@@ -1,0 +1,52 @@
+export interface PlaygroundRoute {
+  path: string
+  name: string
+  title: string
+  testFile: string
+}
+
+export const playgroundRoutes: PlaygroundRoute[] = [
+  { path: '/button', name: 'button', title: 'RsButton', testFile: 'RsButton.spec.ts' },
+  { path: '/badge', name: 'badge', title: 'RsBadge', testFile: 'RsBadge.spec.ts' },
+  { path: '/label', name: 'label', title: 'RsLabel', testFile: 'RsLabel.spec.ts' },
+  { path: '/link', name: 'link', title: 'RsLink', testFile: 'RsLink.spec.ts' },
+  { path: '/input', name: 'input', title: 'RsInput', testFile: 'RsInput.spec.ts' },
+  { path: '/icon', name: 'icon', title: 'RsIcon', testFile: 'RsIcon.spec.ts' },
+  { path: '/avatar', name: 'avatar', title: 'RsAvatar', testFile: 'RsAvatar.spec.ts' },
+  { path: '/card', name: 'card', title: 'RsCard', testFile: 'RsCard.spec.ts' },
+  { path: '/stat-card', name: 'stat-card', title: 'RsStatCard', testFile: 'RsStatCard.spec.ts' },
+  { path: '/empty', name: 'empty', title: 'RsEmpty', testFile: 'RsEmpty.spec.ts' },
+  { path: '/loading', name: 'loading', title: 'RsLoading', testFile: 'RsLoading.spec.ts' },
+  { path: '/toaster', name: 'toaster', title: 'RsToaster', testFile: 'RsToaster.spec.ts' },
+  { path: '/form', name: 'form', title: 'RsForm', testFile: 'RsForm.spec.ts' },
+  { path: '/breadcrumb', name: 'breadcrumb', title: 'RsBreadcrumb', testFile: 'RsBreadcrumb.spec.ts' },
+  { path: '/steps', name: 'steps', title: 'RsSteps', testFile: 'RsSteps.spec.ts' },
+  { path: '/select', name: 'select', title: 'RsSelect', testFile: 'RsSelect.spec.ts' },
+  { path: '/scrollbar', name: 'scrollbar', title: 'RsScrollbar', testFile: 'RsScrollbar.spec.ts' },
+  { path: '/dropdown', name: 'dropdown', title: 'RsDropdown', testFile: 'RsDropdown.spec.ts' },
+  { path: '/menu', name: 'menu', title: 'RsMenu', testFile: 'RsMenu.spec.ts' },
+  { path: '/tabs', name: 'tabs', title: 'RsTabs', testFile: 'RsTabs.spec.ts' },
+  { path: '/terminal', name: 'terminal', title: 'RsTerminal', testFile: 'RsTerminal.spec.ts' },
+  { path: '/pagination', name: 'pagination', title: 'RsPagination', testFile: 'RsPagination.spec.ts' },
+  { path: '/table', name: 'table', title: 'RsTable', testFile: 'RsTable.spec.ts' },
+  { path: '/virtual-list', name: 'virtual-list', title: 'RsVirtualList', testFile: 'RsVirtualList.spec.ts' },
+  { path: '/popover', name: 'popover', title: 'RsPopover', testFile: 'RsPopover.spec.ts' },
+  { path: '/container', name: 'container', title: 'RsContainer', testFile: 'RsContainer.spec.ts' },
+  { path: '/sidebar', name: 'sidebar', title: 'RsSidebar', testFile: 'RsSidebar.spec.ts' },
+  { path: '/split-pane', name: 'split-pane', title: 'RsSplitPane', testFile: 'RsSplitPane.spec.ts' },
+  { path: '/context-menu', name: 'context-menu', title: 'RsContextMenu', testFile: 'RsContextMenu.spec.ts' },
+  { path: '/calendar-grid', name: 'calendar-grid', title: 'RsCalendarGrid', testFile: 'RsCalendarGrid.spec.ts' },
+  { path: '/date-picker', name: 'date-picker', title: 'RsDatePicker', testFile: 'RsDatePicker.spec.ts' },
+  { path: '/datetime-picker', name: 'datetime-picker', title: 'RsDateTimePicker', testFile: 'RsDateTimePicker.spec.ts' },
+  { path: '/time-picker', name: 'time-picker', title: 'RsTimePicker', testFile: 'RsTimePicker.spec.ts' },
+  { path: '/tooltip', name: 'tooltip', title: 'RsTooltip', testFile: 'RsTooltip.spec.ts' },
+  { path: '/tree', name: 'tree', title: 'RsTree', testFile: 'RsTree.spec.ts' },
+  { path: '/upload', name: 'upload', title: 'RsUpload', testFile: 'RsUpload.spec.ts' },
+  { path: '/confirm-dialog', name: 'confirm-dialog', title: 'RsConfirmDialog', testFile: 'RsConfirmDialog.spec.ts' },
+  { path: '/dialog', name: 'dialog', title: 'RsDialog', testFile: 'RsDialog.spec.ts' },
+  { path: '/drawer', name: 'drawer', title: 'RsDrawer', testFile: 'RsDrawer.spec.ts' },
+  { path: '/code-editor', name: 'code-editor', title: 'RsCodeEditor', testFile: 'RsCodeEditor.spec.ts' },
+  { path: '/code-block', name: 'code-block', title: 'RsCodeBlock', testFile: 'RsCodeBlock.spec.ts' },
+  { path: '/studio-components', name: 'studio-components', title: '全量 Studio 组件', testFile: 'RsStudioComponents' },
+  { path: '/theme', name: 'theme', title: '主题 / 多语言', testFile: 'RsConfigProvider' },
+]

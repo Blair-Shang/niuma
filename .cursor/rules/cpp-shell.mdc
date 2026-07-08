@@ -1,0 +1,453 @@
+---
+description: C++ 壳层开发规范（Doxygen 注释、CEF、资源泄露防护）— shell/ 与 include/
+globs: "shell/**/*.{cpp,h,hpp}"
+alwaysApply: false
+---
+
+# C++ 壳层开发规范
+
+对齐 **Google C++ Style Guide**（命名与结构）、**Doxygen** 文档约定；适用于 `shell/` CEF 宿主与 `shell/include/niuma/` 公共头文件。
+
+架构设计见 [docs/02-shell-cpp-cef.md](../../docs/02-shell-cpp-cef.md)。
+
+## 项目结构
+
+```
+shell/
+├── src/
+│   ├── main.cpp              # 进程入口、CEF 多进程分发
+│   ├── app/                  # CefApp / CefClient / Renderer
+│   ├── bridge/               # CEF IPC ↔ 应用 IPC
+│   ├── protocol/             # app:// scheme
+│   └── service/              # ServiceManager / IpcClient
+├── include/niuma/            # 对外类型（BridgeRequest 等）
+└── CMakeLists.txt
+```
+
+- **壳层只做**：CEF 生命周期、窗口、Bridge 转发、服务启停
+- **禁止**在 shell 内实现 SSH / DB / AI 等业务逻辑
+
+## 语言与标准
+
+- **C++17**（`CMAKE_CXX_STANDARD 17`）
+- 编译器：MSVC（Windows 主目标）、Clang/GCC（跨平台预留）
+- 第三方：CEF Binary Distribution、可选 gRPC C++（应用 IPC）
+
+## 命名约定
+
+| 类别 | 风格 | 示例 |
+|------|------|------|
+| 命名空间 | 小写 | `niuma` |
+| 类 / 结构体 | PascalCase | `BridgeRouter`, `ServiceManager` |
+| 函数 / 方法 | PascalCase（CEF 回调沿用 CEF 命名）或 camelCase 自有 API | `Dispatch`, `EnsureRunning` |
+| 成员变量 | snake_case + 尾下划线 | `service_manager_` |
+| 局部变量 | snake_case | `service_id` |
+| 常量 | kPascalCase 或 UPPER_SNAKE | `kChunkSize`, `NIuma_WITH_CEF` |
+| 文件名 | snake_case | `message_router_handler.cpp` |
+| 宏 / 编译开关 | UPPER_SNAKE | `NIuma_WITH_CEF` |
+
+## 头文件
+
+- 使用 `#pragma once`
+- 顺序：`#pragma once` → 对应 `.h` → 项目头 → CEF 头 → STL → 第三方
+- 头文件尽量 **前向声明**，减少 CEF 头扩散
+- 实现细节放 `.cpp`；`include/niuma/` 只放稳定契约类型
+
+```cpp
+#pragma once
+
+#include "niuma/types.h"
+
+#include <functional>
+#include <memory>
+#include <string>
+
+#if NIuma_WITH_CEF
+#include "include/cef_browser.h"
+#endif
+
+namespace niuma {
+// ...
+}  // namespace niuma
+```
+
+## 文档注释（必须 — Doxygen）
+
+采用 **Doxygen** `///` 或 `/** */`；与 TS/rustdoc 一样：**公开 API 必须有文档**。
+
+### 必须写文档的符号
+
+| 类别 | 要求 |
+|------|------|
+| **头文件**（`include/niuma/*.h`） | 文件顶 `@file` + 一句模块说明 |
+| **公开 class / struct** | 类职责摘要 |
+| **public 方法** | `@brief`；**每个形参**必须写 `@param`；有返回值必须写 `@return` |
+| **public 枚举 / 枚举值** | 非显然枚举值各写一行 |
+| **namespace 级 free 函数** | 同方法；**每个形参**必须 `@param` |
+| **CEF Handler 重写** | 非显然行为说明（线程、生命周期）；**每个形参**必须 `@param` |
+
+### 可省略
+
+- `.cpp` 内 **匿名 namespace** 或 `static` 辅助函数（逻辑一目了然）——若对外可见或签名非显然，仍须 `@param`
+- 纯透传 CEF 回调（仅 `return true;`）——**若重写且形参影响行为，仍须逐参数 `@param`**
+- 自动生成 / 第三方 CEF 样板
+
+### 参数文档（强制）
+
+公开 API 与头文件中的 **每一个形参** 都必须有对应 `@param`，不得遗漏、不得用 `/* ... */` 占位。
+
+| 要求 | 说明 |
+|------|------|
+| **全覆盖** | 函数有几个形参，就有几条 `@param`（含 `override` 的 CEF 回调） |
+| **写语义** | 说明用途、单位、取值范围、是否可空；**禁止**只重复类型名 |
+| **命名一致** | `@param` 名称与签名形参名**完全一致**（含 `browser`、`callback` 等） |
+| **输出参数** | 指针/引用用于传出时，注明「输出」「由调用方提供」等 |
+| **回调** | 异步 `callback` / `CefRefPtr<CefFileDialogCallback>` 等须说明何时、在哪个线程调用 |
+| **ID 类参数** | 如 `window_id`：说明 `0` 是否表示「当前聚焦窗口」等特殊约定 |
+
+```cpp
+// ❌ BAD — 缺 @param、或占位
+/**
+ * @brief 打开新窗口。
+ */
+int Open(const WindowCreateOptions& opts);
+
+// ❌ BAD — 只复述类型
+/** @param opts WindowCreateOptions */
+
+// ✅ GOOD
+/**
+ * @brief 创建并显示新的顶层 CEF 窗口。
+ *
+ * @param opts 窗口创建选项（URL/route、标题、尺寸、是否可缩放等）；不含业务字段
+ * @return 新窗口 ID（≥1）；失败时实现应保证不返回有效 id（当前由 UI 线程同步分配）
+ */
+int Open(const WindowCreateOptions& opts);
+```
+
+CEF Handler 示例：
+
+```cpp
+/**
+ * @brief 浏览器创建完成，登记到 WindowManager。
+ *
+ * @param browser 新创建的 Browser；运行于 UI 线程，生命周期由 CEF 管理
+ */
+void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
+```
+
+### 格式模板
+
+```cpp
+/**
+ * @file types.h
+ * @brief CEF Bridge 与 Shell 层共享的请求/响应类型。
+ */
+
+namespace niuma {
+
+/**
+ * @brief Web → Shell 的 CEF IPC 请求体（JSON 解析后）。
+ */
+struct BridgeRequest {
+  std::string method;   ///< 完整方法名，如 com.niuma.ssh.exec
+  std::string params;   ///< JSON 字符串
+  std::string id;       ///< 请求 correlation id
+};
+
+/**
+ * @brief 解析 method 为 service_id 与 action。
+ *
+ * @param method 点分方法名
+ * @return 成功时 {service_id, action}；格式非法时 std::nullopt
+ */
+std::optional<std::pair<std::string, std::string>> ParseMethod(
+    const std::string& method);
+
+/**
+ * @brief ① CEF IPC 入口：接收 cefQuery，转发至 BridgeRouter。
+ *
+ * 运行在 Browser 进程 UI 线程；回调通过 CefMessageRouter Callback 返回 Renderer。
+ */
+class MessageRouterHandler : public CefMessageRouterBrowserSide::Handler {
+ public:
+  /**
+   * @brief 处理来自 Renderer 的查询请求。
+   * @param browser 发起查询的 Browser 实例
+   * @param frame 发起查询的 Frame；持久化 query 时可能跨导航失效
+   * @param query_id CEF 分配的查询 ID，用于 OnQueryCanceled 关联
+   * @param request JSON 字符串请求体
+   * @param persistent 是否为持久化查询
+   * @param callback 异步结果回调；成功调 Success，失败调 Failure
+   * @return true 表示已接管该 query（异步 callback 仍会调用）
+   */
+  bool OnQuery(CefRefPtr<CefBrowser> browser,
+               CefRefPtr<CefFrame> frame,
+               int64_t query_id,
+               const CefString& request,
+               bool persistent,
+               CefRefPtr<Callback> callback) override;
+};
+
+}  // namespace niuma
+```
+
+### 标签约定
+
+| 标签 | 用途 |
+|------|------|
+| `@brief` | 一句话摘要 |
+| `@param name` | **必填**（凡有该形参）；参数语义、约束、特殊值（类型在签名中，注释不重复贴类型表） |
+| `@return` | 返回值语义 |
+| `@note` | 线程、进程、CEF 线程亲和性 |
+| `@warning` | 危险操作、已知限制 |
+| `@see` | 关联类 / `docs/` 章节 |
+| `@deprecated` | 废弃原因与替代 API |
+
+### 书写原则
+
+1. **首行摘要**：说明「做什么」，不复述类名（❌ `/** BridgeRouter 类 */`）
+2. **参数必写**：公开 API **每个形参**一条 `@param`，与签名一一对应，不得省略
+3. **语言**：摘要用**中文**；标识符、CEF API、协议字段保留英文
+4. **CEF 特注**：跨进程、UI thread / IO thread 用 `@note` 标明
+5. **与实现同步**：改签名或行为时同步更新注释（**增删参必须同步增删 `@param`**）
+6. **行内注释 `//`**：只解释非显然业务/算法；禁止逐行翻译代码
+
+## CEF 专项约定
+
+### 引用计数
+
+```cpp
+class NiuMaClient : public CefClient {
+  // ...
+ private:
+  IMPLEMENT_REFCOUNTING(NiuMaClient);
+};
+```
+
+- 继承 `CefBaseRefCounted` 的类 **必须** `IMPLEMENT_REFCOUNTING`
+- 禁止 `new`/`delete` 管理 CefRefPtr 对象；使用 `CefRefPtr<T>` / `new Handler()` 交给 CEF
+
+### 进程入口
+
+- `main()` 内根据 `--type=` 分发 Browser / Renderer / GPU
+- Browser 进程：`CefInitialize` → 注册 scheme → `CefRunMessageLoop`
+- **禁止**在 Renderer 进程做 ServiceManager / gRPC 调用
+
+### 字符串
+
+- CEF API 用 `CefString`；内部逻辑用 `std::string` / `std::string_view`
+- 与 Web JSON 交互：UTF-8；`CefString` 转换处注释编码假设
+
+## 错误处理
+
+- 壳层 **不抛异常** 跨 CEF 边界；捕获后转 Bridge 错误 JSON
+- 服务不可用：Bridge 返回 `{ ok: false, error: "..." }`，不 `abort`
+- 日志：预留统一 `NM_LOG_*` 宏（实现阶段）；关键路径必打（服务启停、IPC 失败）
+
+```cpp
+// ✅ GOOD — 错误走 callback
+void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback cb) {
+  if (!parsed) {
+    BridgeResponse resp{ .id = req.id, .ok = false, .error = "invalid method" };
+    cb(resp);
+    return;
+  }
+}
+
+// ❌ BAD — 异常穿透 CEF 回调
+void BridgeRouter::Dispatch(...) {
+  throw std::runtime_error("invalid");  // 禁止
+}
+```
+
+## 内存与所有权
+
+- 默认：`std::unique_ptr` 自有对象；`std::shared_ptr` 仅在确需共享时用
+- CEF 对象：`CefRefPtr` only
+- 禁止裸 `new`/`delete`（CEF Handler 除外由 CEF 接管）
+- 大 buffer / 流式数据 **不在壳层堆积**；走 StreamProxy 分片
+
+---
+
+## 资源泄露防护（CEF 壳层额外难题）
+
+> CEF + 多进程 + 异步 IPC 场景下，泄露不只是「忘了 delete」——还包括 **悬挂回调、僵尸子进程、未取消的 stream、引用环**。本节为壳层 **强制** 要求。
+
+### 1. 为何壳层更难
+
+| 风险源 | 典型后果 |
+|--------|----------|
+| CEF 引用计数 + Handler 互持 | Browser/Client/Router 循环引用，进程退不出 |
+| 异步 `cefQuery` | 页面关闭后 callback 仍被持有 → 泄漏或 UAF |
+| gRPC / Named Pipe 长连接 | 服务进程、句柄、线程未释放 |
+| `CreateProcess` 后端 Sidecar | 僵尸 `ssh-service.exe` |
+| `CefPostTask` / 定时器 | 对象已析构仍执行 lambda |
+| StreamProxy 队列 | chunk 堆积、stream 未 Cancel |
+| 错误 shutdown 顺序 | 先 `CefShutdown` 再关 IPC → 半开连接 |
+
+### 2. 资源分类与释放策略
+
+| 资源 | 所有权工具 | 释放时机 |
+|------|------------|----------|
+| CEF 对象 | `CefRefPtr<T>` | 最后一个 ref 释放；**禁止**裸指针长期保存 |
+| OS 句柄（Pipe、File、Event） | RAII `UniqueHandle` / `ScopedPipe` | 作用域结束或 `Close()` 显式 |
+| 子进程 | `ServiceManager` 跟踪 `PROCESS_HANDLE` | `StopService` / 壳退出 `TerminateProcess` + `Wait` |
+| gRPC Client / Stream | `IpcClient` 池化；stream 带 `stream_id` | `CancelStream(id)` / 连接关闭 |
+| 进行中的 Bridge 请求 | `query_id` → `PendingRequest` 表 | `OnQueryCanceled` **必须**清理 |
+| StreamProxy 状态 | `stream_id` → `StreamState` | EOF / Cancel / Browser 销毁时 erase |
+| 定时器 / idle 超时 | `CefTimer` 或 `base::RepeatingTimer` 封装 | 析构 / StopService 时 Cancel |
+
+**原则**：每类资源有 **唯一 Owner**（通常是 `ServiceManager`、`IpcClient`、`MessageRouterHandler`），禁止散落在静态全局。
+
+### 3. CEF 引用与回调
+
+```cpp
+// ❌ BAD — lambda 捕获 raw this，Browser 已销毁后仍可能触发
+browser->GetMainFrame()->ExecuteJavaScript(
+    "...", "", 0);
+CefPostTask(TID_UI, base::BindOnce([this]() { DoWork(); }));
+
+// ✅ GOOD — 捕获 CefRefPtr，CEF 保活；或 weak + IsValid 检查
+CefRefPtr<CefBrowser> browser_ref = browser_;
+CefPostTask(TID_UI, base::BindOnce(
+    [](CefRefPtr<CefBrowser> b) {
+      if (b && b->IsValid()) { /* ... */ }
+    },
+    browser_ref));
+```
+
+- Handler 内 **禁止** 保存裸 `CefBrowser*` / `CefFrame*` 超过单次回调生命周期
+- 长期关联用 `CefRefPtr<CefBrowser>` + `IsValid()` 判断
+- `MessageRouterHandler` 必须在 **`OnQueryCanceled`** 中：取消 IPC、erase pending、**禁止**再调用 `callback->Success/Failure`
+
+### 4. 异步 Bridge 请求生命周期
+
+```
+OnQuery → 登记 pending[query_id] → IPC 异步
+   ├── 成功 → callback→Success → erase pending
+   ├── 失败 → callback→Failure → erase pending
+   └── OnQueryCanceled / Browser closed → Cancel IPC → erase pending（不调 callback 或按 CEF 文档处理）
+```
+
+- `pending` 表 key：`query_id`；value 至少含 `CancelToken` / `grpc_context`
+- **禁止** pending 只增不减
+
+### 5. StreamProxy / gRPC 流
+
+- 每个 stream 注册 `stream_id`；Browser 关闭、`OnBeforeClose`、用户取消时调用 `StreamProxy::Cancel(stream_id)`
+- `Cancel` 必须：`grpc::ClientContext::TryCancel()` + 清空 `pending_chunks` + 从 map 移除
+- 背压 pause 后，**Cancel 时** resume 并关闭，避免 gRPC 线程永久阻塞
+
+### 6. ServiceManager 与子进程
+
+```cpp
+struct ServiceRecord {
+  PROCESS_INFORMATION process_info{};  // hProcess, hThread
+  std::string service_id;
+  // ...
+};
+
+// StopService / ShutdownAll:
+// 1. 通知 IPC 断开  2. TerminateProcess（超时） 3. CloseHandle(hProcess/hThread)
+// 4. 从 registry erase
+```
+
+- 壳退出路径 **`ShutdownAll()`** 先于 `CefShutdown`
+- `idle_timeout` 到期：`StopService`，不得泄漏进程句柄
+- Windows：`WaitForSingleObject(hProcess, timeout)` 后再 `CloseHandle`
+
+### 7. 应用 IPC（Named Pipe / UDS）
+
+- 连接失败或重试：旧 `client` 必须 `reset()` / `Shutdown()` 后再建新连接
+- 禁止每次请求 new 一个 gRPC channel 且不释放（除非明确短连接 + RAII）
+- 异常路径（manifest 缺失、服务启动失败）同样关闭已创建的 pipe 服务端
+
+### 8. 关闭顺序（强制）
+
+```
+用户退出 / 最后一个 Browser 关闭
+  1. StreamProxy::CancelAll()
+  2. MessageRouterHandler::CancelAllPendingQueries()
+  3. IpcClient::ShutdownAll()
+  4. ServiceManager::ShutdownAll()     // 杀子进程、关句柄
+  5. CefQuitMessageLoop()
+  6. CefShutdown()
+```
+
+**禁止**跳过 1–4 直接 `CefShutdown`（会遗留 Sidecar 与 pipe）。
+
+### 9. RAII 封装（推荐）
+
+壳层统一提供（实现阶段放 `shell/src/util/`）：
+
+| 类型 | 包装 |
+|------|------|
+| `HANDLE` | `ScopedHandle`（Move-only，析构 `CloseHandle`） |
+| `PROCESS_INFORMATION` | `ScopedProcess`（关 hProcess + hThread） |
+| gRPC stream | `ScopedStream` 析构调 `Cancel` |
+| 文件映射 / 共享内存 | `ScopedMapping` |
+
+**禁止**在业务路径手写 `CloseHandle` 散落各处；失败分支用 **同一 cleanup**（`goto cleanup` / `scope_guard` / `unique_ptr` custom deleter）。
+
+### 10. 调试与 CI 检测
+
+| 手段 | 用途 |
+|------|------|
+| Debug 构建 `_CrtSetDbgFlag(_CRTDBG_LEAK_CHECK_DF)` | 进程退出时报告 CRT 泄漏 |
+| 壳退出前 log：`pending_queries`、`active_streams`、`running_services` 应为 **0** |
+| 反复打开/关闭窗口 50 次 | 任务管理器无累积 `NiuMa.exe` / `ssh-service.exe` |
+| Application Verifier（Windows） | Handle 泄漏检测 |
+
+实现 `ServiceManager::DebugSnapshot()` 输出三类计数，便于 QA 与自动化断言。
+
+### 11. 常见反模式（禁止）
+
+```cpp
+// ❌ static 容器只 insert 不 erase
+static std::map<int64_t, Callback*> g_pending;
+
+// ❌ 捕获 raw pointer 的 CefPostTask
+CefPostTask(TID_UI, base::BindOnce([this]() { ... }));
+
+// ❌ OnQuery 启动 IPC 后未处理 OnQueryCanceled
+
+// ❌ 子进程 CreateProcess 成功但启动失败分支未 CloseHandle
+
+// ❌ Stream 结束未从 map 移除，chunk 队列无限增长
+```
+
+---
+
+## CMake
+
+- 目标名：`niuma`（壳 executable）
+- `CEF_ROOT` 由外部传入；未设置时 CMake 明确 `FATAL_ERROR` 提示
+- 新增 `.cpp` 必须加入 `CMakeLists.txt` 的 `SHELL_SOURCES`
+
+## 禁止
+
+- 壳层写 SSH / SQL / AI 业务
+- 在 Renderer 进程访问 Named Pipe / gRPC
+- 硬编码绝对路径（用 `GetRuntimeDir()` 等统一工具）
+- 空 Doxygen、`/** TODO */` 占位、注释与签名不一致
+- 公开 API **缺少 `@param`** 或 `@param` 与形参列表不一致
+- `using namespace std;` 于头文件
+- 非 RAII 资源（裸 HANDLE / 文件指针不关闭）
+- 静态/global 容器缓存 Browser、Callback、Stream 且无上限或 erase
+- `CefPostTask` / 异步 lambda 捕获裸 `this` 或裸 `CefBrowser*`
+- 跳过 §资源泄露防护 的 shutdown 顺序
+
+## 检查清单（提交前）
+
+1. 新增 **公开** 类/函数是否有 Doxygen？
+2. **每个形参**是否都有 `@param`，且名称与签名一致、语义非空？
+3. CEF Handler 是否 `IMPLEMENT_REFCOUNTING`？
+4. 是否未在 shell 引入业务逻辑？
+5. Bridge 错误是否走 JSON 响应而非崩溃？
+6. 头文件是否 `#pragma once`、include 顺序合理？
+7. 注释是否与当前线程/进程模型一致？
+8. **异步路径**：是否实现 `OnQueryCanceled` / stream `Cancel` / 失败分支 cleanup？
+9. **子进程 / 句柄**：`CreateProcess` 各分支是否 `CloseHandle`？退出是否 `ShutdownAll`？
+10. **pending 表 / stream map**：成功、失败、取消、Browser 关闭是否都会 erase？
+11. Debug 退出时 `pending_queries`、`active_streams`、`running_services` 是否为 0？

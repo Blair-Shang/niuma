@@ -1,0 +1,414 @@
+<script setup lang="ts">
+import { RsDropdown, RsButton, RsIcon } from '@niuma/ui'
+import type { RsDropdownItems } from '@niuma/ui'
+import { useI18n } from 'vue-i18n'
+import { useAppStore } from '@/stores/app'
+import type { ThemePreference } from '@/stores/app'
+import { pluginApi } from '@/api'
+import type { PluginRecord } from '@/api/types/plugin'
+import { useBridgeStore } from '@/stores/bridge'
+import type { ExtensionManifest } from '@/extensions/types/manifest'
+import { computed, onMounted, ref } from 'vue'
+
+/** 设置分区（VS Code 左右布局：左导航 + 右内容） */
+type SettingsSection = 'appearance' | 'plugins' | 'runtime'
+
+const { t } = useI18n()
+const appStore = useAppStore()
+const bridgeStore = useBridgeStore()
+
+const activeSection = ref<SettingsSection>('appearance')
+
+const sections = computed(
+  (): { id: SettingsSection; labelKey: string; descKey: string; icon: string }[] => [
+    { id: 'appearance', labelKey: 'settings.appearance', descKey: 'settings.appearanceDesc', icon: 'palette' },
+    { id: 'plugins', labelKey: 'settings.plugins', descKey: 'settings.pluginsDesc', icon: 'puzzle' },
+    { id: 'runtime', labelKey: 'settings.runtime', descKey: 'settings.runtimeDesc', icon: 'activity' },
+  ],
+)
+
+const themeOptions = computed(
+  (): { value: ThemePreference; label: string; icon: string }[] => [
+    { value: 'light', label: t('settings.themeLight'), icon: 'sun' },
+    { value: 'dark', label: t('settings.themeDark'), icon: 'moon' },
+    { value: 'system', label: t('settings.themeSystem'), icon: 'monitor' },
+  ],
+)
+
+const localeItems = computed<RsDropdownItems>(() => [
+  { value: 'zh-CN', label: t('settings.localeZh'), icon: 'languages' },
+  { value: 'en-US', label: t('settings.localeEn'), icon: 'languages' },
+])
+
+const plugins = ref<PluginRecord[]>([])
+const pluginsLoading = ref(false)
+const pluginsError = ref<string | null>(null)
+const togglingId = ref<string | null>(null)
+
+function selectSection(id: SettingsSection): void {
+  activeSection.value = id
+  if (id === 'plugins' && !plugins.value.length) {
+    void loadPlugins()
+  }
+}
+
+function onThemeSelect(value: ThemePreference): void {
+  appStore.setThemePreference(value)
+}
+
+function onLocaleSelect(value: string): void {
+  appStore.setLocale(value as 'zh-CN' | 'en-US')
+}
+
+function manifestName(record: PluginRecord): string {
+  const m = record.manifest
+  if (typeof m === 'object' && m?.name) {
+    return m.name
+  }
+  return record.pluginId ?? record.root
+}
+
+function pluginIdOf(record: PluginRecord): string {
+  if (record.pluginId) {
+    return record.pluginId
+  }
+  const m = record.manifest
+  if (typeof m === 'object') {
+    return (m as ExtensionManifest).id
+  }
+  return record.root
+}
+
+/** 加载全部插件及启用状态（含已禁用项） */
+async function loadPlugins(): Promise<void> {
+  if (!bridgeStore.connected) {
+    plugins.value = []
+    return
+  }
+
+  pluginsLoading.value = true
+  pluginsError.value = null
+  try {
+    const payload = await pluginApi.listAll()
+    plugins.value = payload.plugins ?? []
+  } catch (e) {
+    pluginsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    pluginsLoading.value = false
+  }
+}
+
+/** 切换插件启用状态；变更后刷新页面以重建路由 */
+async function togglePlugin(record: PluginRecord): Promise<void> {
+  const pluginId = pluginIdOf(record)
+  const nextEnabled = record.enabled === false
+  togglingId.value = pluginId
+  try {
+    await pluginApi.setEnabled({ pluginId, enabled: nextEnabled })
+    globalThis.location.reload()
+  } catch (e) {
+    pluginsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    togglingId.value = null
+  }
+}
+
+onMounted(() => {
+  void bridgeStore.bootstrap()
+})
+</script>
+
+<template>
+  <div class="nm-settings">
+    <!-- 左：分区导航 -->
+    <nav class="nm-settings__nav" :aria-label="t('nav.settings')">
+      <div class="nm-settings__nav-title">{{ t('nav.settings') }}</div>
+      <button
+        v-for="section in sections"
+        :key="section.id"
+        type="button"
+        class="nm-settings__nav-item"
+        :class="{ 'nm-settings__nav-item--active': activeSection === section.id }"
+        @click="selectSection(section.id)"
+      >
+        <RsIcon :name="section.icon" :size="16" />
+        <span>{{ t(section.labelKey) }}</span>
+      </button>
+    </nav>
+
+    <!-- 右：内容 -->
+    <div class="nm-settings__content">
+      <!-- 外观 -->
+      <section v-if="activeSection === 'appearance'" class="nm-settings__panel">
+        <header class="nm-settings__panel-head">
+          <h1 class="nm-section-title">{{ t('settings.appearance') }}</h1>
+          <p class="nm-section-desc">{{ t('settings.appearanceDesc') }}</p>
+        </header>
+
+        <div class="nm-setting-row">
+          <div class="nm-setting-row__info">
+            <p class="nm-setting-row__label">{{ t('settings.themeLabel') }}</p>
+            <p class="nm-setting-row__desc">{{ t('settings.themeDesc') }}</p>
+          </div>
+          <div class="nm-segmented">
+            <button
+              v-for="opt in themeOptions"
+              :key="opt.value"
+              type="button"
+              class="nm-segmented__btn"
+              :class="{ 'nm-segmented__btn--active': appStore.themePreference === opt.value }"
+              :aria-pressed="appStore.themePreference === opt.value"
+              @click="onThemeSelect(opt.value)"
+            >
+              <RsIcon :name="opt.icon" :size="14" />
+              <span>{{ opt.label }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="nm-setting-row">
+          <div class="nm-setting-row__info">
+            <p class="nm-setting-row__label">{{ t('settings.localeLabel') }}</p>
+            <p class="nm-setting-row__desc">{{ t('settings.localeDesc') }}</p>
+          </div>
+          <div class="nm-setting-row__control">
+            <RsDropdown
+              v-model="appStore.locale"
+              :items="localeItems"
+              @select="onLocaleSelect"
+            />
+          </div>
+        </div>
+      </section>
+
+      <!-- 插件 -->
+      <section v-else-if="activeSection === 'plugins'" class="nm-settings__panel">
+        <header class="nm-settings__panel-head">
+          <div class="flex items-center justify-between gap-2">
+            <h1 class="nm-section-title">{{ t('settings.plugins') }}</h1>
+            <RsButton variant="ghost" size="sm" :disabled="pluginsLoading" @click="loadPlugins">
+              {{ t('settings.pluginsRefresh') }}
+            </RsButton>
+          </div>
+          <p class="nm-section-desc">{{ t('settings.pluginsHint') }}</p>
+        </header>
+
+        <p v-if="pluginsLoading" class="nm-caption">{{ t('extensions.loading') }}</p>
+        <p v-else-if="pluginsError" class="nm-caption" style="color: var(--rs-danger)">
+          {{ pluginsError }}
+        </p>
+        <p v-else-if="!bridgeStore.connected" class="nm-caption">{{ t('settings.devHint') }}</p>
+        <div v-else-if="plugins.length" class="nm-settings__list">
+          <div
+            v-for="record in plugins"
+            :key="pluginIdOf(record)"
+            class="nm-setting-row"
+          >
+            <div class="nm-setting-row__info min-w-0">
+              <p class="nm-setting-row__label">{{ manifestName(record) }}</p>
+              <p class="nm-setting-row__desc truncate font-mono">{{ pluginIdOf(record) }}</p>
+            </div>
+            <RsButton
+              variant="secondary"
+              size="sm"
+              :disabled="togglingId === pluginIdOf(record)"
+              @click="togglePlugin(record)"
+            >
+              {{ record.enabled !== false ? t('settings.pluginDisable') : t('settings.pluginEnable') }}
+            </RsButton>
+          </div>
+        </div>
+        <p v-else class="nm-caption">{{ t('settings.pluginsEmpty') }}</p>
+      </section>
+
+      <!-- 运行时 -->
+      <section v-else class="nm-settings__panel">
+        <header class="nm-settings__panel-head">
+          <h1 class="nm-section-title">{{ t('settings.runtime') }}</h1>
+          <p class="nm-section-desc">{{ t('settings.runtimeDesc') }}</p>
+        </header>
+
+        <dl class="nm-settings__facts">
+          <dt class="nm-caption">{{ t('settings.bridge') }}</dt>
+          <dd>{{ bridgeStore.statusLabel }}</dd>
+          <dt class="nm-caption">{{ t('settings.connected') }}</dt>
+          <dd>{{ bridgeStore.connected ? t('settings.yes') : t('settings.no') }}</dd>
+          <template v-if="bridgeStore.shellInfo">
+            <dt class="nm-caption">{{ t('settings.webPath') }}</dt>
+            <dd class="break-all font-mono nm-caption">{{ bridgeStore.shellInfo.webPath }}</dd>
+          </template>
+        </dl>
+        <p class="nm-caption leading-relaxed">{{ t('settings.devHint') }}</p>
+      </section>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.nm-settings {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--nm-editor-bg);
+}
+
+/* 左导航 */
+.nm-settings__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 13rem;
+  flex-shrink: 0;
+  padding: var(--rs-space-md) var(--rs-space-sm);
+  border-right: 1px solid var(--rs-border-subtle);
+  overflow-y: auto;
+}
+
+.nm-settings__nav-title {
+  padding: 0 var(--rs-space-sm) var(--rs-space-sm);
+  font-size: var(--nm-font-caption);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--rs-muted);
+}
+
+.nm-settings__nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--rs-space-sm);
+  padding: var(--rs-space-sm) var(--rs-space-sm);
+  border: none;
+  border-radius: var(--rs-radius-sm);
+  background: transparent;
+  color: var(--rs-muted);
+  font-size: var(--nm-font-body);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--rs-transition-fast),
+    color var(--rs-transition-fast);
+}
+
+.nm-settings__nav-item:hover {
+  background: var(--rs-item-hover);
+  color: var(--rs-text);
+}
+
+.nm-settings__nav-item--active {
+  background: color-mix(in srgb, var(--rs-primary) 16%, transparent);
+  color: var(--rs-primary);
+}
+
+/* 右内容 */
+.nm-settings__content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.nm-settings__panel {
+  max-width: 44rem;
+  padding: var(--rs-space-xl);
+}
+
+.nm-settings__panel-head {
+  margin-bottom: var(--rs-space-lg);
+}
+
+.nm-settings__panel-head .nm-section-desc {
+  margin-top: 0.25rem;
+}
+
+/* 设置行：左标签右控件（macOS System Settings 风格） */
+.nm-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rs-space-lg);
+  padding: var(--rs-space-md) 0;
+  border-top: 1px solid var(--rs-border-subtle);
+}
+
+.nm-setting-row:last-child {
+  border-bottom: 1px solid var(--rs-border-subtle);
+}
+
+.nm-settings__list .nm-setting-row + .nm-setting-row {
+  border-top: none;
+}
+
+.nm-settings__list .nm-setting-row {
+  border-top: 1px solid var(--rs-border-subtle);
+}
+
+.nm-settings__list .nm-setting-row:last-child {
+  border-bottom: 1px solid var(--rs-border-subtle);
+}
+
+.nm-setting-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.nm-setting-row__label {
+  font-size: var(--nm-font-body);
+  font-weight: 500;
+  color: var(--rs-text);
+}
+
+.nm-setting-row__desc {
+  font-size: var(--nm-font-caption);
+  color: var(--rs-muted);
+}
+
+.nm-setting-row__control {
+  width: 12rem;
+  flex-shrink: 0;
+}
+
+/* 主题分段控件 */
+.nm-segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--rs-radius-sm);
+  background: color-mix(in srgb, var(--rs-text) 6%, transparent);
+}
+
+.nm-segmented__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.7rem;
+  border: none;
+  border-radius: calc(var(--rs-radius-sm) - 2px);
+  background: transparent;
+  color: var(--rs-muted);
+  font-size: var(--nm-font-caption);
+  cursor: pointer;
+  transition:
+    background var(--rs-transition-fast),
+    color var(--rs-transition-fast),
+    box-shadow var(--rs-transition-fast);
+}
+
+.nm-segmented__btn:hover {
+  color: var(--rs-text);
+}
+
+.nm-segmented__btn--active {
+  background: var(--rs-surface-elevated);
+  color: var(--rs-text);
+  box-shadow: var(--rs-shadow-sm);
+}
+
+/* 运行时信息 */
+.nm-settings__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--rs-space-sm) var(--rs-space-lg);
+  margin-bottom: var(--rs-space-md);
+}
+</style>

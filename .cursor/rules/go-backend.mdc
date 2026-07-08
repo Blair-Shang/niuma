@@ -1,0 +1,203 @@
+---
+description: Go 后端规范（注释、数值常量、错误处理、目录约定）— 全仓复用
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go 后端规范
+
+对齐 **Effective Go**、**Uber Go Style Guide**、**Google Go Style**；适用于 `services/`、`deploy/` 及仓库内全部 `.go` 文件。
+
+## 项目结构
+
+```
+services/server/
+  cmd/server/main.go          # 入口，仅组装与启动
+  pkg/                        # 可复用工具包（config、cache、database、logs、utils 等）
+  internal/
+    bootstrap/                # 依赖注入 / 应用图
+    handler/                  # HTTP handler（参数校验、响应封装、调用 service）
+    router/                   # 路由注册与路径常量（按域拆分 routes_*.go）
+    middleware/               # 可复用中间件
+    platform/                 # 平台能力（idgen 等）
+```
+
+- SQL 迁移与表结构：见 [.cursor/rules/database-schema.mdc](./database-schema.mdc) 与 `docs/architecture/database-schema.md`
+- 迁移目录：`services/server/migrations/{sqlite,postgres,mysql}/`
+- `internal/` 外不可 import 实现细节
+- 模块路径：`github.com/ruoshui/platform/services/server`
+- API 根路径：`/ruoshui/api/v1`（常量 `router.APIBase`）
+
+## 文档注释（必须）
+
+**所有 export 符号**必须有 Go doc 注释（完整句子，以符号名开头）：
+
+```go
+// Snowflake 实现 Generator 接口。
+type Snowflake struct { ... }
+
+// NewSnowflake 为指定 worker ID 创建 Snowflake 生成器。
+func NewSnowflake(workerID int64) (*Snowflake, error) { ... }
+
+// NextID 返回下一个唯一 ID。
+func (s *Snowflake) NextID() (int64, error) { ... }
+```
+
+| 符号 | 要求 |
+|------|------|
+| export 类型 / 接口 / 函数 / 方法 | 首句说明用途；非显然行为补充第二句 |
+| export 常量 / 变量 | 说明含义与使用场景 |
+| 包 | `package` 上方可选 `// Package xxx ...`（internal 包鼓励写） |
+| 未 export | 复杂逻辑写注释；一行能看懂的辅助函数可省略 |
+
+- 语言：**中文**（完整句子，以符号名开头）
+- 禁止：空注释、只重复标识符、`// TODO` 无跟进人/议题
+
+### 注释写法（`//` 为主）
+
+Go **没有** Java 式 `/** */` 文档块；**包、类型、函数、方法、常量**的文档注释一律用紧邻声明上方的 **`//` 行注释**：
+
+```go
+// Package idgen 提供分布式唯一 ID 生成能力。
+package idgen
+
+// Generator 签发全局唯一的 64 位 ID。
+type Generator interface {
+	// NextID 返回下一个唯一 ID。
+	NextID() (int64, error)
+}
+
+// Snowflake 实现 Generator 接口。
+type Snowflake struct { ... }
+
+// NewSnowflake 为指定 worker ID 创建 Snowflake 生成器。
+func NewSnowflake(workerID int64) (*Snowflake, error) { ... }
+```
+
+| 场景 | 写法 | 说明 |
+|------|------|------|
+| 包 / 类型 / 函数 / 方法 / export 常量 | `//` 紧挨声明上方 | 供 `go doc` / `pkg.go.dev` 展示；声明与注释之间**不能空行** |
+| 行内说明、实现细节 | `//` 单独一行或行尾 | 未 export 符号、复杂分支逻辑 |
+| 大段临时禁用代码 | `/* */` 块注释 | **不用于** export 文档；仅注释掉代码块 |
+
+- 多行文档 = 连续多行 `//`，不是 `/* ... */`
+- 方法注释同样用 `//`，紧贴在 `func (r *T) Method` 上一行
+- 行尾 `//` 仅用于短说明；较长解释单独成行
+
+## 数值与常量（必须命名）
+
+禁止裸魔法数字；位运算、超时、限流、分页等一律具名常量，并注明**单位**：
+
+```go
+const (
+	workerBits       = 10
+	sequenceBits     = 12
+	maxWorkerID      = (1 << workerBits) - 1
+	epochMillisecond int64 = 1704067200000 // 2024-01-01 UTC, milliseconds
+)
+
+// ❌ BAD
+time.Sleep(300 * time.Second)
+if len(items) > 100 { ... }
+
+// ✅ GOOD
+const defaultHTTPTimeout = 30 * time.Second
+const maxPageSize = 100
+```
+
+- 时间：用 `time.Duration` 或带单位的常量（`5 * time.Minute`）
+- HTTP 状态：用 `http.StatusOK` 等标准常量
+- 配置默认值：集中在 `config.Load()`，环境变量名大写蛇形
+
+## 枚举常量（字符串优先，禁止 iota）
+
+表示状态、类型、角色、驱动、错误码等**枚举语义**的常量，**优先使用字符串字面量**，语义自描述、日志可读、JSON/API 可直接对齐；禁止使用 `iota` 隐式递增。
+
+```go
+// OrderStatus 表示订单的生命周期状态。
+type OrderStatus string
+
+const (
+	// OrderStatusPending 表示订单待处理。
+	OrderStatusPending OrderStatus = "pending"
+	// OrderStatusActive 表示订单进行中。
+	OrderStatusActive OrderStatus = "active"
+	// OrderStatusClosed 表示订单已到达终态。
+	OrderStatusClosed OrderStatus = "closed"
+)
+```
+
+```go
+// ❌ BAD — iota 隐式序号，语义不透明
+const (
+	StatusPending = iota
+	StatusActive
+	StatusClosed
+)
+
+// ❌ BAD — 魔法数字枚举，可读性差
+const (
+	StatusPending int32 = 1
+	StatusActive  int32 = 2
+)
+
+// ✅ GOOD — 字符串逐项显式赋值（默认首选）
+const (
+	// DriverSQLite 表示 SQLite 数据库驱动。
+	DriverSQLite   = "sqlite"
+	// DriverPostgres 表示 PostgreSQL 数据库驱动。
+	DriverPostgres = "postgres"
+	// DriverMySQL 表示 MySQL 数据库驱动。
+	DriverMySQL    = "mysql"
+)
+```
+
+约定：
+
+- 使用**具名类型**承载枚举：`type DBDriver string`、`type OrderStatus string`
+- 每个 export 常量有 Go doc，说明业务含义
+- 字符串值用 **snake_case** 或项目统一风格（与 JSON 字段、配置项一致）
+- Handler / 配置 / 持久化层比较枚举时用常量，**禁止**裸字符串字面量散落
+- 仅当协议或存储**强制要求数值码**时，才用显式整型字面量（仍禁止 `iota`）；对外 API 优先暴露字符串
+- 位布局、掩码、偏移量（如 Snowflake `workerBits`）属于**数值常量**，不是枚举
+
+## 错误处理
+
+```go
+// 哨兵错误带包名前缀
+return nil, errors.New("idgen: worker id out of range")
+
+// 包装传递上下文
+return fmt.Errorf("bootstrap: snowflake init: %w", err)
+```
+
+- Handler 返回结构化 JSON 错误码（如 `internal_server_error`），不泄露堆栈
+- `main` 可 `log.Fatal`；`internal` 库函数**禁止**随意 `panic`（`bootstrap.New` 启动期失败除外）
+- 忽略错误必须 `_ =` 或 `//nolint` 附理由
+
+## HTTP / Gin 约定
+
+- Handler 方法签名：`(h *XxxHandler) Action(c *gin.Context)`
+- 中间件挂在 `router.RegisterRoutes` 统一注册：`RequestID` → `Recovery` → `CORS` → `Logger`
+- 新增路由按业务域写入 `internal/router/routes_*.go`，不在 handler 中注册
+- 响应时间用 UTC + `time.RFC3339`
+- 请求 ID：`X-Request-ID`，上下文键 `request_id`
+
+## 命名
+
+| 类别 | 风格 |
+|------|------|
+| 包名 | 小写单词，不用下划线 |
+| 接口 | 行为名 + `er`（`Generator`）或小接口 |
+| 构造函数 | `New` / `NewXxx` |
+| 缩写 | `ID` `HTTP` `URL`（全大写） |
+| 文件名 | `snake_case.go` 或小写单词 |
+
+## 检查清单
+
+1. 新增 export 是否有 Go doc？
+2. 数值是否具名常量并标注单位？
+3. 枚举是否为字符串常量、逐项显式赋值（未使用 `iota`）？
+4. 错误是否带包前缀 / `%w` 包装？
+5. 路由是否挂在 `router.APIBase` 下？
+6. `go fmt` / `go vet` 通过？

@@ -1,0 +1,32 @@
+# Layer 2 — Platform Core 注册契约（com.niuma.platform）
+#
+# 用途：打包清单、文档与三端地址对齐的权威参考。
+# 壳层 ServiceManifestLoader 当前硬编码同等字段；supervisor 不参与 platform 路由。
+id: com.niuma.platform
+name: Platform Core
+version: 0.1.0
+runtime:
+  # 相对安装根目录（与 ServiceManager install_dir 拼接）；niuma- 前缀便于任务管理器搜索
+  executable: services/bin/niuma-platform-core.exe
+  executable_windows: services/bin/niuma-platform-core.exe
+  executable_unix: services/bin/niuma-platform-core
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  # 单引号避免 YAML 双引号把 \\ 吃成单个反斜杠（须与 main.go 常量一致）
+  address: '\\.\pipe\niuma.platform'
+  address_windows: '\\.\pipe\niuma.platform'
+  address_unix: '/tmp/niuma.platform.sock'
+  protocol: length_prefixed_json
+  # 反向事件通道（与 RPC 分离，见 docs/12-ftp-module.md §7.2）
+  event_ingest: '\\.\pipe\niuma.platform.eventin'
+  event_shell: '\\.\pipe\niuma.platform.events'
+  # 日志目录：壳层设 NIUMMA_LOG_DIR=<repo>/logs/<session>/；默认根为仓库 logs/
+  # 各进程 <name>.log 单文件 100 MiB 滚动为 <name>.log.1；保留最近 15 次会话或 30 天内
+lifecycle:
+  startup: always
+permissions:
+  - credential:read
+  - filesystem

@@ -1,0 +1,14 @@
+/* Playground 演示：启用 data-rs-brand="indigo" 时覆盖品牌色 */
+html[data-rs-brand='indigo'][data-rs-theme='light'] {
+  --rs-primary: #6366f1;
+  --rs-primary-hover: #4f46e5;
+  --rs-primary-container: #eef2ff;
+  --rs-on-primary-container: #312e81;
+}
+
+html[data-rs-brand='indigo'][data-rs-theme='dark'] {
+  --rs-primary: #818cf8;
+  --rs-primary-hover: #a5b4fc;
+  --rs-primary-container: #1e1b4b;
+  --rs-on-primary-container: #c7d2fe;
+}

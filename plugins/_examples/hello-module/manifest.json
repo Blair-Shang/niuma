@@ -1,0 +1,22 @@
+{
+  "id": "com.niuma.example.hello",
+  "name": "Hello Module",
+  "version": "0.0.1",
+  "engine": { "niuma": "^0.1.0" },
+  "source": "extension",
+  "level": "L1",
+  "permissions": [],
+  "module": {
+    "routePath": "/hello",
+    "labelKey": "nav.hello",
+    "icon": "sparkles",
+    "order": 50,
+    "uiEntry": "ui/entry.js"
+  },
+  "contributions": {
+    "commands": [
+      { "id": "hello.run", "title": "Run Hello" }
+    ]
+  },
+  "activationEvents": ["onRoute:/hello"]
+}

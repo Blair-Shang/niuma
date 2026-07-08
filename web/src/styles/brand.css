@@ -1,0 +1,4 @@
+/*
+ * NiuMa brand — 默认跟随 @niuma/ui 的 macOS system palette。
+ * 若产品品牌色需偏离 systemBlue，仅在此覆盖 --rs-primary* 等 token。
+ */

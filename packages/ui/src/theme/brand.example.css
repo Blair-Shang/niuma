@@ -1,0 +1,37 @@
+/**
+ * 业务品牌色覆盖示例
+ *
+ * 用法：
+ * 1. 复制到 apps/web/src/theme/brand.css
+ * 2. 在 main.ts 中于 @ruoshui/ui/styles.css 之后 import
+ *
+ * 原理：CSS 变量级联，后加载的同名 --rs-* 覆盖公共 preset
+ *
+ * 表格专用 token（--rs-table-*）可单独覆盖，色值参考 VS Code Dark/Light Modern
+ * 终端专用 token（--rs-terminal-*）可单独覆盖 xterm 调色板（默认 macOS Terminal.app 风格）
+ */
+
+[data-rs-theme='light'] {
+  --rs-primary: #6366f1;
+  --rs-primary-hover: #4f46e5;
+  --rs-primary-container: #eef2ff;
+  --rs-on-primary-container: #312e81;
+}
+
+[data-rs-theme='dark'] {
+  --rs-primary: #818cf8;
+  --rs-primary-hover: #a5b4fc;
+  --rs-primary-container: #1e1b4b;
+  --rs-on-primary-container: #c7d2fe;
+}
+
+/* 子树隔离：把 data-rs-theme 挂在业务根节点时同样生效 */
+.rs-app-web[data-rs-theme='light'] {
+  --rs-primary: #6366f1;
+  --rs-primary-hover: #4f46e5;
+}
+
+.rs-app-web[data-rs-theme='dark'] {
+  --rs-primary: #818cf8;
+  --rs-primary-hover: #a5b4fc;
+}

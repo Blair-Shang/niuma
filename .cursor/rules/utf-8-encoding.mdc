@@ -1,0 +1,70 @@
+---
+description: 全仓源码与文本文件统一 UTF-8 编码，禁止 GBK/ANSI 写入导致中文乱码
+alwaysApply: true
+---
+
+# UTF-8 编码约束
+
+本仓库所有代码助手（Agent / 子任务）在**读写、生成、批量替换**任何文本时，必须使用 **UTF-8**。不得在 Windows 默认编码（如 GBK/CP936）下写入含中文的源码或配置。
+
+## 核心约定
+
+1. **文件编码**：`.go`、`.ts`、`.tsx`、`.js`、`.json`、`.md`、`.sql`、`.toml`、`.yaml`、`.txt` 等文本一律 **UTF-8**（Go/TS 源码优先 **UTF-8 无 BOM**）。
+2. **中文内容**：注释、字符串字面量、prompt 模板、错误信息中的中文必须与文件编码一致，禁止出现 `锟?`、`鍏ㄤ功`、`?` 占位等乱码。
+3. **工具写入**：优先使用编辑器/IDE 提供的写入能力；若用脚本或 Shell，必须显式指定 UTF-8，不得依赖系统默认编码。
+
+## 禁止做的事
+
+```powershell
+# ❌ PowerShell 默认编码写入（在中文 Windows 上常为 GBK，会破坏 UTF-8 中文）
+Get-Content file.go -Raw | ForEach-Object { $_ -replace 'old', 'new' } | Set-Content file.go
+
+# ❌ 不指定编码的批量替换
+$content = Get-Content $path -Raw
+Set-Content $path $content
+```
+
+```go
+// ❌ 从错误编码源复制粘贴后未校验的中文
+// Package novelctx 瀹炵幇灏忚缁啓...
+povRules := fmt.Sprintf("叙事视角?s，时态：%s?", ...)
+```
+
+## 正确做法
+
+**PowerShell（必须显式 UTF-8）：**
+
+```powershell
+$utf8 = New-Object System.Text.UTF8Encoding $false
+$content = [System.IO.File]::ReadAllText($path, $utf8)
+# ... 修改 $content ...
+[System.IO.File]::WriteAllText($path, $content, $utf8)
+```
+
+**Go 读写：**
+
+```go
+os.ReadFile(path)                    // 按 UTF-8 文本处理
+os.WriteFile(path, []byte(s), 0644)  // s 为 UTF-8 字符串
+```
+
+**批量替换含中文的文件时：**
+
+- 优先用 Cursor/IDE 的 `StrReplace` 或等价 UTF-8 安全 API；
+- 若必须用 Shell，先 `ReadAllText`/`WriteAllText` 并指定 UTF-8；
+- 替换后检查：编译（`go build`）、搜索乱码特征（`锟`、`鍏`、`閿`、U+FFFD ``）。
+
+## 乱码识别与修复
+
+| 现象 | 常见原因 | 处理 |
+|------|----------|------|
+| `鍏ㄤ功` 类字符 | UTF-8 被当 GBK 显示/保存 | 对**整行或整文件**尝试 GBK→UTF-8 逆转换，并人工核对 |
+| `锟?`、行尾 `` | UTF-8 截断或 ANSI 写入 | 按上下文还原标点/汉字（如 `。`、`第%d`、`：`） |
+| 中文变成 `???` | 写入时码点丢失 | 从 git/备份恢复，或用正确 UTF-8 重写该段 |
+
+修复后必须执行相关模块的 `go build ./...` 或前端类型检查，确认无 `illegal UTF-8 encoding` 报错。
+
+## 与本仓库其他规则的关系
+
+- Go 注释与字符串规范：见 [go-backend.mdc](./go-backend.mdc)
+- Prompt 模板（`services/prompts/templates/`）：同样 UTF-8，多语言目录（`zh-CN`、`en-US` 等）勿混用编码

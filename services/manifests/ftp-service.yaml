@@ -1,0 +1,27 @@
+id: com.niuma.ftp
+name: FTP Service
+version: 0.1.0
+bridge:
+  namespace: ftp
+  connection_kind: ftp
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+runtime:
+  executable: bin/niuma-ftp-service.exe
+  executable_windows: bin/niuma-ftp-service.exe
+  executable_unix: bin/niuma-ftp-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.ftp'
+  address_windows: '\\.\pipe\niuma.ftp'
+  address_unix: '/tmp/niuma.ftp.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

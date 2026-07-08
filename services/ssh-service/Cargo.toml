@@ -1,0 +1,24 @@
+[package]
+name = "niuma-ssh-service"
+description = "NiuMa SSH/SFTP 能力服务（Layer 1）"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "niuma-ssh-service"
+path = "src/main.rs"
+
+[dependencies]
+async-trait = "0.1"
+niuma-logutil = { path = "../../packages/rust/niuma-logutil" }
+niuma-serviceipc = { path = "../../packages/rust/niuma-serviceipc" }
+russh = "0.44"
+russh-keys = "0.44"
+russh-sftp = "2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ssh-key = "0.6"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"

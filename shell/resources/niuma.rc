@@ -1,0 +1,4 @@
+#include "resource.h"
+
+IDI_NIUMA_MAIN ICON "app.ico"
+IDI_NIUMA_APP ICON "app.ico"

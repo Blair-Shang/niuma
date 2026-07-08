@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=NiuMa
+Comment=All-in-one AI operations platform
+Exec=/usr/bin/niuma
+Icon=niuma
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true

@@ -1,0 +1,89 @@
+---
+description: TypeScript TSDoc 文档注释规范（类、方法、类型等必须注释）
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript 文档注释（TSDoc）
+
+采用 **TSDoc**（微软 / API Extractor / VS Code 生态标准），与 Google TypeScript Style、DefinitelyTyped 惯例一致。
+
+## 必须写 TSDoc 的符号
+
+| 类别 | 要求 |
+|------|------|
+| **export 函数 / 方法** | 首行摘要；有参数写 `@param`，有返回值写 `@returns` |
+| **export class** | 类摘要；`public` / `protected` 方法各写 TSDoc |
+| **interface / type / enum** | 类型摘要；非显然字段加 `@remarks` 或行内说明 |
+| **composable**（`useXxx`） | 用途、返回值结构 |
+| **工具模块**（`utils`、`rules` 等） | 每个对外 export 均有文档 |
+| **废弃 API** | `@deprecated` + 替代方案 |
+
+## 可省略（仍鼓励简要说明）
+
+- `private` / 模块内未 export、且逻辑一目了然的辅助函数
+- `*.spec.ts` / `*.test.ts` 测试文件
+- Playground 演示页（非库公开 API）
+- Vue SFC 中纯展示用局部变量（**对外 props / emit / expose 仍需注释**）
+
+## 格式模板
+
+```typescript
+/**
+ * 在 Provider 内外安全读取 i18n 文案。
+ * Provider 内跟随 `locale` 切换，否则回退 `defaultLocale`。
+ *
+ * @returns `t` 翻译函数与响应式 `locale`
+ *
+ * @example
+ * ```ts
+ * const { t } = useRsI18n()
+ * t('select.placeholder')
+ * ```
+ */
+export function useRsI18n() { ... }
+
+/**
+ * 根据预设规则校验输入值。
+ *
+ * @param value - 当前输入
+ * @param options - 规则、必填与自定义校验器
+ * @param t - 可选翻译函数，默认 `defaultLocale`
+ * @returns 校验结果与错误文案
+ */
+export function runInputValidation(...) { ... }
+```
+
+## 标签约定
+
+| 标签 | 用途 |
+|------|------|
+| `@param name - 说明` | 参数（类型写在 TS 签名，**不要**写 `{string}`） |
+| `@returns` | 返回值说明 |
+| `@throws` | 可能抛出的错误 |
+| `@deprecated` | 废弃原因与迁移路径 |
+| `@example` | 最小可用示例 |
+| `@internal` | 包内 API，不对外承诺 |
+| `@see` | 关联类型 / 文档链接 |
+
+## 书写原则
+
+1. **首行摘要**：一句话说明「做什么」，不要复述函数名（❌ `/** 应用主题 */` on `applyTheme`）
+2. **类型单一来源**：类型只在 TS 签名中声明；TSDoc 只写语义与约束
+3. **语言**：`packages/*` 库代码用**中文**摘要，标识符 / 技术术语保留英文
+4. **与实现同步**：改签名、改行为时同步更新 `@param` / `@returns` / `@deprecated`
+5. **Vue 组件**：`defineProps` / `defineEmits` 的非显然字段在类型或上方用 TSDoc 说明用途
+
+## 禁止
+
+- 空注释、`/** TODO */` 占位、复制粘贴函数名
+- 只给部分 export 写文档，其余遗漏
+- JSDoc 类型注解（`@param {string}`）与 TS 重复
+- `@ts-ignore` / `@ts-expect-error` 无相邻说明
+
+## 检查清单（提交前）
+
+1. 新增 / 修改的 **export** 是否都有 TSDoc？
+2. 公共方法是否具备 `@param` / `@returns`（适用时）？
+3. 废弃项是否标注 `@deprecated`？
+4. 注释是否与当前实现一致？

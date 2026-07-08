@@ -1,0 +1,54 @@
+---
+description: 工具、MCP、Skills 必须作为外部服务调用，禁止集成进平台代码
+alwaysApply: true
+---
+
+# 工具 / MCP / Skills 外部化原则
+
+## 核心约定
+
+**新增的工具（Tool）、MCP Server、Skills 能力，一律作为独立外部服务实现，通过配置注册，禁止编译进平台 Server 二进制。**
+
+## 禁止做的事
+
+```go
+// ❌ 禁止在 toolsvc 内新增内置工具
+func (s *Service) Register(BuiltinXxx, handler) { ... }
+
+// ❌ 禁止在 orchestrator / agentsvc 内硬编码新工具逻辑
+case "my_new_tool":
+    return doSomething()
+```
+
+## 正确做法
+
+所有新工具、能力通过 **外部 MCP Server** 提供，在配置文件中注册地址：
+
+```toml
+# config.toml
+[tools]
+mcp_servers = [
+  { id = "my-tool", url = "http://localhost:9100/mcp" },
+]
+```
+
+平台只负责：
+1. 发现并调用外部 MCP Server 上的工具
+2. 将工具名透传给模型（MCP 协议保证命名合法）
+3. 路由工具调用结果回模型
+
+## 现有内置工具的处理
+
+当前已存在的 `datetime_now`、`text_stats`、`web_search` 是历史遗留，**不再扩展**，后续迁移目标是将其也改造为外部 MCP Server。
+
+## Skills
+
+- Skills 是提示词模板 + 参数，保持配置/数据库驱动
+- 禁止把新的 Skill 执行逻辑写成 Go 代码编译进服务
+
+## 原因
+
+- 内置工具名需符合各模型 API 的命名约束（`^[a-zA-Z0-9_-]+$`），容易引入 bug
+- 外部 MCP 可独立部署、更新、重启，不影响主服务
+- 支持任意语言实现工具，不受 Go 限制
+- 工具崩溃不影响主进程稳定性

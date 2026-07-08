@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="256x256" href="/app-icon-256.png" />
+    <title>NiuMa</title>
+    <!-- 防启动黑/白屏：在 CSS bundle / Vue 挂载前同步主题与底色 -->
+    <style>
+      html,
+      body,
+      #app {
+        margin: 0;
+        height: 100%;
+        background: #181818;
+      }
+
+      /* 静态启动层：不依赖 JS bundle，辅助窗 Shell 早显时覆盖 Vite 冷加载 */
+      #niuma-boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483646;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background: var(--niuma-boot-bg, #181818);
+        color: var(--niuma-boot-fg, rgba(255, 255, 255, 0.72));
+        font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+        transition: opacity 0.22s ease;
+      }
+
+      #niuma-boot-loader.niuma-boot-loader--hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .niuma-boot-loader__spinner {
+        width: 28px;
+        height: 28px;
+        border: 2px solid var(--niuma-boot-track, rgba(255, 255, 255, 0.14));
+        border-top-color: var(--niuma-boot-accent, rgba(255, 255, 255, 0.88));
+        border-radius: 50%;
+        animation: niuma-boot-spin 0.75s linear infinite;
+      }
+
+      @keyframes niuma-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem('niuma-theme') || 'system'
+          var dark =
+            pref === 'dark' ||
+            (pref === 'system' && globalThis.matchMedia('(prefers-color-scheme: dark)').matches)
+          var mode = dark ? 'dark' : 'light'
+          var bg = dark ? '#181818' : '#f5f5f7'
+          var fg = dark ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.62)'
+          var track = dark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.1)'
+          var accent = dark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.72)'
+          var root = document.documentElement
+          root.dataset.rsTheme = mode
+          root.style.background = bg
+          root.style.colorScheme = mode
+          root.style.setProperty('--niuma-boot-bg', bg)
+          root.style.setProperty('--niuma-boot-fg', fg)
+          root.style.setProperty('--niuma-boot-track', track)
+          root.style.setProperty('--niuma-boot-accent', accent)
+          document.addEventListener('DOMContentLoaded', function () {
+            document.body.style.background = bg
+            var app = document.getElementById('app')
+            if (app) app.style.background = bg
+            var loader = document.getElementById('niuma-boot-loader')
+            if (loader) loader.style.background = bg
+          })
+        } catch (e) {
+          console.warn('[niuma] theme preflight skipped:', e)
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="niuma-boot-loader" aria-live="polite" aria-busy="true">
+      <div class="niuma-boot-loader__spinner" aria-hidden="true"></div>
+      <span>加载中…</span>
+    </div>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

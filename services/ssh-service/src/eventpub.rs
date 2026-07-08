@@ -1,0 +1,72 @@
+//! eventpub 向 platform 事件入口异步发布 SSH 终端流式事件。
+
+use std::time::Duration;
+
+use niuma_serviceipc::write_frame;
+use serde_json::Value;
+use tokio::sync::mpsc;
+use tracing::warn;
+
+/// Windows 上命名管道忙的错误码。
+const ERROR_PIPE_BUSY: i32 = 231;
+/// 管道忙时的重试间隔。
+const PIPE_RETRY_DELAY_MS: u64 = 50;
+/// Unix 下 platform 事件入口文件名。
+#[cfg(not(windows))]
+const UNIX_INGEST_NAME: &str = "niuma.platform.eventin.sock";
+/// Windows 下 platform 事件入口地址。
+const WINDOWS_INGEST_ADDR: &str = r"\\.\pipe\niuma.platform.eventin";
+
+/// AsyncPublisher 在后台单任务中串行写入 platform 事件入口。
+#[derive(Clone)]
+pub struct AsyncPublisher {
+    tx: mpsc::UnboundedSender<Value>,
+}
+
+impl AsyncPublisher {
+    /// new 创建异步发布器并启动后台写入循环。
+    pub fn new() -> Self {
+        let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let Err(err) = publish_event(event).await {
+                    warn!(%err, "ssh terminal event publish failed");
+                }
+            }
+        });
+        Self { tx }
+    }
+
+    /// emit 入队一个 JSON 事件对象。
+    pub fn emit(&self, event: Value) {
+        let _ = self.tx.send(event);
+    }
+}
+
+async fn publish_event(event: Value) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let payload = serde_json::to_vec(&event)?;
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ClientOptions;
+
+        let mut stream = loop {
+            match ClientOptions::new().open(WINDOWS_INGEST_ADDR) {
+                Ok(client) => break client,
+                Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                    tokio::time::sleep(Duration::from_millis(PIPE_RETRY_DELAY_MS)).await;
+                }
+                Err(err) => return Err(Box::new(err)),
+            }
+        };
+        write_frame(&mut stream, &payload).await?;
+    }
+    #[cfg(not(windows))]
+    {
+        use tokio::net::UnixStream;
+
+        let addr = std::env::temp_dir().join(UNIX_INGEST_NAME);
+        let mut stream = UnixStream::connect(addr).await?;
+        write_frame(&mut stream, &payload).await?;
+    }
+    Ok(())
+}

@@ -1,0 +1,9 @@
+go 1.25.0
+
+use (
+	./packages/go/logutil
+	./packages/go/netproxy
+	./packages/go/serviceipc
+	./platform
+	./services/ftp-service
+)

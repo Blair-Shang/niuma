@@ -1,0 +1,346 @@
+#include "util/local_fs.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <system_error>
+#include <vector>
+
+#if defined(OS_WIN)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#else
+#include <spawn.h>
+extern char** environ;
+#endif
+
+namespace fs = std::filesystem;
+
+namespace niuma {
+
+namespace {
+
+std::string JsonEscape(const std::string& value) {
+  std::string out;
+  out.reserve(value.size() + 8);
+  for (char c : value) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default: {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (u < 0x20) {
+          char buf[7];
+          snprintf(buf, sizeof(buf), "\\u%04x", u);
+          out += buf;
+        } else {
+          out.push_back(c);
+        }
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+std::string U8StringToUtf8(const std::u8string& value) {
+  return std::string(reinterpret_cast<const char*>(value.data()), value.size());
+}
+
+#if defined(OS_WIN)
+std::wstring Utf8ToWide(const std::string& value) {
+  if (value.empty()) {
+    return {};
+  }
+  const int size = MultiByteToWideChar(CP_UTF8, 0, value.c_str(),
+                                       static_cast<int>(value.size()), nullptr, 0);
+  if (size <= 0) {
+    return {};
+  }
+  std::wstring out(size, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
+                      out.empty() ? nullptr : &out[0], size);
+  return out;
+}
+#endif
+
+}  // namespace
+
+bool LocalFs::IsAccessiblePath(const std::string& path, std::string& error) {
+  if (path.empty()) {
+    error = "path required";
+    return false;
+  }
+  std::error_code ec;
+  const fs::path p = fs::u8path(path);
+  if (!p.is_absolute()) {
+    error = "path must be absolute";
+    return false;
+  }
+  const fs::path normalized = fs::weakly_canonical(p, ec);
+  if (ec) {
+    error = ec.message();
+    return false;
+  }
+  (void)normalized;
+  return true;
+}
+
+bool LocalFs::Exists(const std::string& path) {
+  std::string error;
+  if (!IsAccessiblePath(path, error)) {
+    return false;
+  }
+  std::error_code ec;
+  return fs::exists(fs::u8path(path), ec);
+}
+
+std::string LocalFs::StatJson(const std::string& path, std::string& error) {
+  if (!IsAccessiblePath(path, error)) {
+    return {};
+  }
+  std::error_code ec;
+  const fs::path p = fs::u8path(path);
+  if (!fs::exists(p, ec)) {
+    error = "path not found";
+    return {};
+  }
+  const bool is_dir = fs::is_directory(p, ec);
+  const bool is_file = fs::is_regular_file(p, ec);
+  std::uintmax_t size = 0;
+  if (is_file) {
+    size = fs::file_size(p, ec);
+    if (ec) {
+      error = ec.message();
+      return {};
+    }
+  }
+  std::ostringstream ss;
+  ss << "{\"path\":\"" << JsonEscape(path) << "\",\"exists\":true"
+     << ",\"isDirectory\":" << (is_dir ? "true" : "false")
+     << ",\"isFile\":" << (is_file ? "true" : "false") << ",\"size\":" << size
+     << "}";
+  return ss.str();
+}
+
+std::string LocalFs::ReadText(const std::string& path, std::string& error) {
+  if (!IsAccessiblePath(path, error)) {
+    return {};
+  }
+  std::ifstream in(fs::u8path(path), std::ios::binary);
+  if (!in) {
+    error = "failed to open file";
+    return {};
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  const std::string content = ss.str();
+  std::ostringstream out;
+  out << "{\"path\":\"" << JsonEscape(path) << "\",\"content\":\""
+      << JsonEscape(content) << "\"}";
+  return out.str();
+}
+
+bool LocalFs::WriteText(const std::string& path, const std::string& content,
+                        std::string& error) {
+  if (!IsAccessiblePath(path, error)) {
+    return false;
+  }
+  std::ofstream out(fs::u8path(path), std::ios::binary | std::ios::trunc);
+  if (!out) {
+    error = "failed to open file for write";
+    return false;
+  }
+  out.write(content.data(), static_cast<std::streamsize>(content.size()));
+  if (!out) {
+    error = "failed to write file";
+    return false;
+  }
+  return true;
+}
+
+std::string LocalFs::HomeDirJson(std::string& error) {
+#if defined(OS_WIN)
+  const char* home = std::getenv("USERPROFILE");
+#else
+  const char* home = std::getenv("HOME");
+#endif
+  if (home == nullptr || home[0] == '\0') {
+    error = "home directory not found";
+    return {};
+  }
+  std::ostringstream ss;
+  ss << "{\"path\":\"" << JsonEscape(home) << "\"}";
+  return ss.str();
+}
+
+std::string LocalFs::ListDirJson(const std::string& path, std::string& error) {
+  if (!IsAccessiblePath(path, error)) {
+    return {};
+  }
+  std::error_code ec;
+  const fs::path p = fs::u8path(path);
+  if (!fs::exists(p, ec) || !fs::is_directory(p, ec)) {
+    error = "path is not a directory";
+    return {};
+  }
+
+  std::ostringstream ss;
+  ss << "{\"path\":\"" << JsonEscape(path) << "\",\"entries\":[";
+  bool first = true;
+  for (const auto& entry : fs::directory_iterator(p, ec)) {
+    if (ec) {
+      error = ec.message();
+      return {};
+    }
+    const std::string name = U8StringToUtf8(entry.path().filename().u8string());
+    const bool is_dir = entry.is_directory(ec);
+    const bool is_file = entry.is_regular_file(ec);
+    std::string kind = "file";
+    if (is_dir) {
+      kind = "dir";
+    }
+    std::uintmax_t size = 0;
+    if (is_file) {
+      size = entry.file_size(ec);
+      if (ec) {
+        ec.clear();
+        size = 0;
+      }
+    }
+    if (!first) {
+      ss << ',';
+    }
+    first = false;
+    ss << "{\"name\":\"" << JsonEscape(name) << "\",\"kind\":\"" << kind
+       << "\",\"size\":" << size << "}";
+  }
+  ss << "]}";
+  return ss.str();
+}
+
+bool LocalFs::Mkdir(const std::string& path, std::string& error) {
+  if (!IsAccessiblePath(path, error)) {
+    return false;
+  }
+  std::error_code ec;
+  const fs::path p = fs::u8path(path);
+  if (fs::exists(p, ec)) {
+    error = "path already exists";
+    return false;
+  }
+  fs::create_directories(p, ec);
+  if (ec) {
+    error = ec.message();
+    return false;
+  }
+  return true;
+}
+
+bool LocalFs::Rename(const std::string& from_path, const std::string& to_path,
+                     std::string& error) {
+  if (!IsAccessiblePath(from_path, error)) {
+    return false;
+  }
+  if (!IsAccessiblePath(to_path, error)) {
+    return false;
+  }
+  std::error_code ec;
+  const fs::path from = fs::u8path(from_path);
+  if (!fs::exists(from, ec)) {
+    error = "source path not found";
+    return false;
+  }
+  const fs::path to = fs::u8path(to_path);
+  if (fs::exists(to, ec)) {
+    error = "destination path already exists";
+    return false;
+  }
+  fs::rename(from, to, ec);
+  if (ec) {
+    error = ec.message();
+    return false;
+  }
+  return true;
+}
+
+bool LocalFs::Delete(const std::string& path, std::string& error) {
+  if (!IsAccessiblePath(path, error)) {
+    return false;
+  }
+  std::error_code ec;
+  const fs::path p = fs::u8path(path);
+  if (!fs::exists(p, ec)) {
+    error = "path not found";
+    return false;
+  }
+  fs::remove_all(p, ec);
+  if (ec) {
+    error = ec.message();
+    return false;
+  }
+  return true;
+}
+
+bool LocalFs::ShowInFolder(const std::string& path, std::string& error) {
+  if (!IsAccessiblePath(path, error)) {
+    return false;
+  }
+#if defined(OS_WIN)
+  const std::wstring wide = Utf8ToWide(path);
+  if (wide.empty()) {
+    error = "invalid path encoding";
+    return false;
+  }
+  const std::wstring args = L"/select," + wide;
+  const HINSTANCE result =
+      ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+  if (reinterpret_cast<intptr_t>(result) <= 32) {
+    error = "explorer failed";
+    return false;
+  }
+  return true;
+#else
+  (void)path;
+  const fs::path target = fs::u8path(path);
+  const fs::path folder = fs::is_directory(target) ? target : target.parent_path();
+  if (folder.empty()) {
+    error = "folder not found";
+    return false;
+  }
+#if defined(__APPLE__)
+  const char* opener = "open";
+#else
+  const char* opener = "xdg-open";
+#endif
+  std::vector<char> folder_arg(folder.string().begin(), folder.string().end());
+  folder_arg.push_back('\0');
+  char* argv[] = {const_cast<char*>(opener), folder_arg.data(), nullptr};
+  pid_t pid = 0;
+  if (posix_spawnp(&pid, opener, nullptr, nullptr, argv, environ) != 0) {
+    error = std::string(opener) + " failed";
+    return false;
+  }
+  return true;
+#endif
+}
+
+}  // namespace niuma

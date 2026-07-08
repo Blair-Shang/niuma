@@ -1,0 +1,58 @@
+# Build & output
+/build/
+/dist/
+/out/
+/output/
+*.exe
+*.dll
+*.pdb
+*.obj
+*.o
+*.a
+*.lib
+*.exp
+*.ilk
+
+# CEF third party (download via scripts/download-cef.ps1)
+/third_party/cef/
+
+# Node
+node_modules/
+.pnpm-store/
+*.local
+
+# Vite / Vue
+web/dist/
+packages/ui/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+*.sln.docstates
+CMakeUserPresets.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Rust
+**/target/
+
+# Logs & temp
+/logs/
+*.log
+*.tmp
+.cache/
+
+# Local data (dev)
+*.db
+*.db-shm
+*.db-wal
+
+# Pack output (scripts/pack → pack/win-x64/)
+/pack/*
+!/pack/.gitkeep
+!/pack/README.md

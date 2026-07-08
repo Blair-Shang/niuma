@@ -1,0 +1,381 @@
+<script setup lang="ts">
+import { computed, toRef } from 'vue'
+import {
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+} from './reka'
+import { useRsI18n } from '../composables/useRsI18n'
+import RsButton from './RsButton.vue'
+import type { RsFeedbackTone } from './overlay-utils'
+import { useRsDialogWindow } from './dialog-window'
+
+const open = defineModel<boolean>('open', { default: false })
+
+const props = withDefaults(
+  defineProps<{
+    title: string
+    description?: string
+    width?: 'sm' | 'md' | 'lg'
+    tone?: RsFeedbackTone
+    layout?: 'window' | 'confirm'
+    draggable?: boolean
+    resizable?: boolean
+    fullscreenable?: boolean
+    showOverlay?: boolean
+    showClose?: boolean
+    closeOnOverlayClick?: boolean
+  }>(),
+  {
+    width: 'md',
+    tone: 'default',
+    layout: 'confirm',
+    draggable: false,
+    resizable: false,
+    fullscreenable: false,
+    showOverlay: false,
+    showClose: true,
+    closeOnOverlayClick: false,
+  },
+)
+
+const { t } = useRsI18n()
+const isWindowLayout = computed(() => props.layout === 'window')
+const isConfirmLayout = computed(() => props.layout === 'confirm')
+const enableDraggable = computed(() => props.draggable && isWindowLayout.value)
+const enableResizable = computed(() => props.resizable && isWindowLayout.value)
+
+const {
+  isFullscreen,
+  dialogStyle,
+  resizeHandles,
+  toggleFullscreen,
+  onHeaderPointerDown,
+  onResizePointerDown,
+} = useRsDialogWindow({
+  open,
+  widthPreset: toRef(props, 'width'),
+  draggable: enableDraggable,
+  resizable: enableResizable,
+  compact: isConfirmLayout,
+})
+</script>
+
+<template>
+  <DialogRoot v-model:open="open">
+    <DialogPortal>
+      <DialogOverlay v-if="showOverlay" class="rs-dialog__overlay rs-motion-reduce" />
+      <DialogContent
+        class="rs-dialog__content rs-motion-reduce"
+        :class="[
+          `rs-dialog__content--${width}`,
+          `rs-dialog__content--${layout}`,
+          `rs-dialog__content--tone-${tone}`,
+          { 'rs-dialog__content--fullscreen': isFullscreen },
+        ]"
+        :style="isWindowLayout ? dialogStyle : undefined"
+        @pointer-down-outside="closeOnOverlayClick ? undefined : $event.preventDefault()"
+        @interact-outside="closeOnOverlayClick ? undefined : $event.preventDefault()"
+      >
+        <template v-if="enableResizable && !isFullscreen">
+          <div
+            v-for="handle in resizeHandles"
+            :key="handle"
+            :class="['rs-dialog__resize-handle', `rs-dialog__resize-handle--${handle}`]"
+            :aria-hidden="true"
+            @pointerdown.stop="onResizePointerDown(handle, $event)"
+          />
+        </template>
+        <header class="rs-dialog__header" @pointerdown="onHeaderPointerDown">
+          <div class="rs-dialog__heading">
+            <DialogTitle class="rs-dialog__title">{{ title }}</DialogTitle>
+            <DialogDescription
+              class="rs-dialog__description"
+              :class="{ 'rs-dialog__description--sr-only': !description }"
+            >
+              {{ description || title }}
+            </DialogDescription>
+          </div>
+          <div class="rs-dialog__actions">
+            <RsButton
+              v-if="fullscreenable && isWindowLayout"
+              variant="ghost"
+              size="sm"
+              :icon="isFullscreen ? 'minimize-2' : 'maximize-2'"
+              :tooltip="isFullscreen ? t('dialog.restore') : t('dialog.fullscreen')"
+              @click="toggleFullscreen"
+            />
+            <RsButton
+              v-if="showClose"
+              variant="ghost"
+              size="sm"
+              icon="x"
+              :tooltip="t('dialog.close')"
+              @click="open = false"
+            />
+          </div>
+        </header>
+        <div class="rs-dialog__body">
+          <slot />
+        </div>
+        <footer v-if="$slots.footer" class="rs-dialog__footer">
+          <slot name="footer" />
+        </footer>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
+</template>
+
+<style>
+.rs-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--rs-z-modal);
+  background: var(--rs-dialog-overlay-bg);
+  backdrop-filter: blur(var(--rs-dialog-overlay-blur)) saturate(120%);
+  -webkit-backdrop-filter: blur(var(--rs-dialog-overlay-blur)) saturate(120%);
+}
+.rs-dialog__overlay[data-state='open'] {
+  animation: rs-dialog-overlay-in 220ms ease;
+}
+.rs-dialog__overlay[data-state='closed'] {
+  animation: rs-dialog-overlay-out 160ms ease;
+}
+.rs-dialog__content {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: calc(var(--rs-z-modal) + 1);
+  display: flex;
+  max-height: min(90vh, 40rem);
+  width: calc(100% - 2rem);
+  flex-direction: column;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
+  border-radius: var(--rs-radius-lg);
+  border: 1px solid var(--rs-dialog-border);
+  background: var(--rs-dialog-header-bg);
+  box-shadow: var(--rs-dialog-shadow);
+  outline: none;
+}
+
+/* 亮色：轻微 vibrancy；暗色：实底分层（token 在 styles.css） */
+[data-rs-theme='light'] .rs-dialog__content {
+  background: color-mix(in srgb, var(--rs-dialog-bg) 94%, transparent);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+/* confirm 布局：缩放 + 淡入（居中，含 translate）；苹果 sheet 缓动曲线 */
+.rs-dialog__content--confirm[data-state='open'] {
+  animation: rs-dialog-pop-in 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.rs-dialog__content--confirm[data-state='closed'] {
+  animation: rs-dialog-pop-out 180ms ease;
+}
+/* window 布局：位置由拖拽内联样式控制，仅淡入避免与 transform 冲突 */
+.rs-dialog__content--window[data-state='open'] {
+  animation: rs-dialog-fade-in 220ms ease;
+}
+.rs-dialog__content--window[data-state='closed'] {
+  animation: rs-dialog-fade-out 150ms ease;
+}
+@keyframes rs-dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes rs-dialog-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes rs-dialog-pop-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes rs-dialog-pop-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -47%) scale(0.97);
+  }
+}
+@keyframes rs-dialog-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes rs-dialog-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.rs-dialog__content--window {
+  left: 50%;
+  top: 50%;
+  max-width: none;
+  max-height: none;
+  transform: none;
+}
+.rs-dialog__content--sm {
+  max-width: 24rem;
+}
+.rs-dialog__content--md {
+  max-width: 32rem;
+}
+.rs-dialog__content--lg {
+  max-width: 42rem;
+}
+.rs-dialog__content--window.rs-dialog__content--sm,
+.rs-dialog__content--window.rs-dialog__content--md,
+.rs-dialog__content--window.rs-dialog__content--lg {
+  max-width: none;
+}
+.rs-dialog__content--fullscreen {
+  border-radius: var(--rs-radius);
+}
+.rs-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  padding: 0.625rem 0.75rem 0.625rem 1.25rem;
+  background: var(--rs-dialog-header-bg);
+  border-bottom: 1px solid var(--rs-dialog-separator);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+.rs-dialog__content--window .rs-dialog__header {
+  cursor: grab;
+  user-select: none;
+}
+.rs-dialog__title {
+  margin: 0;
+  font-size: var(--rs-font-size-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rs-dialog-title-fg);
+}
+.rs-dialog__description {
+  margin: 0.25rem 0 0;
+  font-size: var(--rs-font-size-sm);
+  color: var(--rs-dialog-description-fg);
+  line-height: var(--rs-line-height-normal);
+}
+.rs-dialog__description--sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.rs-dialog__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.25rem;
+  background: var(--rs-dialog-body-bg);
+}
+.rs-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding: 0.75rem 1.25rem;
+  background: var(--rs-dialog-footer-bg);
+  border-top: 1px solid var(--rs-dialog-separator);
+}
+[data-rs-theme='light'] .rs-dialog__header {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.75);
+}
+.rs-dialog__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rs-space-xs);
+}
+.rs-dialog__resize-handle {
+  position: absolute;
+  z-index: 2;
+}
+.rs-dialog__resize-handle--n,
+.rs-dialog__resize-handle--s {
+  left: 0.5rem;
+  right: 0.5rem;
+  height: 0.5rem;
+  cursor: ns-resize;
+}
+.rs-dialog__resize-handle--n {
+  top: -0.25rem;
+}
+.rs-dialog__resize-handle--s {
+  bottom: -0.25rem;
+}
+.rs-dialog__resize-handle--e,
+.rs-dialog__resize-handle--w {
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 0.5rem;
+  cursor: ew-resize;
+}
+.rs-dialog__resize-handle--e {
+  right: -0.25rem;
+}
+.rs-dialog__resize-handle--w {
+  left: -0.25rem;
+}
+.rs-dialog__resize-handle--ne,
+.rs-dialog__resize-handle--nw,
+.rs-dialog__resize-handle--se,
+.rs-dialog__resize-handle--sw {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+.rs-dialog__resize-handle--ne {
+  top: -0.25rem;
+  right: -0.25rem;
+  cursor: nesw-resize;
+}
+.rs-dialog__resize-handle--nw {
+  top: -0.25rem;
+  left: -0.25rem;
+  cursor: nwse-resize;
+}
+.rs-dialog__resize-handle--se {
+  right: -0.25rem;
+  bottom: -0.25rem;
+  cursor: nwse-resize;
+}
+.rs-dialog__resize-handle--sw {
+  left: -0.25rem;
+  bottom: -0.25rem;
+  cursor: nesw-resize;
+}
+</style>

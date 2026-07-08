@@ -1,0 +1,496 @@
+@import 'tailwindcss';
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+:root {
+  --nm-topbar-h: 2.5rem;
+  --nm-topbar-control-h: 1.625rem;
+  --nm-statusbar-h: 1.625rem;
+  --nm-activitybar-w: 3rem;
+  --nm-sidebar-w: 13.5rem;
+  --nm-ai-panel-w: 22rem;
+  --nm-tabbar-h: 2.125rem;
+  /* Shell 区域背景 — 与设计系统暗色灰阶对齐（frame<内容<悬浮层） */
+  --nm-frame-bg: #181818;
+  --nm-editor-bg: #1f1f1f;
+  --nm-elevated-bg: #262626;
+  --nm-activitybar-bg: var(--nm-frame-bg);
+  --nm-sidebar-bg: var(--nm-frame-bg);
+  --nm-topbar-bg: color-mix(in srgb, var(--nm-frame-bg) 80%, transparent);
+  --nm-content-radius: var(--rs-radius);
+  --nm-glass-blur: 24px;
+
+  /* Apple 式极光色相（柔和、偏 pastel，非霓虹） */
+  --nm-aurora-a: #5ac8fa;
+  --nm-aurora-b: #bf5af2;
+  --nm-aurora-c: #ff375f;
+  --nm-aurora-d: #64d2ff;
+  --nm-aurora-e: #30d158;
+
+  /* Shell 排版尺度（统一引用，禁止散落 text-sm/text-base） */
+  --nm-font-body: var(--rs-font-size-sm);
+  --nm-font-caption: var(--rs-font-size-xs);
+  --nm-font-title: var(--rs-font-size-base);
+  --nm-font-heading: var(--rs-font-size-lg);
+  --nm-font-brand: var(--rs-font-size-sm);
+}
+
+/* 亮色：内容白、框架浅灰，沿用设计系统 rs token */
+[data-rs-theme='light'] {
+  --nm-frame-bg: var(--rs-bg);
+  --nm-editor-bg: var(--rs-surface);
+  --nm-elevated-bg: var(--rs-surface);
+}
+
+.nm-app {
+  height: 100%;
+  min-height: 0;
+  background: var(--nm-frame-bg);
+  color: var(--rs-text);
+  font-size: var(--nm-font-body);
+  line-height: var(--rs-line-height-normal);
+  font-feature-settings: 'kern' 1, 'liga' 1;
+  letter-spacing: -0.011em;
+}
+
+/* macOS-inspired translucent chrome */
+.nm-glass {
+  background: color-mix(in srgb, var(--rs-surface) 72%, transparent);
+  backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
+}
+
+[data-rs-theme='dark'] .nm-glass {
+  background: color-mix(in srgb, var(--rs-surface) 65%, transparent);
+}
+
+.nm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--rs-space-sm);
+  height: var(--nm-topbar-h);
+  padding: 0 var(--rs-space-lg);
+  border-bottom: 1px solid var(--rs-border-subtle);
+}
+
+/** 全宽顶栏：毛玻璃 + 底层流动极光 */
+.nm-topbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: var(--nm-topbar-h);
+  isolation: isolate;
+  overflow: hidden;
+  z-index: 11;
+  border-bottom: 1px solid var(--rs-border-subtle);
+  background: var(--nm-topbar-bg);
+  backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
+}
+
+.nm-topbar::before {
+  content: '';
+  position: absolute;
+  inset: -40% -20%;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 50% 80% at 10% 50%, color-mix(in srgb, var(--nm-aurora-a) 42%, transparent), transparent 70%),
+    radial-gradient(ellipse 45% 90% at 45% 20%, color-mix(in srgb, var(--nm-aurora-b) 34%, transparent), transparent 68%),
+    radial-gradient(ellipse 40% 70% at 78% 80%, color-mix(in srgb, var(--nm-aurora-c) 28%, transparent), transparent 65%),
+    radial-gradient(ellipse 35% 60% at 92% 30%, color-mix(in srgb, var(--nm-aurora-d) 30%, transparent), transparent 60%);
+  background-size: 140% 140%;
+  animation: nm-aurora-drift 14s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+[data-rs-theme='dark'] .nm-topbar::before {
+  opacity: 0.55;
+}
+
+[data-rs-theme='light'] .nm-topbar::before {
+  opacity: 0.38;
+}
+
+.nm-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--rs-space-sm);
+  height: 100%;
+  padding: 0 var(--rs-space-md);
+  flex-shrink: 0;
+}
+
+.nm-topbar__spacer {
+  flex: 1;
+  align-self: stretch;
+  min-width: var(--rs-space-md);
+}
+
+.nm-topbar__actions {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--rs-space-sm);
+  height: 100%;
+  padding-left: var(--rs-space-sm);
+  flex-shrink: 0;
+}
+
+/** 辅助窗口标题栏：标题 + 拖拽区 + 右侧窗口控制（与主窗口 TopBar 一致） */
+.nm-aux-titlebar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.nm-aux-titlebar__title {
+  flex-shrink: 0;
+  max-width: min(28rem, 40vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: var(--rs-space-md);
+  font-size: var(--nm-font-caption);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rs-text);
+  user-select: none;
+}
+
+.nm-aux-tabstrip {
+  display: flex;
+  align-items: stretch;
+  height: var(--nm-tabbar-h);
+  border-bottom: 1px solid var(--rs-border-subtle);
+  background: color-mix(in srgb, var(--nm-frame-bg) 92%, transparent);
+  flex-shrink: 0;
+}
+
+.nm-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--nm-statusbar-h);
+  padding: 0 var(--rs-space-md);
+  border-top: 1px solid var(--rs-border-subtle);
+  font-size: var(--nm-font-caption);
+  color: var(--rs-muted);
+  background: var(--nm-frame-bg);
+}
+
+.nm-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--nm-editor-bg);
+}
+
+.nm-workspace-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/** 设置等「文档型」页面内边距；模块工具 UI 默认全幅 */
+.nm-page-padded {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: var(--rs-space-xl);
+  background: var(--nm-editor-bg);
+}
+
+/** 模块根容器：占满工作区，由模块自行分栏（树 + 编辑器 + 面板） */
+.nm-module-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.nm-module-empty {
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--rs-space-xl);
+  background: var(--nm-editor-bg);
+}
+
+.nm-brand-mark {
+  display: flex;
+  align-items: center;
+  gap: var(--rs-space-sm);
+  font-size: var(--nm-font-brand);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rs-text);
+}
+
+/**
+ * 品牌标：Apple 式圆角方块 + 流动极光底。
+ * 剑形用白色，叠在动态渐变上；系统图标仍用 AppBrandIcon variant=app。
+ */
+.nm-brand-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 0.4rem;
+  color: #fff;
+  box-shadow:
+    0 0.5px 0 rgb(255 255 255 / 0.35) inset,
+    0 1px 3px rgb(0 0 0 / 0.12);
+}
+
+.nm-brand-icon::before {
+  content: '';
+  position: absolute;
+  inset: -70%;
+  background: conic-gradient(
+    from 0deg,
+    var(--nm-aurora-a),
+    var(--nm-aurora-b),
+    var(--nm-aurora-c),
+    var(--nm-aurora-d),
+    var(--nm-aurora-e),
+    var(--nm-aurora-a)
+  );
+  animation: nm-aurora-spin 10s linear infinite;
+}
+
+.nm-brand-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    160deg,
+    rgb(255 255 255 / 0.38) 0%,
+    rgb(255 255 255 / 0.06) 42%,
+    rgb(0 0 0 / 0.08) 100%
+  );
+  pointer-events: none;
+}
+
+.nm-brand-icon .nm-app-brand-icon {
+  position: relative;
+  z-index: 1;
+  display: block;
+  filter: drop-shadow(0 0.5px 0.5px rgb(0 0 0 / 0.18));
+}
+
+.nm-brand-icon--lg {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.45rem;
+}
+
+@keyframes nm-aurora-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes nm-aurora-drift {
+  0% {
+    transform: translate3d(-4%, -6%, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(3%, 4%, 0) scale(1.12);
+  }
+  100% {
+    transform: translate3d(5%, -3%, 0) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nm-topbar::before,
+  .nm-brand-icon::before {
+    animation: none;
+  }
+
+  .nm-brand-icon::before {
+    background: linear-gradient(
+      135deg,
+      var(--nm-aurora-a),
+      var(--nm-aurora-b) 40%,
+      var(--nm-aurora-c)
+    );
+  }
+}
+
+.nm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--rs-radius-full);
+  font-size: var(--nm-font-caption);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nm-badge--connected {
+  background: color-mix(in srgb, var(--rs-success) 14%, transparent);
+  color: var(--rs-success);
+}
+
+.nm-badge--offline {
+  background: color-mix(in srgb, var(--rs-muted) 12%, transparent);
+  color: var(--rs-muted);
+}
+
+.nm-status-dot {
+  display: inline-block;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: var(--rs-radius-full);
+  flex-shrink: 0;
+}
+
+.nm-status-dot--online {
+  background: var(--rs-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rs-success) 25%, transparent);
+}
+
+.nm-status-dot--offline {
+  background: var(--rs-muted);
+}
+
+.nm-section-title {
+  font-size: var(--nm-font-heading);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rs-text);
+}
+
+.nm-section-desc {
+  font-size: var(--nm-font-body);
+  color: var(--rs-muted);
+  line-height: var(--rs-line-height-normal);
+}
+
+.nm-page-title {
+  font-size: var(--nm-font-title);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rs-text);
+}
+
+.nm-caption {
+  font-size: var(--nm-font-caption);
+  color: var(--rs-muted);
+  line-height: var(--rs-line-height-normal);
+}
+
+.nm-toolbar-menu :deep(.rs-dropdown) {
+  min-width: 0;
+  width: 100%;
+}
+
+.nm-toolbar-menu :deep(.rs-dropdown__trigger) {
+  min-height: var(--rs-control-height-sm);
+  padding: 0 var(--rs-space-sm);
+  font-size: var(--nm-font-caption);
+  background: color-mix(in srgb, var(--rs-surface) 60%, transparent);
+}
+
+/** CEF 无边框窗口：拖拽区与可点击区（由 DragHandler 同步到原生） */
+.nm-drag-region {
+  -webkit-app-region: drag;
+}
+
+.nm-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/** 无边框窗口：四边与四角拖拽缩放热区 */
+.nm-frameless-resize {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.nm-frameless-resize__edge {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.nm-frameless-resize__edge--n,
+.nm-frameless-resize__edge--s {
+  left: 8px;
+  right: 8px;
+  height: 4px;
+}
+
+.nm-frameless-resize__edge--e,
+.nm-frameless-resize__edge--w {
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+}
+
+.nm-frameless-resize__edge--n {
+  top: 0;
+  cursor: ns-resize;
+}
+
+.nm-frameless-resize__edge--s {
+  bottom: 0;
+  cursor: ns-resize;
+}
+
+.nm-frameless-resize__edge--e {
+  right: 0;
+  cursor: ew-resize;
+}
+
+.nm-frameless-resize__edge--w {
+  left: 0;
+  cursor: ew-resize;
+}
+
+.nm-frameless-resize__edge--ne,
+.nm-frameless-resize__edge--nw,
+.nm-frameless-resize__edge--se,
+.nm-frameless-resize__edge--sw {
+  width: 8px;
+  height: 8px;
+}
+
+.nm-frameless-resize__edge--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.nm-frameless-resize__edge--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.nm-frameless-resize__edge--se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.nm-frameless-resize__edge--sw {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+}

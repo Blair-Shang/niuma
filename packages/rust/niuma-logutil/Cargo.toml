@@ -1,0 +1,11 @@
+[package]
+name = "niuma-logutil"
+description = "NiuMa 桌面子进程落盘日志（与 Go logutil 目录策略对齐）"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono = "0.4"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "chrono"] }

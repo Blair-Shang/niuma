@@ -1,0 +1,118 @@
+---
+description: NiuMa 本地离线数据库与 SQL 迁移规范 — 对齐 database-schema.md
+globs: "scripts/sql/**/*.sql"
+alwaysApply: false
+---
+
+# 数据库与 SQL 迁移规范
+
+完整表清单与 DDL 见 [docs/database-schema.md](../../docs/database-schema.md)。
+
+## 项目特点
+
+- **离线桌面**：默认 SQLite 单文件，路径见文档 §1.4
+- **物理删除**：禁止软删除字段与 `UPDATE ... is_deleted` 模式
+- **凭据不入库**：密码/密钥用 `keychain_service` + OS Keychain
+
+## 迁移目录
+
+```
+scripts/sql/
+  sqlite/       # 必选 — 本地离线库源脚本
+  postgres/     # 可选 — 同步/企业扩展
+  mysql/        # 可选
+```
+
+打包时复制到 `pack/win-x64/platform/migrations/sqlite/`。
+
+文件命名：`{6位版本}_{域}.up.sql` / `.down.sql`（例：`000001_core.up.sql`）。
+
+## 强制约束
+
+| # | 规范 | 说明 |
+|---|------|------|
+| 1 | 禁止裸字段 `id` | 主键 `{entity}_id` |
+| 2 | 禁止数据库自增 | 禁止 `AUTOINCREMENT` / `SERIAL` / `AUTO_INCREMENT` |
+| 3 | 主键应用层生成 | INSERT 前 `NmIdGenerator` → **TEXT** 十进制字符串 |
+| 4 | 字段语义明确 | `profile_name`、`record_status`；禁止裸 `name`/`status`/`type` |
+| 5 | 禁止 SQL 关键字作列名 | 避开 `user`、`order`、`group`、`key`、裸 `role` |
+| 6 | 禁止物理外键 | 不写 `REFERENCES`；级联删除在 Service 层 |
+| 7 | 表名 `nm_` 前缀 | 小写 + 下划线，≤ 30 字符 |
+| 8 | 索引名 ≤ 30 字符 | `uk_` 唯一 / `idx_` 普通 |
+| 9 | **仅物理删除** | 禁止 `is_deleted`、`deleted_at`；唯一索引不加软删 `WHERE` |
+
+## 标准字段模板（主数据表）
+
+```sql
+{entity}_id     TEXT NOT NULL PRIMARY KEY   -- NmIdGenerator
+-- 业务字段 ...
+row_version     INTEGER NOT NULL DEFAULT 0
+created_at      TEXT NOT NULL               -- ISO8601 UTC
+updated_at      TEXT NOT NULL
+```
+
+**不含** `is_deleted`。流水/审计表仅需 `created_at`。
+
+## 索引规范
+
+```
+uk_{表名核心}_{列名}
+idx_{表名核心}_{列名}
+```
+
+- 唯一索引直接 `UNIQUE`，**不要** `WHERE is_deleted = ...`
+- 单表业务索引 ≤ 5（日志表除外）
+
+## SQLite 方言（默认）
+
+| 逻辑类型 | SQLite |
+|----------|--------|
+| 主键/逻辑外键 | `TEXT` |
+| 字符串 | `TEXT`（注释标明逻辑 `VARCHAR(n)`） |
+| 时间 | `TEXT` ISO8601 UTC |
+| JSON | `TEXT` + JSON1 |
+| 布尔 | `INTEGER` 0/1 |
+
+字段含义用 `--` 行注释；PG/MySQL 扩展目录用 `COMMENT ON` / 列 `COMMENT`。
+
+## 迁移约定
+
+1. 一域一文件：core、connection、plugin、ai、api_test、audit
+2. `down` 与 `up` 对称
+3. `nm_schema_migration` 仅迁移工具使用
+4. 无多租户：不用 `org_id`；可选 `workspace_id` 本地分组
+5. 敏感字段：仅 `secret_ref` / `keychain_service`，禁止明文密码列
+
+## 正例 / 反例
+
+```sql
+-- ✅ GOOD
+CREATE TABLE nm_connection_profile (
+    profile_id      TEXT NOT NULL PRIMARY KEY,
+    workspace_id    TEXT NOT NULL,
+    profile_name    TEXT NOT NULL,
+    connection_kind TEXT NOT NULL,
+    record_status   TEXT NOT NULL DEFAULT 'active',
+    row_version     INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE UNIQUE INDEX uk_nm_conn_profile_name
+  ON nm_connection_profile (workspace_id, profile_name);
+
+-- ❌ BAD
+CREATE TABLE connection (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    is_deleted INTEGER DEFAULT 0
+);
+```
+
+## 检查清单
+
+1. 主键 `{entity}_id` TEXT，无自增？
+2. 无 `is_deleted` / 软删逻辑？
+3. 删除是否为 `DELETE` + 应用层级联？
+4. 表名 `nm_` 前缀、索引 `uk_`/`idx_`？
+5. 无 `REFERENCES`？
+6. 凭据是否走 Keychain 引用？
+7. SQLite 迁移在 `scripts/sql/sqlite/` 且含 `down`？

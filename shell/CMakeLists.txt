@@ -1,0 +1,145 @@
+cmake_minimum_required(VERSION 3.21)
+project(NiuMaShell VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_compile_definitions(
+  NIUMMA_RESOURCES_DIR="resources"
+  NIUMMA_APP_SCHEME="app"
+  NIUMMA_APP_HOST="niuma"
+)
+
+if(NOT DEFINED NIUMMA_APP_VERSION)
+  set(NIUMMA_APP_VERSION "dev")
+endif()
+if(NOT DEFINED NIUMMA_BUILD_ID)
+  set(NIUMMA_BUILD_ID "dev")
+endif()
+
+add_compile_definitions(
+  NIUMMA_APP_VERSION="${NIUMMA_APP_VERSION}"
+  NIUMMA_BUILD_ID="${NIUMMA_BUILD_ID}"
+)
+
+if(NOT CEF_ROOT)
+  set(CEF_ROOT "$ENV{CEF_ROOT}" CACHE PATH "CEF binary distribution root")
+endif()
+
+set(SHELL_SOURCES
+  src/main.cpp
+  src/util/bridge_method.cpp
+  src/core/cef/niuma_app.cpp
+  src/core/cef/niuma_render_process_handler.cpp
+  src/core/cef/cef_settings.cpp
+  src/core/window/window_registry.cpp
+  src/core/window/window_factory.cpp
+  src/core/window/main_window.cpp
+  src/core/window/auxiliary_window.cpp
+  src/core/window/window_manager.cpp
+  src/core/window/native_dialog.cpp
+  src/core/runtime/service_manager.cpp
+  src/core/runtime/service_manifest.cpp
+  src/browser/main_browser.cpp
+  src/browser/handlers/message_router_handler.cpp
+  src/browser/handlers/drag_handler.cpp
+  src/browser/handlers/permission_handler.cpp
+  src/bridge/bridge_router.cpp
+  src/bridge/stream_proxy.cpp
+  src/ipc/platform_client.cpp
+  src/protocol/app_scheme_handler.cpp
+  src/protocol/path_resolver.cpp
+  src/util/runtime_paths.cpp
+  src/util/session_log.cpp
+  src/util/json_util.cpp
+  src/util/local_fs.cpp
+  src/util/win_clipboard.cpp
+  src/util/plugin_scanner.cpp
+  src/util/plugin_registry.cpp
+  src/util/win_app_icon.cpp
+)
+
+if(WIN32)
+  enable_language(RC)
+  add_executable(niuma WIN32 ${SHELL_SOURCES})
+else()
+  add_executable(niuma ${SHELL_SOURCES})
+endif()
+
+if(WIN32)
+  target_sources(niuma PRIVATE resources/niuma.rc)
+  target_compile_definitions(niuma PRIVATE OS_WIN=1)
+endif()
+
+target_include_directories(niuma PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/resources
+)
+
+set(NIUMMA_WITH_CEF 0)
+
+if(CEF_ROOT AND EXISTS "${CEF_ROOT}/CMakeLists.txt")
+  file(TO_CMAKE_PATH "${CEF_ROOT}" CEF_ROOT_NORM)
+  set(USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox (no ATL)" FORCE)
+  list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT_NORM}/cmake")
+  find_package(CEF REQUIRED)
+
+  add_subdirectory("${CEF_ROOT_NORM}" cef_build EXCLUDE_FROM_ALL)
+
+  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+  add_dependencies(niuma libcef_dll_wrapper)
+  target_link_libraries(niuma PRIVATE libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+  target_include_directories(niuma PRIVATE "${CEF_ROOT_NORM}")
+  target_compile_definitions(niuma PRIVATE NIUMMA_WITH_CEF=1)
+  set(NIUMMA_WITH_CEF 1)
+
+  SET_CEF_TARGET_OUT_DIR()
+  SET_EXECUTABLE_TARGET_PROPERTIES(niuma)
+  if(APPLE)
+    add_custom_command(TARGET niuma POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CEF_ROOT_NORM}/Release/Chromium Embedded Framework.framework"
+        "$<TARGET_FILE_DIR:niuma>/Chromium Embedded Framework.framework"
+      COMMENT "Copy CEF framework")
+    foreach(_cef_res chrome_100_percent.pak chrome_200_percent.pak resources.pak icudtl.dat)
+      add_custom_command(TARGET niuma POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CEF_ROOT_NORM}/Resources/${_cef_res}"
+          "$<TARGET_FILE_DIR:niuma>/${_cef_res}"
+        COMMENT "Copy CEF resource ${_cef_res}")
+    endforeach()
+    add_custom_command(TARGET niuma POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CEF_ROOT_NORM}/Resources/locales"
+        "$<TARGET_FILE_DIR:niuma>/locales"
+      COMMENT "Copy CEF locales")
+  else()
+    COPY_FILES("niuma" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
+    COPY_FILES("niuma" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+  endif()
+
+  message(STATUS "CEF enabled: ${CEF_ROOT}")
+else()
+  message(WARNING "CEF_ROOT not set — building stub without CEF (run pnpm setup:desktop)")
+  target_compile_definitions(niuma PRIVATE NIUMMA_WITH_CEF=0)
+endif()
+
+# web/dist → resources/web（与 exe 同目录）
+set(WEB_DIST "${CMAKE_SOURCE_DIR}/../web/dist")
+if(EXISTS "${WEB_DIST}/index.html")
+  add_custom_command(TARGET niuma POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:niuma>/resources/web"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${WEB_DIST}" "$<TARGET_FILE_DIR:niuma>/resources/web"
+    COMMENT "Copy web/dist → resources/web")
+endif()
+
+set(PLUGINS_SRC "${CMAKE_SOURCE_DIR}/../plugins")
+if(EXISTS "${PLUGINS_SRC}")
+  add_custom_command(TARGET niuma POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:niuma>/resources/plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${PLUGINS_SRC}" "$<TARGET_FILE_DIR:niuma>/resources/plugins"
+    COMMENT "Copy plugins/ → resources/plugins")
+endif()

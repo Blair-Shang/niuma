@@ -1,0 +1,31 @@
+---
+description: Web 前端规范索引 — 布局与 UI 风格分文档，详见 docs/
+globs: "{web/**,packages/ui/**}"
+alwaysApply: false
+---
+
+# Web 前端规范（索引）
+
+完整内容在 `docs/`，**布局与视觉分离**：
+
+| 文档 | 范围 |
+|------|------|
+| [docs/07-web-overview.md](../../docs/07-web-overview.md) | Vue 3、Pinia、技术栈、目录、`@niuma/ui` 迁入 |
+| [docs/08-web-design-system.md](../../docs/08-web-design-system.md) | Token、Rs* 组件、i18n、**不含布局** |
+| [docs/09-web-app-shell.md](../../docs/09-web-app-shell.md) | App Shell、Tab、路由、**不含视觉** |
+
+## 技术栈（摘要）
+
+| 使用 | 禁止 |
+|------|------|
+| Vue 3 + TS + Vite | Element Plus、Ant Design |
+| Tailwind v4、`web/src/styles/tokens.css` | 混乱内联 class |
+| `@niuma/ui`（Rs*） | 业务层 `import 'reka-ui'` |
+| lucide-vue-next、vue-sonner | ElMessage |
+| Pinia、vue-i18n | — |
+
+## 组件库
+
+从 `E:\shangijan\AI\RuoShui\packages\ui` 复制到 `packages/ui`，包名改为 `@niuma/ui`；保留 `Rs*` 与 `--rs-*` token。
+
+业务代码：`import { RsButton } from '@niuma/ui'`，禁止引入 Element/Ant。

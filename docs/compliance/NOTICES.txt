@@ -1,0 +1,24 @@
+NiuMa Third-Party Notices
+=========================
+
+This distribution includes third-party software components. The following
+notices apply to redistributed binaries.
+
+Chromium Embedded Framework (CEF)
+---------------------------------
+NiuMa embeds Chromium Embedded Framework (CEF). See licenses/CEF-LICENSE.txt
+for the full CEF license text.
+
+Inno Setup (Windows installer only)
+-----------------------------------
+Windows installers are produced with Inno Setup 6, which may be used free of
+charge for commercial distribution. See: https://jrsoftware.org/files/is/license.txt
+
+Open Source Dependencies
+------------------------
+JavaScript, Go, and Rust dependencies are managed via pnpm, go modules, and
+Cargo respectively. Source code for NiuMa application components is available
+under the project repository license.
+
+For the exact CEF build version bundled with this release, see build/version.json
+in the source tree or version metadata embedded in the application.

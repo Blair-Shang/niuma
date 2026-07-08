@@ -1,0 +1,114 @@
+---
+description: Rust 后端规范（rustdoc 注释、crate 结构、Tauri）— 全仓复用
+globs: "**/*.rs"
+alwaysApply: false
+---
+
+# Rust 后端规范
+
+对齐 **Rust API Guidelines**、**rustdoc** 官方约定；适用于 `crates/`、`apps/*/src-tauri/` 及仓库内全部 `.rs` 文件。
+
+## 项目结构
+
+```
+crates/ruoshui-local/     # 本地能力库（fs、git、watcher、PTY、LSP）
+apps/desktop/src-tauri/   # Tauri 桌面壳，调用 crate + command
+```
+
+- 可复用逻辑放 `crates/`，Tauri 层只做 `command` 桥接
+- Workspace 根 `Cargo.toml` 管理 members
+
+## 文档注释（必须）
+
+采用 **rustdoc** 标准：
+
+| 位置 | 语法 | 用途 |
+|------|------|------|
+| 模块 | `//!` 文件顶部 | crate / mod 说明 |
+| 项（fn、struct、enum、trait） | `///` | 公开 API 文档 |
+| 字段 | `///` 或 `#[doc = "..."]` | 非显然字段必写 |
+
+```rust
+//! RuoShui local bridge — filesystem, git, watcher, PTY, LSP coordination.
+//! Consumed by Desktop Tauri commands, VS Code extension, and CLI.
+
+/// Returns bridge metadata for health checks.
+pub fn info() -> LocalBridgeInfo { ... }
+
+/// Health check from frontend to native layer.
+#[tauri::command]
+fn ping() -> String { ... }
+```
+
+### 必须写 `///` / `//!` 的符号
+
+- 所有 **`pub`** 函数、结构体、枚举、trait、模块
+- `#[tauri::command]` 命令（前端会调用）
+- 公开 crate 考虑 crate 根 `#![warn(missing_docs)]` 或 `#![deny(missing_docs)]`
+
+### 可省略
+
+- `pub(crate)` / 私有且一目了然的辅助函数
+- `#[cfg(test)]` 测试模块内的测试函数
+- `build.rs` 中纯构建胶水（仍鼓励关键步骤一行说明）
+
+### 书写原则
+
+1. **首句摘要**：完整句子，说明「做什么」
+2. 支持 Markdown：代码块、列表、链接（`[Tauri](https://tauri.app)`）
+3. 复杂函数加 `# Examples` 段（rustdoc 标准节）
+4. 语言：**英文**（与 `ruoshui-local` 一致）；用户面向错误消息可中英分层
+5. 类型信息靠签名，注释不写重复类型表
+
+```rust
+/// Parses a workspace path and returns canonical absolute path.
+///
+/// # Errors
+///
+/// Returns `io::Error` if the path does not exist or permission denied.
+///
+/// # Examples
+///
+/// ```
+/// # use ruoshui_local::resolve_path;
+/// let p = resolve_path("./src")?;
+/// ```
+pub fn resolve_path(path: &str) -> Result<PathBuf, io::Error> { ... }
+```
+
+## 数值与常量
+
+- 魔法数字提取为 `const`，命名 `SCREAMING_SNAKE_CASE`，注释单位与来源
+- 超时、缓冲区大小、重试次数等同理
+- 优先使用类型化包装（`Duration`、`NonZeroUsize`）而非裸 `u64`
+
+```rust
+/// Default PTY scrollback lines.
+const DEFAULT_SCROLLBACK_LINES: usize = 10_000;
+```
+
+## 错误与 API 设计
+
+- 库 crate：优先 `thiserror` 定义错误枚举 + `#[from]`
+- 应用 / command 边界：可用 `anyhow::Result` 简化，但对前端返回需序列化友好消息
+- `expect` / `unwrap` 仅用于不变量或启动阶段；附注释说明为何安全
+
+## Serde / Tauri
+
+- DTO 使用 `#[derive(Serialize, Deserialize)]` + `Debug, Clone`（按需）
+- `#[tauri::command]` 参数与返回值须实现 `Serialize` / 可反序列化
+- 敏感字段不进入 `Serialize`（`#[serde(skip_serializing)]`）
+
+## 命名与格式
+
+- `cargo fmt` 默认风格，行宽 100（团队统一即可）
+- 函数 / 方法：`snake_case`；类型：`PascalCase`；常量：`SCREAMING_SNAKE_CASE`
+- 模块文件：`snake_case.rs`
+
+## 检查清单
+
+1. 新增 `pub` API 是否有 `///` 或模块 `//!`？
+2. `#[tauri::command]` 是否文档化？
+3. 数值常量是否命名并注明单位？
+4. `cargo fmt` + `cargo clippy` 无新增 warning？
+5. 公开 crate 是否考虑 `missing_docs` lint？
