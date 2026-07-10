@@ -38,6 +38,8 @@ const props = withDefaults(
     cursorBlink?: boolean
     fontFamily?: string
     fontSize?: number
+    fontWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '350' | '400' | '500' | '600' | '700' | '800' | '900'
+    fontWeightBold?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900'
     allowTransparency?: boolean
     /** auto 跟随 data-rs-theme；也可强制 light / dark */
     themeMode?: RsTerminalThemeMode
@@ -63,6 +65,8 @@ const props = withDefaults(
     fontFamily:
       '"SF Mono", "Cascadia Code", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace',
     fontSize: 13,
+    fontWeight: '350',
+    fontWeightBold: '400',
     allowTransparency: false,
     themeMode: 'auto',
     theme: () => ({}),
@@ -210,21 +214,41 @@ function emitResizeIfChanged(): void {
 }
 
 async function fit(): Promise<void> {
-  if (!fitAddon) {
+  if (!fitAddon || !terminal || !hostEl.value) {
+    return
+  }
+  const { clientWidth, clientHeight } = hostEl.value
+  if (clientWidth <= 0 || clientHeight <= 0) {
     return
   }
   if (typeof document !== 'undefined' && document.fonts?.ready) {
     await document.fonts.ready
   }
+  if (!fitAddon || !terminal || !hostEl.value) {
+    return
+  }
   await nextTick()
+  if (!fitAddon || !terminal) {
+    return
+  }
   await rafTwice()
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    fitAddon.fit()
+    if (!fitAddon || !terminal) {
+      return
+    }
+    try {
+      fitAddon.fit()
+    } catch {
+      return
+    }
     const dims = fitAddon.proposeDimensions()
     if (dims && dims.cols > 0 && dims.rows > 0) {
       break
     }
     await rafTwice()
+  }
+  if (!fitAddon || !terminal) {
+    return
   }
   emitResizeIfChanged()
   zebraStripesHandle?.refresh()
@@ -367,7 +391,7 @@ function attachShortcuts(): void {
 }
 
 watch(
-  () => [props.cursorBlink, props.fontFamily, props.fontSize, props.allowTransparency, props.convertEol, props.themeMode, props.theme, props.zebraStripes, props.wheelScrollModifier] as const,
+  () => [props.cursorBlink, props.fontFamily, props.fontSize, props.fontWeight, props.fontWeightBold, props.allowTransparency, props.convertEol, props.themeMode, props.theme, props.zebraStripes, props.wheelScrollModifier] as const,
   () => {
     if (!terminal) {
       return
@@ -376,6 +400,8 @@ watch(
     terminal.options.cursorBlink = props.cursorBlink
     terminal.options.fontFamily = props.fontFamily
     terminal.options.fontSize = props.fontSize
+    terminal.options.fontWeight = props.fontWeight
+    terminal.options.fontWeightBold = props.fontWeightBold
     terminal.options.allowTransparency = resolveAllowTransparency()
     terminal.options.convertEol = props.convertEol
     if (props.zebraStripes) {
@@ -400,6 +426,8 @@ onMounted(async () => {
     cursorBlink: props.cursorBlink,
     fontFamily: props.fontFamily,
     fontSize: props.fontSize,
+    fontWeight: props.fontWeight,
+    fontWeightBold: props.fontWeightBold,
     lineHeight: TERMINAL_LINE_HEIGHT,
     allowTransparency: resolveAllowTransparency(),
     drawBoldTextInBrightColors: true,
@@ -561,7 +589,9 @@ defineExpose({
   background: color-mix(in srgb, var(--rs-terminal-bg) 84%, transparent);
   text-align: center;
   pointer-events: none;
-  font-size: var(--rs-font-size-sm);
+  font-family: var(--rs-font-mono);
+  font-size: var(--rs-font-size-xs);
+  font-weight: 400;
   line-height: var(--rs-line-height-normal);
 }
 

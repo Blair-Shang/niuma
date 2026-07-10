@@ -16,9 +16,7 @@ export function applyProxyToForm(target: ProxyFormState, options?: ConnectionOpt
   const proxy = options?.proxy
   target.proxyType = proxy?.type ?? 'none'
   target.proxyHost = proxy?.host ?? ''
-  target.proxyPort = String(
-    proxy?.port ?? defaultProxyPort(target.proxyType === 'http' ? 'http' : 'socks5'),
-  )
+  target.proxyPort = String(proxy?.port ?? defaultProxyPort(target.proxyType))
   target.proxyUsername = proxy?.username ?? ''
   target.proxyPassword = ''
 }

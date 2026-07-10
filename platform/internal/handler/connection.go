@@ -1,6 +1,6 @@
-// 本文件实现连接站点（nm_connection_profile）与凭据（nm_credential_ref +
-// OS Keychain）相关的 Bridge 方法。明文密钥只经 SecretStore 落地 OS 凭据库，
-// 绝不写入 SQLite、绝不回传 Web（见 docs/12-ftp-module.md 安全一节）。
+// 本文件实现连接站点（nm_connection_profile）与凭据（nm_credential_ref）相关的 Bridge 方法。
+// 明文密钥经 VaultStore（AES-256-GCM）加密后存入 nm_credential_ref.cipher_text，
+// 绝不以明文回传 Web（见 docs/12-ftp-module.md 安全一节）。
 package handler
 
 import (
@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	// keychainServicePrefix 是凭据密钥在 OS Keychain 中的 service 前缀。
-	keychainServicePrefix = "NiuMa/credential/"
-	// keychainSecretAccount 是凭据密钥固定的 account 名。
-	keychainSecretAccount = "secret"
+	// credentialServicePrefix 是凭据在 VaultStore 中的 service 前缀，与 store.credentialServicePrefix 保持一致。
+	credentialServicePrefix = "NiuMa/credential/"
+	// credentialSecretAccount 是凭据 service 下固定的 account 名。
+	credentialSecretAccount = "secret"
 	// credentialKindPassword 表示密码类凭据。
 	credentialKindPassword = "password"
 	// connectionKindFTP 表示 FTP/FTPS 连接（是否加密由 connection_options 区分）。
@@ -261,6 +261,48 @@ func (d *Dispatcher) connectionDelete(ctx context.Context, req Request) Response
 	return okResponse(req.ID, map[string]any{"deleted": true})
 }
 
+// credentialGet 处理 platform.credential.get：按 profileId 找到关联的首个凭据并解密，
+// 供本地编辑表单回填。
+//
+// 此接口仅供本地 IPC 调用（Named Pipe / Unix Socket），不走网络。
+// 若站点无凭据或解密失败，secret 返回空字符串、found 为 false。
+func (d *Dispatcher) credentialGet(ctx context.Context, req Request) Response {
+	var params struct {
+		ProfileID string `json:"profileId"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+	}
+	if params.ProfileID == "" {
+		return errorResponse(req.ID, "profileId required")
+	}
+
+	p, err := d.connections.Get(ctx, params.ProfileID)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	if p == nil || len(p.CredentialIDs) == 0 {
+		return okResponse(req.ID, map[string]any{"secret": "", "found": false})
+	}
+
+	ref, err := d.credentials.Get(ctx, p.CredentialIDs[0])
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	if ref == nil {
+		return okResponse(req.ID, map[string]any{"secret": "", "found": false})
+	}
+
+	secret, ok, err := d.secrets.GetSecret(credentialServicePrefix+ref.CredentialID, credentialSecretAccount)
+	if err != nil {
+		return errorResponse(req.ID, fmt.Sprintf("vault: %v", err))
+	}
+	if !ok {
+		return okResponse(req.ID, map[string]any{"secret": "", "found": false})
+	}
+	return okResponse(req.ID, map[string]any{"secret": secret, "found": true})
+}
+
 // credentialSet 处理 platform.credential.set。
 func (d *Dispatcher) credentialSet(ctx context.Context, req Request) Response {
 	var params credentialInput
@@ -318,8 +360,8 @@ func (d *Dispatcher) applyCredentialToProfile(ctx context.Context, profileID str
 	return d.connections.LinkCredential(ctx, profileID, credentialID)
 }
 
-// storeCredential 写入（或更新）凭据密钥到 Keychain 并维护 nm_credential_ref，
-// 返回凭据 ID。input.CredentialID 为空则新建。
+// storeCredential 写入（或更新）凭据并维护 nm_credential_ref，返回凭据 ID。
+// input.CredentialID 为空则新建；新建时先插入引用行，再加密写入密文。
 func (d *Dispatcher) storeCredential(ctx context.Context, input credentialInput) (string, error) {
 	kind := input.Kind
 	if kind == "" {
@@ -331,23 +373,20 @@ func (d *Dispatcher) storeCredential(ctx context.Context, input credentialInput)
 		if err != nil {
 			return "", err
 		}
-		service := keychainServicePrefix + credentialID
-		if err := d.secrets.SetSecret(service, keychainSecretAccount, input.Secret); err != nil {
-			return "", err
-		}
-
 		label := input.Label
 		if label == "" {
 			// credential_label 有唯一索引，空标签会冲突，故回退为按 ID 生成的唯一名。
 			label = "credential-" + credentialID
 		}
+		// 先建引用行（cipher_text 为空），再加密写入密文（UPDATE）。
 		if err := d.credentials.Create(ctx, store.CredentialRef{
 			CredentialID:    credentialID,
 			CredentialLabel: label,
 			CredentialKind:  kind,
-			KeychainService: service,
-			KeychainAccount: keychainSecretAccount,
 		}); err != nil {
+			return "", err
+		}
+		if err := d.secrets.SetSecret(credentialServicePrefix+credentialID, credentialSecretAccount, input.Secret); err != nil {
 			return "", err
 		}
 		return credentialID, nil
@@ -360,7 +399,7 @@ func (d *Dispatcher) storeCredential(ctx context.Context, input credentialInput)
 	if ref == nil {
 		return "", fmt.Errorf("handler: credential not found: %s", input.CredentialID)
 	}
-	if err := d.secrets.SetSecret(ref.KeychainService, ref.KeychainAccount, input.Secret); err != nil {
+	if err := d.secrets.SetSecret(credentialServicePrefix+input.CredentialID, credentialSecretAccount, input.Secret); err != nil {
 		return "", err
 	}
 	if input.Label != "" && input.Label != ref.CredentialLabel {
@@ -383,17 +422,9 @@ func (d *Dispatcher) deleteCredentialIfOrphan(ctx context.Context, credentialID 
 	return d.deleteCredential(ctx, credentialID)
 }
 
-// deleteCredential 删除凭据的 Keychain 密钥与引用行。
+// deleteCredential 删除凭据引用行（cipher_text 随行一起消失）。
 func (d *Dispatcher) deleteCredential(ctx context.Context, credentialID string) error {
-	ref, err := d.credentials.Get(ctx, credentialID)
-	if err != nil {
-		return err
-	}
-	if ref == nil {
-		return nil
-	}
-	if err := d.secrets.DeleteSecret(ref.KeychainService, ref.KeychainAccount); err != nil {
-		return err
-	}
+	// DeleteSecret 在 VaultStore 下为幂等空操作；在测试替身（memSecretStore）下会清除内存条目。
+	_ = d.secrets.DeleteSecret(credentialServicePrefix+credentialID, credentialSecretAccount)
 	return d.credentials.Delete(ctx, credentialID)
 }

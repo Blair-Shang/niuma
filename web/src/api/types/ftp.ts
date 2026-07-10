@@ -20,6 +20,8 @@ export type {
   ConnectionUpdateResult,
   CredentialDeleteParams,
   CredentialDeleteResult,
+  CredentialGetParams,
+  CredentialGetResult,
   CredentialInput,
   CredentialSetParams,
   CredentialSetResult,
@@ -37,7 +39,12 @@ export interface FtpConnectionOptions extends ConnectionOptionsBase {
   encoding: 'utf-8' | 'gbk'
   transfer_type: 'binary' | 'ascii'
   tls_verify: boolean
+  /** 建连拨号超时（秒）；ftp-service 已生效 */
   timeout_seconds: number
+  /**
+   * 连接保活间隔（秒）。
+   * @remarks v0.1 仅持久化，ftp-service 尚未应用。
+   */
   keepalive_seconds: number
   anonymous: boolean
 }
@@ -86,7 +93,8 @@ export interface FtpSessionTestParams {
   hostAddress?: string
   portNumber?: number
   loginAccount?: string
-  password?: string
+  /** 认证凭据；新字段名为 `secret`。 */
+  secret?: string
   options?: FtpConnectionOptions
 }
 

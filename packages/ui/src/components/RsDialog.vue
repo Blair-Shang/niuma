@@ -25,9 +25,13 @@ const props = withDefaults(
     draggable?: boolean
     resizable?: boolean
     fullscreenable?: boolean
+    /** 是否模态（false 时允许外部交互，适合页签切换等场景） */
+    modal?: boolean
     showOverlay?: boolean
     showClose?: boolean
     closeOnOverlayClick?: boolean
+    /** DialogPortal 挂载目标（id 选择器或 Element） */
+    teleportTo?: string | HTMLElement
   }>(),
   {
     width: 'md',
@@ -36,6 +40,7 @@ const props = withDefaults(
     draggable: false,
     resizable: false,
     fullscreenable: false,
+    modal: true,
     showOverlay: false,
     showClose: true,
     closeOnOverlayClick: false,
@@ -65,8 +70,8 @@ const {
 </script>
 
 <template>
-  <DialogRoot v-model:open="open">
-    <DialogPortal>
+  <DialogRoot v-model:open="open" :modal="modal">
+    <DialogPortal :to="teleportTo">
       <DialogOverlay v-if="showOverlay" class="rs-dialog__overlay rs-motion-reduce" />
       <DialogContent
         class="rs-dialog__content rs-motion-reduce"

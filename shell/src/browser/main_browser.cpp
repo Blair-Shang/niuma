@@ -220,16 +220,25 @@ void NiuMaClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
                             CefRefPtr<CefFrame> frame,
                             int httpStatusCode) {
   (void)httpStatusCode;
-  (void)browser;
-  if (frame->IsMain()) {
-    frame->ExecuteJavaScript(
-        R"(window.niuma = window.niuma || { ready: true, mode: 'cef' };)",
-        frame->GetURL(), 0);
-    NiuMaDragHandler::InstallFileDropHooks(frame);
+  if (!browser || !frame->IsMain() || IsDevToolsBrowser(browser)) {
+    return;
+  }
+  frame->ExecuteJavaScript(
+      R"(window.niuma = window.niuma || { ready: true, mode: 'cef' };)",
+      frame->GetURL(), 0);
+  NiuMaDragHandler::InstallFileDropHooks(frame);
 
-    // 窗口显示由 Web 侧在 Vue mount() + nextTick 后调用 shell.window.reveal 触发，
-    // 确保 Vue 首帧已渲染完毕再显示，彻底消除启动黑屏闪烁。
-    // OnAfterCreated 中注册的 3 秒兜底会在 bridge 调用失败时保证窗口最终可见。
+  // 窗口显示由 Web 侧在 Vue mount() + nextTick 后调用 shell.window.reveal 触发，
+  // 确保 Vue 首帧已渲染完毕再显示，彻底消除启动黑屏闪烁。
+  // OnAfterCreated 的 3 秒兜底只在首次创建浏览器时注册；热重载会 Conceal 窗口，
+  // 此处每次主帧加载结束都重新注册兜底，避免 Vite 全量刷新后窗口一直隐藏。
+  const WindowRecord* entry = WindowRegistry::Instance().FindByBrowser(browser);
+  if (!entry || entry->kind != WindowKind::Auxiliary) {
+    CefPostDelayedTask(
+        TID_UI,
+        base::BindOnce(&NiuMaClient::RevealBrowserWindow,
+                       CefRefPtr<NiuMaClient>(this), browser),
+        3000);
   }
 }
 

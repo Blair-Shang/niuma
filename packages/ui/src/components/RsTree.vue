@@ -111,6 +111,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'node-click': [node: RsTreeNode, key: string]
+  'node-dblclick': [node: RsTreeNode, key: string]
   expand: [key: string, expanded: boolean]
   check: [keys: string[], halfCheckedKeys: string[], node: RsTreeNode, key: string]
   'node-drop': [dragKey: string, dropKey: string, position: RsTreeDropPosition]
@@ -410,6 +411,12 @@ function handleRowClick(node: RsTreeNode, key: string, event: MouseEvent): void 
   handleNodeAction(node, key)
 }
 
+function handleRowDblclick(node: RsTreeNode, key: string, event: MouseEvent): void {
+  const target = event.target as HTMLElement
+  if (target.closest('.rs-tree__toggle, .rs-tree__checkbox, .rs-tree__drag-handle')) return
+  emit('node-dblclick', node, key)
+}
+
 function handleLabelClick(node: RsTreeNode, key: string, event: MouseEvent): void {
   event.stopPropagation()
   handleNodeAction(node, key)
@@ -669,6 +676,7 @@ defineExpose({
             @drop="onDrop(entry.key, $event)"
             @dragend="onDragEnd"
             @click="blockNode ? handleRowClick(entry.node, entry.key, $event) : undefined"
+            @dblclick="handleRowDblclick(entry.node, entry.key, $event)"
           >
             <span
               v-if="showLine"

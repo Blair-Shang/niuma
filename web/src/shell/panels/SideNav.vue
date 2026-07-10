@@ -7,9 +7,10 @@ import { useRoute } from 'vue-router'
 import OpsConnectionPanel from '@/modules/ops/components/OpsConnectionPanel.vue'
 import { useShellStore } from '@/stores/shell'
 
-const shellStore = useShellStore()
 const route = useRoute()
+const shellStore = useShellStore()
 
+// 路由变化时同步 ActivityBar 高亮状态
 watch(
   () => route.path,
   (path) => shellStore.syncFromRoute(path),
@@ -19,7 +20,7 @@ watch(
 
 <template>
   <div class="nm-sidenav">
-    <OpsConnectionPanel :category="shellStore.activeCategory" />
+    <OpsConnectionPanel />
   </div>
 </template>
 

@@ -3,14 +3,35 @@
  */
 import type { ConnectionOptionsBase } from './connection'
 
+export type SshAuthType = 'password' | 'private_key' | 'private_key_file'
+
 /** SSH 连接选项（存于 connection_options JSON） */
 export interface SshConnectionOptions extends ConnectionOptionsBase {
+  /** 建连拨号超时（秒）；ssh-service 已生效 */
   timeout_seconds: number
+  /** keepalive 间隔（秒）；0 = 禁用；ssh-service 已生效（russh Config.keepalive_interval）。 */
   keepalive_seconds: number
+  /** 交互终端类型；由 Web 在 `ssh.terminal.open` 时读取，非 ConnectOptions */
   term_type: string
+  /**
+   * 远程输出编码。
+   * @remarks v0.1 仅持久化。
+   */
   encoding: 'utf-8'
+  /**
+   * 是否展示 SFTP 入口。
+   * @remarks v0.1 仅持久化；UI 始终展示 SFTP。
+   */
   sftp_enabled: boolean
+  /**
+   * 是否对照 `~/.ssh/known_hosts` 验证服务器主机密钥。
+   * `false`（默认）跳过验证；`true` 时若 known_hosts 不存在或主机不在其中则拒绝连接。
+   * ssh-service 已生效。
+   */
   verify_host_key: boolean
+  auth_type: SshAuthType
+  private_key_path?: string
+  passphrase?: string
 }
 
 /** 默认 SSH 连接选项 */
@@ -21,6 +42,9 @@ export const DEFAULT_SSH_OPTIONS: SshConnectionOptions = {
   encoding: 'utf-8',
   sftp_enabled: true,
   verify_host_key: false,
+  auth_type: 'password',
+  private_key_path: '',
+  passphrase: '',
   proxy: { type: 'none' },
 }
 
@@ -54,7 +78,8 @@ export interface SshSessionTestParams {
   hostAddress?: string
   portNumber?: number
   loginAccount?: string
-  password?: string
+  /** 认证凭据；新字段名为 `secret`。 */
+  secret?: string
   options?: SshConnectionOptions
 }
 

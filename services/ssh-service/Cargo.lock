@@ -798,6 +798,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "niuma-netproxy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "niuma-serviceipc"
 version = "0.1.0"
 dependencies = [
@@ -815,7 +824,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "niuma-logutil",
+ "niuma-netproxy",
  "niuma-serviceipc",
+ "niuma-tunnel",
  "russh",
  "russh-keys",
  "russh-sftp",
@@ -826,6 +837,19 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "niuma-tunnel"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "niuma-netproxy",
+ "russh",
+ "russh-keys",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

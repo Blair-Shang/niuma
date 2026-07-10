@@ -45,6 +45,12 @@
   --rs-icon-ftp-accent: #ea580c;
   --rs-icon-ftp-on-accent: #ffffff;
 
+  /* Redis 品牌图标默认强调色（Redis 官方红） */
+  --rs-icon-redis-accent: #dc382d;
+
+  /* MongoDB 品牌图标默认强调色（MongoDB 官方绿） */
+  --rs-icon-mongodb-accent: #47a248;
+
   /* macOS 风格原生滚动条（与 RsScrollbar 视觉一致） */
   --rs-scrollbar-size: 13px;
   --rs-scrollbar-padding: 2px;
@@ -122,6 +128,8 @@
 
   --rs-icon-ftp-accent: #fb923c;
   --rs-icon-ftp-on-accent: #ffffff;
+  --rs-icon-redis-accent: #ff6f61;
+  --rs-icon-mongodb-accent: #5cb85c;
   --rs-focus-border: var(--rs-primary);
   --rs-focus-ring: color-mix(in srgb, var(--rs-primary) 28%, transparent);
   --rs-focus-ring-width: 2px;
@@ -142,6 +150,27 @@
   --rs-dialog-bg: var(--rs-dialog-body-bg);
   --rs-dialog-title-fg: #ffffff;
   --rs-dialog-description-fg: #9d9d9d;
+
+  /* ── Card（macOS grouped panel / inset 分组卡片）── */
+  --rs-card-border: #3a3a3a;
+  --rs-card-separator: #484848;
+  --rs-card-header-bg: #2b2b2b;
+  --rs-card-body-bg: #1f1f1f;
+  --rs-card-title-fg: #ffffff;
+  --rs-card-description-fg: #9d9d9d;
+  --rs-card-shadow:
+    0 0 0 0.5px rgb(255 255 255 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.2);
+  --rs-card-shadow-elevated:
+    0 0 0 0.5px rgb(255 255 255 / 0.08),
+    0 4px 16px rgb(0 0 0 / 0.4),
+    0 1px 3px rgb(0 0 0 / 0.28);
+  --rs-card-filled-bg: #262626;
+  --rs-card-filled-elevated-shadow:
+    0 1px 2px rgb(0 0 0 / 0.35),
+    0 2px 6px rgb(0 0 0 / 0.28);
+  --rs-card-glass-bg: rgb(31 31 31 / 0.72);
+  --rs-card-glass-border: rgb(255 255 255 / 0.1);
 
   /* ── Terminal（macOS Terminal.app 风格：柔和 ANSI + 可读斑马纹）── */
   --rs-terminal-shell-bg: #141416;
@@ -219,13 +248,13 @@
   --rs-table-resize-handle: #8c8c8c;
   --rs-table-resize-handle-hover: var(--rs-primary);
 
-  /* WCAG AA: input-border 3.36:1 vs white; border 3.36:1 vs white; muted 5.43:1 vs white; placeholder 3.19:1 vs white */
+  /* macOS separator 风格：默认边框偏柔，focus 环承担可访问性反馈 */
   --rs-input-bg: #ffffff;
-  --rs-input-border: #8c8c8c;
-  --rs-input-border-hover: #6e6e73;
+  --rs-input-border: rgb(60 60 67 / 0.18);
+  --rs-input-border-hover: rgb(60 60 67 / 0.30);
   --rs-input-shadow: none;
-  --rs-border: #8c8c8c;
-  --rs-border-subtle: rgb(60 60 67 / 0.20);
+  --rs-border: rgb(60 60 67 / 0.16);
+  --rs-border-subtle: rgb(60 60 67 / 0.10);
   --rs-text: #1d1d1f;
   --rs-muted: #6e6e73;
   --rs-placeholder: #909090;
@@ -261,13 +290,34 @@
   --rs-dialog-title-fg: var(--rs-text);
   --rs-dialog-description-fg: var(--rs-muted);
 
+  /* ── Card（macOS systemGroupedBackground 上的圆角分组卡片）── */
+  --rs-card-border: rgb(60 60 67 / 0.14);
+  --rs-card-separator: #d4d4d6;
+  --rs-card-header-bg: #f8f8f8;
+  --rs-card-body-bg: #ffffff;
+  --rs-card-title-fg: var(--rs-text);
+  --rs-card-description-fg: var(--rs-muted);
+  --rs-card-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.04),
+    0 1px 2px rgb(0 0 0 / 0.03);
+  --rs-card-shadow-elevated:
+    0 0 0 0.5px rgb(0 0 0 / 0.06),
+    0 4px 16px rgb(0 0 0 / 0.08),
+    0 1px 3px rgb(0 0 0 / 0.04);
+  --rs-card-filled-bg: #f3f3f5;
+  --rs-card-filled-elevated-shadow:
+    0 1px 2px rgb(0 0 0 / 0.12),
+    0 2px 6px rgb(0 0 0 / 0.08);
+  --rs-card-glass-bg: rgb(255 255 255 / 0.72);
+  --rs-card-glass-border: rgb(255 255 255 / 0.55);
+
   /* ── Terminal（macOS Terminal.app 亮色：systemBackground + 浅灰斑马纹）── */
   --rs-terminal-shell-bg: #ececf0;
   --rs-terminal-bg: #ffffff;
   --rs-terminal-fg: #1d1d1f;
   --rs-terminal-cursor: #1d1d1f;
   --rs-terminal-cursor-accent: var(--rs-terminal-bg);
-  --rs-terminal-row-stripe: #f4f4f6;
+  --rs-terminal-row-stripe: #f0f9ff;
   --rs-terminal-selection-bg: color-mix(in srgb, var(--rs-primary) 26%, #ffffff);
   --rs-terminal-selection-fg: #1d1d1f;
   --rs-terminal-border: rgb(60 60 67 / 0.14);
@@ -294,6 +344,8 @@
 
   --rs-icon-ftp-accent: #ea580c;
   --rs-icon-ftp-on-accent: #ffffff;
+  --rs-icon-redis-accent: #dc382d;
+  --rs-icon-mongodb-accent: #47a248;
 }
 
 /**
@@ -395,7 +447,7 @@ code {
   flex-direction: column;
   padding: 0;
   border-radius: var(--rs-radius);
-  border: 1px solid var(--rs-border);
+  border: 1px solid var(--rs-dialog-border, var(--rs-border));
   background: var(--rs-surface-elevated);
   box-shadow: var(--rs-shadow-lg);
   color: var(--rs-text);
@@ -780,4 +832,24 @@ code {
 .rs-context-menu__item[data-highlighted] .lucide-ftp-icon .ftp-icon__label,
 .rs-context-menu__item[data-state='open'] .lucide-ftp-icon .ftp-icon__label {
   fill: var(--rs-icon-ftp-accent);
+}
+
+/* Redis 自定义图标：官方品牌 mark，单色填充随主题调整明暗对比度 */
+.lucide-redis-icon .redis-icon__mark {
+  fill: var(--rs-icon-redis-accent);
+}
+
+.rs-context-menu__item[data-highlighted] .lucide-redis-icon .redis-icon__mark,
+.rs-context-menu__item[data-state='open'] .lucide-redis-icon .redis-icon__mark {
+  fill: rgb(255 255 255 / 0.95);
+}
+
+/* MongoDB 自定义图标：官方品牌 mark，单色填充随主题调整明暗对比度 */
+.lucide-mongodb-icon .mongodb-icon__mark {
+  fill: var(--rs-icon-mongodb-accent);
+}
+
+.rs-context-menu__item[data-highlighted] .lucide-mongodb-icon .mongodb-icon__mark,
+.rs-context-menu__item[data-state='open'] .lucide-mongodb-icon .mongodb-icon__mark {
+  fill: rgb(255 255 255 / 0.95);
 }

@@ -14,11 +14,12 @@ import {
   type RsSplitPaneItem,
   type RsSelectOptions,
 } from '@niuma/ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { connectionApi, dialogApi, fsApi, sshApi } from '@/api'
 import type { ConnectionProfile } from '@/api/types/ftp'
 import type { SshSftpEntry } from '@/api/types/ssh'
+import { useSessionLease } from '@/modules/connection/useSessionLease'
 import { openInFile } from '@/modules/file-editor'
 import FtpFilePane from '@/modules/ftp/components/FtpFilePane.vue'
 import type { FtpPaneEntry } from '@/modules/ftp/composables/useFtpPaneList'
@@ -30,10 +31,13 @@ import { useShellStore } from '@/stores/shell'
 import { useTransferHubStore } from '@/stores/transfer-hub'
 import { useTabStore } from '@/stores/tab'
 import { useConnectionProfiles } from '@/modules/ops/composables/useConnectionProfiles'
-import { publishTerminalSync, subscribeTerminalSync } from '@/modules/ssh/composables/terminalSyncBus'
+import { useSshTerminalSync } from '@/modules/ssh/composables/useSshTerminalSync'
+import { createId } from '@/utils/id'
 
 const props = defineProps<{
   profileId: string
+  /** 工作区 Tab id（Session Registry 借用键） */
+  tabId?: string
   /** A/B/C/D 分屏多主机：所有分屏共享的终端同步组 id */
   terminalSyncGroupId?: string
   /** A/B/C/D 槽位标识（仅用于展示与排除自身同步回环） */
@@ -47,6 +51,11 @@ const transferHub = useTransferHubStore()
 const shellStore = useShellStore()
 const tabStore = useTabStore()
 const sshProfiles = useConnectionProfiles(['ssh'])
+
+const dialogInstanceId = createId()
+const dialogMountId = computed(() => `nm-ssh-dialog-mount-${dialogInstanceId}`)
+const dialogMountTo = computed(() => `#${dialogMountId.value}`)
+let dialogMountEl: HTMLDivElement | null = null
 
 // ── 输入 / 确认对话框 ─────────────────────────────────────────────────
 const promptOpen = ref(false)
@@ -129,7 +138,29 @@ interface TransferPlanItem {
 }
 
 const profile = ref<ConnectionProfile | null>(null)
-const sessionId = ref<string | null>(null)
+
+const { sessionId, acquireSession, reconnectSession } = useSessionLease({
+  kind: 'ssh',
+  profileId: () => props.profileId,
+  tabId: () => props.tabId,
+  onAcquired: async (sid) => {
+    transferHub.registerSession({
+      sessionId: sid,
+      provider: 'ssh',
+      label: sessionLabel(),
+    })
+    await refreshRemote()
+    await refreshTransfers()
+  },
+  buildOnRelease: () => [
+    () => {
+      const id = sessionId.value
+      if (id) {
+        transferHub.unregisterSession(id)
+      }
+    },
+  ],
+})
 
 const { enqueue: enqueueTransfer, refresh: refreshTransfers } = useSshTransfer(sessionId)
 
@@ -147,62 +178,35 @@ const sftpHeadRef = ref<HTMLElement | null>(null)
 // ── 分屏（终端 PTY 分屏）──────────────────────────────────────────────
 const TERMINAL_MAX_PANES = 1
 const terminalPaneCount = ref(1)
-const terminalSyncEnabled = ref(false)
 
-const terminalInstanceId = crypto.randomUUID()
-let offTerminalSync: (() => void) | null = null
-
-watch(
-  () => props.terminalSyncGroupId,
-  (groupId) => {
-    offTerminalSync?.()
-    offTerminalSync = null
-    if (!groupId) {
-      terminalSyncEnabled.value = false
-      return
-    }
-    offTerminalSync = subscribeTerminalSync(groupId, (event) => {
-      if (event.sourceInstanceId === terminalInstanceId) return
-      if (!terminalSyncEnabled.value) return
-      terminalGroupRef.value?.sendInput(event.data).catch(() => undefined)
-    })
-  },
-  { immediate: true },
-)
-
-function onTerminalBroadcastInput(data: string): void {
-  const groupId = props.terminalSyncGroupId
-  if (!groupId) return
-  if (!terminalSyncEnabled.value) return
-  publishTerminalSync({
-    syncGroupId: groupId,
-    sourceInstanceId: terminalInstanceId,
-    data,
-  })
-}
-
-// ── A/B/C/D 多主机（仅在 A 入口 Tab 展示）──────────────────────────────
-const slotBProfileId = ref<string>('')
-const slotCProfileId = ref<string>('')
-const slotDProfileId = ref<string>('')
-
-function normalizeProfileId(v: string): string | null {
-  return v.trim() ? v : null
-}
-
-const abcdSelectedCount = computed(() => {
-  return [slotBProfileId.value, slotCProfileId.value, slotDProfileId.value].reduce((acc, v) => {
-    return acc + (normalizeProfileId(v) ? 1 : 0)
-  }, 0)
+const {
+  terminalSyncEnabled,
+  effectiveSyncGroupId,
+  ensureTerminalSyncGroup,
+  onTerminalBroadcastInput,
+} = useSshTerminalSync({
+  terminalSyncGroupId: toRef(props, 'terminalSyncGroupId'),
+  terminalGroupRef,
 })
+
+// ── 多主机分屏（由 TabBar 分屏承载，不固定分屏数）────────────────────────
+const multiHostOpen = ref(false)
+const addHostProfileId = ref<string>('')
+const selectedHostProfileIds = ref<string[]>([])
 
 const sshProfileSelectOptions = computed<RsSelectOptions>(() => {
   const list = sshProfiles.allProfiles
   const opts: Array<{ label: string; value: string }> = []
   for (const p of list) {
+    if (p.profileId === props.profileId) {
+      continue
+    }
+    if (selectedHostProfileIds.value.includes(p.profileId)) {
+      continue
+    }
     opts.push({ label: p.profileName, value: p.profileId })
   }
-  return [{ label: '未选择', value: '' }, ...opts]
+  return opts
 })
 
 function sshProfileName(profileId: string): string {
@@ -210,50 +214,65 @@ function sshProfileName(profileId: string): string {
   return p?.profileName ?? profileId
 }
 
-function applyAbcdSplit(): void {
-  // 仅允许在“非多主机模式”的 A 入口发起
-  if (props.terminalSyncGroupId) return
-  if (props.terminalSyncSlot && props.terminalSyncSlot !== 'A') return
+function addSelectedHost(): void {
+  const id = addHostProfileId.value.trim()
+  if (!id) return
+  if (id === props.profileId) {
+    addHostProfileId.value = ''
+    toast.error('当前主机无需重复添加')
+    return
+  }
+  if (selectedHostProfileIds.value.includes(id)) {
+    addHostProfileId.value = ''
+    toast.error('该主机已添加')
+    return
+  }
+  selectedHostProfileIds.value.push(id)
+  addHostProfileId.value = ''
+  toast.success(`已添加 ${sshProfileName(id)}`)
+}
 
+function removeSelectedHost(profileId: string): void {
+  selectedHostProfileIds.value = selectedHostProfileIds.value.filter((x) => x !== profileId)
+}
+
+function openMultiHostDialog(): void {
+  if (!sshProfiles.loading && sshProfiles.allProfiles.length === 0) {
+    sshProfiles.loadAll().catch(() => undefined)
+  }
+  addHostProfileId.value = ''
+  selectedHostProfileIds.value = []
+  multiHostOpen.value = true
+}
+
+function applyMultiHostSplit(): void {
+  const list = selectedHostProfileIds.value
+  if (list.length === 0) {
+    multiHostOpen.value = false
+    return
+  }
   const srcTab = tabStore.activeTab
-  if (!srcTab || srcTab.moduleId !== 'ssh') return
-
-  const b = normalizeProfileId(slotBProfileId.value)
-  const c = normalizeProfileId(slotCProfileId.value)
-  const d = normalizeProfileId(slotDProfileId.value)
-  const selected = [
-    { slot: 'B' as const, profileId: b },
-    { slot: 'C' as const, profileId: c },
-    { slot: 'D' as const, profileId: d },
-  ].filter((x) => x.profileId)
-
-  if (selected.length === 0) return
-
-  const syncGroupId = crypto.randomUUID()
-
-  // A 当前 Tab 打标签（让它成为组内 A，并开启“终端同步”入口）
-  tabStore.updateTabProps(srcTab.tabId, {
-    terminalSyncGroupId: syncGroupId,
-    terminalSyncSlot: 'A',
-  })
-  tabStore.updateTitle(srcTab.tabId, `A ${profile.value?.profileName ?? srcTab.title ?? props.profileId}`)
-
-  // 从源组复制 A Tab；每次 split 都在 A 所在组上取 activeTab
+  if (!srcTab || srcTab.moduleId !== 'ssh') {
+    multiHostOpen.value = false
+    return
+  }
+  // 勾选了同步：确保本 Tab 有同步组 id，这样 split 出来的副本天然继承同组
+  if (terminalSyncEnabled.value) {
+    ensureTerminalSyncGroup()
+  }
   const sourceGroupId = tabStore.groups.find((g) => g.tabs.some((t) => t.tabId === srcTab.tabId))?.groupId
-  if (!sourceGroupId) return
-
-  for (const item of selected) {
+  if (!sourceGroupId) {
+    multiHostOpen.value = false
+    return
+  }
+  for (const profileId of list) {
     tabStore.splitGroup(sourceGroupId)
     const copyTab = tabStore.activeTab
     if (!copyTab || copyTab.moduleId !== 'ssh') continue
-
-    tabStore.updateTabProps(copyTab.tabId, {
-      profileId: item.profileId as string,
-      terminalSyncGroupId: syncGroupId,
-      terminalSyncSlot: item.slot,
-    })
-    tabStore.updateTitle(copyTab.tabId, `${item.slot} ${sshProfileName(item.profileId as string)}`)
+    tabStore.updateTabProps(copyTab.tabId, { profileId })
+    tabStore.updateTitle(copyTab.tabId, sshProfileName(profileId))
   }
+  multiHostOpen.value = false
 }
 
 /** SFTP 区域当前活动 Tab */
@@ -402,15 +421,7 @@ async function openSession(): Promise<void> {
   connecting.value = true
   error.value = null
   try {
-    const result = await sshApi.sessionOpen({ profileId: props.profileId })
-    sessionId.value = result.sessionId
-    transferHub.registerSession({
-      sessionId: result.sessionId,
-      provider: 'ssh',
-      label: sessionLabel(),
-    })
-    await refreshRemote()
-    await refreshTransfers()
+    await acquireSession()
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('modules.ssh.session.connectError')
     toast.error(error.value)
@@ -420,22 +431,16 @@ async function openSession(): Promise<void> {
 }
 
 async function reconnect(): Promise<void> {
-  await closeSession()
-  await openSession()
-}
-
-async function closeSession(): Promise<void> {
-  const id = sessionId.value
-  if (!id) {
-    return
-  }
-  transferHub.unregisterSession(id)
+  connecting.value = true
+  error.value = null
   try {
-    await sshApi.sessionClose({ sessionId: id })
-  } catch {
-    // 关闭失败不阻断卸载
+    await reconnectSession()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t('modules.ssh.session.connectError')
+    toast.error(error.value)
+  } finally {
+    connecting.value = false
   }
-  sessionId.value = null
 }
 
 async function refreshRemote(): Promise<void> {
@@ -764,6 +769,12 @@ async function mkdirRemote(): Promise<void> {
 
 onMounted(async () => {
   try {
+    if (typeof document !== 'undefined' && !dialogMountEl) {
+      dialogMountEl = document.createElement('div')
+      dialogMountEl.id = dialogMountId.value
+      dialogMountEl.className = 'nm-ssh-session__dialog-mount'
+      document.body.appendChild(dialogMountEl)
+    }
     if (!props.terminalSyncGroupId) {
       sshProfiles.loadAll().catch(() => undefined)
     }
@@ -782,9 +793,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  offTerminalSync?.()
-  offTerminalSync = null
-  void closeSession()
+  if (dialogMountEl) {
+    dialogMountEl.remove()
+  }
+  dialogMountEl = null
 })
 
 watch(
@@ -802,6 +814,7 @@ watch(
     void reconnect()
   },
 )
+
 </script>
 
 <template>
@@ -879,50 +892,21 @@ watch(
             </div>
 
             <div class="nm-ssh-session__sftp-right">
-              <!-- 分屏控制（保持与监控工具栏同层次） -->
-              <div class="nm-ssh-session__split-controls" aria-label="multi host controls">
-                <template v-if="props.terminalSyncGroupId">
-                  <label class="nm-ssh-session__split-sync">
-                    <input type="checkbox" v-model="terminalSyncEnabled" />
-                    <span>终端同步 {{ props.terminalSyncSlot ?? 'A' }}</span>
-                  </label>
-                </template>
+              <!-- 分屏同步：勾选后加入当前同步组（未创建则自动生成） -->
+              <label class="nm-ssh-session__split-sync" :title="effectiveSyncGroupId ? '同组分屏将同步输入' : '勾选后将创建同步组'">
+                <input type="checkbox" v-model="terminalSyncEnabled" />
+                <span>终端同步</span>
+              </label>
 
-                <template v-else-if="!props.terminalSyncSlot || props.terminalSyncSlot === 'A'">
-                  <div class="nm-ssh-session__host-split">
-                    <div class="nm-ssh-session__host-split-row">
-                      <span class="nm-ssh-session__host-split-title">多主机</span>
-                      <span class="nm-ssh-session__host-split-a">A: {{ profile?.profileName ?? props.profileId }}</span>
-                    </div>
-
-                    <div class="nm-ssh-session__host-split-selects">
-                      <div class="nm-ssh-session__host-slot">
-                        <span class="nm-ssh-session__host-slot-label">B</span>
-                        <RsSelect v-model="slotBProfileId" :options="sshProfileSelectOptions" />
-                      </div>
-                      <div class="nm-ssh-session__host-slot">
-                        <span class="nm-ssh-session__host-slot-label">C</span>
-                        <RsSelect v-model="slotCProfileId" :options="sshProfileSelectOptions" />
-                      </div>
-                      <div class="nm-ssh-session__host-slot">
-                        <span class="nm-ssh-session__host-slot-label">D</span>
-                        <RsSelect v-model="slotDProfileId" :options="sshProfileSelectOptions" />
-                      </div>
-                    </div>
-
-                    <div class="nm-ssh-session__host-split-actions">
-                      <RsButton
-                        size="sm"
-                        variant="primary"
-                        :disabled="abcdSelectedCount === 0"
-                        @click="applyAbcdSplit"
-                      >
-                        创建A/B/C/D分屏
-                      </RsButton>
-                    </div>
-                  </div>
-                </template>
-              </div>
+              <button
+                type="button"
+                class="nm-ssh-session__mh-btn"
+                :title="'多主机分屏'"
+                @click="openMultiHostDialog"
+              >
+                <RsIcon name="columns-2" :size="14" />
+                <span>多主机</span>
+              </button>
 
               <!-- 当前路径（仅文件Tab可见） -->
               <span
@@ -973,28 +957,81 @@ watch(
     </RsSplitPane>
 
     <RsDialog
+      v-model:open="multiHostOpen"
+      title="多主机分屏"
+      width="lg"
+      :teleport-to="dialogMountTo"
+    >
+        <div class="nm-ssh-session__mh">
+          <p class="nm-ssh-session__mh-hint">
+            选择要在分屏里打开的主机数量（不限制个数）。创建后可在每个分屏 Tab 单独勾选“终端同步”。
+          </p>
+
+          <div class="nm-ssh-session__mh-row">
+            <RsSelect
+              v-model="addHostProfileId"
+              class="nm-ssh-session__mh-select"
+              :options="sshProfileSelectOptions"
+            />
+            <RsButton
+              size="sm"
+              variant="default"
+              :disabled="!addHostProfileId.trim()"
+              @click="addSelectedHost"
+            >
+              添加
+            </RsButton>
+          </div>
+
+          <div v-if="selectedHostProfileIds.length" class="nm-ssh-session__mh-list">
+            <div
+              v-for="pid in selectedHostProfileIds"
+              :key="pid"
+              class="nm-ssh-session__mh-item"
+              :title="sshProfileName(pid)"
+            >
+              <span class="nm-ssh-session__mh-name">{{ sshProfileName(pid) }}</span>
+              <button type="button" class="nm-ssh-session__mh-remove" @click="removeSelectedHost(pid)">
+                <RsIcon name="x" :size="14" />
+              </button>
+            </div>
+          </div>
+          <p v-else class="nm-ssh-session__mh-empty">还未选择主机。</p>
+        </div>
+
+        <template #footer>
+          <RsButton variant="ghost" @click="multiHostOpen = false">取消</RsButton>
+          <RsButton variant="primary" :disabled="selectedHostProfileIds.length === 0" @click="applyMultiHostSplit">
+            在分屏打开（{{ selectedHostProfileIds.length }}）
+          </RsButton>
+        </template>
+    </RsDialog>
+
+    <RsDialog
       v-model:open="promptOpen"
       :title="promptTitle"
       width="sm"
       :show-close="false"
+      :teleport-to="dialogMountTo"
     >
-      <RsInput
-        ref="promptInputRef"
-        v-model="promptValue"
-        :placeholder="promptPlaceholder"
-        @press-enter="onPromptConfirm"
-      />
-      <template #footer>
-        <RsButton variant="default" @click="onPromptCancel">{{ t('common.cancel') }}</RsButton>
-        <RsButton variant="primary" :disabled="!promptValue.trim()" @click="onPromptConfirm">
-          {{ t('common.confirm') }}
-        </RsButton>
-      </template>
+        <RsInput
+          ref="promptInputRef"
+          v-model="promptValue"
+          :placeholder="promptPlaceholder"
+          @press-enter="onPromptConfirm"
+        />
+        <template #footer>
+          <RsButton variant="default" @click="onPromptCancel">{{ t('common.cancel') }}</RsButton>
+          <RsButton variant="primary" :disabled="!promptValue.trim()" @click="onPromptConfirm">
+            {{ t('common.confirm') }}
+          </RsButton>
+        </template>
     </RsDialog>
 
     <RsConfirmDialog
       v-model:open="confirmOpen"
       :description="confirmDesc"
+      :teleport-to="dialogMountTo"
       @confirm="onConfirmOk"
       @cancel="onConfirmCancel"
     />
@@ -1133,101 +1170,113 @@ watch(
   min-width: 0;
 }
 
-.nm-ssh-session__split-controls {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--rs-space-xs);
-  user-select: none;
-  flex-shrink: 0;
-}
-
-.nm-ssh-session__split-label {
-  color: var(--rs-muted);
-  font-size: 11px;
-}
-
-.nm-ssh-session__split-btn {
-  border: 1px solid var(--rs-border-subtle);
-  background: transparent;
-  color: var(--rs-text);
-  border-radius: var(--rs-radius-xs);
-  padding: 2px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.nm-ssh-session__split-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.nm-ssh-session__split-count {
-  min-width: 18px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  color: var(--rs-text);
-  font-size: 11px;
-}
-
 .nm-ssh-session__split-sync {
   display: inline-flex;
   align-items: center;
   gap: var(--rs-space-xs);
   color: var(--rs-muted);
   font-size: 11px;
+  padding: 0 var(--rs-space-sm);
+  height: 2rem;
+  border-left: 1px solid var(--rs-border-subtle);
+  user-select: none;
 }
 
-.nm-ssh-session__host-split {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--rs-space-xs);
-}
-
-.nm-ssh-session__host-split-row {
-  display: flex;
+.nm-ssh-session__mh-btn {
+  display: inline-flex;
   align-items: center;
   gap: var(--rs-space-xs);
-}
-
-.nm-ssh-session__host-split-title {
+  height: 2rem;
+  padding: 0 var(--rs-space-sm);
+  border: none;
+  border-left: 1px solid var(--rs-border-subtle);
+  background: transparent;
   color: var(--rs-muted);
-  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--rs-transition-fast), color var(--rs-transition-fast);
+  font-size: var(--rs-font-size-xs);
   white-space: nowrap;
 }
 
-.nm-ssh-session__host-split-a {
+.nm-ssh-session__mh-btn:hover {
+  background: var(--rs-item-hover);
   color: var(--rs-text);
-  font-size: 11px;
-  max-width: 10rem;
+}
+
+.nm-ssh-session__mh {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-sm);
+}
+
+.nm-ssh-session__mh-hint {
+  margin: 0;
+  color: var(--rs-muted);
+  font-size: var(--rs-font-size-xs);
+}
+
+.nm-ssh-session__mh-row {
+  display: flex;
+  align-items: center;
+  gap: var(--rs-space-sm);
+}
+
+.nm-ssh-session__mh-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.nm-ssh-session__mh-row :deep(.rs-select) {
+  width: 100%;
+}
+
+.nm-ssh-session__mh-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nm-ssh-session__mh-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rs-space-sm);
+  padding: 6px var(--rs-space-sm);
+  border: 1px solid var(--rs-border-subtle);
+  border-radius: var(--rs-radius-xs);
+  background: var(--rs-surface-elevated);
+}
+
+.nm-ssh-session__mh-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
-.nm-ssh-session__host-split-selects {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-}
-
-.nm-ssh-session__host-slot {
+.nm-ssh-session__mh-remove {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-
-.nm-ssh-session__host-slot-label {
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: var(--rs-radius-xs);
+  background: transparent;
   color: var(--rs-muted);
-  font-size: 11px;
-  white-space: nowrap;
+  cursor: pointer;
 }
 
-.nm-ssh-session__host-split-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+.nm-ssh-session__mh-remove:hover {
+  background: var(--rs-item-hover);
+  color: var(--rs-text);
+}
+
+.nm-ssh-session__mh-empty {
+  margin: 0;
+  color: var(--rs-muted);
+  font-size: var(--rs-font-size-xs);
 }
 
 .nm-ssh-session__sftp-chevron {
@@ -1236,5 +1285,10 @@ watch(
 
 .nm-ssh-session__sftp--collapsed .nm-ssh-session__sftp-head {
   border-bottom: none;
+}
+
+.nm-ssh-session__dialog-mount {
+  /* 作为 RsDialog/ConfirmDialog 的 Teleport 挂载点（动态挂到 body） */
+  position: relative;
 }
 </style>

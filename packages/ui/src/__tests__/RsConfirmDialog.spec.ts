@@ -136,4 +136,23 @@ describe('RsConfirmDialog', () => {
     expect(wrapper.emitted('cancel')).toHaveLength(1)
     wrapper.unmount()
   })
+
+  it('mounts portal into custom target via teleportTo', async () => {
+    const target = document.createElement('div')
+    target.id = 'rs-confirm-target'
+    document.body.appendChild(target)
+
+    const wrapper = mount(RsConfirmDialog, {
+      props: {
+        open: true,
+        title: '挂载目标',
+        teleportTo: '#rs-confirm-target',
+      },
+      attachTo: document.body,
+    })
+
+    await flushPromises()
+    expect(target.querySelector('.rs-confirm-dialog__content')).not.toBeNull()
+    wrapper.unmount()
+  })
 })

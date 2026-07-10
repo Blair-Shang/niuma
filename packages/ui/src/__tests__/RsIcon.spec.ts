@@ -25,6 +25,15 @@ describe('RsIcon', () => {
     expect(isRsIconName('ftp')).toBe(true)
   })
 
+  it('loads custom mongodb icon', () => {
+    const icon = resolveLucideIcon('mongodb')
+    expect(icon).toBeTruthy()
+    const wrapper = mount(RsIcon, { props: { name: 'mongodb' } })
+    expect(wrapper.find('svg.rs-icon').exists()).toBe(true)
+    expect(wrapper.find('.mongodb-icon__mark').exists()).toBe(true)
+    expect(isRsIconName('mongodb')).toBe(true)
+  })
+
   it('loads arbitrary lucide icon by name', () => {
     const icon = resolveLucideIcon('trash-2')
     expect(icon).toBeTruthy()
@@ -94,6 +103,11 @@ describe('RsIcon', () => {
   it('applies accent color to custom ftp icon', () => {
     const wrapper = mount(RsIcon, { props: { name: 'ftp', color: '#34C759' } })
     expect(wrapper.find('svg').attributes('style')).toContain('--rs-icon-ftp-accent: #34C759')
+  })
+
+  it('applies accent color to custom mongodb icon', () => {
+    const wrapper = mount(RsIcon, { props: { name: 'mongodb', color: '#34C759' } })
+    expect(wrapper.find('svg').attributes('style')).toContain('--rs-icon-mongodb-accent: #34C759')
   })
 
   it('applies rotate transform', () => {

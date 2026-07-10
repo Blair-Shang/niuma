@@ -4,6 +4,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,11 +15,31 @@ import (
 	"sync"
 	"time"
 
+	"niuma/pkg/tunnel"
 	"niuma/services/ftp-service/internal/eventpub"
 	"niuma/services/ftp-service/internal/idgen"
 	"niuma/services/ftp-service/internal/transfer"
 
 	"github.com/jlaffaye/ftp"
+)
+
+// TLS 模式常量，与前端 FtpConnectionOptions.tls_mode 对齐。
+const (
+	tlsModeNone     = "none"
+	tlsModeExplicit = "explicit"
+	tlsModeImplicit = "implicit"
+)
+
+// 编码与传输类型常量，与前端 FtpConnectionOptions 对齐。
+const (
+	encodingGBK       = "gbk"
+	transferTypeASCII = "ascii"
+)
+
+// 默认端口：Implicit FTPS 使用 990，其余使用 21。
+const (
+	defaultFTPPort      = 21
+	defaultFTPSImplPort = 990
 )
 
 // 能力服务内部方法名（platform-core 代理时映射为 ftp.* 命名空间）。
@@ -66,25 +87,59 @@ type Response struct {
 
 // ConnectOptions 与 Web connection_options JSON 对齐。
 type ConnectOptions struct {
-	Protocol         string        `json:"protocol"`
-	TLSMode          string        `json:"tls_mode"`
-	Passive          bool          `json:"passive"`
-	Encoding         string        `json:"encoding"`
-	TransferType     string        `json:"transfer_type"`
-	TLSVerify        bool          `json:"tls_verify"`
-	TimeoutSeconds   int           `json:"timeout_seconds"`
-	KeepaliveSeconds int           `json:"keepalive_seconds"`
-	Anonymous        bool          `json:"anonymous"`
-	Proxy            *ProxyOptions `json:"proxy,omitempty"`
+	Protocol             string          `json:"protocol"`
+	TLSMode              string          `json:"tls_mode"`
+	Passive              bool            `json:"passive"`
+	Encoding             string          `json:"encoding"`
+	TransferType         string          `json:"transfer_type"`
+	TLSVerify            bool            `json:"tls_verify"`
+	TimeoutSeconds       int             `json:"timeout_seconds"`
+	TimeoutSecondsLegacy int             `json:"timeoutSeconds"`
+	KeepaliveSeconds     int             `json:"keepalive_seconds"`
+	Anonymous            bool            `json:"anonymous"`
+	Proxy                *ProxyOptions   `json:"proxy,omitempty"`
+	// SSH 跳板机隧道；platform 在转发前已注入 sshProfile 凭据。
+	Tunnel               *tunnel.Options `json:"tunnel,omitempty"`
 }
 
-// ConnectParams 是建连参数（含明文密码，仅进程内使用）。
+// effectiveTimeoutSeconds 返回建连超时秒数；兼容历史 camelCase 字段。
+func (o ConnectOptions) effectiveTimeoutSeconds() int {
+	if o.TimeoutSeconds > 0 {
+		return o.TimeoutSeconds
+	}
+	if o.TimeoutSecondsLegacy > 0 {
+		return o.TimeoutSecondsLegacy
+	}
+	return 0
+}
+
+// ConnectParams 是建连参数（含明文凭据，仅进程内使用）。
+//
+// Secret 承载用户认证凭据（密码或私钥内容）；新信封字段名为 `secret`。
+// 历史字段 `password` 由 JSON 反序列化时自动回退（通过 UnmarshalJSON 兼容）。
 type ConnectParams struct {
 	HostAddress  string         `json:"hostAddress"`
 	PortNumber   int            `json:"portNumber"`
 	LoginAccount string         `json:"loginAccount"`
-	Password     string         `json:"password"`
+	Secret       string         `json:"secret"`
 	Options      ConnectOptions `json:"options"`
+}
+
+// UnmarshalJSON 兼容历史 `password` 字段（platform 旧版仍可能发送 password）。
+func (p *ConnectParams) UnmarshalJSON(data []byte) error {
+	type alias ConnectParams
+	var raw struct {
+		alias
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*p = ConnectParams(raw.alias)
+	if p.Secret == "" && raw.Password != "" {
+		p.Secret = raw.Password
+	}
+	return nil
 }
 
 type sessionOpenParams struct {
@@ -138,9 +193,10 @@ type FtpEntry struct {
 }
 
 type session struct {
-	id   string
-	conn *ftp.ServerConn
-	mu   sync.Mutex
+	id         string
+	conn       *ftp.ServerConn
+	mu         sync.Mutex
+	tunnelStop func() // non-nil when a SSH tunnel is active; call to tear down forwarding
 }
 
 // Dispatcher 管理 FTP 会话并处理方法。
@@ -214,7 +270,7 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
 	}
-	conn, err := dialFTP(ctx, params.ConnectParams)
+	conn, tunnelStop, err := dialFTPWithTunnel(ctx, params.ConnectParams)
 	if err != nil {
 		slog.Error(MethodSessionOpen, "host", params.HostAddress, "port", params.PortNumber, "err", err)
 		return errorResponse(req.ID, err.Error())
@@ -222,10 +278,13 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 	sessionID, err := d.ids.NextString()
 	if err != nil {
 		_ = conn.Quit()
+		if tunnelStop != nil {
+			tunnelStop()
+		}
 		return errorResponse(req.ID, err.Error())
 	}
 	d.mu.Lock()
-	d.sessions[sessionID] = &session{id: sessionID, conn: conn}
+	d.sessions[sessionID] = &session{id: sessionID, conn: conn, tunnelStop: tunnelStop}
 	d.mu.Unlock()
 	slog.Info(MethodSessionOpen, "session", sessionID, "host", params.HostAddress, "port", params.PortNumber)
 	return okResponse(req.ID, map[string]any{"sessionId": sessionID})
@@ -251,11 +310,14 @@ func (d *Dispatcher) sessionTest(ctx context.Context, req Request) Response {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
 	}
-	conn, err := dialFTP(ctx, params)
+	conn, tunnelStop, err := dialFTPWithTunnel(ctx, params)
 	if err != nil {
 		return okResponse(req.ID, map[string]any{"ok": false, "message": err.Error()})
 	}
 	_ = conn.Quit()
+	if tunnelStop != nil {
+		tunnelStop()
+	}
 	return okResponse(req.ID, map[string]any{"ok": true, "message": "connected"})
 }
 
@@ -571,50 +633,113 @@ func (d *Dispatcher) closeSession(sessionID string) error {
 	delete(d.sessions, sessionID)
 	d.mu.Unlock()
 	d.xfers.CancelSession(sessionID)
+	var connErr error
 	if s.conn != nil {
-		return s.conn.Quit()
+		connErr = s.conn.Quit()
 	}
-	return nil
+	// 关闭 SSH 隧道（若有）；在 FTP 连接关闭之后执行，避免 Quit 因网络中断提前失败。
+	if s.tunnelStop != nil {
+		s.tunnelStop()
+	}
+	return connErr
 }
 
+// dialFTPWithTunnel 先（可选）建立 SSH 隧道，再调用 dialFTP。
+// 返回的 stop 函数在调用方关闭会话时调用以释放隧道资源；无隧道时 stop 为 nil。
+func dialFTPWithTunnel(ctx context.Context, params ConnectParams) (*ftp.ServerConn, func(), error) {
+	var stop func()
+	if params.Options.Tunnel.Enabled() {
+		host, port, s, err := tunnel.StartSSHTunnel(
+			ctx,
+			params.Options.Tunnel,
+			params.HostAddress,
+			params.PortNumber,
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ftp: ssh tunnel: %w", err)
+		}
+		// 把连接目标替换为本地隧道端口，保留其余参数不变。
+		params.HostAddress = host
+		params.PortNumber = port
+		stop = s
+	}
+	conn, err := dialFTP(ctx, params)
+	if err != nil {
+		if stop != nil {
+			stop()
+		}
+		return nil, nil, err
+	}
+	return conn, stop, nil
+}
+
+// dialFTP 根据 ConnectParams 建立 FTP/FTPS 连接。
+//
+// TLS 模式由 Options.TLSMode 决定：
+//   - "none"     → 明文 FTP
+//   - "explicit" → FTPS Explicit（AUTH TLS，端口默认 21）
+//   - "implicit" → FTPS Implicit（TLS 直连，端口默认 990）
+//
+// 当 Options.Protocol 为 "ftps" 且 TLSMode 为空或 "none" 时，自动回退到 explicit 模式。
+// Options.TLSVerify 为 false 时跳过服务端证书校验（适用于自签名证书场景）。
 func dialFTP(ctx context.Context, params ConnectParams) (*ftp.ServerConn, error) {
 	if params.HostAddress == "" {
 		return nil, fmt.Errorf("ftp: host required")
 	}
+
+	// 确定实际生效的 TLS 模式：protocol=ftps 且未显式指定 tls_mode 时默认 explicit。
+	tlsMode := params.Options.TLSMode
+	if params.Options.Protocol == "ftps" && (tlsMode == "" || tlsMode == tlsModeNone) {
+		tlsMode = tlsModeExplicit
+	}
+
 	port := params.PortNumber
 	if port == 0 {
-		port = 21
+		if tlsMode == tlsModeImplicit {
+			port = defaultFTPSImplPort
+		} else {
+			port = defaultFTPPort
+		}
 	}
 	addr := fmt.Sprintf("%s:%d", params.HostAddress, port)
 
 	timeout := defaultDialTimeout
-	if params.Options.TimeoutSeconds > 0 {
-		timeout = time.Duration(params.Options.TimeoutSeconds) * time.Second
+	if secs := params.Options.effectiveTimeoutSeconds(); secs > 0 {
+		timeout = time.Duration(secs) * time.Second
 	}
 
 	var opts []ftp.DialOption
 	opts = append(opts, ftp.DialWithTimeout(timeout))
+
 	if params.Options.Passive {
 		opts = append(opts, ftp.DialWithDisabledEPSV(true))
 	}
+	if params.Options.Encoding == encodingGBK {
+		opts = append(opts, ftp.DialWithDisabledUTF8(true))
+	}
+
 	dialFn := func(network, address string) (net.Conn, error) {
 		return dialTCP(ctx, params.Options.Proxy, network, address, timeout)
 	}
 	opts = append(opts, ftp.DialWithDialFunc(dialFn))
 
-	var conn *ftp.ServerConn
-	var err error
-	if params.Options.Protocol == "ftps" {
-		conn, err = ftp.Dial(addr, append(opts, ftp.DialWithExplicitTLS(nil))...)
-	} else {
-		conn, err = ftp.Dial(addr, opts...)
+	switch tlsMode {
+	case tlsModeExplicit:
+		// Explicit TLS：先建明文连接，再通过 AUTH TLS 升级为 TLS。
+		opts = append(opts, ftp.DialWithExplicitTLS(buildTLSConfig(params.HostAddress, params.Options.TLSVerify)))
+	case tlsModeImplicit:
+		// Implicit TLS：整个连接从握手阶段就走 TLS（类似 HTTPS）。
+		// DialWithTLS 会将 DialWithDialFunc 建立的连接直接当作 TLS 连接处理。
+		opts = append(opts, ftp.DialWithTLS(buildTLSConfig(params.HostAddress, params.Options.TLSVerify)))
 	}
+
+	conn, err := ftp.Dial(addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("ftp: dial %s: %w", addr, err)
 	}
 
 	account := params.LoginAccount
-	password := params.Password
+	password := params.Secret
 	if params.Options.Anonymous {
 		account = "anonymous"
 		if password == "" {
@@ -625,7 +750,26 @@ func dialFTP(ctx context.Context, params ConnectParams) (*ftp.ServerConn, error)
 		_ = conn.Quit()
 		return nil, fmt.Errorf("ftp: login: %w", err)
 	}
+
+	// ASCII 模式：登录后立即切换，避免在二进制文件上产生行尾转换。
+	if params.Options.TransferType == transferTypeASCII {
+		if err := conn.Type(ftp.TransferTypeASCII); err != nil {
+			_ = conn.Quit()
+			return nil, fmt.Errorf("ftp: set transfer type ASCII: %w", err)
+		}
+	}
+
 	return conn, nil
+}
+
+// buildTLSConfig 根据主机名和证书校验开关构造 TLS 配置。
+//
+// tlsVerify 为 false 时设置 InsecureSkipVerify，适用于自签名或内网证书场景。
+func buildTLSConfig(host string, tlsVerify bool) *tls.Config {
+	return &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: !tlsVerify, //nolint:gosec // 由用户在连接配置中显式控制
+	}
 }
 
 func toFtpEntry(ent *ftp.Entry) FtpEntry {

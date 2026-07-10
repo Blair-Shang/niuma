@@ -7,11 +7,15 @@ import ConnectionProfileTable from '@/modules/ops/components/ConnectionProfileTa
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import { useConnectionProfiles } from '@/modules/ops/composables/useConnectionProfiles'
 import type { ConnItem } from '@/modules/ops/types'
+import SshConnectionFields from '@/modules/ssh/components/SshConnectionFields.vue'
+import SshConnectionOptionsFields from '@/modules/ssh/components/SshConnectionOptionsFields.vue'
 import SshSession from '@/modules/ssh/views/SshSession.vue'
 import { useTabStore } from '@/stores/tab'
 
 const props = defineProps<{
   profileId?: string
+  terminalSyncGroupId?: string
+  terminalSyncSlot?: 'A' | 'B' | 'C' | 'D'
 }>()
 
 const tabStore = useTabStore()
@@ -79,7 +83,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <SshSession v-if="props.profileId" :profile-id="props.profileId" class="nm-ssh-tab" />
+  <SshSession
+    v-if="props.profileId"
+    :profile-id="props.profileId"
+    :terminal-sync-group-id="props.terminalSyncGroupId"
+    :terminal-sync-slot="props.terminalSyncSlot"
+    class="nm-ssh-tab"
+  />
   <div v-else class="nm-module-root nm-ssh-home">
     <header class="nm-ssh-home__header">
       <h2 class="nm-section-title">{{ t('modules.ssh.title') }}</h2>
@@ -128,7 +138,14 @@ onMounted(() => {
       @save="onSave"
       @delete="onDelete"
       @test="cx.testConnection()"
-    />
+    >
+      <template #credential-section>
+        <SshConnectionFields :form="form" :mode="dlgMode" />
+      </template>
+      <template #options>
+        <SshConnectionOptionsFields :form="form" />
+      </template>
+    </ConnectionFormDialog>
   </div>
 </template>
 

@@ -8,6 +8,9 @@ import App from './App.vue'
 import { bootstrapExtensions } from '@/extensions/bootstrap/bootstrap-extensions'
 import { registerBuiltinFileProviders } from '@/modules/file-editor'
 import { registerBuiltinCommands } from '@/extensions/contributions/builtin-commands'
+import { registerBuiltinConnectionKinds } from '@/modules/ops/connection-kinds'
+import { registerBuiltinConnectionNavStrategies } from '@/modules/ops/conn-nav-providers'
+import { registerBuiltinConnTreeProviders } from '@/modules/ops/conn-tree-providers'
 import { getModuleById } from '@/extensions/registry/extension-registry'
 import { useTabStore } from '@/stores/tab'
 import { router } from './router'
@@ -28,6 +31,10 @@ if (import.meta.env.DEV) {
     event.preventDefault()
     const g = globalThis as typeof globalThis & { __niumaVitePreloadReload?: boolean }
     if (g.__niumaVitePreloadReload) {
+      // 依赖重优化连续失败时仍 reveal，避免 CEF 热重载后窗口一直 Conceal
+      if (isBridgeAvailable()) {
+        void windowApi.reveal()
+      }
       return
     }
     g.__niumaVitePreloadReload = true
@@ -68,12 +75,23 @@ async function prewarmActiveModules(): Promise<void> {
  * 5. router.isReady → mount → nextTick → 双 rAF 后再 reveal（CEF 首显须等首帧已绘制）
  */
 async function main() {
+  if (import.meta.env.DEV && isBridgeAvailable()) {
+    globalThis.setTimeout(() => {
+      void windowApi.reveal()
+    }, 3500)
+  }
+
   const pinia = createPinia()
   // bootstrapExtensions 在组件外使用 useModuleStore()，须先激活 Pinia 实例
   setActivePinia(pinia)
 
   // 注册文件工作台内置 Provider（local / ftp）
   registerBuiltinFileProviders()
+
+  // 注册内置连接协议 UI（FTP / Redis / SSH），挂载前完成以确保 OpsConnectionPanel 查表有效
+  registerBuiltinConnectionKinds()
+  registerBuiltinConnectionNavStrategies()
+  registerBuiltinConnTreeProviders()
 
   const workbenchEntry = isFileWorkbenchEntry()
 

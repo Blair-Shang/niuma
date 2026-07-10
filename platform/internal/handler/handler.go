@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"niuma/platform/internal/idgen"
+	"niuma/platform/internal/components"
 	"niuma/platform/internal/store"
 )
 
@@ -35,6 +36,18 @@ const (
 	MethodCredentialSet = "platform.credential.set"
 	// MethodCredentialDelete 删除凭据（连同 Keychain 密钥与关联）。
 	MethodCredentialDelete = "platform.credential.delete"
+	// MethodCredentialGet 按站点 ID 从 OS Keychain 读取凭据明文（仅供本地 IPC 使用）。
+	MethodCredentialGet = "platform.credential.get"
+	// MethodComponentsList 列出工具组件包及探测状态。
+	MethodComponentsList = "platform.components.list"
+	// MethodComponentsDetect 重新探测指定工具组件包。
+	MethodComponentsDetect = "platform.components.detect"
+	// MethodComponentsSetPath 设置或清除工具可执行文件路径。
+	MethodComponentsSetPath = "platform.components.setPath"
+	// MethodComponentsGetDownload 返回工具官方下载页 URL。
+	MethodComponentsGetDownload = "platform.components.getDownload"
+	// MethodComponentsInstall 下载并安装组件包至 data/components/。
+	MethodComponentsInstall = "platform.components.install"
 )
 
 // Request 是 Shell 透传过来的原始请求（cefQuery 请求体）。
@@ -91,6 +104,7 @@ type Deps struct {
 	IDs         idgen.Generator
 	Capabilities *CapabilityRegistry
 	FileEditor  *FileEditorCoordinator
+	Components  *components.Registry
 }
 
 // Dispatcher 持有各处理逻辑所需的依赖并执行方法分发。
@@ -102,6 +116,7 @@ type Dispatcher struct {
 	ids          idgen.Generator
 	capabilities *CapabilityRegistry
 	fileEditor   *FileEditorCoordinator
+	components   *components.Registry
 }
 
 // New 依据 deps 创建 Dispatcher。
@@ -114,6 +129,7 @@ func New(deps Deps) *Dispatcher {
 		ids:          deps.IDs,
 		capabilities: deps.Capabilities,
 		fileEditor:   deps.FileEditor,
+		components:   deps.Components,
 	}
 }
 
@@ -154,6 +170,18 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 		return d.credentialSet(ctx, req)
 	case MethodCredentialDelete:
 		return d.credentialDelete(ctx, req)
+	case MethodCredentialGet:
+		return d.credentialGet(ctx, req)
+	case MethodComponentsList:
+		return d.componentsList(ctx, req)
+	case MethodComponentsDetect:
+		return d.componentsDetect(ctx, req)
+	case MethodComponentsSetPath:
+		return d.componentsSetPath(ctx, req)
+	case MethodComponentsGetDownload:
+		return d.componentsGetDownload(ctx, req)
+	case MethodComponentsInstall:
+		return d.componentsInstall(ctx, req)
 	default:
 		if d.fileEditor != nil {
 			if resp, handled := d.fileEditor.Dispatch(ctx, req); handled {

@@ -7,11 +7,13 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-// SecretStore 抽象 OS Keychain 的密钥存取，便于在测试中注入替身。
+// SecretStore 抽象密钥存取，便于在测试中注入替身。
 //
-// 明文密钥只存于操作系统凭据库（Windows Credential Manager / macOS Keychain /
-// Linux Secret Service）；数据库仅保存对其的引用（见 nm_credential_ref），
-// 严禁把明文密码写入 SQLite（见 .cursor/rules/database-schema.mdc）。
+// 生产实现为 VaultStore（见 vault.go）：凭据密文用 AES-256-GCM 存入 SQLite
+// nm_vault_secret，OS Keychain 仅保留一条主密钥（NiuMa/master-vault）。
+// KeychainStore 保留用于：① 单元测试替身；② VaultStore 内部存取主密钥；
+// ③ 向后兼容迁移（自动读取旧版单条目并写入 vault）。
+// 严禁把明文密码直接写入 SQLite（见 .cursor/rules/database-schema.mdc）。
 type SecretStore interface {
 	// SetSecret 写入（或覆盖）指定 service+account 下的密钥。
 	SetSecret(service, account, secret string) error

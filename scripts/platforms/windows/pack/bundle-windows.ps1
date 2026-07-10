@@ -108,6 +108,12 @@ if (Test-Path $PluginsSrc) {
     Copy-Item -Recurse -Force $PluginsSrc $PluginsDst
 }
 
+$ComponentsSrc = Join-Path $Root 'components'
+$ComponentsDst = Join-Path $Staging 'components'
+if (Test-Path $ComponentsSrc) {
+    Copy-Item -Recurse -Force $ComponentsSrc $ComponentsDst
+}
+
 $NiumaExe = Join-Path $ShellBuild 'niuma.exe'
 if (Test-Path $NiumaExe) {
     Copy-Item -Force $NiumaExe $Staging

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import SshTerminalPane from '@/modules/ssh/components/SshTerminalPane.vue'
 
 const emit = defineEmits<{
@@ -27,11 +28,16 @@ const maxPanes = computed(() => props.maxPanes ?? 4)
 const effectivePaneCount = computed(() => clamp(props.paneCount ?? 2, 1, maxPanes.value))
 const syncInput = computed(() => props.syncInput ?? false)
 
-const paneRefs = ref<Array<InstanceType<typeof SshTerminalPane> | null>>([])
+type TerminalPaneExpose = {
+  refreshSize: () => Promise<void>
+  sendInput: (data: string) => Promise<void>
+}
+
+const paneRefs = ref<Array<TerminalPaneExpose | null>>([])
 
 function setPaneRef(index: number) {
-  return (el: InstanceType<typeof SshTerminalPane> | null): void => {
-    paneRefs.value[index] = el
+  return (el: Element | ComponentPublicInstance | null): void => {
+    paneRefs.value[index] = el as TerminalPaneExpose | null
   }
 }
 

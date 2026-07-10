@@ -4,6 +4,8 @@ use (
 	./packages/go/logutil
 	./packages/go/netproxy
 	./packages/go/serviceipc
+	./packages/go/tunnel
 	./platform
 	./services/ftp-service
+	./services/mongodb-service
 )

@@ -1,7 +1,7 @@
 <script setup lang="ts" generic="T">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import type { RsVirtualListItemSize } from './virtual-list-utils'
-import { resolveItemSize, resolveVirtualListHeight } from './virtual-list-utils'
+import { isVirtualListFillHeight, resolveItemSize, resolveVirtualListHeight } from './virtual-list-utils'
 
 const props = withDefaults(
   defineProps<{
@@ -21,6 +21,12 @@ const props = withDefaults(
 
 const rootRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
+const measuredHeight = ref(0)
+const fillHeight = computed(() => isVirtualListFillHeight(props.height))
+const heightStyle = computed(() => {
+  const resolved = resolveVirtualListHeight(props.height)
+  return resolved ? { height: resolved } : undefined
+})
 const fixedItemSize = computed(() => resolveItemSize(props.itemSize))
 const viewportHeightPx = computed(() => {
   if (typeof props.height === 'number' && props.height > 0) {
@@ -32,11 +38,42 @@ const viewportHeightPx = computed(() => {
       return parsed
     }
   }
+  if (measuredHeight.value > 0) {
+    return measuredHeight.value
+  }
   const el = rootRef.value
   if (el && el.clientHeight > 0) {
     return el.clientHeight
   }
   return 240
+})
+
+let resizeObserver: ResizeObserver | null = null
+
+function syncMeasuredHeight(): void {
+  const el = rootRef.value
+  if (!el) {
+    return
+  }
+  const next = el.clientHeight
+  if (next > 0 && next !== measuredHeight.value) {
+    measuredHeight.value = next
+  }
+}
+
+onMounted(() => {
+  syncMeasuredHeight()
+  const el = rootRef.value
+  if (!el || typeof ResizeObserver === 'undefined') {
+    return
+  }
+  resizeObserver = new ResizeObserver(() => syncMeasuredHeight())
+  resizeObserver.observe(el)
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
 })
 const startIndex = computed(() => Math.max(0, Math.floor(scrollTop.value / fixedItemSize.value) - props.overscan))
 const visibleCount = computed(
@@ -84,7 +121,8 @@ defineExpose({ scrollToIndex })
   <div
     ref="rootRef"
     class="rs-virtual-list"
-    :style="{ height: resolveVirtualListHeight(height) }"
+    :class="{ 'rs-virtual-list--fill': fillHeight }"
+    :style="heightStyle"
     @scroll="scrollTop = ($event.target as HTMLElement).scrollTop"
   >
     <div class="rs-virtual-list__spacer" :style="{ height: `${totalHeight}px` }">
@@ -110,6 +148,13 @@ defineExpose({ scrollToIndex })
   overflow: auto;
   border: 1px solid var(--rs-border-subtle);
   border-radius: var(--rs-radius-sm);
+}
+.rs-virtual-list--fill {
+  flex: 1;
+  align-self: stretch;
+  width: 100%;
+  min-height: 0;
+  height: 0;
 }
 .rs-virtual-list__spacer {
   position: relative;

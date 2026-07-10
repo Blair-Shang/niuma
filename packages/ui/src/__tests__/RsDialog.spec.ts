@@ -174,4 +174,38 @@ describe('RsDialog', () => {
     expect(closeBtn.querySelector('.rs-btn__tooltip')?.textContent).toContain('Close')
     wrapper.unmount()
   })
+
+  it('mounts portal into custom target via teleportTo', async () => {
+    const target = document.createElement('div')
+    target.id = 'rs-dialog-target'
+    document.body.appendChild(target)
+
+    const wrapper = mount(RsDialog, {
+      props: {
+        open: true,
+        title: '挂载目标',
+        teleportTo: '#rs-dialog-target',
+      },
+      attachTo: document.body,
+    })
+
+    await flushPromises()
+    expect(target.querySelector('.rs-dialog__content')).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('passes modal=false to DialogRoot for non-modal usage', async () => {
+    const wrapper = mount(RsDialog, {
+      props: {
+        open: true,
+        title: '非模态',
+        modal: false,
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const root = wrapper.findComponent({ name: 'DialogRoot' })
+    expect(root.props('modal')).toBe(false)
+    wrapper.unmount()
+  })
 })

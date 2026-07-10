@@ -1,12 +1,18 @@
 import type { Component } from 'vue'
 import { FtpIcon } from './custom/ftp'
+import { MongodbIcon } from './custom/mongodb'
+import { RedisIcon } from './custom/redis'
 
 export const LUCIDE_LICENSE = 'ISC'
 export const LUCIDE_ATTRIBUTION =
   'Icons by Lucide (https://lucide.dev) — ISC License, free for commercial use'
 
 /** NiuMa 业务扩展图标（kebab-case，与 Lucide 同名查找） */
-const customIconMap = new Map<string, Component>([['ftp', FtpIcon]])
+const customIconMap = new Map<string, Component>([
+  ['ftp', FtpIcon],
+  ['mongodb', MongodbIcon],
+  ['redis', RedisIcon],
+])
 
 /** Vite 构建时收集全部 Lucide 图标，运行时按名称 O(1) 查找 */
 const iconModules = import.meta.glob<{ default: Component }>(

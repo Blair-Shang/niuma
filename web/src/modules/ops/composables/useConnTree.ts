@@ -7,6 +7,10 @@ import {
   connTreeKey,
   folderTreeKey,
   parseTreeKey,
+} from '@/modules/ops/conn-tree/keys'
+import { getConnTreeProvider } from '@/modules/ops/conn-tree/registry'
+import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
+import {
   wouldCreateFolderCycle,
   type ConnFolder,
 } from './useConnFolders'
@@ -26,13 +30,25 @@ export interface ConnLeafNode extends RsTreeNode {
   _searchText: string
 }
 
-export type ConnTreeNode = ConnFolderNode | ConnLeafNode
+export interface ConnResourceNode extends RsTreeNode {
+  _type: 'resource'
+  _conn: ConnItem
+  _path: ConnResourcePath
+  _searchText: string
+  _badge?: string
+  _icon?: string
+}
+
+export type ConnTreeNode = ConnFolderNode | ConnLeafNode | ConnResourceNode
 
 function makeLeaf(conn: ConnItem): ConnLeafNode {
+  const provider = getConnTreeProvider(conn.kind)
+  const expandable = provider?.canExpand(conn) ?? false
   return {
     key: connTreeKey(conn.profileId),
     label: conn.profileName,
-    isLeaf: true,
+    isLeaf: !expandable,
+    children: expandable ? [] : undefined,
     _type: 'conn',
     _conn: conn,
     _searchText: `${conn.profileName.toLowerCase()} ${conn.hostAddress.toLowerCase()}`,
@@ -57,9 +73,6 @@ function buildFolderNode(
     .map(makeLeaf)
 
   const children = [...childFolders, ...childConns]
-  if (children.length === 0) {
-    return null
-  }
 
   return {
     key: folderTreeKey(folder.id),
@@ -153,6 +166,7 @@ export function connTreeSearchMatch(node: ConnTreeNode, keyword: string): boolea
   const q = keyword.toLowerCase()
   if (!q) return true
   if (node._type === 'conn') return node._searchText.includes(q)
+  if (node._type === 'resource') return node._searchText.includes(q)
   if (node._type === 'folder') return (node.label ?? '').toLowerCase().includes(q)
   return false
 }
@@ -182,6 +196,9 @@ export function allowDrop(
   position: RsTreeDropPosition,
   folders: readonly ConnFolder[] = [],
 ): boolean {
+  if (dragKey.startsWith('res:') || dropKey.startsWith('res:')) {
+    return false
+  }
   const dragType = dragKey.split(':')[0]
   const dropType = dropKey.split(':')[0]
   if (dragKey === dropKey) return false

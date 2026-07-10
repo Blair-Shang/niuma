@@ -1,5 +1,9 @@
-import { ref } from 'vue'
-import type { ConnItem } from '../types'
+import {
+  connTreeKey,
+  folderTreeKey,
+  parseTreeKey,
+} from '@/modules/ops/conn-tree/keys'
+import { DEFAULT_FOLDER_ACCENT, folderAccentColor, type ConnAccentColor, type ConnItem } from '../types'
 
 export interface ConnFolder {
   id: string
@@ -8,6 +12,8 @@ export interface ConnFolder {
   profileIds: string[]
   /** null = 根层级 */
   parentId: string | null
+  /** 侧栏文件夹标签色 */
+  accentColor?: ConnAccentColor
 }
 
 export type OrgEntry =
@@ -17,19 +23,9 @@ export type OrgEntry =
 const STORAGE_KEY = 'nm-conn-folders-v1'
 const ROOT_ORDER_KEY = 'nm-conn-root-order-v1'
 
-export function folderTreeKey(id: string): string {
-  return `folder:${id}`
-}
+import { ref } from 'vue'
 
-export function connTreeKey(profileId: string): string {
-  return `conn:${profileId}`
-}
-
-export function parseTreeKey(key: string): { type: 'folder' | 'conn'; id: string } {
-  const idx = key.indexOf(':')
-  if (idx < 0) return { type: 'conn', id: key }
-  return { type: key.slice(0, idx) as 'folder' | 'conn', id: key.slice(idx + 1) }
-}
+export { connTreeKey, folderTreeKey, parseTreeKey } from '@/modules/ops/conn-tree/keys'
 
 function loadFolders(): ConnFolder[] {
   try {
@@ -39,6 +35,7 @@ function loadFolders(): ConnFolder[] {
       ...f,
       parentId: f.parentId ?? null,
       profileIds: [...f.profileIds],
+      accentColor: folderAccentColor(f),
     }))
   } catch {
     return []
@@ -143,13 +140,18 @@ export function useConnFolders() {
     persist()
   }
 
-  function createFolder(name: string, parentId: string | null = null): ConnFolder {
+  function createFolder(
+    name: string,
+    parentId: string | null = null,
+    accentColor: ConnAccentColor = DEFAULT_FOLDER_ACCENT,
+  ): ConnFolder {
     const folder: ConnFolder = {
       id: crypto.randomUUID(),
       name,
       expanded: true,
       profileIds: [],
       parentId,
+      accentColor,
     }
     folders.value = [...folders.value, folder]
     if (!parentId) {
@@ -160,7 +162,14 @@ export function useConnFolders() {
   }
 
   function renameFolder(id: string, name: string): void {
-    folders.value = folders.value.map((f) => (f.id === id ? { ...f, name } : f))
+    updateFolder(id, { name })
+  }
+
+  function updateFolder(
+    id: string,
+    patch: { name?: string; accentColor?: ConnAccentColor },
+  ): void {
+    folders.value = folders.value.map((f) => (f.id === id ? { ...f, ...patch } : f))
     persist()
   }
 
@@ -301,6 +310,7 @@ export function useConnFolders() {
     syncRootOrder,
     createFolder,
     renameFolder,
+    updateFolder,
     deleteFolder,
     toggleFolder,
     moveToFolder,

@@ -1,5 +1,17 @@
 /**
- * 工作区 Tab 状态 — 编辑区多实例 + 多编辑组（VS Code editor group / split 模型）。
+ * 工作区 Tab 状态 — **L1：Tab Store**（编辑区多实例 + 多编辑组）。
+ *
+ * ## Tab 管理四层模型
+ *
+ * | 层 | 本文件角色 | 职责 |
+ * |----|------------|------|
+ * | **L1** | `tab.ts`（本 Store） | `tabId` / `moduleId` / `props` / 编辑组 / Platform 持久化 |
+ * | **L2** | `ModuleWorkspace.vue` | 每组渲染激活 Tab；`<keep-alive>` 保活 UI，关 Tab 不保证 unmount |
+ * | **L3** | `useConnectionNavigation` + `connection-nav` | 连接树 → `openTab`；策略在 `conn-nav-strategy.ts` |
+ * | **L4** | `session-registry.ts` | `acquire` / `release`；唯一管理 `session.open/close` 的 Web 入口 |
+ *
+ * **本 Store 只管 UI 页签元数据，不触碰 Layer-1 物理连接。**
+ * `closeTab` 仅从 `groups` 删除条目；释放 Layer-1 会话由 L4 `sessionRegistry.release(tabId)` 完成。
  *
  * 层级：workspace → groups[]（编辑组，横向分屏）→ 每组 tabs[]（该组内的多个实例）。
  * 每个 Tab 是某模块的一个独立实例；`ModuleWorkspace` 为**每个组**各用一个
@@ -12,6 +24,7 @@
  * 旧的单组结构。
  *
  * @see docs/09-web-app-shell.md 第 6 节「Tab 工作区」
+ * @see docs/21-session-registry.md §0「Tab 管理架构总览」
  * @see docs/11-platform-core.md Platform 层持久化
  */
 import { defineStore } from 'pinia'
@@ -23,6 +36,7 @@ import {
   getModuleById,
 } from '@/extensions/registry/extension-registry'
 import { SETTINGS_VIEW_ID, getInternalView, isInternalViewId } from '@/shell/internal-views'
+import { useSessionRegistry } from '@/stores/session-registry'
 
 /** Platform 层 KV 键（SQLite nm_app_setting，唯一权威存储） */
 const SETTING_KEY = 'workspace.tabs'
@@ -324,6 +338,9 @@ export const useTabStore = defineStore('tab', () => {
   /**
    * 新开一个 Tab 实例并激活（始终创建，加入当前激活组）。
    *
+   * 连接树场景由 L3 `useConnectionNavigation` 先去重，必要时才调用本方法。
+   * 物理会话 `session.open` 不在此触发（规划由 L4 `acquire(tabId)` 负责）。
+   *
    * @param spec - Tab 规格，moduleId 必填
    * @returns 新 Tab 的 tabId
    */
@@ -397,12 +414,21 @@ export const useTabStore = defineStore('tab', () => {
     }
   }
 
+  /** 关闭 Tab 前释放 Layer-1 会话借用（L4） */
+  function releaseTabs(tabIds: string[]): void {
+    if (tabIds.length === 0) {
+      return
+    }
+    void useSessionRegistry().releaseMany(tabIds)
+  }
+
   /**
-   * 关闭 Tab；若关闭的是该组激活项，激活相邻 Tab（优先左侧）；组空则回收。
+   * 关闭 Tab（L1 删条目 + L4 release）。
    *
    * @param tabId - 目标 Tab id
    */
   function closeTab(tabId: string): void {
+    releaseTabs([tabId])
     const group = groupOfTab(tabId)
     if (!group) {
       return
@@ -426,6 +452,8 @@ export const useTabStore = defineStore('tab', () => {
     if (!group) {
       return
     }
+    const toRelease = group.tabs.filter((t) => t.tabId !== tabId && t.closable).map((t) => t.tabId)
+    releaseTabs(toRelease)
     group.tabs = group.tabs.filter((t) => t.tabId === tabId || !t.closable)
     ensureGroupActive(group, tabId)
   }
@@ -444,6 +472,8 @@ export const useTabStore = defineStore('tab', () => {
     if (index === -1) {
       return
     }
+    const toRelease = group.tabs.filter((t, i) => i > index && t.closable).map((t) => t.tabId)
+    releaseTabs(toRelease)
     group.tabs = group.tabs.filter((t, i) => i <= index || !t.closable)
     ensureGroupActive(group, tabId)
   }
@@ -458,6 +488,8 @@ export const useTabStore = defineStore('tab', () => {
     if (!group) {
       return
     }
+    const toRelease = group.tabs.filter((t) => t.closable).map((t) => t.tabId)
+    releaseTabs(toRelease)
     group.tabs = group.tabs.filter((t) => !t.closable)
     ensureGroupActive(group)
     pruneEmptyGroups()
@@ -543,12 +575,19 @@ export const useTabStore = defineStore('tab', () => {
    * @param groupId - 目标组 id
    */
   function closeGroup(groupId: string): void {
-    if (groups.value.length <= 1) {
-      const only = groups.value[0]
-      only.tabs = only.tabs.filter((t) => !t.closable)
-      ensureGroupActive(only)
+    const group = groups.value.find((g) => g.groupId === groupId)
+    if (!group) {
       return
     }
+    if (groups.value.length <= 1) {
+      const toRelease = group.tabs.filter((t) => t.closable).map((t) => t.tabId)
+      releaseTabs(toRelease)
+      group.tabs = group.tabs.filter((t) => !t.closable)
+      ensureGroupActive(group)
+      return
+    }
+    const toRelease = group.tabs.map((t) => t.tabId)
+    releaseTabs(toRelease)
     const index = groups.value.findIndex((g) => g.groupId === groupId)
     if (index === -1) {
       return

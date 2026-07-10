@@ -23,10 +23,9 @@ CREATE TABLE IF NOT EXISTS nm_credential_ref (
     credential_id     TEXT NOT NULL PRIMARY KEY,
     credential_label  TEXT NOT NULL,
     credential_kind   TEXT NOT NULL,
-    keychain_service  TEXT NOT NULL,
-    keychain_account  TEXT,
-    created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL
+    cipher_text       TEXT NOT NULL DEFAULT '',  -- AES-256-GCM 密文；主密钥存 OS Keychain 单条目
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_nm_cred_ref_label ON nm_credential_ref (credential_label);

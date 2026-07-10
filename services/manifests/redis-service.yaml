@@ -1,0 +1,28 @@
+id: com.niuma.redis
+name: Redis Service
+version: 0.1.0
+bridge:
+  namespace: redis
+  connection_kind: redis
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+    - tree.databases
+runtime:
+  executable: bin/niuma-redis-service.exe
+  executable_windows: bin/niuma-redis-service.exe
+  executable_unix: bin/niuma-redis-service
+  lang: rust
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.redis'
+  address_windows: '\\.\pipe\niuma.redis'
+  address_unix: '/tmp/niuma.redis.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

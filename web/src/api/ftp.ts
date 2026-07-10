@@ -12,6 +12,8 @@ import type {
   ConnectionUpdateResult,
   CredentialDeleteParams,
   CredentialDeleteResult,
+  CredentialGetParams,
+  CredentialGetResult,
   CredentialSetParams,
   CredentialSetResult,
   FtpDirListParams,
@@ -66,9 +68,15 @@ export const connectionApi = {
 } as const
 
 /**
- * 凭据写入/删除（密钥落 OS Keychain，DB 仅存引用）。
+ * 凭据读写/删除（密钥落 OS Keychain，DB 仅存引用）。
+ *
+ * get 仅经本地 IPC 调用，安全边界与 OS Keychain 一致，适用于编辑表单回填密码。
  */
 export const credentialApi = {
+  get(params: CredentialGetParams): Promise<CredentialGetResult> {
+    return bridgeInvoke<CredentialGetResult>('platform.credential.get', params)
+  },
+
   set(params: CredentialSetParams): Promise<CredentialSetResult> {
     return bridgeInvoke<CredentialSetResult>('platform.credential.set', params)
   },

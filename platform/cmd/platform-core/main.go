@@ -20,6 +20,7 @@ import (
 
 	"niuma/platform/internal/eventhub"
 	"niuma/platform/internal/handler"
+	"niuma/platform/internal/components"
 	"niuma/pkg/buildinfo"
 	"niuma/pkg/logutil"
 	"niuma/platform/internal/idgen"
@@ -109,14 +110,32 @@ func run() error {
 	eventHub := eventhub.New()
 	fileEditor := handler.NewFileEditorCoordinator(eventHub)
 
+	// VaultStore：AES-256-GCM 加密密文存 SQLite，OS Keychain 仅保留一条主密钥。
+	// 向后兼容旧版 KeychainStore：首次读取时自动迁移旧条目。
+	keychain := store.NewKeychainStore()
+	settingStore := store.NewSettingStore(db)
+
+	var componentRegistry *components.Registry
+	if componentsDir, compErr := components.ResolveDir(); compErr != nil {
+		slog.Warn("tool components registry unavailable", "err", compErr)
+	} else if dataRoot, dataErr := dataDir(); dataErr != nil {
+		slog.Warn("tool components registry unavailable", "err", dataErr)
+	} else if reg, regErr := components.NewRegistry(componentsDir, settingStore, dataRoot); regErr != nil {
+		slog.Warn("tool components registry init failed", "err", regErr)
+	} else {
+		componentRegistry = reg
+		slog.Info("tool components registry ready", "dir", componentsDir)
+	}
+
 	dispatcher := handler.New(handler.Deps{
-		Settings:     store.NewSettingStore(db),
+		Settings:     settingStore,
 		Connections:  store.NewConnectionStore(db),
 		Credentials:  store.NewCredentialStore(db),
-		Secrets:      store.NewKeychainStore(),
+		Secrets:      store.NewVaultStore(db, keychain),
 		IDs:          idGen,
 		Capabilities: capabilities,
 		FileEditor:   fileEditor,
+		Components:   componentRegistry,
 	})
 	srv := server.New(ipcAddress(), dispatcher)
 	go func() {

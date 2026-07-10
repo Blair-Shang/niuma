@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RsConfirmDialog, RsContextMenu, RsIcon, type RsContextMenuItem } from '@niuma/ui'
-import { computed, ref } from 'vue'
+import { RsConfirmDialog, RsContextMenu, RsIcon, RsPopover, type RsContextMenuItem } from '@niuma/ui'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabStore, type WorkspaceTab } from '@/stores/tab'
 import { useSessionActionStore } from '@/stores/session-actions'
@@ -29,6 +29,14 @@ let confirmAction: (() => void) | null = null
 
 /** 拖拽悬停到的目标 Tab id（显示插入指示线） */
 const dragOverId = ref<string | null>(null)
+
+const listRef = ref<HTMLElement | null>(null)
+const canScrollPrev = ref(false)
+const canScrollNext = ref(false)
+const hiddenTabs = ref<WorkspaceTab[]>([])
+const overflowOpen = ref(false)
+
+let listResizeObserver: ResizeObserver | null = null
 
 /** Tab 显示标题：自定义 title 优先，否则用 i18n 键（随语言切换更新） */
 function tabLabel(tab: WorkspaceTab): string {
@@ -158,7 +166,114 @@ function onMenuSelect(tab: WorkspaceTab, key: string): void {
  */
 function focusTab(tab: WorkspaceTab): void {
   tabStore.activateTab(tab.tabId)
+  void scrollActiveTabIntoView()
 }
+
+/** 统计当前视口外（含部分被裁切）的 Tab */
+function collectHiddenTabs(): WorkspaceTab[] {
+  const el = listRef.value
+  if (!el) return []
+  const bounds = el.getBoundingClientRect()
+  const hidden: WorkspaceTab[] = []
+  for (const tab of tabs.value) {
+    const tabEl = el.querySelector<HTMLElement>(`[data-tab-id="${tab.tabId}"]`)
+    if (!tabEl) continue
+    const rect = tabEl.getBoundingClientRect()
+    if (rect.right <= bounds.left + 1 || rect.left >= bounds.right - 1) {
+      hidden.push(tab)
+    }
+  }
+  return hidden
+}
+
+/** 根据滚动位置与容器宽度更新滚动按钮与溢出菜单 */
+function updateScrollState(): void {
+  const el = listRef.value
+  if (!el) {
+    canScrollPrev.value = false
+    canScrollNext.value = false
+    hiddenTabs.value = []
+    return
+  }
+  canScrollPrev.value = el.scrollLeft > 1
+  canScrollNext.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+  hiddenTabs.value = collectHiddenTabs()
+}
+
+function scheduleLayout(): void {
+  nextTick(() => {
+    updateScrollState()
+    nextTick(updateScrollState)
+  })
+}
+
+function scrollList(direction: -1 | 1): void {
+  listRef.value?.scrollBy({ left: direction * 160, behavior: 'smooth' })
+}
+
+async function scrollActiveTabIntoView(): Promise<void> {
+  await nextTick()
+  const el = listRef.value
+  const activeId = group.value?.activeTabId
+  if (!el || !activeId) return
+  el.querySelector<HTMLElement>(`[data-tab-id="${activeId}"]`)?.scrollIntoView({
+    inline: 'nearest',
+    block: 'nearest',
+    behavior: 'smooth',
+  })
+  updateScrollState()
+}
+
+/** 标签栏横向滚轮（触控板横向滑动或 Shift+滚轮） */
+function onListWheel(event: WheelEvent): void {
+  const el = listRef.value
+  if (!el || el.scrollWidth <= el.clientWidth) return
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  if (delta === 0) return
+  event.preventDefault()
+  el.scrollBy({ left: delta })
+}
+
+const overflowLabel = computed(() => {
+  const activeId = group.value?.activeTabId
+  if (activeId && hiddenTabs.value.some((tab) => tab.tabId === activeId)) {
+    const active = tabs.value.find((tab) => tab.tabId === activeId)
+    return active ? tabLabel(active) : t('workspace.tabsMore')
+  }
+  const count = hiddenTabs.value.length
+  return count > 0 ? t('workspace.tabsMoreCount', { count }) : t('workspace.tabsMore')
+})
+
+function selectOverflowTab(tab: WorkspaceTab): void {
+  overflowOpen.value = false
+  focusTab(tab)
+}
+
+watch(
+  () => [tabs.value.length, tabs.value.map((tab) => tab.tabId).join('\0')] as const,
+  () => scheduleLayout(),
+)
+
+watch(
+  () => group.value?.activeTabId,
+  () => {
+    scheduleLayout()
+    void scrollActiveTabIntoView()
+  },
+)
+
+onMounted(() => {
+  scheduleLayout()
+  const el = listRef.value
+  if (!el || typeof ResizeObserver === 'undefined') return
+  listResizeObserver = new ResizeObserver(() => scheduleLayout())
+  listResizeObserver.observe(el)
+})
+
+onUnmounted(() => {
+  listResizeObserver?.disconnect()
+  listResizeObserver = null
+})
 
 /** 在本组右侧分屏（打开当前激活 Tab 模块的新实例） */
 function splitHere(): void {
@@ -248,47 +363,112 @@ function onDragEnd(): void {
     @dragover.prevent
     @drop.prevent="onDropStrip"
   >
-    <div class="nm-tabbar__list flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2">
-      <RsContextMenu
-        v-for="tab in tabs"
-        :key="tab.tabId"
-        :items="menuItems(tab)"
-        @select="(key: string) => onMenuSelect(tab, key)"
+    <div class="nm-tabbar__nav flex min-w-0 flex-1 items-center">
+      <button
+        v-if="canScrollPrev"
+        type="button"
+        class="nm-tabbar__scroll"
+        :aria-label="t('workspace.tabsScrollPrev')"
+        :title="t('workspace.tabsScrollPrev')"
+        @click="scrollList(-1)"
       >
-        <div
-          role="tab"
-          tabindex="0"
-          draggable="true"
-          class="nm-tab"
-          :class="{
-            'nm-tab--active': tab.tabId === group?.activeTabId,
-            'nm-tab--dragging': tab.tabId === draggingTabId,
-            'nm-tab--dragover': tab.tabId === dragOverId,
-          }"
-          :aria-selected="tab.tabId === group?.activeTabId"
-          :title="tabLabel(tab)"
-          @click="focusTab(tab)"
-          @keydown.enter="focusTab(tab)"
-          @mousedown.middle.prevent="requestClose(tab)"
-          @dragstart="onDragStart(tab, $event)"
-          @dragover.prevent="onDragOver(tab, $event)"
-          @drop.prevent.stop="onDropTab(tab)"
-          @dragend="onDragEnd"
+        <RsIcon name="chevron-left" :size="14" />
+      </button>
+
+      <div
+        ref="listRef"
+        class="nm-tabbar__list flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+        @scroll="updateScrollState"
+        @wheel="onListWheel"
+      >
+        <RsContextMenu
+          v-for="tab in tabs"
+          :key="tab.tabId"
+          class="nm-tabbar__slot"
+          :items="menuItems(tab)"
+          @select="(key: string) => onMenuSelect(tab, key)"
         >
-          <RsIcon v-if="tab.icon" :name="tab.icon" :size="14" class="nm-tab__icon" />
-          <span class="nm-tab__label">{{ tabLabel(tab) }}</span>
-          <span v-if="tab.dirty" class="nm-tab__dot" aria-hidden="true" />
-          <button
-            v-if="tab.closable"
-            type="button"
-            class="nm-tab__close"
-            :aria-label="t('workspace.closeTab')"
-            @click.stop="requestClose(tab)"
+          <div
+            role="tab"
+            tabindex="0"
+            draggable="true"
+            class="nm-tab"
+            :data-tab-id="tab.tabId"
+            :class="{
+              'nm-tab--active': tab.tabId === group?.activeTabId,
+              'nm-tab--dragging': tab.tabId === draggingTabId,
+              'nm-tab--dragover': tab.tabId === dragOverId,
+            }"
+            :aria-selected="tab.tabId === group?.activeTabId"
+            :title="tabLabel(tab)"
+            @click="focusTab(tab)"
+            @keydown.enter="focusTab(tab)"
+            @mousedown.middle.prevent="requestClose(tab)"
+            @dragstart="onDragStart(tab, $event)"
+            @dragover.prevent="onDragOver(tab, $event)"
+            @drop.prevent.stop="onDropTab(tab)"
+            @dragend="onDragEnd"
           >
-            <RsIcon name="x" :size="12" />
-          </button>
-        </div>
-      </RsContextMenu>
+            <RsIcon v-if="tab.icon" :name="tab.icon" :size="14" class="nm-tab__icon" />
+            <span class="nm-tab__label">{{ tabLabel(tab) }}</span>
+            <span v-if="tab.dirty" class="nm-tab__dot" aria-hidden="true" />
+            <button
+              v-if="tab.closable"
+              type="button"
+              class="nm-tab__close"
+              :aria-label="t('workspace.closeTab')"
+              @click.stop="requestClose(tab)"
+            >
+              <RsIcon name="x" :size="12" />
+            </button>
+          </div>
+        </RsContextMenu>
+      </div>
+
+      <button
+        v-if="canScrollNext"
+        type="button"
+        class="nm-tabbar__scroll"
+        :aria-label="t('workspace.tabsScrollNext')"
+        :title="t('workspace.tabsScrollNext')"
+        @click="scrollList(1)"
+      >
+        <RsIcon name="chevron-right" :size="14" />
+      </button>
+
+      <RsPopover
+        v-if="hiddenTabs.length"
+        v-model:open="overflowOpen"
+        side="bottom"
+        align="end"
+        width="sm"
+      >
+        <button
+          type="button"
+          class="nm-tabbar__overflow"
+          :class="{ 'nm-tabbar__overflow--active': hiddenTabs.some((tab) => tab.tabId === group?.activeTabId) }"
+          :title="overflowLabel"
+        >
+          <span class="nm-tabbar__overflow-label">{{ overflowLabel }}</span>
+          <RsIcon name="chevron-down" :size="12" class="nm-tabbar__overflow-icon" />
+        </button>
+        <template #content>
+          <ul class="nm-tabbar__overflow-menu">
+            <li v-for="tab in hiddenTabs" :key="tab.tabId">
+              <button
+                type="button"
+                class="nm-tabbar__overflow-item"
+                :class="{ 'nm-tabbar__overflow-item--active': tab.tabId === group?.activeTabId }"
+                @click="selectOverflowTab(tab)"
+              >
+                <RsIcon v-if="tab.icon" :name="tab.icon" :size="14" class="nm-tabbar__overflow-item-icon" />
+                <span class="nm-tabbar__overflow-item-label">{{ tabLabel(tab) }}</span>
+                <span v-if="tab.dirty" class="nm-tab__dot" aria-hidden="true" />
+              </button>
+            </li>
+          </ul>
+        </template>
+      </RsPopover>
     </div>
 
     <div class="nm-tabbar__actions flex shrink-0 items-center gap-0.5 px-1">
@@ -328,6 +508,8 @@ function onDragEnd(): void {
 <style scoped>
 .nm-tabbar {
   position: relative;
+  width: 100%;
+  min-width: 0;
 }
 
 /* 激活组：Tab 栏顶部一条高亮线，指示焦点所在分屏 */
@@ -341,6 +523,10 @@ function onDragEnd(): void {
   background: var(--rs-primary);
 }
 
+.nm-tabbar__nav {
+  min-width: 0;
+}
+
 .nm-tabbar__list {
   scrollbar-width: none;
 }
@@ -349,8 +535,14 @@ function onDragEnd(): void {
   height: 0;
 }
 
+/* 透传 flex 布局，避免 ContextMenu 根节点占位 */
+.nm-tabbar__slot {
+  display: contents;
+}
+
 .nm-tab {
-  display: inline-flex;
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 0.375rem;
   max-width: 11rem;
@@ -400,6 +592,8 @@ function onDragEnd(): void {
 }
 
 .nm-tab__label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -463,5 +657,116 @@ function onDragEnd(): void {
 .nm-tabbar__btn:hover {
   background: var(--rs-item-hover);
   color: var(--rs-text);
+}
+
+.nm-tabbar__scroll {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--rs-radius-xs);
+  background: transparent;
+  color: var(--rs-muted);
+  cursor: pointer;
+  transition:
+    background var(--rs-transition-fast),
+    color var(--rs-transition-fast);
+}
+
+.nm-tabbar__scroll:hover {
+  background: var(--rs-item-hover);
+  color: var(--rs-text);
+}
+
+.nm-tabbar__overflow {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.125rem;
+  max-width: 8rem;
+  height: 1.625rem;
+  margin-right: 0.125rem;
+  padding: 0 0.375rem;
+  border: 1px solid transparent;
+  border-radius: var(--rs-radius-xs);
+  background: transparent;
+  color: var(--rs-muted);
+  font-size: var(--nm-font-caption);
+  cursor: pointer;
+  transition:
+    background var(--rs-transition-fast),
+    color var(--rs-transition-fast),
+    border-color var(--rs-transition-fast);
+}
+
+.nm-tabbar__overflow:hover,
+.nm-tabbar__overflow--active {
+  background: var(--rs-item-hover);
+  border-color: var(--rs-border-subtle);
+  color: var(--rs-text);
+}
+
+.nm-tabbar__overflow-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nm-tabbar__overflow-icon {
+  flex-shrink: 0;
+  opacity: 0.72;
+}
+
+.nm-tabbar__overflow-menu {
+  margin: -0.5rem;
+  padding: 0.25rem;
+  list-style: none;
+}
+
+.nm-tabbar__overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  min-width: 8rem;
+  max-width: 16rem;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: var(--rs-radius-xs);
+  background: transparent;
+  color: var(--rs-text);
+  font-size: var(--nm-font-caption);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--rs-transition-fast);
+}
+
+.nm-tabbar__overflow-item:hover {
+  background: var(--rs-item-hover);
+}
+
+.nm-tabbar__overflow-item--active {
+  color: var(--rs-primary);
+}
+
+.nm-tabbar__overflow-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nm-tabbar__overflow-item-icon {
+  flex-shrink: 0;
+  color: var(--rs-muted);
+}
+
+.nm-tabbar__overflow-item--active .nm-tabbar__overflow-item-icon {
+  color: var(--rs-primary);
 }
 </style>

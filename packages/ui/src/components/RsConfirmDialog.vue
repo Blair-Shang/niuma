@@ -24,6 +24,8 @@ withDefaults(
     cancelText?: string
     confirmVariant?: 'primary' | 'danger'
     showOverlay?: boolean
+    /** AlertDialogPortal 挂载目标（id 选择器或 Element） */
+    teleportTo?: string | HTMLElement
   }>(),
   {
     tone: 'danger',
@@ -51,7 +53,7 @@ function onCancel(): void {
 
 <template>
   <AlertDialogRoot v-model:open="open">
-    <AlertDialogPortal>
+    <AlertDialogPortal :to="teleportTo">
       <AlertDialogOverlay v-if="showOverlay" class="rs-confirm-dialog__overlay" />
       <AlertDialogContent
         class="rs-confirm-dialog__content"

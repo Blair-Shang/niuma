@@ -1,0 +1,29 @@
+id: com.niuma.mongodb
+name: MongoDB Service
+version: 0.1.0
+bridge:
+  namespace: mongodb
+  connection_kind: mongodb
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+    - tree.databases
+    - tree.collections
+runtime:
+  executable: bin/niuma-mongodb-service.exe
+  executable_windows: bin/niuma-mongodb-service.exe
+  executable_unix: bin/niuma-mongodb-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.mongodb'
+  address_windows: '\\.\pipe\niuma.mongodb'
+  address_unix: '/tmp/niuma.mongodb.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

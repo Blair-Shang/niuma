@@ -1,0 +1,2 @@
+-- 000003_vault.down.sql
+-- 无操作；对应 000003_vault.up.sql 的空白版本。

@@ -173,12 +173,20 @@ PRIMARY KEY (parent_id, child_id)
 
 ### 5.4 AI
 
-| 表名 | 说明 | 主键 |
-|------|------|------|
-| `nm_ai_provider` | LLM Provider 配置 | `provider_id` |
-| `nm_ai_conversation` | AI 对话 | `conversation_id` |
-| `nm_ai_message` | 对话消息 | `message_id` |
-| `nm_ai_tool_invocation` | Tool 调用流水 | `invocation_id` |
+| 表名 | 说明 | 主键 | 迁移 |
+|------|------|------|------|
+| `nm_ai_provider` | LLM Provider（服务商/接入点）配置 | `provider_id` | 000004 |
+| `nm_ai_model` | Provider 下的模型条目 | `model_id` | 000004 |
+| `nm_mcp_server` | MCP Server 注册 | `server_id` | 000004 |
+| `nm_mcp_tool` | MCP 工具发现缓存 + 启用开关 | `tool_id` | 000004 |
+| `nm_ai_skill` | Skill 提示词模板 + 参数 schema | `skill_id` | 000004 |
+| `nm_ai_conversation` | AI 对话 | `conversation_id` | 规划中 |
+| `nm_ai_message` | 对话消息 | `message_id` | 规划中 |
+| `nm_ai_tool_invocation` | Tool 调用流水 | `invocation_id` | 规划中 |
+
+> **架构约束**（见 `.cursor/rules/external-tools-mcp-skills.mdc`）：MCP / Tool / Skill 的**执行**一律在外部进程（外部 MCP Server），本域仅存**配置与发现缓存**，不把工具实现编译进 Platform Core。`nm_mcp_tool` 是从 MCP Server 拉取的工具清单缓存，可随时按 `server_id` 重建。
+>
+> **密钥不入库**：Provider 的 API Key、MCP Server 的 Token 等只以 `credential_id` 逻辑关联 `nm_credential_ref`（密文/Keychain），业务表不存明文。
 
 ### 5.5 API 测试
 
@@ -256,7 +264,104 @@ CREATE TABLE nm_credential_ref (
 CREATE UNIQUE INDEX uk_nm_cred_ref_label ON nm_credential_ref (credential_label);
 ```
 
-### 6.4 nm_ai_conversation / nm_ai_message
+### 6.4 AI 配置：Provider / 模型 / MCP / Skill（迁移 000004）
+
+```sql
+-- LLM Provider（服务商/接入点）；API Key 走 credential_id
+CREATE TABLE nm_ai_provider (
+    provider_id         TEXT NOT NULL PRIMARY KEY,
+    provider_name       TEXT NOT NULL,                  -- 展示名
+    provider_kind       TEXT NOT NULL,                  -- openai | anthropic | azure_openai | ollama | custom
+    base_url            TEXT,
+    credential_id       TEXT,                           -- 逻辑关联 nm_credential_ref
+    default_model_code  TEXT,
+    provider_options    TEXT NOT NULL DEFAULT '{}',     -- JSON：api_version、organization、extra_headers
+    record_status       TEXT NOT NULL DEFAULT 'active', -- active | disabled
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    row_version         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX uk_nm_ai_provider_name ON nm_ai_provider (provider_name);
+CREATE INDEX idx_nm_ai_provider_status ON nm_ai_provider (record_status, sort_order);
+
+-- 模型（一个 Provider 下可注册多个）
+CREATE TABLE nm_ai_model (
+    model_id            TEXT NOT NULL PRIMARY KEY,
+    provider_id         TEXT NOT NULL,                  -- 逻辑关联 nm_ai_provider
+    model_code          TEXT NOT NULL,                  -- API 模型标识
+    model_label         TEXT NOT NULL,
+    context_window      INTEGER,
+    max_output_tokens   INTEGER,
+    model_options       TEXT NOT NULL DEFAULT '{}',     -- JSON：能力标记（vision/tools/reasoning）
+    record_status       TEXT NOT NULL DEFAULT 'active',
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    row_version         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE INDEX idx_nm_ai_model_provider ON nm_ai_model (provider_id, sort_order);
+CREATE UNIQUE INDEX uk_nm_ai_model_prov_code ON nm_ai_model (provider_id, model_code);
+
+-- MCP Server 注册（执行在外部进程）
+CREATE TABLE nm_mcp_server (
+    server_id           TEXT NOT NULL PRIMARY KEY,
+    server_name         TEXT NOT NULL,
+    transport_kind      TEXT NOT NULL,                  -- stdio | sse | streamable_http
+    endpoint_url        TEXT,
+    command_path        TEXT,
+    launch_options      TEXT NOT NULL DEFAULT '{}',     -- JSON：args、env、headers、timeout
+    credential_id       TEXT,                           -- 逻辑关联 nm_credential_ref
+    record_status       TEXT NOT NULL DEFAULT 'active',
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    row_version         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX uk_nm_mcp_server_name ON nm_mcp_server (server_name);
+CREATE INDEX idx_nm_mcp_server_status ON nm_mcp_server (record_status, sort_order);
+
+-- MCP 工具发现缓存 + 启用开关（非工具实现）
+CREATE TABLE nm_mcp_tool (
+    tool_id             TEXT NOT NULL PRIMARY KEY,
+    server_id           TEXT NOT NULL,                  -- 逻辑关联 nm_mcp_server
+    tool_name           TEXT NOT NULL,                  -- ^[a-zA-Z0-9_-]+$
+    tool_title          TEXT,
+    tool_description    TEXT,
+    input_schema        TEXT NOT NULL DEFAULT '{}',     -- JSON Schema 缓存
+    enabled             INTEGER NOT NULL DEFAULT 1,     -- 0/1
+    discovered_at       TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE INDEX idx_nm_mcp_tool_server ON nm_mcp_tool (server_id);
+CREATE UNIQUE INDEX uk_nm_mcp_tool_srv_name ON nm_mcp_tool (server_id, tool_name);
+
+-- Skill 模板（提示词 + 参数；执行逻辑不入库）
+CREATE TABLE nm_ai_skill (
+    skill_id            TEXT NOT NULL PRIMARY KEY,
+    skill_code          TEXT NOT NULL,                  -- 稳定标识
+    skill_name          TEXT NOT NULL,
+    skill_scope         TEXT,                           -- ops | writing | code ...
+    prompt_template     TEXT NOT NULL,
+    param_schema        TEXT NOT NULL DEFAULT '{}',     -- JSON Schema
+    skill_options       TEXT NOT NULL DEFAULT '{}',     -- JSON：默认模型/温度等
+    record_status       TEXT NOT NULL DEFAULT 'active',
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    row_version         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX uk_nm_ai_skill_code ON nm_ai_skill (skill_code);
+CREATE INDEX idx_nm_ai_skill_status ON nm_ai_skill (record_status, sort_order);
+```
+
+### 6.5 nm_ai_conversation / nm_ai_message
 
 ```sql
 CREATE TABLE nm_ai_conversation (
@@ -284,7 +389,7 @@ CREATE TABLE nm_ai_message (
 CREATE INDEX idx_nm_ai_msg_conv ON nm_ai_message (conversation_id, created_at);
 ```
 
-### 6.5 nm_audit_log
+### 6.6 nm_audit_log
 
 ```sql
 CREATE TABLE nm_audit_log (
@@ -312,6 +417,8 @@ CREATE INDEX idx_nm_audit_log_kind ON nm_audit_log (action_kind, created_at DESC
 |------|------------------|
 | `nm_workspace` | 删其下 `nm_connection_profile`、`nm_ai_conversation`（或禁止删，提示先迁移） |
 | `nm_connection_profile` | 删 `nm_profile_credential`、`nm_recent_access` 引用 |
+| `nm_ai_provider` | 删其下 `nm_ai_model`；清 `credential_id` 指向的 Keychain 条目 |
+| `nm_mcp_server` | 删其下 `nm_mcp_tool` 缓存；清 `credential_id` 指向的 Keychain 条目 |
 | `nm_ai_conversation` | 删 `nm_ai_message`、`nm_ai_tool_invocation` |
 | `nm_api_collection` | 删 `nm_api_folder`、`nm_api_request` |
 | `nm_credential_ref` | 删 Keychain 条目 + `nm_profile_credential`；**无软删恢复** |

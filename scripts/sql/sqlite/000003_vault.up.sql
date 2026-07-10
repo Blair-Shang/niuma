@@ -1,0 +1,3 @@
+-- 000003_vault.up.sql
+-- 密文已直接存入 nm_credential_ref.cipher_text（见 000002），
+-- 无需单独的 nm_vault_secret 表。本版本保留为空白以维持版本序列。

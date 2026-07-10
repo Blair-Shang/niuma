@@ -1,0 +1,14 @@
+[package]
+name = "niuma-tunnel"
+description = "NiuMa 能力服务共用 SSH 隧道与本地转发"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+niuma-netproxy = { path = "../niuma-netproxy" }
+russh = "0.44"
+russh-keys = "0.44"
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

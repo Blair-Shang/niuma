@@ -161,6 +161,21 @@ interface ModuleNavItem {
 
 层级：`workspace → groups[]（编辑组，横向并排）→ 每组 tabs[]（该组的多个实例）`。
 
+> **架构分层**：Tab Store 只管 **L1 页签元数据**；物理连接由
+> [Session Registry](./21-session-registry.md) **L4** 统一管理。
+> 端到端时序与开发者约定见 [21 §0.5–§0.6](./21-session-registry.md#05-端到端时序速查)。
+
+### 6.0 职责边界（Tab 栈内）
+
+| 组件 | 路径 | 职责 |
+|------|------|------|
+| **Tab Store** | `web/src/stores/tab.ts` | `tabId` / `moduleId` / `props` / 编辑组 / Platform 持久化 |
+| **ModuleWorkspace** | `web/src/shell/workspace/ModuleWorkspace.vue` | 每组渲染**当前激活** Tab；`<keep-alive>` 保活 UI |
+| **连接导航** | `useConnectionNavigation` | 树双击 → `openTab` 或聚焦已有 Tab（去重） |
+| **Session Registry** | `session-registry.ts` + `useSessionLease` | `acquire` / `release`；**唯一**调用 `session.open/close` 的 Web 入口 |
+
+**`WorkspaceTab.props` 运维会话常用字段**：`profileId`（必填）、`database` / `collection`（Redis、Mongo）、`tabId`（由 Shell 注入，供树同步）。
+
 ### 6.1 数据模型（`web/src/stores/tab.ts`）
 
 ```ts
@@ -192,7 +207,7 @@ interface EditorGroup {
 | `openModule(id, opts?)` | 默认**聚焦**已存在同模块 Tab（优先激活组），没有才在激活组新建；`forceNew` 时总新建 |
 | `activateTab(id)` | 激活指定 Tab，并把其所在组设为激活组 |
 | `setActiveGroup(gid)` | 设为激活组（点击某组任意处） |
-| `closeTab(id)` | 关闭；若关的是该组当前项，激活相邻 Tab（优先左侧）；组空则回收（保留至少 1 组） |
+| `closeTab(id)` | 关闭；若关的是该组当前项，激活相邻 Tab（优先左侧）；组空则回收（保留至少 1 组）。**规划**：同时 `sessionRegistry.release(id)`，见 [21](./21-session-registry.md) |
 | `closeOthers(id)` / `closeToRight(id)` / `closeAll(id?)` | 同组内批量关闭（保留不可关闭的 Tab），右键菜单用 |
 | `moveTab(id, toIndex)` | **组内**拖拽排序：把 Tab 移到目标下标（越界自动夹取） |
 | `moveTabToGroup(id, gid, toIndex?)` | **跨组**移动 Tab（拖到另一编辑组）；同组时退化为 `moveTab` |
@@ -215,7 +230,9 @@ interface EditorGroup {
 
 - 横向并排渲染 `tabStore.groups`，每组一个 `<section class="nm-group">`（`flex-grow: group.grow`），组间插入可拖拽分隔条（`startResize` 仅调整相邻两组、其余不变，带最小宽度夹取）。
 - 组件由 `resolveModuleComponent(moduleId)` 从模块 registry 的 `load` 解析并**按 moduleId 记忆化**（保证 `<keep-alive>` 缓存稳定）。
-- **每组各一个 `<keep-alive>`** + `:key="tabId"` 渲染该组激活 Tab：组内每个 Tab 独立实例，切走缓存、切回恢复，状态不丢。
+- **每组各一个 `<keep-alive>`** + `:key="tabId"` 渲染该组**当前激活** Tab：
+  - **切换 Tab**：旧实例 `deactivated`（UI 状态保留），**不**等于关闭连接。
+  - **关闭 Tab**：从 `tabStore` 删除条目；keep-alive 内缓存的实例**不保证**立即 `unmount`，故**不可**依赖 `onBeforeUnmount` 释放 Layer-1 会话（见 [21 §0.4](./21-session-registry.md#04-实现状态截至-v02-设计稿)）。
 - 点击某组任意处 → `setActiveGroup`（激活组 TabBar 顶部有高亮线）。跨组拖拽移动 Tab 会在源/目标 keep-alive 间重挂载（该实例状态重置，属预期）。
 - `allTabs` 为空时显示空状态（`workspace.emptyTitle/emptyDesc`）。
 

@@ -1,0 +1,10 @@
+[package]
+name = "niuma-netproxy"
+description = "NiuMa 能力服务共用 HTTP CONNECT / SOCKS5 代理拨号"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

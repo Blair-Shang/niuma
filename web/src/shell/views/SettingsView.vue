@@ -9,9 +9,10 @@ import type { PluginRecord } from '@/api/types/plugin'
 import { useBridgeStore } from '@/stores/bridge'
 import type { ExtensionManifest } from '@/extensions/types/manifest'
 import { computed, onMounted, ref } from 'vue'
+import ComponentsSettingsPanel from '@/shell/views/ComponentsSettingsPanel.vue'
 
 /** 设置分区（VS Code 左右布局：左导航 + 右内容） */
-type SettingsSection = 'appearance' | 'plugins' | 'runtime'
+type SettingsSection = 'appearance' | 'plugins' | 'components' | 'runtime'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -23,6 +24,7 @@ const sections = computed(
   (): { id: SettingsSection; labelKey: string; descKey: string; icon: string }[] => [
     { id: 'appearance', labelKey: 'settings.appearance', descKey: 'settings.appearanceDesc', icon: 'palette' },
     { id: 'plugins', labelKey: 'settings.plugins', descKey: 'settings.pluginsDesc', icon: 'puzzle' },
+    { id: 'components', labelKey: 'settings.components', descKey: 'settings.componentsDesc', icon: 'wrench' },
     { id: 'runtime', labelKey: 'settings.runtime', descKey: 'settings.runtimeDesc', icon: 'activity' },
   ],
 )
@@ -220,6 +222,9 @@ onMounted(() => {
         </div>
         <p v-else class="nm-caption">{{ t('settings.pluginsEmpty') }}</p>
       </section>
+
+      <!-- 工具组件 -->
+      <ComponentsSettingsPanel v-else-if="activeSection === 'components'" />
 
       <!-- 运行时 -->
       <section v-else class="nm-settings__panel">

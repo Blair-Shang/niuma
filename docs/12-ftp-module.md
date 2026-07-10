@@ -82,19 +82,33 @@
 
 ```json
 {
-  "protocol": "ftp",            // ftp | ftps
-  "tls_mode": "none",           // none | explicit | implicit（protocol=ftps 时必填 explicit/implicit）
-  "passive": true,              // 被动模式（默认 true，适配 NAT/防火墙）
-  "encoding": "utf-8",          // utf-8 | gbk（服务器文件名编码）
-  "transfer_type": "binary",    // binary | ascii
-  "tls_verify": true,           // 是否校验服务器证书
+  "protocol": "ftp",
+  "tls_mode": "none",
+  "passive": true,
+  "encoding": "utf-8",
+  "transfer_type": "binary",
+  "tls_verify": true,
   "timeout_seconds": 30,
   "keepalive_seconds": 60,
-  "anonymous": false
+  "anonymous": false,
+  "proxy": { "type": "none" },
+  "accentColor": "blue"
 }
 ```
 
-约束：`connection_kind` 恒为 `'ftp'`；是否加密看 `protocol`/`tls_mode`。凭据信息（密码）**不在** `connection_options` 内。
+字段实现状态（v0.1）：
+
+| 字段 | 状态 |
+|------|------|
+| `protocol`, `tls_mode`, `passive`, `encoding`, `transfer_type`, `tls_verify`, `timeout_seconds`, `anonymous` | **ftp-service 已生效** |
+| `proxy` | **已生效**（TCP 拨号） |
+| `keepalive_seconds` | **仅存储**；建连后保活未实现 |
+| `accentColor` | Web UI 标签色 |
+| `tunnel` | **未实现**；若历史数据中存在则原样保留，不影响 FTP 拨号 |
+
+公共字段命名与跨协议约定见 [14 — 能力连接框架 §9](./14-capability-connection-framework.md)。
+
+约束：`connection_kind` 恒为 `'ftp'`；是否加密看 `protocol`/`tls_mode`。凭据信息（密码）**不在** `connection_options` 内。表单「测试连接」超时见 [14 §9.4](./14-capability-connection-framework.md)（≤12s，与保存值取较小者）。
 
 ### 3.2 迁移
 

@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
     "niuma-logutil",
+    "niuma-netproxy",
     "niuma-serviceipc",
+    "niuma-tunnel",
 ]
 
 [workspace.package]

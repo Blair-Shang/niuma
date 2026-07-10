@@ -9,6 +9,8 @@ const deleteOpen = ref(false)
 const customButtonsOpen = ref(false)
 const primaryConfirmOpen = ref(false)
 const eventOpen = ref(false)
+const scopedConfirmOpen = ref(false)
+const scopedConfirmMount = 'pg-confirm-dialog-mount'
 
 const toneOpen = ref(false)
 const toneConfig = ref<{
@@ -138,6 +140,20 @@ function logEvent(name: string): void {
         @cancel="logEvent('cancel')"
       />
     </DemoBlock>
+
+    <DemoBlock title="teleportTo 挂载点（页签隔离）">
+      <p class="hint">
+        ConfirmDialog 同样支持 <code>teleport-to</code>，可挂载到当前页签容器，避免跨页签覆盖。
+      </p>
+      <RsButton variant="default" @click="scopedConfirmOpen = true">打开挂载点确认框</RsButton>
+      <div :id="scopedConfirmMount" class="scoped-mount" />
+      <RsConfirmDialog
+        v-model:open="scopedConfirmOpen"
+        title="挂载点确认"
+        description="此确认框挂载到本页指定 id。"
+        :teleport-to="`#${scopedConfirmMount}`"
+      />
+    </DemoBlock>
   </DemoPage>
 </template>
 
@@ -165,5 +181,8 @@ function logEvent(name: string): void {
 .event-log code {
   font-size: inherit;
   color: var(--rs-text);
+}
+.scoped-mount {
+  position: relative;
 }
 </style>

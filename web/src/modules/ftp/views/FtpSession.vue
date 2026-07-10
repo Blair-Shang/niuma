@@ -11,9 +11,10 @@ import {
   useRsToast,
   type RsSplitPaneItem,
 } from '@niuma/ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { connectionApi, dialogApi, fsApi, ftpApi } from '@/api'
+import { useSessionLease } from '@/modules/connection/useSessionLease'
 import { openInFile } from '@/modules/file-editor'
 import type { ConnectionProfile, FtpEntry } from '@/api/types/ftp'
 import type { LocalEntry } from '@/api/types/fs'
@@ -39,6 +40,7 @@ import { useTransferHubStore } from '@/stores/transfer-hub'
 
 const props = defineProps<{
   profileId: string
+  tabId?: string
 }>()
 
 const { t } = useI18n()
@@ -47,7 +49,32 @@ const sessionActionStore = useSessionActionStore()
 const transferHub = useTransferHubStore()
 
 const profile = ref<ConnectionProfile | null>(null)
-const sessionId = ref<string | null>(null)
+
+const { sessionId, acquireSession, reconnectSession } = useSessionLease({
+  kind: 'ftp',
+  profileId: () => props.profileId,
+  tabId: () => props.tabId,
+  onAcquired: async (sid) => {
+    transferHub.registerSession({
+      sessionId: sid,
+      provider: 'ftp',
+      label: profile.value?.profileName || profile.value?.hostAddress || 'FTP',
+    })
+    await refreshRemote()
+    await refreshTransfers()
+    await transferHub.refreshSession(sid)
+  },
+  buildOnRelease: () => [
+    () => {
+      const id = sessionId.value
+      if (id) {
+        transferHub.unregisterSession(id)
+      }
+    },
+  ],
+})
+
+const { tasks, enqueue, cancel, pause, resume, refresh: refreshTransfers } = useFtpTransfer(sessionId)
 const remotePath = ref('/')
 const entries = ref<FtpEntry[]>([])
 const localPath = ref('')
@@ -238,8 +265,6 @@ async function enqueueTransferItems(
   }
 }
 
-const { tasks, enqueue, cancel, pause, resume, refresh: refreshTransfers } = useFtpTransfer(sessionId)
-
 type FtpMoveTarget =
   | { kind: 'parent' }
   | { kind: 'dir'; entry: FtpPaneEntry }
@@ -426,16 +451,20 @@ async function openSession(): Promise<void> {
   connecting.value = true
   error.value = null
   try {
-    const result = await ftpApi.sessionOpen({ profileId: props.profileId })
-    sessionId.value = result.sessionId
-    transferHub.registerSession({
-      sessionId: result.sessionId,
-      provider: 'ftp',
-      label: profile.value?.profileName || profile.value?.hostAddress || 'FTP',
-    })
-    await refreshRemote()
-    await refreshTransfers()
-    await transferHub.refreshSession(result.sessionId)
+    await acquireSession()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t('modules.ftp.session.connectError')
+    toast.error(error.value)
+  } finally {
+    connecting.value = false
+  }
+}
+
+async function reconnect(): Promise<void> {
+  connecting.value = true
+  error.value = null
+  try {
+    await reconnectSession()
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('modules.ftp.session.connectError')
     toast.error(error.value)
@@ -958,25 +987,6 @@ async function onRemoteDrop(e: DragEvent): Promise<void> {
   await enqueueTransferItems('upload', planDragUploadItems(payload.entries))
 }
 
-async function reconnect(): Promise<void> {
-  await closeSession()
-  await openSession()
-}
-
-async function closeSession(): Promise<void> {
-  const id = sessionId.value
-  if (!id) {
-    return
-  }
-  transferHub.unregisterSession(id)
-  try {
-    await ftpApi.sessionClose({ sessionId: id })
-  } catch {
-    // 关闭失败不阻断卸载
-  }
-  sessionId.value = null
-}
-
 onMounted(async () => {
   try {
     await loadProfile()
@@ -988,10 +998,6 @@ onMounted(async () => {
     // 先抛出，connecting 会卡在初始的 true，此处兜底确保错误态下不显示无限 loading
     connecting.value = false
   }
-})
-
-onBeforeUnmount(() => {
-  void closeSession()
 })
 
 watch(

@@ -30,7 +30,8 @@ platform/
 └── internal/
     ├── protocol/            # ✅ 报文分帧（长度前缀 + JSON）
     ├── server/              # ✅ 应用 IPC 服务端（命名管道 / UDS）
-    ├── handler/             # ✅ 方法分发（platform.settings.*）
+    ├── handler/             # ✅ 方法分发（platform.settings.*、platform.components.*）
+    ├── components/          # ✅ 工具组件 manifest 加载与 CLI 探测
     ├── store/               # ✅ SQLite 仓储（nm_app_setting KV）
     ├── migrate/             # ✅ 执行内嵌 SQL 迁移（go:embed；copy_migrations.go 从 scripts/sql 生成）
     ├── auth/                # ○ 数据权限 · 模块访问
@@ -45,8 +46,12 @@ platform/
 |--------|------|----------|------|
 | `platform.settings.get` | `{key}` | `{value: string \| null}` | 键不存在时 `value` 为 `null` |
 | `platform.settings.set` | `{key, value}` | `{updated: true}` | UPSERT，刷新 `updated_at` |
+| `platform.components.list` | `{bundleId?}` | `{bundles: [...]}` | 工具组件包及探测状态 |
+| `platform.components.detect` | `{bundleId}` | `{bundle: ...}` | 重新探测单包 |
+| `platform.components.setPath` | `{bundleId, toolId, path}` | `{updated: true}` | 设置/清除可执行文件路径 |
+| `platform.components.getDownload` | `{bundleId, toolId}` | `{url}` | 官方下载页 URL |
 
-契约来源：[web/src/api/settings.ts](../web/src/api/settings.ts)。
+契约来源：[web/src/api/settings.ts](../web/src/api/settings.ts)、[web/src/api/components.ts](../web/src/api/components.ts)、[docs/20-tool-components.md](../docs/20-tool-components.md)。
 
 ## 边界
 

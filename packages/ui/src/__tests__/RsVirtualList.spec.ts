@@ -12,6 +12,7 @@ describe('virtual-list-utils', () => {
   it('resolves list height', () => {
     expect(resolveVirtualListHeight(240)).toBe('240px')
     expect(resolveVirtualListHeight('50%')).toBe('50%')
+    expect(resolveVirtualListHeight(0)).toBeUndefined()
   })
 })
 

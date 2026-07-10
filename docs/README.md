@@ -20,6 +20,10 @@
 | [12-ftp-module.md](./12-ftp-module.md) | FTP 管理模块（能力服务 + Web 模块） |
 | [15-file-editor-window.md](./15-file-editor-window.md) | **文件工作台（多 Tab 查看/编辑窗口，全模块复用）** |
 | [16-ssh-sftp-module.md](./16-ssh-sftp-module.md) | SSH / SFTP 管理模块（能力服务 + Web 模块） |
+| [18-ops-connection-tree.md](./18-ops-connection-tree.md) | **运维连接树与资源子节点（Redis 库展开、SQL 扩展预留）** |
+| [19-mongodb-module.md](./19-mongodb-module.md) | **MongoDB 管理模块（Go 能力服务 + Navicat 架构对齐）** |
+| [20-tool-components.md](./20-tool-components.md) | **工具组件管理（设置页外部 CLI 检测与路径配置）** |
+| [21-session-registry.md](./21-session-registry.md) | **Tab 四层架构 + Session Registry**（时序速查 §0.5、开发者约定 §0.6） |
 | [17-script-platform-layout.md](./17-script-platform-layout.md) | 脚本平台分层与重构方案 |
 | [database-schema.md](./database-schema.md) | 本地离线 SQLite 规范、表结构 |
 
@@ -62,3 +66,7 @@ Platform Core ──→ 多语言 Capability Services
 | v0.1.1 | 2026-07-03 | Platform Core 语言定为 Go |
 | v0.2 | 2026-07-03 | 新增 04/06/10 扩展体系文档；web/extensions、plugins/ 目录 |
 | v0.3 | 2026-07-06 | 15 升级为文件工作台（多 Tab + Provider + 跨模块复用） |
+| v0.4 | 2026-07-09 | 18 运维连接树资源子节点（Redis 库展开设计） |
+| v0.5 | 2026-07-09 | 19 MongoDB 模块设计（Navicat 架构、Go mongodb-service） |
+| v0.6 | 2026-07-09 | 20 工具组件管理（设置页、platform.components.*） |
+| v0.7 | 2026-07-10 | 21 会话注册表设计稿（Tab 与连接生命周期、冲击评估） |

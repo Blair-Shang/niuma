@@ -4,7 +4,7 @@
  */
 
 /** 代理类型（存于 connection_options.proxy） */
-export type ProxyType = 'none' | 'http' | 'socks5'
+export type ProxyType = 'none' | 'http' | 'socks4' | 'socks4a' | 'socks5'
 
 /** 连接代理配置 */
 export interface ProxyOptions {
@@ -15,9 +15,31 @@ export interface ProxyOptions {
   password?: string
 }
 
+export type TunnelType = 'none' | 'ssh'
+
+export interface InjectedSshTunnelProfile {
+  hostAddress: string
+  portNumber: number
+  loginAccount: string
+  /** 认证凭据；新字段名为 `secret`（platform 注入）。 */
+  secret: string
+  options?: Record<string, unknown>
+}
+
+/** SSH 隧道配置：敏感凭据仅由 platform 运行时注入，不落 connection_options。 */
+export interface TunnelOptions {
+  type: TunnelType
+  sshProfileId?: string
+  targetHost?: string
+  targetPort?: number
+  /** platform 运行时注入；FTP / SSH / Redis service 均已消费隧道拨号 */
+  sshProfile?: InjectedSshTunnelProfile
+}
+
 /** 各 connection_kind 的 options 公共字段 */
 export interface ConnectionOptionsBase {
   proxy?: ProxyOptions
+  tunnel?: TunnelOptions
   accentColor?: string
 }
 
@@ -53,7 +75,7 @@ export interface ConnectionProfileInput {
 export interface CredentialInput {
   credentialId?: string
   label: string
-  kind: 'password'
+  kind: 'password' | 'ssh_private_key'
   secret: string
 }
 
@@ -113,11 +135,24 @@ export interface ConnectionDeleteResult {
   deleted: boolean
 }
 
+/** `platform.credential.get` 入参（按站点 ID 从 OS Keychain 读取明文凭据，仅供本地 IPC） */
+export interface CredentialGetParams {
+  profileId: string
+}
+
+/** `platform.credential.get` 返回 */
+export interface CredentialGetResult {
+  /** 凭据明文；found 为 false 时为空字符串 */
+  secret: string
+  /** 站点存在已关联凭据且读取成功时为 true */
+  found: boolean
+}
+
 /** `platform.credential.set` 入参 */
 export interface CredentialSetParams {
   credentialId?: string
   label: string
-  kind: 'password'
+  kind: 'password' | 'ssh_private_key'
   secret: string
 }
 
@@ -143,6 +178,13 @@ export const DEFAULT_PROXY_OPTIONS: ProxyOptions = {
   port: 1080,
   username: '',
   password: '',
+}
+
+export const DEFAULT_TUNNEL_OPTIONS: TunnelOptions = {
+  type: 'none',
+  sshProfileId: '',
+  targetHost: '',
+  targetPort: 0,
 }
 
 export function defaultProxyPort(type: ProxyType): number {

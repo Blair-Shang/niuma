@@ -18,11 +18,14 @@
 
 ### 1.2 暂不纳入
 
-- 公钥认证 / agent forwarding
-- 终端 PTY 全量交互与流式回显完善
-- 端口转发、本地/远程隧道
-- 跳板机 / ProxyJump
-- `known_hosts` 严格校验（MVP 先信任首次主机密钥）
+- SSH agent forwarding
+- 端口转发、本地/远程隧道（Redis 侧 SSH 隧道见 [14 §9.2](./14-capability-connection-framework.md)）
+- `known_hosts` 严格校验（MVP 先信任首次主机密钥，见 §4.1）
+
+### 1.2.1 已纳入（相对初版文档）
+
+- 密码 / 内联私钥 / 私钥文件三种认证（`auth_type`）
+- SFTP 文件浏览与在线编辑（不依赖 `sftp_enabled` 开关）
 
 ### 1.3 关键决策
 
@@ -109,7 +112,7 @@ SSH 连接配置复用现有三张表：
 | 表 | 用途 | SSH 用法 |
 |----|------|----------|
 | `nm_connection_profile` | 连接配置 | `connection_kind = 'ssh'` |
-| `nm_credential_ref` | 凭据引用 | `credential_kind = 'password'`（后续可扩展 `private_key`） |
+| `nm_credential_ref` | 凭据引用 | `password` 或 `ssh_private_key`（由 `auth_type` 决定） |
 | `nm_profile_credential` | 站点与凭据绑定 | 一个 SSH 站点至少绑定一份认证材料 |
 
 ### 4.1 `connection_options`（JSON）
@@ -121,15 +124,35 @@ SSH 连接配置复用现有三张表：
   "term_type": "xterm-256color",
   "encoding": "utf-8",
   "sftp_enabled": true,
-  "verify_host_key": false
+  "verify_host_key": false,
+  "auth_type": "password",
+  "private_key_path": "",
+  "passphrase": "",
+  "proxy": { "type": "none" },
+  "accentColor": "blue"
 }
 ```
 
+字段实现状态（v0.1）：
+
+| 字段 | 状态 |
+|------|------|
+| `timeout_seconds` | **ssh-service 已生效**（建连 + 认证总超时） |
+| `auth_type`, `private_key_path`, `passphrase` | **已生效**；私钥内容在 Keychain，经 platform `password` 字段注入 |
+| `proxy` | **已生效** |
+| `term_type` | **Web 终端**打开时使用（`ssh.terminal.open` 参数 `termType`），非 ConnectOptions |
+| `keepalive_seconds` | **仅存储** |
+| `verify_host_key` | **未生效**；服务当前恒接受主机密钥（与 MVP「信任首次」一致） |
+| `encoding` | **仅存储** |
+| `sftp_enabled` | **仅存储**；UI 始终展示 SFTP 入口 |
+| `accentColor` | Web UI 标签色 |
+| `tunnel` | **未实现**（SSH 服务不消费；历史数据原样保留） |
+
 说明：
 
-- `verify_host_key: false` 为 MVP 默认，后续接 `known_hosts`
-- `sftp_enabled` 用于控制 UI 是否展示远程文件入口
-- 公钥认证落地前，密码不进入 `connection_options`
+- 密码 / 私钥 PEM **不进入** `connection_options`；`private_key_file` 模式仅保存路径。
+- `verify_host_key: false` 为类型默认值；即便设为 `true`，v0.1 后端仍未校验指纹。
+- 公共字段与测试超时约定见 [14 §9](./14-capability-connection-framework.md)。
 
 ---
 

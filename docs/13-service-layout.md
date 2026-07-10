@@ -74,4 +74,6 @@ go build -o ../bin/ftp-service.exe ./cmd/ftp-service
 ## 相关文档
 
 - [12 — FTP 模块](./12-ftp-module.md)
+- [16 — SSH / SFTP 模块](./16-ssh-sftp-module.md)
+- [19 — MongoDB 模块](./19-mongodb-module.md)
 - [11 — Platform Core](./11-platform-core.md)

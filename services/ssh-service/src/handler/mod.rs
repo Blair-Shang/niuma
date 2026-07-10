@@ -92,14 +92,14 @@ impl Dispatcher {
             Err(e) => return Response::err(id, format!("invalid params: {e}")),
         };
         match crate::session::connect_ssh(&params).await {
-            Ok(handle) => {
+            Ok((handle, tunnel)) => {
                 let session_id = match self.ids.next_string() {
                     Ok(s) => s,
                     Err(e) => return Response::err(id, e.to_string()),
                 };
                 if let Err(e) = self
                     .sessions
-                    .insert(session_id.clone(), handle)
+                    .insert(session_id.clone(), handle, tunnel)
                     .await
                 {
                     return Response::err(id, e);
@@ -144,7 +144,7 @@ impl Dispatcher {
             Err(e) => return Response::err(id, format!("invalid params: {e}")),
         };
         match crate::session::connect_ssh(&params).await {
-            Ok(handle) => {
+            Ok((handle, _tunnel)) => {
                 let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
                 Response::ok(
                     id,

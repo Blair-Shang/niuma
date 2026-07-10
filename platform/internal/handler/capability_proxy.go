@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"niuma/pkg/tunnel"
 )
 
 // 连接类能力统一的 session 方法名（Web 与 service 内部一致，经 namespace 前缀区分）。
@@ -25,21 +27,41 @@ const (
 	MethodFTPEntryRename  = "ftp.entry.rename"
 )
 
+// connectBridgeParams 是 Web 发过来的原始连接请求参数。
+// Secret 承载认证凭据；兼容历史字段 `password`（通过 UnmarshalJSON 回退）。
 type connectBridgeParams struct {
 	ProfileID         string          `json:"profileId"`
 	HostAddress       string          `json:"hostAddress"`
 	PortNumber        int             `json:"portNumber"`
 	LoginAccount      string          `json:"loginAccount"`
-	Password          string          `json:"password"`
+	Secret            string          `json:"secret"`
 	Options           json.RawMessage `json:"options"`
 	ConnectionOptions json.RawMessage `json:"connectionOptions"`
 }
 
+// UnmarshalJSON 兼容历史 `password` 字段（Web 旧版仍可能发送 password）。
+func (p *connectBridgeParams) UnmarshalJSON(data []byte) error {
+	type alias connectBridgeParams
+	var raw struct {
+		alias
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*p = connectBridgeParams(raw.alias)
+	if p.Secret == "" && raw.Password != "" {
+		p.Secret = raw.Password
+	}
+	return nil
+}
+
+// injectedConnectParams 是 platform 注入凭据后发送给能力服务的参数。
 type injectedConnectParams struct {
 	HostAddress  string          `json:"hostAddress"`
 	PortNumber   int             `json:"portNumber"`
 	LoginAccount string          `json:"loginAccount"`
-	Password     string          `json:"password"`
+	Secret       string          `json:"secret"`
 	Options      json.RawMessage `json:"options"`
 }
 
@@ -49,10 +71,45 @@ func (r *CapabilityRegistry) Dispatch(ctx context.Context, d *Dispatcher, req Re
 	if !ok {
 		return Response{}, false
 	}
-	if route.manifest.NeedsCredentialInjection(action) {
+	// 凭据注入仅在尚未建立 session 时执行：参数中若已包含有效 sessionId，
+	// 说明服务端 session 已存在，可直接透传，无需再从 profileId 注入凭据。
+	if route.manifest.NeedsCredentialInjection(action) && !paramsHaveSessionID(req.Params) {
 		return r.dispatchWithCredentials(ctx, d, req, route, action), true
 	}
 	return r.forward(ctx, req, route, action), true
+}
+
+// paramsHaveSessionID 检查请求参数中是否携带了非空的 sessionId 字段。
+func paramsHaveSessionID(params json.RawMessage) bool {
+	var p struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return false
+	}
+	return p.SessionID != ""
+}
+
+// mergeWithCredentials 将注入的连接凭据合并进原始请求参数。
+// 凭据字段（hostAddress / portNumber / loginAccount / secret / options）会覆盖原始值，
+// 其余业务字段（如 database、collection 等）保留自原始参数，确保不被凭据注入丢弃。
+func mergeWithCredentials(original json.RawMessage, cred injectedConnectParams) (json.RawMessage, error) {
+	var base map[string]json.RawMessage
+	if err := json.Unmarshal(original, &base); err != nil {
+		return nil, err
+	}
+	credBytes, err := json.Marshal(cred)
+	if err != nil {
+		return nil, err
+	}
+	var credMap map[string]json.RawMessage
+	if err := json.Unmarshal(credBytes, &credMap); err != nil {
+		return nil, err
+	}
+	for k, v := range credMap {
+		base[k] = v
+	}
+	return json.Marshal(base)
 }
 
 func (r *CapabilityRegistry) dispatchWithCredentials(
@@ -89,7 +146,24 @@ func (r *CapabilityRegistry) dispatchWithCredentials(
 		}
 		return okResponse(req.ID, result)
 	default:
-		return errorResponse(req.ID, "method not found: "+req.Method)
+		// 非 session.open/test 方法可能携带业务字段（如 database），
+		// 需将原始参数与注入凭据合并，确保业务字段不被丢失。
+		merged, mergeErr := mergeWithCredentials(req.Params, connect)
+		if mergeErr != nil {
+			return errorResponse(req.ID, fmt.Sprintf("merge params: %v", mergeErr))
+		}
+		var result json.RawMessage
+		if err := route.client.Invoke(ctx, action, merged, &result); err != nil {
+			return errorResponse(req.ID, err.Error())
+		}
+		if len(result) == 0 {
+			return okResponse(req.ID, map[string]any{})
+		}
+		var out any
+		if err := json.Unmarshal(result, &out); err != nil {
+			return errorResponse(req.ID, fmt.Sprintf("invalid service result: %v", err))
+		}
+		return okResponse(req.ID, out)
 	}
 }
 
@@ -149,7 +223,7 @@ func (d *Dispatcher) profilePassword(ctx context.Context, credentialIDs []string
 	if ref == nil {
 		return "", nil
 	}
-	secret, ok, err := d.secrets.GetSecret(ref.KeychainService, ref.KeychainAccount)
+	secret, ok, err := d.secrets.GetSecret(credentialServicePrefix+ref.CredentialID, credentialSecretAccount)
 	if err != nil {
 		return "", err
 	}
@@ -170,12 +244,94 @@ func inlineConnectOptions(opts, connectionOptions json.RawMessage) json.RawMessa
 	return json.RawMessage("{}")
 }
 
-// normalizeFTPPort 内联测试未填端口时回退 FTP 默认 21。
-func normalizeFTPPort(port int) int {
-	if port <= 0 {
-		return 21
+func (d *Dispatcher) injectTunnelOptions(ctx context.Context, opts json.RawMessage) (json.RawMessage, error) {
+	return tunnel.InjectSSHProfile(ctx, opts, tunnel.ProfileResolverFunc(d.resolveTunnelSSHProfile))
+}
+
+func (d *Dispatcher) resolveTunnelSSHProfile(ctx context.Context, profileID string) (tunnel.SSHProfile, error) {
+	if !d.connectStoresAvailable() {
+		return tunnel.SSHProfile{}, fmt.Errorf("connection store unavailable")
 	}
-	return port
+	profile, err := d.connections.Get(ctx, profileID)
+	if err != nil {
+		return tunnel.SSHProfile{}, err
+	}
+	if profile == nil {
+		return tunnel.SSHProfile{}, fmt.Errorf("ssh tunnel profile not found: %s", profileID)
+	}
+	if profile.ConnectionKind != tunnel.ConnectionKindSSH {
+		return tunnel.SSHProfile{}, fmt.Errorf("ssh tunnel profile must be ssh: %s", profileID)
+	}
+	password, err := d.profilePassword(ctx, profile.CredentialIDs, "")
+	if err != nil {
+		return tunnel.SSHProfile{}, err
+	}
+	return tunnel.SSHProfile{
+		HostAddress:  profile.HostAddress,
+		PortNumber:   profile.PortNumber,
+		LoginAccount: profile.LoginAccount,
+		Secret:       password,
+		Options:      profileOptionsJSON(profile.ConnectionOptions),
+	}, nil
+}
+
+// normalizeInlinePort 合并内联覆盖端口：显式端口优先，否则保留 profile 端口；
+// 仍为 0 时留给各能力服务按 connection_kind 取默认（FTP 21、SSH 22、Redis 6379）。
+func normalizeInlinePort(overridePort, profilePort int) int {
+	if overridePort > 0 {
+		return overridePort
+	}
+	if profilePort > 0 {
+		return profilePort
+	}
+	return 0
+}
+
+func (d *Dispatcher) resolveProfileConnectParams(
+	ctx context.Context,
+	params connectBridgeParams,
+) (injectedConnectParams, error) {
+	connect, err := d.resolveConnectParamsFromProfile(ctx, params.ProfileID, params.Secret)
+	if err != nil {
+		return injectedConnectParams{}, err
+	}
+	if params.HostAddress != "" {
+		connect.HostAddress = params.HostAddress
+		connect.PortNumber = normalizeInlinePort(params.PortNumber, connect.PortNumber)
+		connect.LoginAccount = params.LoginAccount
+		if params.Secret != "" {
+			connect.Secret = params.Secret
+		}
+		opts := inlineConnectOptions(params.Options, params.ConnectionOptions)
+		if len(opts) > 0 && string(opts) != "null" {
+			connect.Options = opts
+		}
+	}
+	connect.Options, err = d.injectTunnelOptions(ctx, connect.Options)
+	if err != nil {
+		return injectedConnectParams{}, err
+	}
+	return connect, nil
+}
+
+func (d *Dispatcher) resolveInlineConnectParams(
+	ctx context.Context,
+	params connectBridgeParams,
+) (injectedConnectParams, error) {
+	if params.HostAddress == "" {
+		return injectedConnectParams{}, fmt.Errorf("profileId or hostAddress required")
+	}
+	opts, err := d.injectTunnelOptions(ctx, inlineConnectOptions(params.Options, params.ConnectionOptions))
+	if err != nil {
+		return injectedConnectParams{}, err
+	}
+	return injectedConnectParams{
+		HostAddress:  params.HostAddress,
+		PortNumber:   normalizeInlinePort(params.PortNumber, 0),
+		LoginAccount: params.LoginAccount,
+		Secret:       params.Secret,
+		Options:      opts,
+	}, nil
 }
 
 // resolveConnectParams 解析 Bridge 入参：优先 profileId 查库注入凭据，否则使用内联连接参数（新建站点测试场景）。
@@ -185,34 +341,9 @@ func (d *Dispatcher) resolveConnectParams(ctx context.Context, raw json.RawMessa
 		return injectedConnectParams{}, fmt.Errorf("invalid params: %v", err)
 	}
 	if params.ProfileID != "" {
-		connect, err := d.resolveConnectParamsFromProfile(ctx, params.ProfileID, params.Password)
-		if err != nil {
-			return injectedConnectParams{}, err
-		}
-		if params.HostAddress != "" {
-			connect.HostAddress = params.HostAddress
-			connect.PortNumber = normalizeFTPPort(params.PortNumber)
-			connect.LoginAccount = params.LoginAccount
-			if params.Password != "" {
-				connect.Password = params.Password
-			}
-			opts := inlineConnectOptions(params.Options, params.ConnectionOptions)
-			if len(opts) > 0 && string(opts) != "null" {
-				connect.Options = opts
-			}
-		}
-		return connect, nil
+		return d.resolveProfileConnectParams(ctx, params)
 	}
-	if params.HostAddress == "" {
-		return injectedConnectParams{}, fmt.Errorf("profileId or hostAddress required")
-	}
-	return injectedConnectParams{
-		HostAddress:  params.HostAddress,
-		PortNumber:   normalizeFTPPort(params.PortNumber),
-		LoginAccount: params.LoginAccount,
-		Password:     params.Password,
-		Options:      inlineConnectOptions(params.Options, params.ConnectionOptions),
-	}, nil
+	return d.resolveInlineConnectParams(ctx, params)
 }
 
 // resolveConnectParamsFromProfile 按 profileId 从 SQLite 读取站点，并注入 Keychain 密码后转发给能力服务。
@@ -241,11 +372,15 @@ func (d *Dispatcher) resolveConnectParamsFromProfile(
 		return injectedConnectParams{}, err
 	}
 
+	opts, err := d.injectTunnelOptions(ctx, profileOptionsJSON(profile.ConnectionOptions))
+	if err != nil {
+		return injectedConnectParams{}, err
+	}
 	return injectedConnectParams{
 		HostAddress:  profile.HostAddress,
 		PortNumber:   profile.PortNumber,
 		LoginAccount: profile.LoginAccount,
-		Password:     password,
-		Options:      profileOptionsJSON(profile.ConnectionOptions),
+		Secret:       password,
+		Options:      opts,
 	}, nil
 }

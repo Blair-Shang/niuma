@@ -11,6 +11,7 @@ import ConnectionFormDialog from '@/modules/ops/components/ConnectionFormDialog.
 import ConnectionProfileTable from '@/modules/ops/components/ConnectionProfileTable.vue'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import { useConnectionProfiles } from '@/modules/ops/composables/useConnectionProfiles'
+import FtpConnectionFields from '@/modules/ftp/components/FtpConnectionFields.vue'
 import FtpSession from '@/modules/ftp/views/FtpSession.vue'
 import type { ConnItem } from '@/modules/ops/types'
 
@@ -116,7 +117,11 @@ onMounted(() => {
       @save="onSave"
       @delete="onDelete"
       @test="cx.testConnection()"
-    />
+    >
+      <template #options>
+        <FtpConnectionFields :form="form" />
+      </template>
+    </ConnectionFormDialog>
   </div>
 </template>
 

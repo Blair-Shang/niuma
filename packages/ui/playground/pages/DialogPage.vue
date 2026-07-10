@@ -23,6 +23,12 @@ const toneConfig = ref<{ tone: RsFeedbackTone; title: string }>({
   tone: 'default',
   title: '',
 })
+
+const scopedPanel = ref<'A' | 'B'>('A')
+const scopedOpenA = ref(false)
+const scopedOpenB = ref(false)
+const scopedMountA = 'pg-dialog-mount-a'
+const scopedMountB = 'pg-dialog-mount-b'
 </script>
 
 <template>
@@ -160,6 +166,48 @@ const toneConfig = ref<{ tone: RsFeedbackTone; title: string }>({
         <p class="body-text">当前 tone：<code>{{ toneConfig.tone }}</code></p>
       </RsDialog>
     </DemoBlock>
+
+    <DemoBlock title="teleportTo 挂载点隔离（多页签模拟）">
+      <p class="hint">
+        通过 <code>teleport-to</code> 将 DialogPortal 挂到实例专属 id。切换页签（这里用 A/B 模拟）后，
+        对话框仅在对应挂载点生效，避免覆盖当前活动页签。
+      </p>
+      <div class="row">
+        <RsButton size="sm" variant="default" @click="scopedPanel = 'A'">切到 Panel A</RsButton>
+        <RsButton size="sm" variant="default" @click="scopedPanel = 'B'">切到 Panel B</RsButton>
+        <span class="meta">当前：<code>{{ scopedPanel }}</code></span>
+      </div>
+
+      <section v-if="scopedPanel === 'A'" class="scoped-card">
+        <header class="scoped-card__head">Panel A</header>
+        <RsButton size="sm" @click="scopedOpenA = true">打开 A 对话框</RsButton>
+        <div :id="scopedMountA" class="scoped-mount" />
+        <RsDialog
+          v-model:open="scopedOpenA"
+          title="Panel A 对话框"
+          :teleport-to="`#${scopedMountA}`"
+          :show-overlay="false"
+          :modal="false"
+        >
+          <p class="body-text">挂载到 #{{ scopedMountA }}</p>
+        </RsDialog>
+      </section>
+
+      <section v-else class="scoped-card">
+        <header class="scoped-card__head">Panel B</header>
+        <RsButton size="sm" @click="scopedOpenB = true">打开 B 对话框</RsButton>
+        <div :id="scopedMountB" class="scoped-mount" />
+        <RsDialog
+          v-model:open="scopedOpenB"
+          title="Panel B 对话框"
+          :teleport-to="`#${scopedMountB}`"
+          :show-overlay="false"
+          :modal="false"
+        >
+          <p class="body-text">挂载到 #{{ scopedMountB }}</p>
+        </RsDialog>
+      </section>
+    </DemoBlock>
   </DemoPage>
 </template>
 
@@ -190,5 +238,28 @@ const toneConfig = ref<{ tone: RsFeedbackTone; title: string }>({
   font-family: ui-monospace, monospace;
   font-size: var(--rs-font-size-xs);
   color: var(--rs-muted);
+}
+.meta {
+  font-size: var(--rs-font-size-xs);
+  color: var(--rs-muted);
+}
+.meta code {
+  color: var(--rs-text);
+}
+.scoped-card {
+  border: 1px dashed var(--rs-border);
+  border-radius: var(--rs-radius-sm);
+  padding: var(--rs-space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-sm);
+}
+.scoped-card__head {
+  font-size: var(--rs-font-size-xs);
+  color: var(--rs-muted);
+  font-weight: 600;
+}
+.scoped-mount {
+  position: relative;
 }
 </style>

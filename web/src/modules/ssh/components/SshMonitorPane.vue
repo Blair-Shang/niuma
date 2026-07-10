@@ -195,14 +195,81 @@ async function refreshSelectedProcess(): Promise<void> {
   await inspectProcess(selectedProcess.value)
 }
 
+type HealthAlert = { level: 'critical' | 'warn'; text: string }
+type DiskPeak = { name: string; pct: number }
+type DiskPeaks = { space: DiskPeak; inode: DiskPeak; util: DiskPeak }
+
+function pushUpperBoundAlert(
+  alerts: HealthAlert[],
+  value: number,
+  criticalAt: number,
+  warnAt: number,
+  criticalText: () => string,
+  warnText: () => string,
+): void {
+  if (value >= criticalAt) {
+    alerts.push({ level: 'critical', text: criticalText() })
+  } else if (value >= warnAt) {
+    alerts.push({ level: 'warn', text: warnText() })
+  }
+}
+
+function pushLowerBoundAlert(
+  alerts: HealthAlert[],
+  value: number,
+  criticalAt: number,
+  warnAt: number,
+  criticalText: () => string,
+  warnText: () => string,
+): void {
+  if (value <= criticalAt) {
+    alerts.push({ level: 'critical', text: criticalText() })
+  } else if (value <= warnAt) {
+    alerts.push({ level: 'warn', text: warnText() })
+  }
+}
+
+function updateDiskPeak(current: DiskPeak, name: string, pct: number): DiskPeak {
+  return pct > current.pct ? { name, pct } : current
+}
+
+function diskPeaks(m: SshMetrics): DiskPeaks {
+  let space: DiskPeak = { name: '-', pct: 0 }
+  let inode: DiskPeak = { name: '-', pct: 0 }
+  let util: DiskPeak = { name: '-', pct: 0 }
+  for (const disk of m.disks) {
+    const name = disk.mountpoint || disk.device
+    space = updateDiskPeak(space, name, usagePct(disk.used, disk.total))
+    inode = updateDiskPeak(inode, name, disk.inodeTotal > 0 ? usagePct(disk.inodeUsed, disk.inodeTotal) : 0)
+    util = updateDiskPeak(util, name, disk.utilPct ?? 0)
+  }
+  return { space, inode, util }
+}
+
+function pushDiskPeakAlert(
+  alerts: HealthAlert[],
+  peak: DiskPeak,
+  criticalKey: string,
+  warnKey: string,
+  criticalAt = 90,
+  warnAt = 80,
+): void {
+  pushUpperBoundAlert(
+    alerts,
+    peak.pct,
+    criticalAt,
+    warnAt,
+    () => t(criticalKey, { disk: peak.name, pct: fmtPct(peak.pct) }),
+    () => t(warnKey, { disk: peak.name, pct: fmtPct(peak.pct) }),
+  )
+}
+
 const healthAlerts = computed(() => {
   const m = metrics.value
   if (!m) return []
-  const alerts: Array<{ level: 'critical' | 'warn'; text: string }> = []
+  const alerts: HealthAlert[] = []
   const memAvailPct = m.memTotal > 0 ? (m.memAvailable / m.memTotal) * 100 : 100
-  const maxDiskUtil = m.disks.reduce((max, d) => Math.max(max, d.utilPct ?? 0), 0)
-  const maxDiskUsage = m.disks.reduce((max, d) => Math.max(max, usagePct(d.used, d.total)), 0)
-  const maxInodeUsage = m.disks.reduce((max, d) => Math.max(max, usagePct(d.inodeUsed, d.inodeTotal)), 0)
+  const disk = diskPeaks(m)
   const syn = m.tcpConnections.synRecv + m.tcpConnections.synSent
   const loadPerCore = m.cpuCores > 0 ? m.loadAvg1 / m.cpuCores : m.loadAvg1
 
@@ -211,16 +278,17 @@ const healthAlerts = computed(() => {
   } else if (m.cpuUsage >= 75 || loadPerCore >= 0.75) {
     alerts.push({ level: 'warn', text: t('modules.ssh.monitor.alertCpuWarn', { cpu: fmtPct(m.cpuUsage) }) })
   }
-  if (memAvailPct <= 8) {
-    alerts.push({ level: 'critical', text: t('modules.ssh.monitor.alertMemLow', { pct: fmtPct(memAvailPct) }) })
-  } else if (memAvailPct <= 15) {
-    alerts.push({ level: 'warn', text: t('modules.ssh.monitor.alertMemWarn', { pct: fmtPct(memAvailPct) }) })
-  }
-  if (maxDiskUtil >= 90 || maxDiskUsage >= 90 || maxInodeUsage >= 90) {
-    alerts.push({ level: 'critical', text: t('modules.ssh.monitor.alertDiskHigh') })
-  } else if (maxDiskUtil >= 75 || maxDiskUsage >= 80 || maxInodeUsage >= 80) {
-    alerts.push({ level: 'warn', text: t('modules.ssh.monitor.alertDiskWarn') })
-  }
+  pushLowerBoundAlert(
+    alerts,
+    memAvailPct,
+    8,
+    15,
+    () => t('modules.ssh.monitor.alertMemLow', { pct: fmtPct(memAvailPct) }),
+    () => t('modules.ssh.monitor.alertMemWarn', { pct: fmtPct(memAvailPct) }),
+  )
+  pushDiskPeakAlert(alerts, disk.space, 'modules.ssh.monitor.alertDiskSpaceHigh', 'modules.ssh.monitor.alertDiskSpaceWarn')
+  pushDiskPeakAlert(alerts, disk.inode, 'modules.ssh.monitor.alertDiskInodeHigh', 'modules.ssh.monitor.alertDiskInodeWarn')
+  pushDiskPeakAlert(alerts, disk.util, 'modules.ssh.monitor.alertDiskIoHigh', 'modules.ssh.monitor.alertDiskIoWarn', 90, 75)
   if (syn >= 200) {
     alerts.push({ level: 'warn', text: t('modules.ssh.monitor.alertTcpSyn', { n: syn }) })
   }

@@ -1,17 +1,24 @@
 <script setup lang="ts">
 /**
- * 编辑区（工作区）。支持 **多编辑组分屏**（VS Code editor groups）：
- * 横向并排渲染每个编辑组，**每组各一条 TabBar + 一个 `<keep-alive>`**，按 tabId
- * 为组内每个 Tab 保活独立实例。组间可拖分隔条调整宽度比例；点击某组任意处将其设为
- * 激活组。
+ * 编辑区（工作区）— **L2：ModuleWorkspace + keep-alive**。
  *
- * 设置页与模块一样是**编辑器 Tab**（内置视图，`internal-views.ts`），随普通 Tab 一起
- * 渲染/保活/关闭/分屏，不再是整页覆盖层——对齐 VS Code 打开设置的行为。
+ * 横向并排渲染每个编辑组；**每组各一条 TabBar + 一个 `<keep-alive>`**，
+ * 仅渲染该组**当前激活** Tab 的模块组件（`:key="tabId"`）。
  *
- * 路由只反映「全局激活 Tab（激活组的激活 Tab）属于哪个模块」，与侧栏/活动栏高亮、
- * 深链、前进后退保持一致；内置视图 Tab（如设置）无模块路由，不驱动 URL。
+ * ## 与 L1 / L4 的边界
  *
- * @see docs/09-web-app-shell.md 第 6 节「Tab 工作区」
+ * - **切换 Tab**：旧实例 `deactivated`，UI 状态保留；**不等于**断开物理连接。
+ * - **关闭 Tab**：L1 `tabStore.closeTab` 删除条目；本层缓存的组件实例**不保证**
+ *   立即 unmount，故**不可**依赖 `*Session.vue` 的 `onBeforeUnmount` 调用 `session.close`。
+ * - **物理会话**由 L4 Session Registry 在 `release(tabId)` 时释放（`session-registry.ts`）。
+ *
+ * 组间可拖分隔条调整宽度比例；点击某组任意处将其设为激活组。
+ * 设置页与模块一样是**编辑器 Tab**（内置视图），随普通 Tab 一起渲染/保活/关闭/分屏。
+ *
+ * 路由只反映「全局激活 Tab（激活组的激活 Tab）属于哪个模块」；内置视图 Tab 无模块路由。
+ *
+ * @see docs/09-web-app-shell.md 第 6.3 节
+ * @see docs/21-session-registry.md §0
  */
 import { RsIcon } from '@niuma/ui'
 import { computed, defineAsyncComponent, watch, type Component } from 'vue'
@@ -184,7 +191,7 @@ watch(
                 v-if="component && activeTab"
                 :key="activeTab.tabId"
                 class="nm-workspace-view"
-                v-bind="activeTab.props"
+                v-bind="{ ...activeTab.props, tabId: activeTab.tabId }"
               />
             </keep-alive>
           </div>

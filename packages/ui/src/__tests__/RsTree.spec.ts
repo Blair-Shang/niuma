@@ -312,6 +312,26 @@ describe('RsTree', () => {
     await flushPromises()
     expect(wrapper.find('.rs-tree__row--focused').text()).toContain('B')
   })
+
+  it('emits node-dblclick on a row that was not focused before the gesture', async () => {
+    const onNodeDblclick = vi.fn()
+    const wrapper = mount(RsTree, {
+      props: {
+        nodes: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }],
+        blockNode: true,
+        selectable: false,
+        onNodeDblclick,
+      },
+    })
+    const rows = wrapper.findAll('.rs-tree__row')
+    await rows[0].trigger('click')
+    await rows[1].trigger('dblclick')
+    expect(onNodeDblclick).toHaveBeenCalledTimes(1)
+    expect(onNodeDblclick).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'b', label: 'B' }),
+      'b',
+    )
+  })
 })
 
 describe('tree-utils basics', () => {

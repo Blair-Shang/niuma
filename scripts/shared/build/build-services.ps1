@@ -231,6 +231,8 @@ function Build-RustService {
 $platformOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-platform-core' -PlatformName $Platform)
 $ftpOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ftp-service' -PlatformName $Platform)
 $sshOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ssh-service' -PlatformName $Platform)
+$redisOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-redis-service' -PlatformName $Platform)
+$mongoOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-mongodb-service' -PlatformName $Platform)
 
 $MigrateDir = Join-Path $Root 'platform/internal/migrate'
 Write-Host "==> go generate (sync SQL migrations)" -ForegroundColor Cyan
@@ -252,28 +254,48 @@ Build-GoService -ModuleDir (Join-Path $Root 'services/ftp-service') `
     -Package './cmd/ftp-service' `
     -Output $ftpOut
 
+Build-GoService -ModuleDir (Join-Path $Root 'services/mongodb-service') `
+    -Package './cmd/mongodb-service' `
+    -Output $mongoOut
+
 $sshBuilt = Build-RustService -CrateDir (Join-Path $Root 'services/ssh-service') `
     -BinName 'niuma-ssh-service' `
     -Output $sshOut
+
+$redisBuilt = Build-RustService -CrateDir (Join-Path $Root 'services/redis-service') `
+    -BinName 'niuma-redis-service' `
+    -Output $redisOut
 
 if (Should-SyncLegacyBin) {
     $legacyPlatformOut = Join-Path $BinDir 'niuma-platform-core.exe'
     $legacyFtpOut = Join-Path $BinDir 'niuma-ftp-service.exe'
     $legacySshOut = Join-Path $BinDir 'niuma-ssh-service.exe'
+    $legacyRedisOut = Join-Path $BinDir 'niuma-redis-service.exe'
+    $legacyMongoOut = Join-Path $BinDir 'niuma-mongodb-service.exe'
     Copy-Item -Force $platformOut $legacyPlatformOut
     Copy-Item -Force $ftpOut $legacyFtpOut
+    Copy-Item -Force $mongoOut $legacyMongoOut
     if ($sshBuilt -and (Test-Path $sshOut)) {
         Copy-Item -Force $sshOut $legacySshOut
+    }
+    if ($redisBuilt -and (Test-Path $redisOut)) {
+        Copy-Item -Force $redisOut $legacyRedisOut
     }
 }
 
 Write-Host "==> services ready for ${Platform}/${Arch}:" -ForegroundColor Green
 Write-Host "    $platformOut"
 Write-Host "    $ftpOut"
+Write-Host "    $mongoOut"
 if ($sshBuilt -and (Test-Path $sshOut)) {
     Write-Host "    $sshOut"
 } elseif (Test-Path $sshOut) {
     Write-Host "    $sshOut (existing file, not rebuilt in this run)" -ForegroundColor Yellow
+}
+if ($redisBuilt -and (Test-Path $redisOut)) {
+    Write-Host "    $redisOut"
+} elseif (Test-Path $redisOut) {
+    Write-Host "    $redisOut (existing file, not rebuilt in this run)" -ForegroundColor Yellow
 }
 if (Should-SyncLegacyBin) {
     Write-Host "==> legacy flat bin synced for current Windows host: $BinDir" -ForegroundColor DarkGray

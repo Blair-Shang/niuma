@@ -90,4 +90,110 @@ ipc:
 
 - [13 — 服务目录布局](./13-service-layout.md)
 - [12 — FTP 模块](./12-ftp-module.md)
+- [16 — SSH / SFTP 模块](./16-ssh-sftp-module.md)
 - [04 — 插件体系](./04-plugin-system.md)
+- [21 — 会话注册表](./21-session-registry.md)（Tab 四层架构、L4 生命周期；**新增协议必读 §0.6**）
+
+## 9. `connection_options` 约定（跨协议）
+
+站点非敏感配置统一存入 `nm_connection_profile.connection_options`（JSON）。Bridge 信封与嵌套 options 的命名约定如下。
+
+### 9.1 命名分层
+
+| 层级 | 命名风格 | 示例 |
+|------|----------|------|
+| Bridge 入参 / `platform.connection.*` 响应 | camelCase | `profileId`、`connectionOptions`、`hostAddress` |
+| 公共子对象（各协议共用） | camelCase | `proxy`、`tunnel`、`accentColor` |
+| 协议专属字段（FTP / SSH / Redis） | **snake_case** | `timeout_seconds`、`auth_type`、`sentinel_master_name` |
+
+历史数据若含 camelCase 协议字段（如 Redis `timeoutSeconds`），各服务 **读取时双兼容**；Web 新保存统一写 snake_case。
+
+能力服务收到的 `options` 为 **SQLite 中 JSON 原样透传**（platform 仅做隧道 `sshProfile` 运行时注入，不改写字段名）。
+
+### 9.2 公共字段
+
+```json
+{
+  "accentColor": "blue",
+  "proxy": { "type": "none" },
+  "tunnel": { "type": "none" }
+}
+```
+
+| 字段 | 消费方 | 说明 |
+|------|--------|------|
+| `accentColor` | Web UI | 侧栏/列表标签色；能力服务不读取 |
+| `proxy` | FTP / SSH / Redis | HTTP/SOCKS 代理；`proxy.password` 可存库，编辑时留空表示不修改 |
+| `tunnel` | **Redis（v0.1）** | SSH 跳板隧道；platform 将 `sshProfileId` 展开为 `sshProfile` 后转发。**FTP/SSH 服务尚未消费 tunnel**，表单仅 Redis 展示隧道 Tab |
+
+### 9.3 凭据注入信封（`session.open` / `session.test`）
+
+manifest `session.inject_credentials: true` 时，Web 通常只传 `{ profileId }`。platform 查库后向能力服务转发：
+
+```json
+{
+  "hostAddress": "...",
+  "portNumber": 22,
+  "loginAccount": "...",
+  "password": "...",
+  "options": { /* connection_options 全文 */ }
+}
+```
+
+- `password`：密码认证时为密码；`auth_type=private_key` 时为 **Keychain 中的私钥 PEM 内容**（历史字段名，非 FTP 语义）。
+- 内联测试（新建站点未保存）可传 `hostAddress` + `options` / `connectionOptions`（二者等价，`options` 优先）。
+- 内联 `portNumber <= 0` 时 platform **不**强行默认 21，由各服务按 `connection_kind` 回退（FTP 21、SSH 22、Redis 6379）。
+
+### 9.4 测试连接 vs 正式会话
+
+| 场景 | 超时 | 凭据 |
+|------|------|------|
+| 正式 `session.open` | 使用站点 `connection_options` 中的配置 | platform 从 Keychain 注入 |
+| 表单「测试连接」 | Web 取站点配置与 **12 秒上限** 的较小值（尽快失败反馈） | 新建用表单密码；编辑密码留空则用 `profileId` 注入 |
+
+### 9.5 Redis `connection_options`（摘要）
+
+```json
+{
+  "database": 0,
+  "topology": "standalone",
+  "timeout_seconds": 10,
+  "sentinel_master_name": "",
+  "nodes": [],
+  "proxy": { "type": "none" },
+  "tunnel": { "type": "none" }
+}
+```
+
+历史数据若含 `timeoutSeconds` / `sentinelMasterName`（camelCase），`redis-service` 在**读取时**双兼容；Web 新保存已统一写 snake_case。详见 `web/src/api/types/redis.ts`。
+
+### 9.6 字段实现状态
+
+协议专属字段的 **已生效 / 仅存储** 状态以各模块文档为准（[12](./12-ftp-module.md) §3.1、[16](./16-ssh-sftp-module.md) §4.1、[19](./19-mongodb-module.md) §4.1）。**禁止**在能力服务未实现前将字段标为「已强制生效」。
+
+### 9.7 MongoDB `connection_options`（摘要）
+
+```json
+{
+  "topology": "standalone",
+  "auth_mechanism": "default",
+  "auth_database": "admin",
+  "replica_set": "",
+  "read_preference": "primary",
+  "srv_record": false,
+  "timeout_seconds": 10,
+  "client_driver": "default",
+  "default_database": "",
+  "tool_paths": {
+    "mongosh": "",
+    "mongodump": "",
+    "mongorestore": "",
+    "mongoexport": "",
+    "mongoimport": ""
+  },
+  "proxy": { "type": "none" },
+  "tunnel": { "type": "none" }
+}
+```
+
+Shell 与导入导出走**用户本机外部工具**（mongosh、mongo-tools），在 [20 — 工具组件](./20-tool-components.md) 中配置全局路径；连接级 `tool_paths` 可覆盖。

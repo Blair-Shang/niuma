@@ -16,6 +16,8 @@ const { t } = useI18n()
 const proxyTypeOptions = computed<RsSelectOptions>(() => [
   { value: 'none', label: t('connection.form.proxyNone') },
   { value: 'http', label: 'HTTP' },
+  { value: 'socks4', label: 'SOCKS4' },
+  { value: 'socks4a', label: 'SOCKS4a' },
   { value: 'socks5', label: 'SOCKS5' },
 ])
 

@@ -1,0 +1,106 @@
+id: com.niuma.components.mongodb-tools
+name: MongoDB 官方工具
+module: mongodb
+install:
+  mode: optional_download
+  packages:
+    - id: mongosh
+      os: windows
+      arch: amd64
+      url: https://downloads.mongodb.com/compass/mongosh-2.3.8-win32-x64.zip
+      archive: zip
+      binDir: mongosh-2.3.8-win32-x64/bin
+    - id: database-tools
+      os: windows
+      arch: amd64
+      url: https://fastdl.mongodb.org/tools/db/mongodb-database-tools-windows-x86_64-100.10.0.zip
+      archive: zip
+      binDir: mongodb-database-tools-windows-x86_64-100.10.0/bin
+    - id: mongosh
+      os: linux
+      arch: amd64
+      url: https://downloads.mongodb.com/compass/mongosh-2.3.8-linux-x64.tgz
+      archive: tar.gz
+      binDir: mongosh-2.3.8-linux-x64/bin
+    - id: database-tools
+      os: linux
+      arch: amd64
+      url: https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2204-x86_64-100.10.0.tgz
+      archive: tar.gz
+      binDir: mongodb-database-tools-ubuntu2204-x86_64-100.10.0/bin
+    - id: mongosh
+      os: darwin
+      arch: arm64
+      url: https://downloads.mongodb.com/compass/mongosh-2.3.8-darwin-arm64.zip
+      archive: zip
+      binDir: mongosh-2.3.8-darwin-arm64/bin
+    - id: database-tools
+      os: darwin
+      arch: arm64
+      url: https://fastdl.mongodb.org/tools/db/mongodb-database-tools-macos-arm64-100.10.0.zip
+      archive: zip
+      binDir: mongodb-database-tools-macos-arm64-100.10.0/bin
+    - id: mongosh
+      os: darwin
+      arch: amd64
+      url: https://downloads.mongodb.com/compass/mongosh-2.3.8-darwin-x64.zip
+      archive: zip
+      binDir: mongosh-2.3.8-darwin-x64/bin
+    - id: database-tools
+      os: darwin
+      arch: amd64
+      url: https://fastdl.mongodb.org/tools/db/mongodb-database-tools-macos-x86_64-100.10.0.zip
+      archive: zip
+      binDir: mongodb-database-tools-macos-x86_64-100.10.0/bin
+tools:
+  - id: mongosh
+    displayName: MongoDB Shell
+    detect:
+      executables:
+        - mongosh
+        - mongo
+      versionArgs:
+        - --version
+    install:
+      mode: optional_download
+      downloadPage: https://www.mongodb.com/try/download/shell
+  - id: mongodump
+    displayName: mongodump
+    detect:
+      executables:
+        - mongodump
+      versionArgs:
+        - --version
+    install:
+      mode: optional_download
+      downloadPage: https://www.mongodb.com/try/download/database-tools
+  - id: mongorestore
+    displayName: mongorestore
+    detect:
+      executables:
+        - mongorestore
+      versionArgs:
+        - --version
+    install:
+      mode: optional_download
+      downloadPage: https://www.mongodb.com/try/download/database-tools
+  - id: mongoexport
+    displayName: mongoexport
+    detect:
+      executables:
+        - mongoexport
+      versionArgs:
+        - --version
+    install:
+      mode: optional_download
+      downloadPage: https://www.mongodb.com/try/download/database-tools
+  - id: mongoimport
+    displayName: mongoimport
+    detect:
+      executables:
+        - mongoimport
+      versionArgs:
+        - --version
+    install:
+      mode: optional_download
+      downloadPage: https://www.mongodb.com/try/download/database-tools

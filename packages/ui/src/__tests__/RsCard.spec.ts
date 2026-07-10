@@ -81,4 +81,17 @@ describe('RsCard', () => {
     })
     expect(wrapper.classes()).toContain('rs-card--elevated')
   })
+
+  it('applies variant class', () => {
+    const wrapper = mount(RsCard, {
+      props: { variant: 'plain' },
+      slots: { default: '内容' },
+    })
+    expect(wrapper.classes()).toContain('rs-card--plain')
+  })
+
+  it('defaults to grouped variant', () => {
+    const wrapper = mount(RsCard, { slots: { default: '内容' } })
+    expect(wrapper.classes()).toContain('rs-card--grouped')
+  })
 })

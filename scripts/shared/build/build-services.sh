@@ -110,19 +110,30 @@ nm_log "go generate (sync SQL migrations)"
 platform_out="$TARGET_BIN_DIR/$(binary_name niuma-platform-core "$PLATFORM")"
 ftp_out="$TARGET_BIN_DIR/$(binary_name niuma-ftp-service "$PLATFORM")"
 ssh_out="$TARGET_BIN_DIR/$(binary_name niuma-ssh-service "$PLATFORM")"
+redis_out="$TARGET_BIN_DIR/$(binary_name niuma-redis-service "$PLATFORM")"
+mongo_out="$TARGET_BIN_DIR/$(binary_name niuma-mongodb-service "$PLATFORM")"
 
 build_go_service "$REPO_ROOT/platform" "./cmd/platform-core" "$platform_out"
 build_go_service "$REPO_ROOT/services/ftp-service" "./cmd/ftp-service" "$ftp_out"
+build_go_service "$REPO_ROOT/services/mongodb-service" "./cmd/mongodb-service" "$mongo_out"
 ssh_built="false"
 if build_rust_service "$REPO_ROOT/services/ssh-service" "niuma-ssh-service" "$ssh_out"; then
   ssh_built="true"
+fi
+redis_built="false"
+if build_rust_service "$REPO_ROOT/services/redis-service" "niuma-redis-service" "$redis_out"; then
+  redis_built="true"
 fi
 
 if should_sync_legacy_bin; then
   cp "$platform_out" "$BIN_DIR/$(binary_name niuma-platform-core "$PLATFORM")"
   cp "$ftp_out" "$BIN_DIR/$(binary_name niuma-ftp-service "$PLATFORM")"
+  cp "$mongo_out" "$BIN_DIR/$(binary_name niuma-mongodb-service "$PLATFORM")"
   if [[ "$ssh_built" == "true" && -f "$ssh_out" ]]; then
     cp "$ssh_out" "$BIN_DIR/$(binary_name niuma-ssh-service "$PLATFORM")"
+  fi
+  if [[ "$redis_built" == "true" && -f "$redis_out" ]]; then
+    cp "$redis_out" "$BIN_DIR/$(binary_name niuma-redis-service "$PLATFORM")"
   fi
 fi
 
