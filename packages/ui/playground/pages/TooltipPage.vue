@@ -143,13 +143,18 @@ const aligns = ['start', 'center', 'end'] as const
       </DemoBlock>
 
       <DemoBlock title="场景：表单字段帮助">
-        <p class="hint">在标签旁放置帮助图标，悬停解释字段含义或校验规则。</p>
+        <p class="hint">
+          <code>icon</code> 开启后缀帮助图标（Ant Design / Element 表单说明范式）：仅图标悬停出提示，不干扰点标签聚焦输入框。
+        </p>
         <div class="field-row">
-          <label class="field-label" for="api-key">API Key</label>
-          <RsTooltip side="right" align="start">
-            <button type="button" class="help-btn" aria-label="API Key 说明">
-              <RsIcon name="info" size="sm" />
-            </button>
+          <RsTooltip icon side="top" align="start" content="登录后默认打开的数据库，一般为 postgres 或业务库名。">
+            <label class="field-label" for="db-name">初始数据库</label>
+          </RsTooltip>
+          <input id="db-name" class="field-input" type="text" placeholder="postgres" />
+        </div>
+        <div class="field-row">
+          <RsTooltip icon side="top" align="start">
+            <label class="field-label" for="api-key">API Key</label>
             <template #content>
               <p class="tooltip-line">在控制台「集成」页面生成。</p>
               <p class="tooltip-line">请勿将 Key 提交到公开仓库。</p>

@@ -13,7 +13,7 @@ NiuMa 是一个全能型 AI 运维桌面平台，涵盖：
 - **主机运维**：SSH、SFTP、FTP
 - **数据库运维**：MySQL、PostgreSQL、Oracle 等
 - **扩展工具**：API 测试、数据格式化、视频生成/拼接等
-- **AI 能力**：统一对话与 Tool 调用
+- **AI 能力**：统一对话与 Tool 调用（细则见 [24-ai-assistant.md](./24-ai-assistant.md)）
 
 各功能模块以**可插拔**形式接入；桌面端采用**自封装 CEF**（非 Electron），UI 跨平台一致。
 
@@ -72,7 +72,7 @@ flowchart TB
     end
 
     L1 --> EXT["外部：远程主机 · 数据库 · LLM API"]
-    L2 -.-> KC[OS Keychain]
+    L2 -.-> KC["Vault 密文 + Keychain 主密钥"]
 ```
 
 与 §4 ASCII 栈等价，便于在 Markdown 预览里直接看图。
@@ -280,12 +280,12 @@ flowchart TB
     end
 
     subgraph Secure["系统安全存储"]
-        K[OS Keychain<br/>密码 / 私钥]
+        K["Vault：cipher_text 在 SQLite<br/>OS Keychain：仅主密钥"]
     end
 
     I1 -.->|"Platform migrate"| D1
     I4 -.->|"IPC"| D2
-    D1 -.->|"credential_ref"| K
+    D1 -.->|"VaultStore"| K
 ```
 
 ### 2.9 数据与超大报文流
@@ -357,7 +357,7 @@ flowchart LR
 |------|-------------|---------------|------------------|-----------------|
 | **数据权限**（能否读某 profile/表） | 按 Platform 返回结果展示；可隐藏菜单（**非安全边界**） | ❌ | ✅ **裁决** | 仅执行 Platform 已授权的调用 |
 | **模块访问**（插件是否启用/可见） | 读 registry 渲染 SideNav | ❌ | ✅ manifest + 用户授权 + `nm_plugin_*` | ❌ |
-| **凭据** | 只持 `credential_id` | ❌ 不见明文 | ✅ Keychain 读写 | 接收 Platform 注入的短期令牌 |
+| **凭据** | 只持 `credential_id` | ❌ 不见明文 | ✅ Vault 加解密（Keychain 仅主密钥） | 接收 Platform 注入的短期令牌 |
 | **连接/配置 CRUD** | 表单与列表 UI | ❌ | ✅ 写 SQLite + 校验 | ❌ |
 | **危险操作确认** | ✅ UI 二次确认 | ❌ | ✅ 记录审计、可强制拒绝 | 执行命令 |
 | **审计日志** | 展示 | ❌ | ✅ 写入 `nm_audit_*` | 可选上报细节 |
@@ -522,7 +522,7 @@ shell/
 | gRPC | `google.golang.org/grpc` + `protobuf` |
 | SQLite | `modernc.org/sqlite`（纯 Go，Windows 打包无 CGO） |
 | 迁移 | 自研或 `golang-migrate`，执行 `scripts/sql/sqlite/` |
-| Keychain | `github.com/zalando/go-keyring` 或平台封装 |
+| Vault / 主密钥 | `VaultStore`（密文 SQLite）+ `go-keyring`（仅主密钥） |
 | ID 生成 | 进程内 Snowflake（见 database-schema.md） |
 | 配置 | 环境变量 + `%LOCALAPPDATA%\NiuMa\` |
 

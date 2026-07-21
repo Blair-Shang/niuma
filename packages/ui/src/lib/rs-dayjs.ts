@@ -21,6 +21,15 @@ export const RS_DATE_PARSE_FORMATS = [
   'YYYY-M-D',
 ] as const
 
+/** 日期时间解析：兼容空格分隔与 ISO `T` 分隔（表格/后端常见） */
+export const RS_DATETIME_PARSE_FORMATS = [
+  RS_DATETIME_FORMAT,
+  'YYYY-MM-DD HH:mm',
+  'YYYY-MM-DDTHH:mm:ss',
+  'YYYY-MM-DDTHH:mm',
+  'YYYY-MM-DDTHH:mm:ss.SSS',
+] as const
+
 export function parseRsDayjs(
   value?: string,
   formats: readonly string[] = RS_DATE_PARSE_FORMATS,
@@ -32,8 +41,16 @@ export function parseRsDayjs(
 
 export function parseRsDateTimeDayjs(value?: string): Dayjs | null {
   if (!value) return null
-  const parsed = dayjs(value, RS_DATETIME_FORMAT, true)
-  return parsed.isValid() ? parsed : null
+  // 去掉末尾 Z / 偏移，按本地墙钟解析（选中态与展示一致）
+  const normalized = value
+    .trim()
+    .replace(/Z$/i, '')
+    .replace(/[+-]\d{2}:?\d{2}$/, '')
+  for (const format of RS_DATETIME_PARSE_FORMATS) {
+    const parsed = dayjs(normalized, format, true)
+    if (parsed.isValid()) return parsed
+  }
+  return null
 }
 
 export { dayjs }

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -27,9 +28,10 @@ type StreamManager struct {
 }
 
 type streamEntry struct {
-	streamID  string
-	sessionID string
-	cancel    context.CancelFunc
+	streamID        string
+	sessionID       string
+	cancel          context.CancelFunc
+	intentionalStop bool
 }
 
 // NewStreamManager 创建 Change Stream 管理器。
@@ -94,7 +96,15 @@ func (m *StreamManager) Start(ctx context.Context, sessionID, database, collecti
 	m.bySess[sessionID] = streamID
 	m.mu.Unlock()
 
-	go m.run(runCtx, streamID, stream)
+	m.emitEvent(map[string]any{
+		"type":      "mongodb.monitor.state",
+		"streamId":  streamID,
+		"sessionId": sessionID,
+		"state":     "ready",
+		"message":   "",
+	})
+
+	go m.run(runCtx, streamID, sessionID, stream)
 	return streamID, nil
 }
 
@@ -106,8 +116,7 @@ func (m *StreamManager) Stop(streamID string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("stream not found: %s", streamID)
 	}
-	delete(m.streams, streamID)
-	delete(m.bySess, entry.sessionID)
+	entry.intentionalStop = true
 	m.mu.Unlock()
 	entry.cancel()
 	return nil
@@ -123,15 +132,29 @@ func (m *StreamManager) StopBySession(sessionID string) {
 	}
 }
 
-func (m *StreamManager) run(ctx context.Context, streamID string, stream *mongo.ChangeStream) {
+func (m *StreamManager) run(ctx context.Context, streamID, sessionID string, stream *mongo.ChangeStream) {
 	defer func() {
 		_ = stream.Close(ctx)
 		m.mu.Lock()
-		if entry, ok := m.streams[streamID]; ok {
+		entry, ok := m.streams[streamID]
+		intentional := ok && entry.intentionalStop
+		if ok {
 			delete(m.streams, streamID)
 			delete(m.bySess, entry.sessionID)
 		}
 		m.mu.Unlock()
+
+		state := "lost"
+		if intentional || errors.Is(ctx.Err(), context.Canceled) {
+			state = "closed"
+		}
+		m.emitEvent(map[string]any{
+			"type":      "mongodb.monitor.state",
+			"streamId":  streamID,
+			"sessionId": sessionID,
+			"state":     state,
+			"message":   "",
+		})
 	}()
 
 	for stream.Next(ctx) {

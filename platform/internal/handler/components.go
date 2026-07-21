@@ -114,6 +114,8 @@ func (d *Dispatcher) componentsGetDownload(ctx context.Context, req Request) Res
 
 type componentsInstallParams struct {
 	BundleID string `json:"bundleId"`
+	// ToolID 可选：指定时仅安装覆盖该工具的包（单独安装 / 重新安装）。
+	ToolID string `json:"toolId"`
 }
 
 type componentsInstallResult struct {
@@ -132,7 +134,22 @@ func (d *Dispatcher) componentsInstall(ctx context.Context, req Request) Respons
 	if params.BundleID == "" {
 		return errorResponse(req.ID, "bundleId required")
 	}
-	bundle, err := d.components.Install(ctx, params.BundleID)
+	onProgress := func(p components.InstallProgress) {
+		if d.events == nil {
+			return
+		}
+		d.events.Publish(map[string]any{
+			"type":          "platform.components.install.progress",
+			"bundleId":      p.BundleID,
+			"toolId":        p.ToolID,
+			"packageId":     p.PackageID,
+			"phase":         p.Phase,
+			"bytesReceived": p.BytesReceived,
+			"bytesTotal":    p.BytesTotal,
+			"percent":       p.Percent,
+		})
+	}
+	bundle, err := d.components.Install(ctx, params.BundleID, params.ToolID, onProgress)
 	if err != nil {
 		return errorResponse(req.ID, err.Error())
 	}

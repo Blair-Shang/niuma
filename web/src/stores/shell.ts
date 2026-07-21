@@ -25,7 +25,7 @@ export const useShellStore = defineStore('shell', () => {
   /** 全局底部 Dock（传输队列等）是否展开 */
   const bottomDockOpen = ref(false)
   /** 底部 Dock 当前 Tab */
-  const bottomDockTab = ref<'transfers'>('transfers')
+  const bottomDockTab = ref<'transfers' | 'dataTasks'>('transfers')
   /** 底部 Dock 高度（px） */
   const bottomDockHeight = ref(220)
 
@@ -73,7 +73,7 @@ export const useShellStore = defineStore('shell', () => {
     bottomDockOpen.value = !bottomDockOpen.value
   }
 
-  function openBottomDock(tab: 'transfers' = 'transfers'): void {
+  function openBottomDock(tab: 'transfers' | 'dataTasks' = 'transfers'): void {
     bottomDockTab.value = tab
     bottomDockOpen.value = true
   }

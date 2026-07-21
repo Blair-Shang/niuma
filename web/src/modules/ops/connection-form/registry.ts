@@ -5,8 +5,8 @@ import type { ConnectionFormAdapter } from './types'
  * 连接表单 adapter 注册表。
  *
  * 这里仅保存“表单数据逻辑”，不保存 UI 组件。UI 片段仍由
- * modules/connection/registry.ts 管理。两者都在 ops/connection-kinds.ts 中注册，
- * 这样新增协议时只有一个入口，但数据逻辑与展示逻辑不会混在一起。
+ * modules/connection/registry.ts 管理。两者均在各模块 `register-conn-form.ts` /
+ * `register-conn-full.ts` 中注册，并由 `register-builtin-conn-kinds.ts` 挂懒加载入口。
  */
 const adapters: Partial<Record<ConnKind, ConnectionFormAdapter>> = {}
 

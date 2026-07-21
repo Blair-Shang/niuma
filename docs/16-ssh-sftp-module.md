@@ -138,7 +138,7 @@ SSH 连接配置复用现有三张表：
 | 字段 | 状态 |
 |------|------|
 | `timeout_seconds` | **ssh-service 已生效**（建连 + 认证总超时） |
-| `auth_type`, `private_key_path`, `passphrase` | **已生效**；私钥内容在 Keychain，经 platform `password` 字段注入 |
+| `auth_type`, `private_key_path`, `passphrase` | **已生效**；私钥内容经 Vault 加密存储，经 platform `password` 字段注入 |
 | `proxy` | **已生效** |
 | `term_type` | **Web 终端**打开时使用（`ssh.terminal.open` 参数 `termType`），非 ConnectOptions |
 | `keepalive_seconds` | **仅存储** |

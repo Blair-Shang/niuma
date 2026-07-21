@@ -4,6 +4,7 @@ import ActivityBar from './bars/ActivityBar.vue'
 import SideNav from './panels/SideNav.vue'
 import StatusBar from './bars/StatusBar.vue'
 import BottomDock from './panels/BottomDock.vue'
+import DataTaskHost from '@/shell/data-tasks/DataTaskHost.vue'
 import ModuleWorkspace from './workspace/ModuleWorkspace.vue'
 import AiPanel from './panels/AiPanel.vue'
 import FramelessResizeEdges from '@/shell/widgets/FramelessResizeEdges.vue'
@@ -22,7 +23,7 @@ const shellStore = useShellStore()
 const splitRef = ref<InstanceType<typeof RsSplitPane> | null>(null)
 
 /** 默认 AI 面板占比（展开时） */
-const AI_PANEL_SIZE = 22
+const AI_PANEL_SIZE = 26
 
 const splitPanes = computed<RsSplitPaneItem[]>(() => [
   {
@@ -41,7 +42,7 @@ const splitPanes = computed<RsSplitPaneItem[]>(() => [
   {
     key: 'ai',
     size: AI_PANEL_SIZE,
-    min: 12,
+    min: 16,
     max: 45,
     collapsible: true,
     collapsedSize: 0,
@@ -147,6 +148,7 @@ onUnmounted(() => {
       </RsSplitPane>
     </div>
     <BottomDock />
+    <DataTaskHost />
     <StatusBar />
   </div>
 </template>

@@ -2,6 +2,7 @@
 
 #include "util/json_util.h"
 #include "util/runtime_paths.h"
+#include "util/session_log.h"
 
 #include <functional>
 #include <cstdint>
@@ -9,8 +10,11 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 #if defined(_WIN32)
@@ -38,12 +42,53 @@ namespace {
 
 void PostToUi(std::function<void()> task);
 
+struct StreamSession {
+  std::atomic<bool> stop{false};
+#if defined(_WIN32)
+  HANDLE pipe = INVALID_HANDLE_VALUE;
+#else
+  int fd = -1;
+#endif
+  void CloseConnection() {
+#if defined(_WIN32)
+    if (pipe != INVALID_HANDLE_VALUE) {
+      CloseHandle(pipe);
+      pipe = INVALID_HANDLE_VALUE;
+    }
+#else
+    if (fd >= 0) {
+      close(fd);
+      fd = -1;
+    }
+#endif
+  }
+
+  void Shutdown() {
+    stop.store(true);
+    CloseConnection();
+  }
+};
+
+std::mutex g_stream_mu;
+std::unordered_map<std::string, std::shared_ptr<StreamSession>> g_streams;
+PlatformEventCallback g_stream_callback;
+
+void RemoveStreamSession(const std::string& stream_id,
+                         const std::shared_ptr<StreamSession>& session) {
+  std::lock_guard<std::mutex> lock(g_stream_mu);
+  const auto it = g_streams.find(stream_id);
+  if (it != g_streams.end() && it->second == session) {
+    g_streams.erase(it);
+  }
+}
+
 #if defined(_WIN32)
 
 /// 命名管道地址；必须与 Go platform-core 及 service manifest 保持一致。
 constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\niuma.platform";
 /// Shell 订阅 Platform 推送事件的命名管道（与 platform eventhub 一致）。
 constexpr wchar_t kEventPipeName[] = L"\\\\.\\pipe\\niuma.platform.events";
+constexpr wchar_t kStreamPipeName[] = L"\\\\.\\pipe\\niuma.platform.stream";
 /// 连接尝试次数（覆盖「刚 spawn、监听器尚未就绪」的窗口期）。
 constexpr DWORD kConnectAttempts = 10;
 /// 所有管道实例繁忙时等待空闲的超时（毫秒）。
@@ -74,6 +119,12 @@ class ScopedHandle {
       CloseHandle(handle_);
     }
     handle_ = INVALID_HANDLE_VALUE;
+  }
+
+  HANDLE Release() {
+    HANDLE released = handle_;
+    handle_ = INVALID_HANDLE_VALUE;
+    return released;
   }
 
  private:
@@ -186,6 +237,48 @@ bool SendRecv(const std::string& request, std::string& response,
 
 std::atomic<bool> g_event_listener_stop{false};
 std::atomic<bool> g_event_listener_running{false};
+
+void StreamReaderLoop(std::string open_request, std::string stream_id,
+                    std::shared_ptr<StreamSession> session) {
+  while (!session->stop.load()) {
+    std::string error;
+    ScopedHandle connected = ConnectPipe(kStreamPipeName, error);
+    if (!connected.Valid()) {
+      Sleep(500);
+      continue;
+    }
+    HANDLE pipe = connected.Release();
+    session->pipe = pipe;
+
+    const uint32_t n = static_cast<uint32_t>(open_request.size());
+    unsigned char header[kHeaderBytes] = {
+        static_cast<unsigned char>(n & 0xFF),
+        static_cast<unsigned char>((n >> 8) & 0xFF),
+        static_cast<unsigned char>((n >> 16) & 0xFF),
+        static_cast<unsigned char>((n >> 24) & 0xFF)};
+    if (!WriteAll(pipe, header, kHeaderBytes) ||
+        (n > 0 && !WriteAll(pipe, open_request.data(), n))) {
+      session->CloseConnection();
+      Sleep(200);
+      continue;
+    }
+
+    while (!session->stop.load()) {
+      std::string payload;
+      if (!ReadFrame(pipe, payload, error)) {
+        break;
+      }
+      if (!payload.empty() && g_stream_callback) {
+        PostToUi([payload]() { g_stream_callback(payload); });
+      }
+    }
+    session->CloseConnection();
+    if (!session->stop.load()) {
+      Sleep(200);
+    }
+  }
+  RemoveStreamSession(stream_id, session);
+}
 
 void EventListenerLoop(PlatformEventCallback callback) {
   while (!g_event_listener_stop.load()) {
@@ -317,6 +410,49 @@ bool SendRecv(const std::string& request, std::string& response, std::string& er
 std::atomic<bool> g_event_listener_stop{false};
 std::atomic<bool> g_event_listener_running{false};
 
+void StreamReaderLoop(std::string open_request, std::string stream_id,
+                    std::shared_ptr<StreamSession> session) {
+  const std::string addr = GetPlatformStreamAddress();
+  while (!session->stop.load()) {
+    std::string error;
+    int fd = ConnectUnixSocket(addr, error);
+    if (fd < 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      continue;
+    }
+    session->fd = fd;
+
+    const uint32_t n = static_cast<uint32_t>(open_request.size());
+    unsigned char header[kHeaderBytes] = {
+        static_cast<unsigned char>(n & 0xFF),
+        static_cast<unsigned char>((n >> 8) & 0xFF),
+        static_cast<unsigned char>((n >> 16) & 0xFF),
+        static_cast<unsigned char>((n >> 24) & 0xFF)};
+    const bool wrote = WriteAll(fd, header, kHeaderBytes) &&
+                       (n == 0 || WriteAll(fd, open_request.data(), n));
+    if (!wrote) {
+      session->CloseConnection();
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      continue;
+    }
+
+    while (!session->stop.load()) {
+      std::string payload;
+      if (!ReadFrame(fd, payload, error)) {
+        break;
+      }
+      if (!payload.empty() && g_stream_callback) {
+        PostToUi([payload]() { g_stream_callback(payload); });
+      }
+    }
+    session->CloseConnection();
+    if (!session->stop.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+  }
+  RemoveStreamSession(stream_id, session);
+}
+
 void EventListenerLoop(PlatformEventCallback callback) {
   while (!g_event_listener_stop.load()) {
     std::string error;
@@ -390,7 +526,64 @@ void PlatformClient::Invoke(const std::string& service_id,
 }
 
 void PlatformClient::ShutdownAll() {
+  CloseAllStreams();
   StopEventListener();
+}
+
+void PlatformClient::SetStreamFrameCallback(PlatformEventCallback callback) {
+  g_stream_callback = std::move(callback);
+}
+
+void PlatformClient::OpenStream(const std::string& open_request_json,
+                                const std::string& stream_id) {
+  if (stream_id.empty()) {
+    return;
+  }
+  CloseStream(stream_id);
+  const std::string method = JsonGetString(open_request_json, "method");
+  AppendShellLog("stream open id=" + stream_id +
+                 (method.empty() ? "" : " method=" + method));
+  auto session = std::make_shared<StreamSession>();
+  {
+    std::lock_guard<std::mutex> lock(g_stream_mu);
+    g_streams[stream_id] = session;
+  }
+  std::thread(StreamReaderLoop, open_request_json, stream_id, session).detach();
+}
+
+void PlatformClient::CloseStream(const std::string& stream_id) {
+  std::shared_ptr<StreamSession> session;
+  {
+    std::lock_guard<std::mutex> lock(g_stream_mu);
+    auto it = g_streams.find(stream_id);
+    if (it == g_streams.end()) {
+      return;
+    }
+    session = it->second;
+    g_streams.erase(it);
+  }
+  AppendShellLog("stream close id=" + stream_id);
+  session->Shutdown();
+}
+
+void PlatformClient::CloseAllStreams() {
+  std::vector<std::shared_ptr<StreamSession>> sessions;
+  size_t count = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_stream_mu);
+    count = g_streams.size();
+    sessions.reserve(g_streams.size());
+    for (auto& item : g_streams) {
+      sessions.push_back(item.second);
+    }
+    g_streams.clear();
+  }
+  if (count > 0) {
+    AppendShellLog("stream close all count=" + std::to_string(count));
+  }
+  for (const auto& session : sessions) {
+    session->Shutdown();
+  }
 }
 
 void PlatformClient::StartEventListener(PlatformEventCallback callback) {

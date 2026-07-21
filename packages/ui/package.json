@@ -42,12 +42,15 @@
     "codemirror": "^6.0.2",
     "dayjs": "^1.11.21",
     "lucide-vue-next": "^1.0.0",
+    "monaco-editor": "^0.55.1",
+    "monaco-sql-languages": "^1.2.0",
     "reka-ui": "^2.9.10",
     "vue-sonner": "^2.0.9",
     "xterm": "^5.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
+    "@types/node": "^26.1.1",
     "@vitejs/plugin-vue": "catalog:",
     "@vue/test-utils": "catalog:",
     "jsdom": "catalog:",

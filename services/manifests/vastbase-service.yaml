@@ -1,0 +1,68 @@
+id: com.niuma.vastbase
+name: Vastbase Service
+version: 0.1.0
+bridge:
+  namespace: vastbase
+  connection_kind: vastbase
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+    - tree.databases
+    - tree.schemas
+    - tree.tables
+    - tree.routines
+    - tree.sequences
+    - tree.categoryCounts
+    - catalog.schemas
+    - catalog.tables
+    - catalog.columns
+    - meta.columns
+    - meta.indexes
+    - meta.constraints
+    - meta.ddl
+    - meta.routineSource
+    - meta.dependencies
+    - meta.primaryKey
+    - meta.foreignKeys
+    - meta.databaseCreateOptions
+    - meta.schemaOverview
+    - meta.databaseOverview
+    - meta.instanceOverview
+    - meta.activity
+    - meta.locks
+    - meta.backendCancel
+    - meta.backendTerminate
+    - ddl.script
+    - ddl.exec
+    - ddl.designPreview
+    - ddl.designApply
+    - ddl.createTablePreview
+    - ddl.createTableApply
+    - io.exportCsv
+    - io.importCsv
+    - io.dumpSql
+    - io.execSqlFile
+    # tools.detect 只探测本机二进制路径，无需站点凭据
+    - tools.dump
+    - tools.restore
+    # debug.*：capabilities/start 带 sessionId；其余仅 debugId，走服务内会话，勿注入凭据
+    - debug.capabilities
+    - debug.start
+runtime:
+  executable: bin/niuma-vastbase-service.exe
+  executable_windows: bin/niuma-vastbase-service.exe
+  executable_unix: bin/niuma-vastbase-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.vastbase'
+  address_windows: '\\.\pipe\niuma.vastbase'
+  address_unix: '/tmp/niuma.vastbase.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

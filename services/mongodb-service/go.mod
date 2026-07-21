@@ -3,7 +3,7 @@ module niuma/services/mongodb-service
 go 1.25.0
 
 require (
-	github.com/creack/pty v1.1.24
+	github.com/aymanbagabas/go-pty v0.2.3
 	go.mongodb.org/mongo-driver v1.17.4
 	niuma/pkg/logutil v0.0.0
 	niuma/pkg/netproxy v0.0.0
@@ -13,9 +13,11 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/klauspost/compress v1.16.7 // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
+	github.com/u-root/u-root v0.16.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect

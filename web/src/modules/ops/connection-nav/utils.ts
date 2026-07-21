@@ -45,3 +45,25 @@ export function buildConnectionTabTitle(
   }
   return `${profileName} · DB${database}`
 }
+
+/**
+ * 构造 Tab 悬浮提示文本（完整连接信息 + 资源路径）。
+ *
+ * 当 Tab 标题被缩短（如只显示库名）时，tooltip 承载完整信息供鼠标悬浮查看。
+ * 格式为换行分隔的多行文本，TabBar 会按行拆分渲染。
+ *
+ * 第 1 行：profileName（连接名）
+ * 第 2 行：hostAddress（主机地址）
+ * 第 3 行（可选）：database[.collection]（资源路径）
+ */
+export function buildConnectionTabTooltip(
+  profileName: string,
+  hostAddress: string,
+  mongo?: { database?: string; collection?: string },
+): string {
+  const lines = [profileName, hostAddress]
+  if (mongo?.database) {
+    lines.push(mongo.collection ? `${mongo.database}.${mongo.collection}` : mongo.database)
+  }
+  return lines.join('\n')
+}

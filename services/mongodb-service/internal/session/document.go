@@ -99,9 +99,15 @@ func FindDocuments(ctx context.Context, client *mongo.Client, p FindParams) (*Fi
 		Documents: docs,
 		HasMore:   hasMore,
 	}
-	if p.Skip == 0 && len(filter) == 0 {
-		count, err := coll.EstimatedDocumentCount(ctx)
-		if err == nil {
+	if p.Skip == 0 {
+		var count int64
+		var countErr error
+		if len(filter) == 0 {
+			count, countErr = coll.EstimatedDocumentCount(ctx)
+		} else {
+			count, countErr = coll.CountDocuments(ctx, filter)
+		}
+		if countErr == nil {
 			result.Total = &count
 		}
 	}
@@ -153,6 +159,10 @@ func UpdateDocument(ctx context.Context, client *mongo.Client, database, collect
 	}
 	doc, err := ParseDocument(docRaw)
 	if err != nil {
+		return 0, 0, err
+	}
+	delete(doc, "_id")
+	if err := validateDocumentForReplace(doc); err != nil {
 		return 0, 0, err
 	}
 	doc["_id"] = id

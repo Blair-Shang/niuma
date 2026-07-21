@@ -4,6 +4,7 @@ import { resolveLucideIcon } from '../icons/registry'
 import type { RsComponentSize } from '../theme/types'
 
 const SIZE_PRESET: Record<RsComponentSize, number> = {
+  ssm: 12,
   sm: 14,
   md: 16,
   lg: 20,

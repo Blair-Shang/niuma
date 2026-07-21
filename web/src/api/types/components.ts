@@ -9,6 +9,8 @@ export interface ToolComponentEntry {
   path?: string
   version?: string
   downloadPage?: string
+  /** 当前平台可为该工具单独下载安装 / 重新安装 */
+  installable?: boolean
 }
 
 export interface ToolComponentBundle {
@@ -57,9 +59,23 @@ export interface ComponentsGetDownloadResult {
 
 export interface ComponentsInstallParams {
   bundleId: string
+  /** 指定时仅安装覆盖该工具的包 */
+  toolId?: string
 }
 
 export interface ComponentsInstallResult {
   bundle: ToolComponentBundle
   installed: boolean
+}
+
+/** `platform.components.install.progress` 事件载荷 */
+export interface ComponentsInstallProgressEvent {
+  type: 'platform.components.install.progress'
+  bundleId: string
+  toolId?: string
+  packageId?: string
+  phase: 'downloading' | 'extracting' | 'finalizing' | string
+  bytesReceived?: number
+  bytesTotal?: number
+  percent?: number
 }

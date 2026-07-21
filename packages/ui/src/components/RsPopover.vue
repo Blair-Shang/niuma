@@ -59,6 +59,7 @@ const portalMounted = computed(() => props.forceMount || !props.lazyMount || ope
   background: var(--rs-surface-elevated);
   box-shadow: var(--rs-shadow);
   outline: none;
+  overflow: visible;
 }
 .rs-popover__content--sm {
   width: 12rem;

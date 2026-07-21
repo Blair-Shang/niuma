@@ -24,7 +24,7 @@ export function registerConnectionNavStrategy(kind: ConnKind, strategy: Connecti
 /**
  * 获取已注册的导航策略。
  *
- * @throws 若 kind 已在 CONN_KIND_DEFS 但未注册——说明 `conn-nav-providers` 启动流程遗漏
+ * @throws 若 kind 已在 CONN_KIND_DEFS 但未注册——说明尚未 `ensureConnKind` 或 loader 遗漏
  */
 export function getConnectionNavStrategy(kind: ConnKind): ConnectionNavStrategy {
   const strategy = strategies[kind]

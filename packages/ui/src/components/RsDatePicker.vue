@@ -641,6 +641,8 @@ watch(open, (isOpen) => {
   background: var(--rs-surface-elevated);
   box-shadow: var(--rs-shadow-lg);
   outline: none;
+  /* 允许页脚/时间行完整展示，避免被裁切 */
+  overflow: visible;
 }
 .rs-date-picker__content--range {
   width: min(42rem, calc(100vw - 2rem));
@@ -652,6 +654,7 @@ watch(open, (isOpen) => {
   display: flex;
   flex-direction: column;
   gap: var(--rs-space-sm);
+  overflow: visible;
 }
 .rs-date-picker__range-grid {
   display: grid;
@@ -677,6 +680,8 @@ watch(open, (isOpen) => {
   color: var(--rs-muted);
 }
 .rs-date-picker__footer {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -684,6 +689,7 @@ watch(open, (isOpen) => {
   margin-top: var(--rs-space-xs);
   padding-top: 0.75rem;
   border-top: 1px solid var(--rs-border-subtle);
+  background: var(--rs-surface-elevated);
 }
 .rs-date-picker__link {
   border: 0;
@@ -728,11 +734,14 @@ watch(open, (isOpen) => {
   cursor: not-allowed;
 }
 .rs-date-picker__time-row {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: var(--rs-space-sm);
   padding-top: var(--rs-space-sm);
   border-top: 1px solid var(--rs-border-subtle);
+  background: var(--rs-surface-elevated);
 }
 .rs-date-picker__time-label {
   flex-shrink: 0;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsConfirmDialog, RsContextMenu, RsIcon, RsPopover, type RsContextMenuItem } from '@niuma/ui'
+import { RsConfirmDialog, RsContextMenu, RsIcon, RsPopover, RsTooltip, type RsContextMenuItem } from '@niuma/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabStore, type WorkspaceTab } from '@/stores/tab'
@@ -102,7 +102,7 @@ function menuItems(tab: WorkspaceTab): RsContextMenuItem[] {
   const closableRight = list.filter((t, i) => i > index && t.closable).length
   const closableAll = list.filter((t) => t.closable).length
   const items: RsContextMenuItem[] = []
-  if (tab.moduleId === 'ftp' || tab.moduleId === 'ssh') {
+  if (tab.moduleId === 'ftp' || tab.moduleId === 'ssh' || tab.moduleId === 'mongodb') {
     items.push(
       { key: 'reconnect', label: t('workspace.ctxReconnect'), icon: 'refresh-cw' },
       { key: 'sep-reconnect', label: '', separator: true },
@@ -388,40 +388,54 @@ function onDragEnd(): void {
           :items="menuItems(tab)"
           @select="(key: string) => onMenuSelect(tab, key)"
         >
-          <div
-            role="tab"
-            tabindex="0"
-            draggable="true"
-            class="nm-tab"
-            :data-tab-id="tab.tabId"
-            :class="{
-              'nm-tab--active': tab.tabId === group?.activeTabId,
-              'nm-tab--dragging': tab.tabId === draggingTabId,
-              'nm-tab--dragover': tab.tabId === dragOverId,
-            }"
-            :aria-selected="tab.tabId === group?.activeTabId"
-            :title="tabLabel(tab)"
-            @click="focusTab(tab)"
-            @keydown.enter="focusTab(tab)"
-            @mousedown.middle.prevent="requestClose(tab)"
-            @dragstart="onDragStart(tab, $event)"
-            @dragover.prevent="onDragOver(tab, $event)"
-            @drop.prevent.stop="onDropTab(tab)"
-            @dragend="onDragEnd"
-          >
-            <RsIcon v-if="tab.icon" :name="tab.icon" :size="14" class="nm-tab__icon" />
-            <span class="nm-tab__label">{{ tabLabel(tab) }}</span>
-            <span v-if="tab.dirty" class="nm-tab__dot" aria-hidden="true" />
-            <button
-              v-if="tab.closable"
-              type="button"
-              class="nm-tab__close"
-              :aria-label="t('workspace.closeTab')"
-              @click.stop="requestClose(tab)"
+          <RsTooltip side="bottom" :side-offset="4">
+            <div
+              role="tab"
+              tabindex="0"
+              draggable="true"
+              class="nm-tab"
+              :data-tab-id="tab.tabId"
+              :class="{
+                'nm-tab--active': tab.tabId === group?.activeTabId,
+                'nm-tab--dragging': tab.tabId === draggingTabId,
+                'nm-tab--dragover': tab.tabId === dragOverId,
+              }"
+              :aria-selected="tab.tabId === group?.activeTabId"
+              @click="focusTab(tab)"
+              @keydown.enter="focusTab(tab)"
+              @mousedown.middle.prevent="requestClose(tab)"
+              @dragstart="onDragStart(tab, $event)"
+              @dragover.prevent="onDragOver(tab, $event)"
+              @drop.prevent.stop="onDropTab(tab)"
+              @dragend="onDragEnd"
             >
-              <RsIcon name="x" :size="12" />
-            </button>
-          </div>
+              <RsIcon v-if="tab.icon" :name="tab.icon" :size="14" class="nm-tab__icon" />
+              <span class="nm-tab__label">{{ tabLabel(tab) }}</span>
+              <span v-if="tab.dirty" class="nm-tab__dot" aria-hidden="true" />
+              <button
+                v-if="tab.closable"
+                type="button"
+                class="nm-tab__close"
+                :aria-label="t('workspace.closeTab')"
+                @click.stop="requestClose(tab)"
+              >
+                <RsIcon name="x" :size="12" />
+              </button>
+            </div>
+            <template #content>
+              <div class="nm-tab-tip">
+                <template v-if="tab.tooltip">
+                  <span
+                    v-for="(line, i) in tab.tooltip.split('\n')"
+                    :key="i"
+                    class="nm-tab-tip__line"
+                    :class="{ 'nm-tab-tip__line--sub': i > 0 }"
+                  >{{ line }}</span>
+                </template>
+                <span v-else class="nm-tab-tip__line">{{ tabLabel(tab) }}</span>
+              </div>
+            </template>
+          </RsTooltip>
         </RsContextMenu>
       </div>
 
@@ -506,6 +520,27 @@ function onDragEnd(): void {
 </template>
 
 <style scoped>
+.nm-tab-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.nm-tab-tip__line {
+  display: block;
+  max-width: 100%;
+  color: var(--rs-text);
+  font-size: var(--rs-font-size-xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.nm-tab-tip__line--sub {
+  color: var(--rs-muted);
+}
+
 .nm-tabbar {
   position: relative;
   width: 100%;

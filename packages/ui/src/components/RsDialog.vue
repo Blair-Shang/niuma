@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue'
 import {
   DialogContent,
   DialogDescription,
@@ -32,18 +32,26 @@ const props = withDefaults(
     closeOnOverlayClick?: boolean
     /** DialogPortal 挂载目标（id 选择器或 Element） */
     teleportTo?: string | HTMLElement
+    /**
+     * 延后挂载 #body 插槽，避免与打开动画/重组件 init 争抢主线程。
+     * 默认：window 布局为 true，confirm 为 false。
+     */
+    deferBodyMount?: boolean
+    /** 全屏/还原时是否播放 bounds 过渡（含编辑器时建议保持 false） */
+    boundsTransition?: boolean
   }>(),
   {
     width: 'md',
     tone: 'default',
-    layout: 'confirm',
+    layout: 'window',
     draggable: false,
-    resizable: false,
-    fullscreenable: false,
+    resizable: true,
+    fullscreenable: true,
     modal: true,
     showOverlay: false,
     showClose: true,
     closeOnOverlayClick: false,
+    boundsTransition: false,
   },
 )
 
@@ -52,9 +60,66 @@ const isWindowLayout = computed(() => props.layout === 'window')
 const isConfirmLayout = computed(() => props.layout === 'confirm')
 const enableDraggable = computed(() => props.draggable && isWindowLayout.value)
 const enableResizable = computed(() => props.resizable && isWindowLayout.value)
+const deferBodyMount = computed(() => props.deferBodyMount ?? isWindowLayout.value)
+
+const bodyReady = ref(false)
+let bodyMountFrameOuter = 0
+let bodyMountFrameInner = 0
+
+function resetBodyMount(): void {
+  if (bodyMountFrameOuter) {
+    cancelAnimationFrame(bodyMountFrameOuter)
+    bodyMountFrameOuter = 0
+  }
+  if (bodyMountFrameInner) {
+    cancelAnimationFrame(bodyMountFrameInner)
+    bodyMountFrameInner = 0
+  }
+  bodyReady.value = false
+}
+
+function scheduleBodyMount(): void {
+  resetBodyMount()
+  bodyMountFrameOuter = requestAnimationFrame(() => {
+    bodyMountFrameOuter = 0
+    bodyMountFrameInner = requestAnimationFrame(() => {
+      bodyMountFrameInner = 0
+      if (open.value) bodyReady.value = true
+    })
+  })
+}
+
+watch(
+  [open, deferBodyMount],
+  ([isOpen, defer]) => {
+    if (!isOpen || !defer) {
+      resetBodyMount()
+      if (isOpen) bodyReady.value = true
+      return
+    }
+    scheduleBodyMount()
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(resetBodyMount)
+
+const showBodyContent = computed(() => !deferBodyMount.value || bodyReady.value)
+
+/** 非模态窗允许外部交互；模态且不允许点遮罩关闭时拦截 outside。 */
+function onPointerDownOutside(event: Event): void {
+  if (!props.modal) return
+  if (!props.closeOnOverlayClick) event.preventDefault()
+}
+
+function onInteractOutside(event: Event): void {
+  if (!props.modal) return
+  if (!props.closeOnOverlayClick) event.preventDefault()
+}
 
 const {
   isFullscreen,
+  boundsTransitionEnabled,
   dialogStyle,
   resizeHandles,
   toggleFullscreen,
@@ -66,6 +131,7 @@ const {
   draggable: enableDraggable,
   resizable: enableResizable,
   compact: isConfirmLayout,
+  boundsTransition: toRef(props, 'boundsTransition'),
 })
 </script>
 
@@ -79,11 +145,15 @@ const {
           `rs-dialog__content--${width}`,
           `rs-dialog__content--${layout}`,
           `rs-dialog__content--tone-${tone}`,
-          { 'rs-dialog__content--fullscreen': isFullscreen },
+          {
+            'rs-dialog__content--fullscreen': isFullscreen,
+            'rs-dialog__content--draggable': enableDraggable,
+            'rs-dialog__content--bounds-transition': boundsTransitionEnabled,
+          },
         ]"
         :style="isWindowLayout ? dialogStyle : undefined"
-        @pointer-down-outside="closeOnOverlayClick ? undefined : $event.preventDefault()"
-        @interact-outside="closeOnOverlayClick ? undefined : $event.preventDefault()"
+        @pointer-down-outside="onPointerDownOutside"
+        @interact-outside="onInteractOutside"
       >
         <template v-if="enableResizable && !isFullscreen">
           <div
@@ -123,8 +193,11 @@ const {
             />
           </div>
         </header>
-        <div class="rs-dialog__body">
-          <slot />
+        <div class="rs-dialog__body" :aria-busy="deferBodyMount && !bodyReady ? 'true' : undefined">
+          <slot v-if="showBodyContent" name="body" />
+          <div v-else class="rs-dialog__body-placeholder">
+            <slot name="body-placeholder" />
+          </div>
         </div>
         <footer v-if="$slots.footer" class="rs-dialog__footer">
           <slot name="footer" />
@@ -152,11 +225,18 @@ const {
 .rs-dialog__content {
   position: fixed;
   left: 50%;
-  top: 50%;
+  top: calc(
+    var(--rs-dialog-inset-top, 1rem) +
+      (100vh - var(--rs-dialog-inset-top, 1rem) - var(--rs-dialog-inset-bottom, 1rem)) / 2
+  );
   z-index: calc(var(--rs-z-modal) + 1);
   display: flex;
-  max-height: min(90vh, 40rem);
-  width: calc(100% - 2rem);
+  max-height: min(
+    calc(100vh - var(--rs-dialog-inset-top, 1rem) - var(--rs-dialog-inset-bottom, 1rem) - 2rem),
+    40rem
+  );
+  width: calc(100vw - 2 * var(--rs-dialog-inset-x, 1rem));
+  max-width: calc(100vw - 2 * var(--rs-dialog-inset-x, 1rem));
   flex-direction: column;
   transform: translate(-50%, -50%);
   overflow: hidden;
@@ -167,11 +247,14 @@ const {
   outline: none;
 }
 
-/* 亮色：轻微 vibrancy；暗色：实底分层（token 在 styles.css） */
-[data-rs-theme='light'] .rs-dialog__content {
+/* 亮色 confirm：轻微 vibrancy；window 用实底避免 CEF 下 blur 合成开销 */
+[data-rs-theme='light'] .rs-dialog__content--confirm {
   background: color-mix(in srgb, var(--rs-dialog-bg) 94%, transparent);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+[data-rs-theme='light'] .rs-dialog__content--window {
+  background: var(--rs-dialog-bg);
 }
 /* confirm 布局：缩放 + 淡入（居中，含 translate）；苹果 sheet 缓动曲线 */
 .rs-dialog__content--confirm[data-state='open'] {
@@ -246,6 +329,14 @@ const {
   max-height: none;
   transform: none;
 }
+.rs-dialog__content--window.rs-dialog__content--bounds-transition {
+  transition:
+    left 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    top 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    width 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
 .rs-dialog__content--sm {
   max-width: 24rem;
 }
@@ -274,7 +365,7 @@ const {
   border-bottom: 1px solid var(--rs-dialog-separator);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
-.rs-dialog__content--window .rs-dialog__header {
+.rs-dialog__content--window.rs-dialog__content--draggable .rs-dialog__header {
   cursor: grab;
   user-select: none;
 }
@@ -308,6 +399,14 @@ const {
   overflow: auto;
   padding: 1.25rem;
   background: var(--rs-dialog-body-bg);
+}
+.rs-dialog__content--window .rs-dialog__body {
+  display: flex;
+  flex-direction: column;
+}
+.rs-dialog__body-placeholder {
+  flex: 1;
+  min-height: 0;
 }
 .rs-dialog__footer {
   display: flex;

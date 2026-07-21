@@ -6,6 +6,8 @@ export const CONN_KIND_DEFS = [
   { kind: 'ftp' as const, label: 'FTP', icon: 'ftp', defaultPort: 21 },
   { kind: 'redis' as const, label: 'Redis', icon: 'redis', defaultPort: 6379 },
   { kind: 'mongodb' as const, label: 'MongoDB', icon: 'mongodb', defaultPort: 27017 },
+  { kind: 'vastbase' as const, label: 'Vastbase', icon: 'vastbase', defaultPort: 5432 },
+  { kind: 'mysql' as const, label: 'MySQL', icon: 'mysql', defaultPort: 3306 },
 ] as const
 
 /** macOS 标签色盘（Finder / Terminal 连接标记风格） */

@@ -19,6 +19,12 @@ type Hub struct {
 	mu         sync.Mutex
 	shellConns map[net.Conn]struct{}
 	progress   *progressCoalescer
+	stream     streamDeliverer
+}
+
+// streamDeliverer 由 streamserver 实现，用于独占投递高频流事件。
+type streamDeliverer interface {
+	DeliverExclusive(payload []byte) bool
 }
 
 // New 创建事件中枢。
@@ -26,6 +32,11 @@ func New() *Hub {
 	h := &Hub{shellConns: make(map[net.Conn]struct{})}
 	h.progress = newProgressCoalescer(h, progressCoalesceInterval)
 	return h
+}
+
+// SetStreamDeliverer 注入流服务（Platform 管理面，不含业务规则）。
+func (h *Hub) SetStreamDeliverer(d streamDeliverer) {
+	h.stream = d
 }
 
 // Serve 同时启动事件入口与 Shell 订阅监听，直到 ctx 取消。
@@ -93,6 +104,9 @@ func (h *Hub) handleIngestConn(ctx context.Context, conn net.Conn) {
 }
 
 func (h *Hub) ingest(payload []byte) {
+	if h.stream != nil && h.stream.DeliverExclusive(payload) {
+		return
+	}
 	h.progress.handle(payload)
 }
 

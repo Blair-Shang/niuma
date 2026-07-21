@@ -23,6 +23,8 @@ ipc:
   # 反向事件通道（与 RPC 分离，见 docs/12-ftp-module.md §7.2）
   event_ingest: '\\.\pipe\niuma.platform.eventin'
   event_shell: '\\.\pipe\niuma.platform.events'
+  stream: '\\.\pipe\niuma.platform.stream'
+  stream_unix: '/tmp/niuma.platform.stream.sock'
   # 日志目录：壳层设 NIUMMA_LOG_DIR=<repo>/logs/<session>/；默认根为仓库 logs/
   # 各进程 <name>.log 单文件 100 MiB 滚动为 <name>.log.1；保留最近 15 次会话或 30 天内
 lifecycle:

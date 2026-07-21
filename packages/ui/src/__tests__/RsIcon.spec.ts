@@ -34,6 +34,25 @@ describe('RsIcon', () => {
     expect(isRsIconName('mongodb')).toBe(true)
   })
 
+  it('loads custom vastbase icon', () => {
+    const icon = resolveLucideIcon('vastbase')
+    expect(icon).toBeTruthy()
+    const wrapper = mount(RsIcon, { props: { name: 'vastbase' } })
+    expect(wrapper.find('svg.rs-icon').exists()).toBe(true)
+    expect(wrapper.find('.vastbase-icon__mark').exists()).toBe(true)
+    expect(wrapper.findAll('.vastbase-icon__mark')).toHaveLength(6)
+    expect(isRsIconName('vastbase')).toBe(true)
+  })
+
+  it('loads custom mysql icon', () => {
+    const icon = resolveLucideIcon('mysql')
+    expect(icon).toBeTruthy()
+    const wrapper = mount(RsIcon, { props: { name: 'mysql' } })
+    expect(wrapper.find('svg.rs-icon').exists()).toBe(true)
+    expect(wrapper.find('.mysql-icon__mark').exists()).toBe(true)
+    expect(isRsIconName('mysql')).toBe(true)
+  })
+
   it('loads arbitrary lucide icon by name', () => {
     const icon = resolveLucideIcon('trash-2')
     expect(icon).toBeTruthy()
@@ -108,6 +127,16 @@ describe('RsIcon', () => {
   it('applies accent color to custom mongodb icon', () => {
     const wrapper = mount(RsIcon, { props: { name: 'mongodb', color: '#34C759' } })
     expect(wrapper.find('svg').attributes('style')).toContain('--rs-icon-mongodb-accent: #34C759')
+  })
+
+  it('applies accent color to custom vastbase icon', () => {
+    const wrapper = mount(RsIcon, { props: { name: 'vastbase', color: '#34C759' } })
+    expect(wrapper.find('svg').attributes('style')).toContain('--rs-icon-vastbase-accent: #34C759')
+  })
+
+  it('applies accent color to custom mysql icon', () => {
+    const wrapper = mount(RsIcon, { props: { name: 'mysql', color: '#34C759' } })
+    expect(wrapper.find('svg').attributes('style')).toContain('--rs-icon-mysql-accent: #34C759')
   })
 
   it('applies rotate transform', () => {

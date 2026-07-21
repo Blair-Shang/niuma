@@ -13,6 +13,7 @@ import {
   sliceVirtualTreeNodes,
   splitTreeLabelHighlight,
   toggleTreeCheck,
+  type RsTreeNode,
 } from '../components/tree-utils'
 
 const nodes = [
@@ -48,6 +49,32 @@ describe('tree-utils', () => {
     const expanded = new Set(['root'])
     const flat = flattenVisibleTreeNodes(nodes, expanded)
     expect(flat.map((item) => item.key)).toEqual(['root', 'child-a', 'child-b'])
+  })
+
+  it('tracks ancestor levelLines for continuous showLine guides', () => {
+    const tree: RsTreeNode[] = [
+      {
+        key: 'a',
+        label: 'A',
+        children: [
+          { key: 'a1', label: 'A1' },
+          {
+            key: 'a2',
+            label: 'A2',
+            children: [{ key: 'a2x', label: 'A2X' }],
+          },
+        ],
+      },
+      { key: 'b', label: 'B' },
+    ]
+    const flat = flattenVisibleTreeNodes(tree, new Set(['a', 'a2']))
+    const a2x = flat.find((item) => item.key === 'a2x')
+    // a 不是末项 → 子树行需保留 depth0 贯穿线；a2 是 a 下末项 → depth1 应断开
+    expect(a2x?.levelLines).toEqual([true, false])
+    expect(a2x?.isLast).toBe(true)
+    const a1 = flat.find((item) => item.key === 'a1')
+    expect(a1?.levelLines).toEqual([true])
+    expect(a1?.isLast).toBe(false)
   })
 
   it('toggles parent-child checks', () => {
@@ -91,6 +118,7 @@ describe('tree-utils', () => {
       hasChildren: false,
       isLast: index === 199,
       parentKey: null,
+      levelLines: [] as boolean[],
     }))
     const slice = sliceVirtualTreeNodes(flat, 320, 200, 32, 2)
     expect(slice.nodes.length).toBeLessThan(flat.length)

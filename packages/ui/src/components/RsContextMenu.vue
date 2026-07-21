@@ -25,7 +25,7 @@ function onSelect(item: RsContextMenuItem) {
 
 <template>
   <ContextMenuRoot v-if="!disabled">
-    <ContextMenuTrigger as-child>
+    <ContextMenuTrigger class="rs-ctx-trigger" @contextmenu.stop>
       <slot />
     </ContextMenuTrigger>
     <ContextMenuPortal>
@@ -38,6 +38,12 @@ function onSelect(item: RsContextMenuItem) {
 </template>
 
 <style>
+/* 触发器包装：display:contents 令 span 不产生盒模型，不影响父级 flex/grid 布局。
+   ContextMenuTrigger 默认渲染为 span，加此 class 使其透明于布局。 */
+.rs-ctx-trigger {
+  display: contents;
+}
+
 /* ── 菜单容器：macOS 毛玻璃浮层 ── */
 .rs-context-menu__content,
 .rs-context-menu__sub-content {

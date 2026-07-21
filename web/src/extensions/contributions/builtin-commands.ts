@@ -60,6 +60,17 @@ function toggleAi(): void {
   useShellStore().toggleAiPanel()
 }
 
+/** 打开 AI 面板并用当前选区作为 @ 引用 */
+async function askSelection(): Promise<void> {
+  const { selectionAttachmentFromWorkspace } = await import('@/shell/panels/ai/context-pack')
+  const { useAiStore } = await import('@/stores/ai')
+  const attachment = selectionAttachmentFromWorkspace()
+  useShellStore().setAiPanelOpen(true)
+  if (attachment) {
+    useAiStore().queueComposerAttachments([attachment])
+  }
+}
+
 /**
  * 按当前语言注册/刷新全部内置命令。
  * 命令注册表以 id 去重，重复调用会覆盖旧标题，故可安全地在语言切换时重跑。
@@ -69,6 +80,7 @@ function registerAll(): void {
   register('workbench.tab.close', tr('command.closeActiveTab'), 'x', closeActiveTab)
   register('workbench.editor.split', tr('command.splitEditor'), 'columns-2', splitEditor)
   register('workbench.ai.toggle', tr('command.toggleAi'), 'bot', toggleAi)
+  register('workbench.ai.askSelection', tr('command.askAiSelection'), 'sparkles', askSelection)
 
   // 为每个模块（内置 + 已注册扩展）生成「打开模块」命令
   for (const module of getAllModules()) {

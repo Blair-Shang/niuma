@@ -416,11 +416,13 @@ mongodb-service / ssh-service 在 `session.close` 内会级联清理子资源；
 | `web/src/modules/connection/session-release.ts` | Pane 子资源清理 inject key |
 | `web/src/stores/tab.ts` | L1；关闭时 `releaseMany` |
 | `web/src/modules/ops/connection-nav/` | L3 策略类型、注册表、utils |
-| `web/src/modules/ops/conn-nav-providers.ts` | 内置 `conn-nav-strategy` 注册 |
-| `web/src/modules/ops/composables/useConnectionNavigation.ts` | L3 薄编排 |
-| `web/src/modules/{ssh,ftp,redis,mongodb}/conn-nav-strategy.ts` | 各协议 Tab 打开策略 |
+| `web/src/modules/ops/register-builtin-conn-kinds.ts` | 内置 kind 懒加载入口（`loadForm` / `load`） |
+| `web/src/modules/ops/conn-kind-loaders.ts` | `ensureConnKind` / `ensureConnKindForm` |
+| `web/src/modules/ops/composables/useConnectionNavigation.ts` | L3 薄编排（先 ensure 再查策略） |
+| `web/src/modules/*/register-conn-full.ts` | 各协议完整自注册（含 `conn-nav-strategy`） |
+| `web/src/modules/{ssh,ftp,redis,mongodb,mysql,vastbase}/conn-nav-strategy.ts` | 各协议 Tab 打开策略 |
 | `web/src/modules/{ssh,ftp,redis,mongodb}/views/*Session.vue` | 调用 `useSessionLease` |
-| `web/src/modules/ops/components/OpsConnectionPanel.vue` | 已连接态、断开菜单 |
+| `web/src/modules/ops/components/OpsConnectionPanel.vue` | 已连接态、断开菜单；协议业务不进面板 |
 
 ---
 
@@ -468,3 +470,4 @@ mongodb-service / ssh-service 在 `session.close` 内会级联清理子资源；
 | v0.3 | 2026-07-10 | Phase 1–2 实现：`session-registry.ts`、Tab 关闭 release、四模块 Session 迁移、连接树断开/已连接态 |
 | v0.4 | 2026-07-10 | 清晰度优化：§0.5 时序图、§0.6 开发者约定、§1 改造前后对照、§3.5–3.6 子资源与 disconnect |
 | v0.5 | 2026-07-10 | L3 拆分为 `connection-nav` 策略注册表 + 各模块 `conn-nav-strategy.ts` |
+| v0.6 | 2026-07-20 | 内置协议改为 `register-builtin-conn-kinds` 懒加载；旧 `conn-nav-providers` 等入口已删除 |

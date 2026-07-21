@@ -157,7 +157,7 @@ pnpm --filter @niuma/ui test     # Vitest 组件测试
 | `useBridgeStore` | CEF IPC 请求封装、事件订阅 |
 | `useConnectionStore` | SSH/DB/FTP 连接 profile 列表（读 Platform） |
 | `useModuleStore` | 已注册插件、当前激活模块 |
-| `useAiStore` | AI 对话会话、Provider 配置 |
+| `useAiStore` | AI 对话会话、Provider 配置（设计见 [24](./24-ai-assistant.md)） |
 | `useTabStore` | 工作区 Tab（多会话） |
 
 原则：
@@ -173,10 +173,10 @@ pnpm --filter @niuma/ui test     # Vitest 组件测试
 | 层 | 位置 | 内容 |
 |----|------|------|
 | 组件库 | `packages/ui/src/locale/messages.ts` | `Rs*` 内置文案（`useRsI18n` / `useRsConfig().t`） |
-| 业务壳 | `web/src/locale/zh-CN.ts` `en-US.ts` | 模块名、菜单、业务提示 |
-| 插件 | `modules/*/locale/` | 插件自有文案（可选） |
+| 业务壳 | `web/src/locale/zh-CN.ts` `en-US.ts` | 导航、设置、AI、连接表单壳层等 |
+| 业务模块 | `web/src/modules/<name>/locale/{zh-CN,en-US}.ts` | 各模块文案（ssh / ftp / redis / mongodb / mysql / vastbase…），由 `web/src/locale/index.ts` `mergeMessages` 合并 |
 
-`RsConfigProvider` 的 `locale` 与 `vue-i18n` 应用 locale **保持同步**。
+`RsConfigProvider` 的 `locale` 与 `vue-i18n` 应用 locale **保持同步**。新增模块文案优先写在该模块的 `locale/` 下。
 
 ---
 

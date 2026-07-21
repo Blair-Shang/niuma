@@ -67,11 +67,17 @@ const sshProfileOptions = computed<RsSelectOptions>(() => {
       <div class="nm-conn-tunnel__row">
         <div class="nm-conn-tunnel__field nm-conn-tunnel__field--grow">
           <RsLabel>{{ t('connection.form.tunnelTargetHost') }}</RsLabel>
-          <RsInput v-model="form.tunnelTargetHost" placeholder="留空使用当前主机" />
+          <RsInput
+            v-model="form.tunnelTargetHost"
+            :placeholder="t('connection.form.tunnelTargetHostPlaceholder')"
+          />
         </div>
         <div class="nm-conn-tunnel__field nm-conn-tunnel__field--port">
           <RsLabel>{{ t('connection.form.tunnelTargetPort') }}</RsLabel>
-          <RsInput v-model="form.tunnelTargetPort" placeholder="留空" />
+          <RsInput
+            v-model="form.tunnelTargetPort"
+            :placeholder="t('connection.form.tunnelTargetPortPlaceholder')"
+          />
         </div>
       </div>
     </section>

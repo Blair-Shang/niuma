@@ -6,6 +6,9 @@
 /** 下拉 / Popover / Tooltip 浮层 */
 export const RS_Z_DROPDOWN = 'var(--rs-z-dropdown)'
 
+/** Shell 常驻面板（底部 Dock 等），须低于 modal */
+export const RS_Z_PANEL = 'var(--rs-z-panel)'
+
 /** 模态对话框 */
 export const RS_Z_MODAL = 'var(--rs-z-modal)'
 
@@ -26,6 +29,9 @@ export type RsToastPosition =
   | 'bottom-center'
 
 export const RS_TOAST_DEFAULT_POSITION: RsToastPosition = 'top-center'
+
+/** 多条 Toast 之间的垂直间距（px），传给 vue-sonner `gap` */
+export const RS_TOAST_DEFAULT_GAP = 4
 
 export const rsToastPositions = [
   'top-center',

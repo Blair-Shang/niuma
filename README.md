@@ -31,28 +31,28 @@ pnpm dev              # 构建并启动 niuma.exe（真实 CEF 桌面窗口）
 
 ### 通用（前端 / 脚本）
 
-| 工具 | 版本 | 用途 |
-|------|------|------|
-| Node.js | ≥ 20 | 前端构建、pnpm 脚本 |
-| pnpm | ≥ 9（推荐 `corepack enable` 锁定 9.15） | Monorepo 包管理 |
-| PowerShell | 5.1+ | `scripts/*.ps1` 入口 |
-| winget | 可选 | `setup:desktop` 自动安装 CMake / MSVC |
+| 工具 | 版本 | 用途 | 官网 / 下载 |
+|------|------|------|-------------|
+| Node.js | ≥ 20 | 前端构建、pnpm 脚本 | [nodejs.org](https://nodejs.org/) |
+| pnpm | ≥ 9（推荐 `corepack enable` 锁定 9.15） | Monorepo 包管理 | [pnpm.io](https://pnpm.io/installation) |
+| PowerShell | 5.1+ | `scripts/*.ps1` 入口 | 系统自带；跨平台见 [PowerShell](https://github.com/PowerShell/PowerShell) |
+| winget | 可选 | `setup:desktop` 自动安装 CMake / MSVC | [winget 文档](https://learn.microsoft.com/windows/package-manager/winget/) |
 
 前端依赖版本在 `pnpm-workspace.yaml` 的 **catalog** 中统一维护（Vue 3.5、Vite 8、Tailwind 4 等），`web` 与 `packages/ui` 通过 `catalog:` 引用，升级时改一处即可。
 
 ### 桌面壳（Layer 3，C++ / CEF）
 
-| 工具 | 版本 | 用途 |
-|------|------|------|
-| Visual Studio 2022 | **C++ 桌面开发** 或 **Build Tools + VC 工具链** | 编译 `shell/` |
-| CMake | ≥ 3.20 | 对接官方 CEF CMake 工程 |
-| CEF Standard Binary | 自动下载 | `third_party/cef/`（约 200MB） |
+| 工具 | 版本 | 用途 | 官网 / 下载 |
+|------|------|------|-------------|
+| Visual Studio 2022 | **C++ 桌面开发** 或 **Build Tools + VC 工具链** | 编译 `shell/` | [VS 下载](https://visualstudio.microsoft.com/downloads/) / [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) |
+| CMake | ≥ 3.20 | 对接官方 CEF CMake 工程 | [cmake.org/download](https://cmake.org/download/) |
+| CEF Standard Binary | 自动下载 | `third_party/cef/`（约 200MB） | [CEF 官网](https://bitbucket.org/chromiumembedded/cef) / [构建索引](https://cef-builds.spotifycdn.com/index.json) |
 
 说明：
 
 - 仅有 VS Community **未勾选 C++ 工作负载** 时无法编译；`setup:desktop` 会尝试通过 winget 安装 **VS 2022 Build Tools**。
 - 构建脚本使用 `vswhere` 查找带 `VC.Tools.x86.x64` 的 VS 实例，生成器优先 **Visual Studio 17 2022**。
-- CEF 从 [cef-builds.spotifycdn.com](https://cef-builds.spotifycdn.com/index.json) 拉取 stable / windows64 标准包。
+- CEF 从 [cef-builds.spotifycdn.com](https://cef-builds.spotifycdn.com/index.json) 拉取 stable / windows64 标准包；升级时对照索引中的版本号与 `scripts` 下载逻辑。
 
 ### 后端（规划中）
 
@@ -65,17 +65,18 @@ pnpm dev              # 构建并启动 niuma.exe（真实 CEF 桌面窗口）
 
 后端开发额外依赖：
 
-| 工具 | 版本 | 用途 |
-|------|------|------|
-| Go | 1.25.x | `platform/`、`ftp-service/`、共享 Go 包 |
-| Rustup | stable | 安装 / 管理 Rust toolchain |
-| Rust | stable（当前固定 `1.96.x`） | `ssh-service`、`packages/rust/` |
+| 工具 | 版本 | 用途 | 官网 / 下载 |
+|------|------|------|-------------|
+| Go | 1.25.x | `platform/`、`ftp-service/`、共享 Go 包 | [go.dev/dl](https://go.dev/dl/) |
+| Rustup | stable | 安装 / 管理 Rust toolchain | [rustup.rs](https://rustup.rs/) |
+| Rust | stable（当前固定 `1.96.x`） | `ssh-service`、`packages/rust/` | [rust-lang.org](https://www.rust-lang.org/tools/install) / [发布说明](https://github.com/rust-lang/rust/releases) |
 
 说明：
 
 - 仓库根存在 `rust-toolchain.toml`，进入仓库后会强制使用 `stable` toolchain。
 - Rust 公共能力放在 `packages/rust/`，当前包含 `niuma-logutil` 与 `niuma-serviceipc` 两个 crate。
 - `scripts/shared/build/build-services.ps1` 会同时构建 Go 服务与 Rust 的 `niuma-ssh-service`；日常使用仍建议通过 `pnpm build:services` 或 `scripts/entry/build.ps1 -Target services` 进入。
+- 升级校对：以本表「版本」列为仓库基线，对照各官网下载页 / Releases 确认是否有安全补丁或破坏性变更，再改版本约束与脚本。
 
 ## 环境准备（首次）
 

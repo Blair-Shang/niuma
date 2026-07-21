@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsTerminal } from '@niuma/ui'
+import { RsTerminal, containsEscapeSequence } from '@niuma/ui'
 import { useSshTerminal } from '@/modules/ssh/composables/useSshTerminal'
+import {
+  clearDiagnostic,
+  clearEditorSelection,
+  publishDiagnostic,
+  publishEditorSelection,
+} from '@/shell/panels/ai/workspace-context'
+import { useTabStore } from '@/stores/tab'
 
 const props = defineProps<{
   sessionId: string | null
@@ -16,8 +23,8 @@ const terminalRef = ref<InstanceType<typeof RsTerminal> | null>(null)
 const terminalReady = ref(false)
 const startupError = ref('')
 let pendingOutput = ''
-let flushScheduled = false
-const TERMINAL_SCROLLBACK = 20_000
+let flushRaf = 0
+const TERMINAL_SCROLLBACK = 5_000
 const syncBroadcast = computed(() => props.syncBroadcast ?? false)
 
 const emit = defineEmits<{
@@ -25,7 +32,6 @@ const emit = defineEmits<{
 }>()
 
 const pane = useSshTerminal()
-let inputQueue = Promise.resolve()
 let openingForSessionId = ''
 
 const overlayText = computed(() => {
@@ -69,8 +75,15 @@ function applyTerminalLimits(): void {
   }
 }
 
+function cancelScheduledFlush(): void {
+  if (flushRaf) {
+    cancelAnimationFrame(flushRaf)
+    flushRaf = 0
+  }
+}
+
 function flushOutput(): void {
-  flushScheduled = false
+  flushRaf = 0
   if (!terminalRef.value || !pendingOutput) {
     return
   }
@@ -79,15 +92,22 @@ function flushOutput(): void {
 }
 
 function scheduleFlush(): void {
-  if (flushScheduled) {
+  if (flushRaf) {
     return
   }
-  flushScheduled = true
-  queueMicrotask(flushOutput)
+  flushRaf = requestAnimationFrame(flushOutput)
 }
 
+/** 含 ESC 的控制序列原样立即写入；纯文本可走 rAF 批量。 */
 function writeChunk(data: string, stream: 'stdout' | 'stderr'): void {
-  pendingOutput += stream === 'stderr' ? `\x1b[31m${data}\x1b[0m` : data
+  const chunk = stream === 'stderr' ? `\x1b[31m${data}\x1b[0m` : data
+  if (containsEscapeSequence(chunk)) {
+    cancelScheduledFlush()
+    flushOutput()
+    terminalRef.value?.write(chunk)
+    return
+  }
+  pendingOutput += chunk
   scheduleFlush()
 }
 
@@ -114,8 +134,7 @@ async function openForSession(sessionId: string): Promise<void> {
   openingForSessionId = sessionId
   startupError.value = ''
   pendingOutput = ''
-  flushScheduled = false
-  inputQueue = Promise.resolve()
+  cancelScheduledFlush()
   terminalRef.value.clear()
   await nextTick()
   await terminalRef.value.fit()
@@ -133,10 +152,17 @@ async function openForSession(sessionId: string): Promise<void> {
       },
       (event) => writeChunk(event.data, event.stream),
     )
-    // 字体/分栏布局就绪后列数可能变化，再同步一次避免满行后从行首覆盖输入
     await syncPtySize()
   } catch (e) {
     startupError.value = e instanceof Error ? e.message : t('modules.ssh.session.terminalError')
+    publishDiagnostic({
+      id: `ssh-term:${sessionId}`,
+      label: 'SSH Terminal',
+      detail: sessionId,
+      text: startupError.value,
+      kind: 'ssh',
+      tabId: useTabStore().activeTabId || undefined,
+    })
   } finally {
     openingForSessionId = ''
   }
@@ -148,9 +174,62 @@ async function refreshSize(): Promise<void> {
 
 async function sendInput(data: string): Promise<void> {
   if (!data) return
-  inputQueue = inputQueue.then(() => pane.input(data)).catch(() => undefined)
-  await inputQueue
+  pane.input(data)
 }
+
+let selectionDisposable: { dispose: () => void } | null = null
+
+function unbindSelection(): void {
+  selectionDisposable?.dispose()
+  selectionDisposable = null
+}
+
+function bindSelection(): void {
+  unbindSelection()
+  const term = terminalRef.value?.getTerminal?.() ?? null
+  if (!term || typeof term.onSelectionChange !== 'function') {
+    return
+  }
+  selectionDisposable = term.onSelectionChange(() => {
+    const text = String(term.getSelection?.() ?? '').trim()
+    const tabId = useTabStore().activeTabId || undefined
+    if (!text) {
+      clearEditorSelection(tabId)
+      return
+    }
+    publishEditorSelection({
+      tabId,
+      text,
+      language: 'shell',
+      source: 'terminal',
+    })
+  })
+}
+
+watch(
+  () => pane.state.value,
+  (state) => {
+    const sid = props.sessionId
+    if (!sid) {
+      return
+    }
+    if (state === 'error' || state === 'lost') {
+      const msg = pane.message.value || state
+      publishDiagnostic({
+        id: `ssh-term:${sid}`,
+        label: 'SSH Terminal',
+        detail: sid,
+        text: msg,
+        kind: 'ssh',
+        tabId: useTabStore().activeTabId || undefined,
+      })
+      return
+    }
+    if (state === 'ready' || state === 'opening') {
+      clearDiagnostic(`ssh-term:${sid}`)
+    }
+  },
+)
 
 onMounted(async () => {
   if (terminalReady.value && props.sessionId) {
@@ -166,7 +245,6 @@ watch(
       return
     }
     if (prev && prev !== next) {
-      // session 已关闭时终端可能已被服务端回收，close() 内部已静默处理错误
       await pane.close()
     }
     if (next && next !== openingForSessionId) {
@@ -177,7 +255,9 @@ watch(
 
 onBeforeUnmount(() => {
   pendingOutput = ''
-  flushScheduled = false
+  cancelScheduledFlush()
+  unbindSelection()
+  clearEditorSelection(useTabStore().activeTabId || undefined)
   pane.close().catch(() => undefined)
 })
 
@@ -192,15 +272,17 @@ defineExpose({
     <RsTerminal
       ref="terminalRef"
       :overlay="overlayText"
+      :snap-viewport-on-tui-write="false"
       wheel-scroll-modifier="shift"
       @ready="async () => {
         terminalReady = true
         applyTerminalLimits()
+        bindSelection()
         if (props.sessionId) {
           await openForSession(props.sessionId)
         }
       }"
-      @data="(data) => { if (syncBroadcast) { emit('broadcastInput', data) } else { inputQueue = inputQueue.then(() => pane.input(data)).catch(() => undefined) } }"
+      @data="(data) => { if (syncBroadcast) { emit('broadcastInput', data) } else { pane.input(data) } }"
       @resize="() => void refreshSize()"
     />
   </section>

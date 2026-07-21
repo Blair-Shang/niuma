@@ -202,6 +202,64 @@ describe('RsSelect', () => {
     const root = wrapper.getComponent({ name: 'ComboboxRoot' })
     expect(root.props('ignoreFilter')).toBe(true)
   })
+
+  it('creatable enables search and commits typed value on Enter', async () => {
+    const wrapper = mount(RsSelect, {
+      props: { options, modelValue: '', creatable: true },
+      attachTo: document.body,
+    })
+    expect(wrapper.find('.rs-select').classes()).toContain('rs-select--searchable')
+    expect(wrapper.find('.rs-select').classes()).toContain('rs-select--creatable')
+
+    await wrapper.find('.rs-select__trigger').trigger('click')
+    await flushPromises()
+    const input = document.querySelector('.rs-select__search') as HTMLInputElement | null
+    expect(input).toBeTruthy()
+    input!.value = 'CITEXT'
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    const createItem = document.querySelector('.rs-select__item--create')
+    expect(createItem?.textContent).toContain('CITEXT')
+
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['CITEXT'])
+    wrapper.unmount()
+  })
+
+  it('creatable does not offer create when query matches an option', async () => {
+    const wrapper = mount(RsSelect, {
+      props: { options, modelValue: '', creatable: true },
+      attachTo: document.body,
+    })
+    await wrapper.find('.rs-select__trigger').trigger('click')
+    await flushPromises()
+    const input = document.querySelector('.rs-select__search') as HTMLInputElement | null
+    input!.value = 'claude'
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    expect(document.querySelector('.rs-select__item--create')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('defaults to content wider than trigger; matchTriggerWidth locks equal width', async () => {
+    const wrapper = mount(RsSelect, {
+      props: { options, modelValue: '' },
+      attachTo: document.body,
+    })
+    await wrapper.find('.rs-select__trigger').trigger('click')
+    await flushPromises()
+    const content = document.querySelector('.rs-select__content')
+    expect(content).toBeTruthy()
+    expect(content!.classList.contains('rs-select__content--match-trigger')).toBe(false)
+
+    await wrapper.setProps({ matchTriggerWidth: true })
+    await flushPromises()
+    const matched = document.querySelector('.rs-select__content')
+    expect(matched!.classList.contains('rs-select__content--match-trigger')).toBe(true)
+    wrapper.unmount()
+  })
 })
 
 describe('select-utils', () => {

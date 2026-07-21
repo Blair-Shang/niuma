@@ -33,7 +33,7 @@ Web cefQuery
 | `ftp.dir.list` | `ftp` | `dir.list` |
 | `com.niuma.db-pg.query.exec` | `com.niuma.db-pg` | `query.exec` |
 
-凭据注入：manifest `session.inject_credentials: true` 时，`session.open` / `session.test`（可配置）由 platform 从 Keychain 注入后转发。
+凭据注入：manifest `session.inject_credentials: true` 时，`session.open` / `session.test`（可配置）由 platform 从 Vault 解密后注入转发。
 
 ## 4. manifest 字段
 
@@ -140,7 +140,7 @@ manifest `session.inject_credentials: true` 时，Web 通常只传 `{ profileId 
 }
 ```
 
-- `password`：密码认证时为密码；`auth_type=private_key` 时为 **Keychain 中的私钥 PEM 内容**（历史字段名，非 FTP 语义）。
+- `password`：密码认证时为密码；`auth_type=private_key` 时为 **Vault 中的私钥 PEM 内容**（历史字段名，非 FTP 语义）。
 - 内联测试（新建站点未保存）可传 `hostAddress` + `options` / `connectionOptions`（二者等价，`options` 优先）。
 - 内联 `portNumber <= 0` 时 platform **不**强行默认 21，由各服务按 `connection_kind` 回退（FTP 21、SSH 22、Redis 6379）。
 
@@ -148,7 +148,7 @@ manifest `session.inject_credentials: true` 时，Web 通常只传 `{ profileId 
 
 | 场景 | 超时 | 凭据 |
 |------|------|------|
-| 正式 `session.open` | 使用站点 `connection_options` 中的配置 | platform 从 Keychain 注入 |
+| 正式 `session.open` | 使用站点 `connection_options` 中的配置 | platform 从 Vault 解密注入 |
 | 表单「测试连接」 | Web 取站点配置与 **12 秒上限** 的较小值（尽快失败反馈） | 新建用表单密码；编辑密码留空则用 `profileId` 注入 |
 
 ### 9.5 Redis `connection_options`（摘要）

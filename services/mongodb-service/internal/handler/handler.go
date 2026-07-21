@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"go.mongodb.org/mongo-driver/mongo"
 
@@ -27,9 +26,20 @@ const (
 	MethodDocumentDelete   = "document.delete"
 	MethodAggregateRun     = "aggregate.run"
 	MethodAggregateExplain = "aggregate.explain"
+	MethodPipelineSuggest  = "pipeline.suggest"
+	MethodQuerySuggest     = "query.suggest"
+	MethodQueryExec        = "query.exec"
+	MethodIndexList        = "index.list"
+	MethodIndexCreate      = "index.create"
+	MethodIndexDrop        = "index.drop"
 	MethodMonitorStats     = "monitor.stats"
 	MethodMonitorCurrentOp = "monitor.currentOp"
-	MethodSchemaSample     = "schema.sample"
+	MethodMonitorSlowLog   = "monitor.slowLog"
+	MethodMonitorProfilerStatus = "monitor.profiler.status"
+	MethodMonitorProfilerSet    = "monitor.profiler.set"
+	MethodSchemaSample         = "schema.sample"
+	MethodSchemaValidatorGet   = "schema.validator.get"
+	MethodSchemaValidatorSet   = "schema.validator.set"
 	MethodCommandExec      = "command.exec"
 	MethodCommandSuggest   = "command.suggest"
 	MethodShellDetect      = "shell.detect"
@@ -138,12 +148,34 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 		return d.aggregateRun(ctx, req)
 	case MethodAggregateExplain:
 		return d.aggregateExplain(ctx, req)
+	case MethodPipelineSuggest:
+		return d.pipelineSuggest(ctx, req)
+	case MethodQuerySuggest:
+		return d.querySuggest(ctx, req)
+	case MethodQueryExec:
+		return d.queryExec(ctx, req)
+	case MethodIndexList:
+		return d.indexList(ctx, req)
+	case MethodIndexCreate:
+		return d.indexCreate(ctx, req)
+	case MethodIndexDrop:
+		return d.indexDrop(ctx, req)
 	case MethodMonitorStats:
 		return d.monitorStats(ctx, req)
 	case MethodMonitorCurrentOp:
 		return d.monitorCurrentOp(ctx, req)
+	case MethodMonitorSlowLog:
+		return d.monitorSlowLog(ctx, req)
+	case MethodMonitorProfilerStatus:
+		return d.monitorProfilerStatus(ctx, req)
+	case MethodMonitorProfilerSet:
+		return d.monitorProfilerSet(ctx, req)
 	case MethodSchemaSample:
 		return d.schemaSample(ctx, req)
+	case MethodSchemaValidatorGet:
+		return d.schemaValidatorGet(ctx, req)
+	case MethodSchemaValidatorSet:
+		return d.schemaValidatorSet(ctx, req)
 	case MethodCommandExec:
 		return d.commandExec(ctx, req)
 	case MethodCommandSuggest:
@@ -186,7 +218,7 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 	}
 	client, tunnelStop, err := session.Connect(ctx, params)
 	if err != nil {
-		slog.Error(MethodSessionOpen, "host", params.HostAddress, "port", params.PortNumber, "err", err)
+		logOpError(MethodSessionOpen, err, "host", params.HostAddress, "port", params.PortNumber)
 		return errorResponse(req.ID, err.Error())
 	}
 	sessionID, err := d.ids.NextString()
@@ -198,7 +230,7 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 		return errorResponse(req.ID, err.Error())
 	}
 	d.sessions.Put(&session.Session{ID: sessionID, Client: client, Params: params, TunnelStop: tunnelStop})
-	slog.Info(MethodSessionOpen, "session", sessionID, "host", params.HostAddress, "port", params.PortNumber)
+	logOpInfo(MethodSessionOpen, "session", sessionID, "host", params.HostAddress, "port", params.PortNumber)
 	return okResponse(req.ID, map[string]any{"sessionId": sessionID})
 }
 
@@ -214,9 +246,10 @@ func (d *Dispatcher) sessionClose(ctx context.Context, req Request) Response {
 	d.tools.CancelBySession(params.SessionID)
 	d.streams.StopBySession(params.SessionID)
 	if err := d.sessions.Close(ctx, params.SessionID); err != nil {
+		logOpError(MethodSessionClose, err, "session", params.SessionID)
 		return errorResponse(req.ID, err.Error())
 	}
-	slog.Info(MethodSessionClose, "session", params.SessionID)
+	logOpInfo(MethodSessionClose, "session", params.SessionID)
 	return okResponse(req.ID, map[string]any{"closed": true})
 }
 
@@ -227,28 +260,34 @@ func (d *Dispatcher) sessionTest(ctx context.Context, req Request) Response {
 	}
 	client, tunnelStop, err := session.Connect(ctx, params)
 	if err != nil {
+		logOpWarn(MethodSessionTest, err, "host", params.HostAddress, "port", params.PortNumber, "ok", false)
 		return okResponse(req.ID, map[string]any{"ok": false, "message": err.Error()})
 	}
 	_ = client.Disconnect(ctx)
 	if tunnelStop != nil {
 		tunnelStop()
 	}
+	logOpInfo(MethodSessionTest, "host", params.HostAddress, "port", params.PortNumber, "ok", true)
 	return okResponse(req.ID, map[string]any{"ok": true, "message": "connected"})
 }
 
 func (d *Dispatcher) treeDatabases(ctx context.Context, req Request) Response {
+	var sessParams sessionIDParams
+	_ = json.Unmarshal(req.Params, &sessParams)
+
 	client, release, err := d.resolveClient(ctx, req.Params)
 	if err != nil {
+		logOpError(MethodTreeDatabases, err, scopeAttrs(sessParams.SessionID, "", "")...)
 		return errorResponse(req.ID, err.Error())
 	}
 	defer release()
 
 	databases, err := session.ListDatabases(ctx, client)
 	if err != nil {
-		slog.Warn(MethodTreeDatabases, "err", err)
+		logOpWarn(MethodTreeDatabases, err, scopeAttrs(sessParams.SessionID, "", "")...)
 		return errorResponse(req.ID, err.Error())
 	}
-	slog.Info(MethodTreeDatabases, "count", len(databases))
+	logOpInfo(MethodTreeDatabases, append(scopeAttrs(sessParams.SessionID, "", ""), "count", len(databases))...)
 	return okResponse(req.ID, map[string]any{"databases": databases})
 }
 
@@ -268,9 +307,10 @@ func (d *Dispatcher) treeCollections(ctx context.Context, req Request) Response 
 
 	collections, err := session.ListCollections(ctx, client, params.Database)
 	if err != nil {
-		slog.Warn(MethodTreeCollections, "database", params.Database, "err", err)
+		logOpWarn(MethodTreeCollections, err, scopeAttrs(params.SessionID, params.Database, "")...)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodTreeCollections, append(scopeAttrs(params.SessionID, params.Database, ""), "count", len(collections))...)
 	return okResponse(req.ID, map[string]any{"collections": collections})
 }
 

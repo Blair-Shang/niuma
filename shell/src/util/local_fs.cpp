@@ -343,4 +343,39 @@ bool LocalFs::ShowInFolder(const std::string& path, std::string& error) {
 #endif
 }
 
+bool LocalFs::OpenExternalUrl(const std::string& url, std::string& error) {
+  if (url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0) {
+    error = "only http(s) urls are supported";
+    return false;
+  }
+#if defined(OS_WIN)
+  const std::wstring wide = Utf8ToWide(url);
+  if (wide.empty()) {
+    error = "invalid url encoding";
+    return false;
+  }
+  const HINSTANCE result = ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+  if (reinterpret_cast<intptr_t>(result) <= 32) {
+    error = "open url failed";
+    return false;
+  }
+  return true;
+#else
+#if defined(__APPLE__)
+  const char* opener = "open";
+#else
+  const char* opener = "xdg-open";
+#endif
+  std::vector<char> url_arg(url.begin(), url.end());
+  url_arg.push_back('\0');
+  char* argv[] = {const_cast<char*>(opener), url_arg.data(), nullptr};
+  pid_t pid = 0;
+  if (posix_spawnp(&pid, opener, nullptr, nullptr, argv, environ) != 0) {
+    error = std::string(opener) + " failed";
+    return false;
+  }
+  return true;
+#endif
+}
+
 }  // namespace niuma

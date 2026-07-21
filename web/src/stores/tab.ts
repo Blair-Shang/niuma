@@ -56,6 +56,8 @@ export interface WorkspaceTab {
   closable: boolean
   /** 未保存标记，TabBar 显示圆点 */
   dirty: boolean
+  /** 悬浮提示（含完整连接信息，如 host + db），优先于 tabLabel 用于 title 属性 */
+  tooltip?: string
   /** 透传给模块组件的 props（扩展模块含 pluginRoot / pluginUiEntry） */
   props: Record<string, unknown>
 }
@@ -76,6 +78,8 @@ export interface OpenTabSpec {
   titleKey?: string
   icon?: string
   closable?: boolean
+  /** 悬浮提示（含完整连接信息），优先于 tabLabel 用于 title 属性 */
+  tooltip?: string
   props?: Record<string, unknown>
   /** 指定 tabId（用于持久化恢复），默认随机 */
   tabId?: string
@@ -128,6 +132,7 @@ function buildTab(spec: OpenTabSpec): WorkspaceTab {
     icon: spec.icon ?? descriptor?.icon,
     closable: spec.closable ?? true,
     dirty: false,
+    tooltip: spec.tooltip,
     props: { ...defaultModuleProps(spec.moduleId), ...spec.props },
   }
 }
@@ -147,6 +152,7 @@ function restoreTab(t: WorkspaceTab): WorkspaceTab {
     icon: t.icon,
     closable: t.closable ?? true,
     dirty: false,
+    tooltip: t.tooltip,
     props: { ...t.props, ...defaultModuleProps(t.moduleId) },
   }
 }
@@ -357,16 +363,25 @@ export const useTabStore = defineStore('tab', () => {
    * 打开「设置」内置视图 Tab（VS Code 式：设置是编辑器页签而非整页覆盖）。
    * 全局单例：已存在则聚焦（可能跨组），否则在当前组新建。
    *
+   * @param options.section - 初始分区 id（如 ai-providers / ai-mcp / ai-skills）
    * @returns 设置 Tab 的 tabId
    */
-  function openSettings(): string {
+  function openSettings(options?: { section?: string }): string {
     const existing = allTabs.value.find((t) => t.moduleId === SETTINGS_VIEW_ID)
     if (existing) {
       activateTab(existing.tabId)
+      if (options?.section) {
+        updateTabProps(existing.tabId, { section: options.section })
+      }
       return existing.tabId
     }
     const view = getInternalView(SETTINGS_VIEW_ID)
-    return openTab({ moduleId: SETTINGS_VIEW_ID, titleKey: view?.titleKey, icon: view?.icon })
+    return openTab({
+      moduleId: SETTINGS_VIEW_ID,
+      titleKey: view?.titleKey,
+      icon: view?.icon,
+      props: options?.section ? { section: options.section } : undefined,
+    })
   }
 
   /**

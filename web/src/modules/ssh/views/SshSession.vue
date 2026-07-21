@@ -28,6 +28,10 @@ import SshMonitorPane from '@/modules/ssh/components/SshMonitorPane.vue'
 import SshTerminalGroup from '@/modules/ssh/components/SshTerminalGroup.vue'
 import { useSessionActionStore } from '@/stores/session-actions'
 import { useShellStore } from '@/stores/shell'
+import {
+  clearDiagnostic,
+  publishDiagnostic,
+} from '@/shell/panels/ai/workspace-context'
 import { useTransferHubStore } from '@/stores/transfer-hub'
 import { useTabStore } from '@/stores/tab'
 import { useConnectionProfiles } from '@/modules/ops/composables/useConnectionProfiles'
@@ -422,9 +426,18 @@ async function openSession(): Promise<void> {
   error.value = null
   try {
     await acquireSession()
+    clearDiagnostic(`ssh-conn:${props.profileId}`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('modules.ssh.session.connectError')
     toast.error(error.value)
+    publishDiagnostic({
+      id: `ssh-conn:${props.profileId}`,
+      label: 'SSH Connect',
+      detail: props.profileId,
+      text: error.value,
+      kind: 'ssh',
+      tabId: useTabStore().activeTabId || undefined,
+    })
   } finally {
     connecting.value = false
   }
@@ -435,9 +448,18 @@ async function reconnect(): Promise<void> {
   error.value = null
   try {
     await reconnectSession()
+    clearDiagnostic(`ssh-conn:${props.profileId}`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('modules.ssh.session.connectError')
     toast.error(error.value)
+    publishDiagnostic({
+      id: `ssh-conn:${props.profileId}`,
+      label: 'SSH Connect',
+      detail: props.profileId,
+      text: error.value,
+      kind: 'ssh',
+      tabId: useTabStore().activeTabId || undefined,
+    })
   } finally {
     connecting.value = false
   }
@@ -456,9 +478,18 @@ async function refreshRemote(): Promise<void> {
     })
     remotePath.value = result.path || remotePath.value
     entries.value = result.entries ?? []
+    clearDiagnostic(`ssh-sftp:${props.profileId}`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('modules.ssh.session.listError')
     toast.error(error.value)
+    publishDiagnostic({
+      id: `ssh-sftp:${props.profileId}`,
+      label: 'SFTP',
+      detail: remotePath.value,
+      text: error.value,
+      kind: 'ssh',
+      tabId: useTabStore().activeTabId || undefined,
+    })
   } finally {
     loadingFiles.value = false
   }
@@ -962,6 +993,7 @@ watch(
       width="lg"
       :teleport-to="dialogMountTo"
     >
+        <template #body>
         <div class="nm-ssh-session__mh">
           <p class="nm-ssh-session__mh-hint">
             选择要在分屏里打开的主机数量（不限制个数）。创建后可在每个分屏 Tab 单独勾选“终端同步”。
@@ -998,6 +1030,7 @@ watch(
           </div>
           <p v-else class="nm-ssh-session__mh-empty">还未选择主机。</p>
         </div>
+        </template>
 
         <template #footer>
           <RsButton variant="ghost" @click="multiHostOpen = false">取消</RsButton>
@@ -1011,15 +1044,20 @@ watch(
       v-model:open="promptOpen"
       :title="promptTitle"
       width="sm"
+      layout="confirm"
+      :resizable="false"
+      :fullscreenable="false"
       :show-close="false"
       :teleport-to="dialogMountTo"
     >
+        <template #body>
         <RsInput
           ref="promptInputRef"
           v-model="promptValue"
           :placeholder="promptPlaceholder"
           @press-enter="onPromptConfirm"
         />
+        </template>
         <template #footer>
           <RsButton variant="default" @click="onPromptCancel">{{ t('common.cancel') }}</RsButton>
           <RsButton variant="primary" :disabled="!promptValue.trim()" @click="onPromptConfirm">

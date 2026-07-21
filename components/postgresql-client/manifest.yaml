@@ -1,0 +1,54 @@
+id: com.niuma.components.postgresql-client
+name: PostgreSQL 客户端工具（备选）
+module: vastbase
+install:
+  mode: optional_download
+  # 通用 PostgreSQL 便携客户端（StandaloneTools）：pg_dump / pg_restore / psql。
+  # Vastbase 逻辑备份请使用组件包 vastbase-tools（vb_dump / vb_restore），勿依赖本包。
+  # macOS 暂无直链包，请用 Homebrew（brew install libpq）后在设置中浏览指定路径。
+  packages:
+    - id: postgresql-client
+      os: windows
+      arch: amd64
+      url: https://github.com/hemnstill/StandaloneTools/releases/download/pg_dump-15.1/build-mingw.tar.gz
+      archive: tar.gz
+      binDir: .
+      tools: [pg_dump, pg_restore, psql]
+    - id: postgresql-client
+      os: linux
+      arch: amd64
+      url: https://github.com/hemnstill/StandaloneTools/releases/download/pg_dump-15.1/build-musl.tar.gz
+      archive: tar.gz
+      binDir: .
+      tools: [pg_dump, pg_restore, psql]
+tools:
+  - id: pg_dump
+    displayName: pg_dump
+    detect:
+      executables:
+        - pg_dump
+      versionArgs:
+        - "--version"
+    install:
+      mode: optional_download
+      downloadPage: https://www.postgresql.org/download/
+  - id: pg_restore
+    displayName: pg_restore
+    detect:
+      executables:
+        - pg_restore
+      versionArgs:
+        - "--version"
+    install:
+      mode: optional_download
+      downloadPage: https://www.postgresql.org/download/
+  - id: psql
+    displayName: psql
+    detect:
+      executables:
+        - psql
+      versionArgs:
+        - "--version"
+    install:
+      mode: optional_download
+      downloadPage: https://www.postgresql.org/download/

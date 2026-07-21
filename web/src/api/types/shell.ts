@@ -27,3 +27,14 @@ export interface ShellInfo {
   /** 是否无边框；Web 据此显示自绘窗口按钮 */
   frameless?: boolean
 }
+
+/** `shell.openExternal` 请求参数 */
+export interface ShellOpenExternalParams {
+  /** 须为 http(s) URL */
+  url: string
+}
+
+/** `shell.openExternal` Bridge 响应 */
+export interface ShellOpenExternalResult {
+  opened: boolean
+}

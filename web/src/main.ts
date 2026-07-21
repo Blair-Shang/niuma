@@ -1,3 +1,7 @@
+import { setupMonacoWorkers } from '@niuma/ui'
+// Monaco Worker 环境必须在任何编辑器实例创建前初始化
+setupMonacoWorkers()
+
 import { createApp, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import '@niuma/ui/styles.css'
@@ -8,9 +12,7 @@ import App from './App.vue'
 import { bootstrapExtensions } from '@/extensions/bootstrap/bootstrap-extensions'
 import { registerBuiltinFileProviders } from '@/modules/file-editor'
 import { registerBuiltinCommands } from '@/extensions/contributions/builtin-commands'
-import { registerBuiltinConnectionKinds } from '@/modules/ops/connection-kinds'
-import { registerBuiltinConnectionNavStrategies } from '@/modules/ops/conn-nav-providers'
-import { registerBuiltinConnTreeProviders } from '@/modules/ops/conn-tree-providers'
+import { registerBuiltinConnKindLoaders } from '@/modules/ops/register-builtin-conn-kinds'
 import { getModuleById } from '@/extensions/registry/extension-registry'
 import { useTabStore } from '@/stores/tab'
 import { router } from './router'
@@ -88,10 +90,8 @@ async function main() {
   // 注册文件工作台内置 Provider（local / ftp）
   registerBuiltinFileProviders()
 
-  // 注册内置连接协议 UI（FTP / Redis / SSH），挂载前完成以确保 OpsConnectionPanel 查表有效
-  registerBuiltinConnectionKinds()
-  registerBuiltinConnectionNavStrategies()
-  registerBuiltinConnTreeProviders()
+  // 登记内置连接协议懒加载入口（首次打开表单/展开树时再拉取各协议模块）
+  registerBuiltinConnKindLoaders()
 
   const workbenchEntry = isFileWorkbenchEntry()
 

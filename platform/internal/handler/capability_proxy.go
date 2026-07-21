@@ -128,23 +128,21 @@ func (r *CapabilityRegistry) dispatchWithCredentials(
 	}
 
 	switch action {
-	case capabilityMethodSessionOpen:
-		var result struct {
-			SessionID string `json:"sessionId"`
-		}
+	case capabilityMethodSessionOpen, capabilityMethodSessionTest:
+		// 透传服务端完整结果（含 dialect / version / capabilities），
+		// 禁止再裁剪为仅 sessionId 或 ok/message，否则前端 Capability 模型失效。
+		var result json.RawMessage
 		if err := route.client.Invoke(ctx, action, connect, &result); err != nil {
 			return errorResponse(req.ID, err.Error())
 		}
-		return okResponse(req.ID, map[string]any{"sessionId": result.SessionID})
-	case capabilityMethodSessionTest:
-		var result struct {
-			OK      bool   `json:"ok"`
-			Message string `json:"message"`
+		if len(result) == 0 {
+			return okResponse(req.ID, map[string]any{})
 		}
-		if err := route.client.Invoke(ctx, action, connect, &result); err != nil {
-			return errorResponse(req.ID, err.Error())
+		var out any
+		if err := json.Unmarshal(result, &out); err != nil {
+			return errorResponse(req.ID, fmt.Sprintf("invalid service result: %v", err))
 		}
-		return okResponse(req.ID, result)
+		return okResponse(req.ID, out)
 	default:
 		// 非 session.open/test 方法可能携带业务字段（如 database），
 		// 需将原始参数与注入凭据合并，确保业务字段不被丢失。
@@ -208,7 +206,7 @@ func profileOptionsJSON(connectionOptions string) json.RawMessage {
 	return json.RawMessage(connectionOptions)
 }
 
-// profilePassword 解析站点密码：表单覆盖值优先，否则从 Keychain 读取首个关联凭据。
+// profilePassword 解析站点密码：表单覆盖值优先，否则从 Vault 解密首个关联凭据。
 func (d *Dispatcher) profilePassword(ctx context.Context, credentialIDs []string, override string) (string, error) {
 	if override != "" {
 		return override, nil
@@ -346,7 +344,7 @@ func (d *Dispatcher) resolveConnectParams(ctx context.Context, raw json.RawMessa
 	return d.resolveInlineConnectParams(ctx, params)
 }
 
-// resolveConnectParamsFromProfile 按 profileId 从 SQLite 读取站点，并注入 Keychain 密码后转发给能力服务。
+// resolveConnectParamsFromProfile 按 profileId 从 SQLite 读取站点，并注入 Vault 解密后的密码后转发给能力服务。
 func (d *Dispatcher) resolveConnectParamsFromProfile(
 	ctx context.Context,
 	profileID string,

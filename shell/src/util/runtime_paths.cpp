@@ -25,6 +25,7 @@ namespace {
 
 constexpr char kPlatformUnixSocketName[] = "niuma.platform.sock";
 constexpr char kPlatformUnixEventSocketName[] = "niuma.platform.events.sock";
+constexpr char kPlatformUnixStreamSocketName[] = "niuma.platform.stream.sock";
 
 fs::path ExeDirectory() {
 #if defined(_WIN32)
@@ -168,6 +169,14 @@ std::string GetPlatformEventAddress() {
   return R"(\\.\pipe\niuma.platform.events)";
 #else
   return (fs::temp_directory_path() / kPlatformUnixEventSocketName).string();
+#endif
+}
+
+std::string GetPlatformStreamAddress() {
+#if defined(_WIN32)
+  return R"(\\.\pipe\niuma.platform.stream)";
+#else
+  return (fs::temp_directory_path() / kPlatformUnixStreamSocketName).string();
 #endif
 }
 

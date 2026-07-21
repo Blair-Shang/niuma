@@ -13,7 +13,7 @@ NiuMa 是一个**全能型 AI 运维桌面平台**，目标能力包括：
 | 主机运维 | SSH、SFTP、FTP |
 | 数据库运维 | MySQL、PostgreSQL、Oracle 等 |
 | 扩展工具 | API 测试、数据格式化、视频生成/拼接 |
-| AI | 统一对话、Tool 调用、自然语言操作 |
+| AI | 统一对话、Tool 调用、自然语言操作（设计见 [24](./24-ai-assistant.md)） |
 
 **形态**：桌面 App · 模块可插拔 · 自封装 CEF · UI 跨平台一致。
 
@@ -134,8 +134,8 @@ Platform:   **Go**（独立进程，权限/SQLite/gRPC 中枢）
 
 | 项 | 方案 |
 |----|------|
-| 凭据存储 | OS Keychain（Windows Credential Manager / macOS Keychain） |
-| 凭据流转 | 仅在 Platform Core，UI 进程不可见明文 |
+| 凭据存储 | **VaultStore**：AES-256-GCM 密文存 `nm_credential_ref`；OS Keychain 仅主密钥 |
+| 凭据流转 | 仅在 Platform Core 解密后注入 L1；UI 进程不可见明文 |
 | IPC 授权 | Named Pipe ACL 限当前用户；可选 one-time token |
 | 插件权限 | manifest 声明 + 用户授权弹窗 |
 | 危险操作 | SSH 执行、删库、FFmpeg 等需二次确认（Human-in-the-loop） |

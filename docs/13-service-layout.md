@@ -12,10 +12,14 @@ services/
 ├── bin/                    # 编译产物（git 忽略 *.exe，保留 .gitkeep）
 │   ├── platform-core.exe
 │   └── ftp-service.exe
-└── ftp-service/            # 独立 Go 模块（未来可有 ssh-service/、db-mysql/ 等）
+├── ftp-service/            # 独立 Go 模块
+│   ├── go.mod
+│   ├── cmd/ftp-service/
+│   └── internal/
+└── vastbase-service/       # Vastbase（Go + pgx，见 docs/22）
     ├── go.mod
-    ├── cmd/ftp-service/
-    └── internal/
+    ├── cmd/vastbase-service/
+    └── internal/             # handler · session · tree · meta · debug · eventpub · idgen
 
 packages/go/
 └── serviceipc/             # 共享 IPC 帧协议与服务端（Go 能力服务复用）
@@ -36,6 +40,8 @@ packages/go/
 
 - `platform`
 - `services/ftp-service`
+- `services/mongodb-service`
+- `services/vastbase-service`
 - `packages/go/serviceipc`
 
 本地开发在任意模块目录执行 `go build` / `go test` 均可解析 replace 依赖。
@@ -76,4 +82,5 @@ go build -o ../bin/ftp-service.exe ./cmd/ftp-service
 - [12 — FTP 模块](./12-ftp-module.md)
 - [16 — SSH / SFTP 模块](./16-ssh-sftp-module.md)
 - [19 — MongoDB 模块](./19-mongodb-module.md)
+- [22 — Vastbase 模块](./22-vastbase-module.md)
 - [11 — Platform Core](./11-platform-core.md)

@@ -1,8 +1,8 @@
 # 18 — 运维连接树与资源子节点（Connection Tree & Resource Children）
 
-> 版本：v0.1 · 日期：2026-07-09  
-> 状态：**P0/P1 已实现**（Redis 库展开）；SQL 扩展见 §9  
-> 关联：[14 — 能力连接框架](./14-capability-connection-framework.md) · [09 — App Shell](./09-web-app-shell.md) · [16 — SSH/SFTP](./16-ssh-sftp-module.md)
+> 版本：v0.3 · 日期：2026-07-20  
+> 状态：**P0/P1 已实现**（Redis 库展开）；SQL 树扩展见 §9（实现细节在各库模块文档）  
+> 关联：[14 — 能力连接框架](./14-capability-connection-framework.md) · [09 — App Shell](./09-web-app-shell.md) · [16 — SSH/SFTP](./16-ssh-sftp-module.md) · [22 — Vastbase](./22-vastbase-module.md) · [25 — MySQL](./25-mysql-module.md)
 
 ---
 
@@ -27,7 +27,7 @@
 
 - 连接树上的**全局对象搜索**（对标 DBeaver「数据库导航器」全文检索）
 - Redis key 前缀树（Phase 3 可选）
-- MySQL / PostgreSQL 完整 schema → table → column 层级（Phase 4，仅预留接口）
+- 各 SQL 库完整对象树（按库分期；接口预留见 §9，实现见 [22](./22-vastbase-module.md) / [25](./25-mysql-module.md)）
 - 资源节点拖放、收藏夹、DDL 右键菜单
 - 树上展示实时「已连接」绿点（Phase 2）
 
@@ -52,11 +52,14 @@ NiuMa 是**运维连接壳**（SSH / FTP / Redis …），不是完整 DBA IDE�
 └───────────────────────────┬──────────────────────────┘
                             │ expand + lazy load
 ┌─ 资源层（虚拟）───────────▼──────────────────────────┐
-│  res:{profileId}:db:0        Redis 逻辑库               │
-│  res:{profileId}:schema:mydb 未来 MySQL 库              │
-│  res:{profileId}:...:table:users  未来表节点            │
-└────────────────────────────────────────────────────────┘
+│  res:{profileId}:db:0                         Redis 逻辑库        │
+│  res:{profileId}:database:mydb                MySQL 库（见 25）   │
+│  res:{profileId}:database:mydb:table:users    MySQL 表            │
+│  res:{profileId}:database:…:schema:…:table:…  Vastbase 等（见 22）│
+└───────────────────────────────────────────────────────────────────┘
 ```
+
+> 段名与层级以**各库模块文档**为准；本文只约定 `res:` 键空间与 Provider 接口，禁止在 ops 基建里写死某一库的 SQL。
 
 | 层级 | Key 前缀 | 持久化 | 可拖放 | 数据来源 |
 |------|----------|--------|--------|----------|
@@ -114,9 +117,9 @@ export interface ConnResourcePath {
 // Redis DB 3:
 // { segments: [{ kind: 'db', name: '3' }] }
 
-// 未来 MySQL 表 users @ schema myapp:
+// MySQL 表 users @ database myapp（见 25；段名用 database，非 schema）:
 // { segments: [
-//     { kind: 'schema', name: 'myapp' },
+//     { kind: 'database', name: 'myapp' },
 //     { kind: 'table', name: 'users' },
 //   ]}
 ```
@@ -138,7 +141,7 @@ parseTreeKey(key):
   | { type: 'res'; profileId: string; path: ConnResourcePath }
 ```
 
-**约束**：`name` 段禁止含未转义的 `:`；协议侧对库名/表名做 URL 编码或 base64url（MySQL 实现时再定）。
+**约束**：`name` 段禁止含未转义的 `:`；协议侧对库名/表名做 URL 编码或 base64url（各库模块落地时自定）。
 
 ---
 
@@ -181,24 +184,36 @@ export function registerConnTreeProvider(kind: string, provider: ConnTreeChildPr
 export function getConnTreeProvider(kind: string): ConnTreeChildProvider | undefined
 ```
 
-### 4.2 注册时机
+### 4.2 注册时机（懒加载）
 
-与 `registerBuiltinConnectionKinds()` 并列，在 `app.mount()` 前调用：
+`main.ts` 在 `app.mount()` 前只调用 **`registerBuiltinConnKindLoaders()`**，登记各协议的动态 import 入口，**不**静态拉入实现。
+
+| API | 何时触发 | 加载内容 |
+|-----|----------|----------|
+| `ensureConnKindForm(kind)` | 新建 / 编辑连接对话框 | `register-conn-form.ts`（adapter + 表单字段） |
+| `ensureConnKind(kind)` | 展开树、连接导航、Tab↔树同步等 | `register-conn-full.ts`（表单 + 导航 + 树 + 可选 tab-sync） |
 
 ```ts
-// web/src/modules/ops/conn-tree-providers.ts
-export function registerBuiltinConnTreeProviders(): void {
-  registerConnTreeProvider('redis', redisConnTreeProvider)
-  // 未来: registerConnTreeProvider('mysql', mysqlConnTreeProvider)
-}
+// web/src/modules/ops/register-builtin-conn-kinds.ts（示意）
+registerConnKindLoader('redis', {
+  tree: true,
+  loadForm: () => import('@/modules/redis/register-conn-form').then((m) => m.registerForm()),
+  load: () => import('@/modules/redis/register-conn-full').then((m) => m.registerFull()),
+})
 ```
+
+`useConnectionProfiles` 进入面板/模块页时会 `prefetchConnKindForms`，降低首次打开对话框的等待。
 
 ### 4.3 新增协议 Checklist
 
-1. 实现 `XxxConnTreeProvider`（`web/src/modules/xxx/conn-tree-provider.ts`）
-2. `registerConnTreeProvider('xxx', ...)` 一行
-3. 能力服务实现 `xxx.tree.*` 元数据方法（**禁止**复用长会话 `session.open` 做树展开）
-4. （可选）模块 Tab 接收 `resourcePath` 或扁平 props（如 `database`）
+1. `ops/types.ts` → `CONN_KIND_DEFS` 追加 kind
+2. `modules/<kind>/connection-form-adapter.ts` + `*ConnectionFields.vue`
+3. `modules/<kind>/register-conn-form.ts`（`registerForm`）
+4. （可选）`conn-tree-provider.ts` / `conn-nav-strategy.ts` / `conn-tree-tab-sync.ts`
+5. `modules/<kind>/register-conn-full.ts`（`registerFull`：调用 `registerForm` + 树/导航等）
+6. `register-builtin-conn-kinds.ts` 追加 `loadForm` / `load` 一行
+7. 能力服务实现 `xxx.tree.*`（若有树；**禁止**复用长会话 `session.open` 做树展开）
+8. 模块文案放 `modules/<kind>/locale/{zh-CN,en-US}.ts`，由 `web/src/locale/index.ts` merge
 
 **无需修改**：`OpsConnectionPanel.vue` 主体、`useConnFolders` 持久化格式。
 
@@ -376,7 +391,8 @@ sessionRegistry.acquire / release     ← L4（docs/21）
 
 ```
 connect(item, ctx)
-  → getConnectionNavStrategy(item.kind)    // registry.ts
+  → ensureConnKind(item.kind)            // 懒加载完整注册
+  → getConnectionNavStrategy(item.kind)  // registry.ts
   → strategy.buildTabSpec(item, ctx)     // modules/*/conn-nav-strategy.ts
   → [dedupFocus] findExistingTab → activateTab
   → tabStore.openTab(spec)
@@ -384,14 +400,18 @@ connect(item, ctx)
 
 | 文件 | 职责 |
 |------|------|
-| `ops/composables/useConnectionNavigation.ts` | 薄编排，**不含** `switch(kind)` |
+| `ops/composables/useConnectionNavigation.ts` | 薄编排，**不含** `switch(kind)`；先 `ensureConnKind` |
 | `ops/connection-nav/types.ts` | `ConnectionNavStrategy` 接口 |
 | `ops/connection-nav/registry.ts` | `register` / `get` |
 | `ops/connection-nav/utils.ts` | Redis DB / Mongo 库表路径解析、标题 |
-| `ops/conn-nav-providers.ts` | 内置策略注册（`main.ts` 启动时） |
-| `modules/{ssh,ftp,redis,mongodb}/conn-nav-strategy.ts` | 各协议实现 |
+| `ops/register-builtin-conn-kinds.ts` | 内置 kind → `loadForm` / `load` 入口 |
+| `ops/conn-kind-loaders.ts` | `ensureConnKind` / `ensureConnKindForm` / prefetch（表单 chunk 内同步含字段组件） |
+| `ops/conn-tree/tab-sync.ts` | Tab↔树聚焦策略 |
+| `ops/conn-tree/registry.ts` | Provider + **响应式** ActionHost 列表 |
+| `modules/*/register-conn-full.ts` | 各协议完整自注册（含 nav strategy） |
+| `modules/{ssh,ftp,redis,mongodb,mysql,vastbase}/conn-nav-strategy.ts` | 各协议实现 |
 
-**新增协议**：实现 `conn-nav-strategy.ts` → `conn-nav-providers.ts` 加一行 → 无需改 Panel。
+**新增协议**：实现 `conn-nav-strategy.ts` → 在本模块 `register-conn-full.ts` 内 `registerConnectionNavStrategy` → `register-builtin-conn-kinds.ts` 挂 loader → 无需改 Panel。
 
 ```ts
 // modules/mysql/conn-nav-strategy.ts（示例）
@@ -436,7 +456,8 @@ defineProps<{
 ### 7.4 树 ↔ Tab 同步（Phase 2，已实现）
 
 - Tab 内 `SELECT` / 下拉切库 → `useConnTreeSyncStore.requestFocus` → 侧栏 `RsTree.focusNode`
-- 切换激活 Tab → `OpsConnectionPanel` 监听 `activeTabId` 并聚焦对应 `res:…:db:n`
+- 切换激活 Tab → `OpsConnectionPanel` 调用通用 `ConnTreeTabSyncStrategy.resolveFocusKey`（先 `ensureConnKind`）
+- **Redis 业务**在 `modules/redis/conn-tree-tab-sync.ts`，经 `registerConnTreeTabSync` 注册；面板不含 `moduleId === 'redis'` 分支
 - 多 Tab 场景通过 `tabId` prop 保证仅**激活会话**上报库变更（`ModuleWorkspace` 注入）
 
 ---
@@ -479,53 +500,55 @@ activate(conn, path) {
 
 ---
 
-## 9. 未来 SQL 扩展（预留）
+## 9. SQL / 多协议树扩展（预留接口）
 
-同一 Provider 接口，加深 `loadChildren` 层级：
+同一 **Provider 接口**；**层级与 ResourceId 段名按协议分文档实现**，勿在本文混写多库 SQL：
 
-| 协议 | 第 1 层 | 第 2 层 | 第 3 层 |
-|------|---------|---------|---------|
-| Redis | `db` | — | — |
-| MySQL | `schema` | `table` | — |
-| PostgreSQL | `database` | `schema` | `table` |
+| 协议 | 典型层级 | ResourceId 段（示意） | 实现文档 |
+|------|----------|----------------------|----------|
+| Redis | 连接 → DB | `db` | 本文 § Redis |
+| MySQL | 连接 → database → table | `database` / `table` | [25](./25-mysql-module.md) |
+| MariaDB | 连接 → database → table（与 MySQL 同形，**独立 kind**） | `database` / `table` | [26](./26-mariadb-module.md) |
+| Vastbase | 连接 → database → schema → table | `database` / `schema` / `table` | [22](./22-vastbase-module.md) |
 
-元数据方法命名约定：
+元数据方法命名（namespace 随服务）：
 
 ```
-{namespace}.tree.databases   / .schemas / .tables
+{namespace}.tree.databases   / .schemas / .tables / .routines
 ```
 
-**禁止**在 `platform-core` Go 代码内写协议逻辑；各服务独立实现，platform 仅代理（见 [14](./14-capability-connection-framework.md)）。
+**禁止**在 `platform-core` 或 `modules/ops` 基建内写某库业务 SQL；各能力服务独立实现，platform 仅代理（见 [14](./14-capability-connection-framework.md)）。
 
 ---
 
-## 10. 工程布局（新增文件）
+## 10. 工程布局（连接协议相关）
 
 ```
 web/src/modules/ops/
+├── register-builtin-conn-kinds.ts  # 内置 kind → loadForm / load
+├── conn-kind-loaders.ts            # ensureConnKind(Form) / prefetch
 ├── conn-tree/
-│   ├── registry.ts              # Provider 注册表
-│   ├── types.ts                 # ConnResourcePath、Descriptor
-│   ├── keys.ts                  # resourceTreeKey、parseTreeKey 扩展
-│   ├── metadata-cache.ts        # TTL 缓存 + inflight 去重
-│   └── useConnTreeChildren.ts   # lazy loadData 实现
-├── conn-tree-providers.ts       # 内置注册入口
+│   ├── registry.ts                 # Provider 注册表
+│   ├── tab-sync.ts                 # Tab↔树聚焦策略注册表
+│   ├── types.ts
+│   ├── keys.ts
+│   └── metadata-cache.ts
+├── connection-nav/                 # L3 导航策略类型与注册表
 ├── composables/
-│   └── useConnTree.ts           # 改造 makeLeaf、节点类型
+│   ├── useConnTree.ts
+│   ├── useConnTreeChildren.ts
+│   └── useConnectionNavigation.ts
 └── components/
-    └── OpsConnectionPanel.vue   # lazy、loadData、resource 模板
+    └── OpsConnectionPanel.vue      # 薄壳：编排 ensure + 策略，无协议业务分支
 
-web/src/modules/redis/
-├── conn-tree-provider.ts        # Redis Provider
-└── views/RedisSession.vue       # 接收 database prop（小改）
-
-web/src/api/
-├── redis.ts                     # treeDatabases()
-└── types/redis.ts               # TreeDatabases 类型
-
-services/redis-service/src/
-├── handler/methods.rs           # tree_databases
-└── handler/mod.rs               # 路由 tree.databases
+web/src/modules/<kind>/
+├── connection-form-adapter.ts
+├── register-conn-form.ts           # 对话框路径（轻）
+├── register-conn-full.ts           # 完整：form + nav + tree + …
+├── conn-nav-strategy.ts            # 可选
+├── conn-tree-provider.ts           # 可选
+├── conn-tree-tab-sync.ts           # 可选（如 Redis）
+└── locale/{zh-CN,en-US}.ts
 ```
 
 ---
@@ -538,7 +561,7 @@ services/redis-service/src/
 | **P1 Redis** | `redis.tree.databases`、Provider、Tab props、Session database | 展开见 DB 列表与 key 数；双击 DB3 打开 Tab 且键空间为 DB3 |
 | **P2 体验** | Tab 去重（✅）、树高亮同步、刷新缓存、加载/错误态 | 切库后树与 Tab 一致；失败显示重试 |
 | **P3 Redis 深** | key 前缀子节点（可选） | 大数据量下 SCAN 分页 |
-| **P4 SQL** | mysql provider + tree API | 连接 → schema → table |
+| **P4 SQL** | 各库自建 provider + tree API（勿混实现） | MySQL：database → table（[25](./25-mysql-module.md)）；Vastbase 见 [22](./22-vastbase-module.md) |
 
 **动手顺序**：严格按 P0 → P1；P2 可与 P1 末尾并行。
 
@@ -573,6 +596,8 @@ services/redis-service/src/
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v0.1 | 2026-07-09 | 初稿：两层树、Provider、元数据 API、Redis Phase 0–1 |
+| v0.2 | 2026-07-20 | SQL 预留：按库分文档；MySQL ResourceId 改为 `database`（非 schema）；§9 指向 22/25 |
+| v0.3 | 2026-07-20 | 连接协议改为按 kind 懒注册（`register-builtin-conn-kinds` + `ensureConnKind(Form)`）；Redis Tab↔树同步迁入 `conn-tree-tab-sync` |
 
 ---
 
@@ -582,3 +607,5 @@ services/redis-service/src/
 - [09 — App Shell / Tab 工作区](./09-web-app-shell.md)
 - [16 — SSH / SFTP（连接树共用约定 §8.1）](./16-ssh-sftp-module.md)
 - [10 — Web 扩展体系](./10-web-extension-system.md)
+- [22 — Vastbase](./22-vastbase-module.md)（本库树层级）
+- [25 — MySQL](./25-mysql-module.md)（本库树层级）

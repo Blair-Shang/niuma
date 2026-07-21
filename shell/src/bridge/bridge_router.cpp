@@ -379,6 +379,20 @@ bool DispatchClipboardMethod(const BridgeRequest& req, BridgeCallback callback) 
   return false;
 }
 
+bool DispatchShellUtilityMethod(const BridgeRequest& req, BridgeCallback callback) {
+  if (req.method == "shell.openExternal") {
+    const std::string url = JsonGetString(req.params, "url");
+    RunOnUiThread([req, callback, url]() {
+      std::string error;
+      const bool ok = LocalFs::OpenExternalUrl(url, error);
+      Respond(callback, req, ok, ok ? R"({"opened":true})" : "{}", error);
+    });
+    return true;
+  }
+
+  return false;
+}
+
 #endif
 
 /**
@@ -430,6 +444,9 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
   if (DispatchClipboardMethod(req, callback)) {
     return;
   }
+  if (DispatchShellUtilityMethod(req, callback)) {
+    return;
+  }
 #endif
 
   if (DispatchPluginMethod(req, callback)) {
@@ -465,6 +482,30 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
        << NIUMMA_BUILD_ID << R"("})";
     resp.result = ss.str();
     callback(resp);
+    return;
+  }
+
+  if (req.method == "shell.stream.open") {
+    const std::string method = JsonGetString(req.params, "method");
+    const std::string id = JsonGetString(req.params, "id");
+    const std::string params_json = JsonGetString(req.params, "paramsJson");
+    if (method.empty() || id.empty()) {
+      Respond(callback, req, false, "{}", "method and id required");
+      return;
+    }
+    std::ostringstream open_req;
+    open_req << "{\"method\":" << JsonQuoteString(method) << ",\"params\":"
+             << (params_json.empty() ? "{}" : params_json)
+             << ",\"id\":" << JsonQuoteString(id) << "}";
+    PlatformClient::OpenStream(open_req.str(), id);
+    Respond(callback, req, true, R"({"opened":true})");
+    return;
+  }
+
+  if (req.method == "shell.stream.close") {
+    const std::string id = JsonGetString(req.params, "id");
+    PlatformClient::CloseStream(id);
+    Respond(callback, req, true, R"({"closed":true})");
     return;
   }
 

@@ -7,5 +7,8 @@ use (
 	./packages/go/tunnel
 	./platform
 	./services/ftp-service
+	./services/mcp-vastbase-readonly
 	./services/mongodb-service
+	./services/mysql-service
+	./services/vastbase-service
 )

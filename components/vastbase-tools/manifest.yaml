@@ -1,0 +1,44 @@
+id: com.niuma.components.vastbase-tools
+name: Vastbase 官方客户端工具
+module: vastbase
+install:
+  mode: detect_only
+  # vb_dump / vb_restore / vsql 随 Vastbase 完整安装包分发（多为 Linux 服务端），
+  # 无公开 Windows 便携包直链。本机 Windows 通常检测不到这些工具。
+  # 完整备份：复制命令到服务器执行；本机表级转储：用「导出 SQL」。
+  # 若已从服务器拷贝二进制：设置中「浏览指定」或加入 PATH。
+  # 下载中心：https://www.vastdata.com.cn/down
+tools:
+  - id: vb_dump
+    displayName: vb_dump
+    detect:
+      executables:
+        - vb_dump
+        - gs_dump
+      versionArgs:
+        - "--version"
+    install:
+      mode: detect_only
+      downloadPage: https://www.vastdata.com.cn/down
+  - id: vb_restore
+    displayName: vb_restore
+    detect:
+      executables:
+        - vb_restore
+        - gs_restore
+      versionArgs:
+        - "--version"
+    install:
+      mode: detect_only
+      downloadPage: https://www.vastdata.com.cn/down
+  - id: vsql
+    displayName: vsql
+    detect:
+      executables:
+        - vsql
+        - gsql
+      versionArgs:
+        - "--version"
+    install:
+      mode: detect_only
+      downloadPage: https://www.vastdata.com.cn/down

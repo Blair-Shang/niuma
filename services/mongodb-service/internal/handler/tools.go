@@ -48,7 +48,14 @@ type taskIDParams struct {
 func (d *Dispatcher) toolsDetect(_ context.Context, req Request) Response {
 	var params toolPathsParams
 	_ = json.Unmarshal(req.Params, &params)
-	return okResponse(req.ID, d.tools.Detect(nil, params.ToolPaths))
+	result := d.tools.Detect(nil, params.ToolPaths)
+	logOpInfo(MethodToolsDetect,
+		"mongodump", result.Mongodump.Available,
+		"mongorestore", result.Mongorestore.Available,
+		"mongoexport", result.Mongoexport.Available,
+		"mongoimport", result.Mongoimport.Available,
+	)
+	return okResponse(req.ID, result)
 }
 
 func (d *Dispatcher) toolsDump(ctx context.Context, req Request) Response {
@@ -58,8 +65,10 @@ func (d *Dispatcher) toolsDump(ctx context.Context, req Request) Response {
 	}
 	taskID, err := d.tools.Dump(ctx, params.SessionID, params.Database, params.OutputDir, params.Options, params.ToolPaths)
 	if err != nil {
+		logOpError(MethodToolsDump, err, scopeAttrs(params.SessionID, params.Database, "")...)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodToolsDump, append(scopeAttrs(params.SessionID, params.Database, ""), "task", taskID)...)
 	return okResponse(req.ID, map[string]any{"taskId": taskID})
 }
 
@@ -70,8 +79,10 @@ func (d *Dispatcher) toolsRestore(ctx context.Context, req Request) Response {
 	}
 	taskID, err := d.tools.Restore(ctx, params.SessionID, params.InputDir, params.Options, params.ToolPaths)
 	if err != nil {
+		logOpError(MethodToolsRestore, err, "session", params.SessionID)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodToolsRestore, "session", params.SessionID, "task", taskID)
 	return okResponse(req.ID, map[string]any{"taskId": taskID})
 }
 
@@ -82,8 +93,10 @@ func (d *Dispatcher) toolsExport(ctx context.Context, req Request) Response {
 	}
 	taskID, err := d.tools.Export(ctx, params.SessionID, params.Database, params.Collection, params.Format, params.OutputPath, params.ToolPaths)
 	if err != nil {
+		logOpError(MethodToolsExport, err, append(scopeAttrs(params.SessionID, params.Database, params.Collection), "format", params.Format)...)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodToolsExport, append(scopeAttrs(params.SessionID, params.Database, params.Collection), "task", taskID, "format", params.Format)...)
 	return okResponse(req.ID, map[string]any{"taskId": taskID})
 }
 
@@ -94,8 +107,10 @@ func (d *Dispatcher) toolsImport(ctx context.Context, req Request) Response {
 	}
 	taskID, err := d.tools.Import(ctx, params.SessionID, params.Database, params.Collection, params.Format, params.InputPath, params.ToolPaths)
 	if err != nil {
+		logOpError(MethodToolsImport, err, append(scopeAttrs(params.SessionID, params.Database, params.Collection), "format", params.Format)...)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodToolsImport, append(scopeAttrs(params.SessionID, params.Database, params.Collection), "task", taskID, "format", params.Format)...)
 	return okResponse(req.ID, map[string]any{"taskId": taskID})
 }
 
@@ -108,7 +123,9 @@ func (d *Dispatcher) toolsCancel(_ context.Context, req Request) Response {
 		return errorResponse(req.ID, "taskId required")
 	}
 	if err := d.tools.Cancel(params.TaskID); err != nil {
+		logOpError(MethodToolsCancel, err, "task", params.TaskID)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodToolsCancel, "task", params.TaskID)
 	return okResponse(req.ID, map[string]any{"cancelled": true})
 }

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -42,6 +44,10 @@ type sshConnectOptions struct {
 //
 // defaultTargetHost/Port 在 Options.TargetHost/Port 未指定时使用（即以最终服务
 // 主机/端口为目标），这与 Rust niuma_tunnel::start_ssh_tunnel 语义一致。
+//
+// 若目标主机与跳板同一地址，会改道 dial 127.0.0.1，避免 hairpin NAT / 本机防火墙
+// 导致经跳板访问「自己的局域网 IP」失败；建立后先探测一次 remote Dial，失败则返回明确错误
+// （否则 Accept 转发静默掐线，客户端只能看到 connection reset）。
 func StartSSHTunnel(
 	ctx context.Context,
 	opts *Options,
@@ -59,17 +65,15 @@ func StartSSHTunnel(
 		return "", 0, nil, fmt.Errorf("tunnel: ssh profile host required")
 	}
 
-	targetHost := defaultTargetHost
-	if opts.TargetHost != "" {
-		targetHost = opts.TargetHost
-	}
-	targetPort := defaultTargetPort
-	if opts.TargetPort > 0 {
-		targetPort = opts.TargetPort
-	}
+	targetHost, targetPort := resolveTunnelTarget(opts, profile, defaultTargetHost, defaultTargetPort)
 
 	sshClient, err := dialSSHJump(ctx, profile)
 	if err != nil {
+		return "", 0, nil, err
+	}
+
+	if err := probeSSHRemote(sshClient, targetHost, targetPort); err != nil {
+		_ = sshClient.Close()
 		return "", 0, nil, err
 	}
 
@@ -80,10 +84,10 @@ func StartSSHTunnel(
 	}
 
 	localPort = listener.Addr().(*net.TCPAddr).Port
-	lctx, cancel := context.WithCancel(ctx)
+	// 隧道生命周期由 stop 控制，不跟请求 ctx 绑定（避免请求结束取消仍在转发的连接）。
+	lctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
-		defer cancel()
 		for {
 			local, aerr := listener.Accept()
 			if aerr != nil {
@@ -101,12 +105,55 @@ func StartSSHTunnel(
 	return "127.0.0.1", localPort, stop, nil
 }
 
+// resolveTunnelTarget 解析最终经跳板访问的目标 host:port。
+func resolveTunnelTarget(
+	opts *Options,
+	profile *SSHProfile,
+	defaultTargetHost string,
+	defaultTargetPort int,
+) (string, int) {
+	targetHost := strings.TrimSpace(defaultTargetHost)
+	if opts.TargetHost != "" {
+		targetHost = strings.TrimSpace(opts.TargetHost)
+	}
+	targetPort := defaultTargetPort
+	if opts.TargetPort > 0 {
+		targetPort = opts.TargetPort
+	}
+	if sameTunnelHost(targetHost, profile.HostAddress) {
+		targetHost = "127.0.0.1"
+	}
+	return targetHost, targetPort
+}
+
+// sameTunnelHost 判断目标主机与跳板是否同一台（忽略大小写与外围空白）。
+func sameTunnelHost(target, jump string) bool {
+	a := strings.ToLower(strings.TrimSpace(target))
+	b := strings.ToLower(strings.TrimSpace(jump))
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b
+}
+
+// probeSSHRemote 确认经跳板能 dial 到目标，避免转发失败后被客户端误读成 connection reset。
+func probeSSHRemote(sshClient *ssh.Client, host string, port int) error {
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	remote, err := sshClient.Dial("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("tunnel: cannot reach %s via jump host: %w", addr, err)
+	}
+	_ = remote.Close()
+	return nil
+}
+
 // forwardConn 将 local 连接经 sshClient direct-tcpip 转发至目标地址。
 func forwardConn(ctx context.Context, sshClient *ssh.Client, local net.Conn, host string, port int) {
 	defer local.Close()
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	remote, err := sshClient.Dial("tcp", addr)
 	if err != nil {
+		log.Printf("tunnel: forward dial %s: %v", addr, err)
 		return
 	}
 	defer remote.Close()

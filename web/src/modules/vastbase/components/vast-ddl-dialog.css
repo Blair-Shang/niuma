@@ -1,0 +1,41 @@
+.nm-vast-ddl-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-md);
+}
+
+.nm-vast-ddl-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--rs-space-md);
+}
+
+.nm-vast-ddl-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-xs);
+}
+
+.nm-vast-ddl-dialog__field--full {
+  width: 100%;
+}
+
+.nm-vast-ddl-dialog__hint {
+  margin: 0;
+  font-size: var(--rs-font-size-xs);
+  color: var(--rs-color-text-secondary);
+}
+
+.nm-vast-ddl-dialog__preview {
+  margin: 0;
+  padding: var(--rs-space-sm);
+  border-radius: var(--rs-radius-sm);
+  background: var(--rs-color-bg-muted, var(--rs-color-bg-subtle));
+  font-family: var(--rs-font-mono, ui-monospace, monospace);
+  font-size: var(--rs-font-size-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 8rem;
+  overflow: auto;
+}

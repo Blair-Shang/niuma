@@ -1,5 +1,7 @@
 <script setup lang="ts" generic="T">
-import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
+import { computed, onActivated, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
+import type { RsRadius } from '../theme/types'
+import { rsRadiusCss, useResolvedRsRadius } from './resolve-radius'
 import type { RsVirtualListItemSize } from './virtual-list-utils'
 import { isVirtualListFillHeight, resolveItemSize, resolveVirtualListHeight } from './virtual-list-utils'
 
@@ -10,6 +12,10 @@ const props = withDefaults(
     height?: number | string
     overscan?: number
     activeIndex?: number | null
+    /** keep-alive 外层可见性；变为 true 时重同步视口与 scroll 位置 */
+    layoutActive?: boolean
+    /** 外层圆角。直角列表传 `none`。默认 sm。 */
+    radius?: RsRadius
   }>(),
   {
     itemSize: 32,
@@ -19,6 +25,8 @@ const props = withDefaults(
   },
 )
 
+const resolvedRadius = useResolvedRsRadius(() => props.radius, 'sm')
+
 const rootRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const measuredHeight = ref(0)
@@ -27,6 +35,10 @@ const heightStyle = computed(() => {
   const resolved = resolveVirtualListHeight(props.height)
   return resolved ? { height: resolved } : undefined
 })
+const rootStyle = computed(() => ({
+  ...heightStyle.value,
+  '--rs-virtual-list-radius': rsRadiusCss(resolvedRadius.value),
+}))
 const fixedItemSize = computed(() => resolveItemSize(props.itemSize))
 const viewportHeightPx = computed(() => {
   if (typeof props.height === 'number' && props.height > 0) {
@@ -61,8 +73,26 @@ function syncMeasuredHeight(): void {
   }
 }
 
-onMounted(() => {
+function syncLayoutFromDom(): void {
   syncMeasuredHeight()
+  const el = rootRef.value
+  if (el) {
+    scrollTop.value = el.scrollTop
+  }
+}
+
+function scheduleLayoutSync(): void {
+  syncLayoutFromDom()
+  void nextTick(() => {
+    syncLayoutFromDom()
+    requestAnimationFrame(() => {
+      syncLayoutFromDom()
+    })
+  })
+}
+
+onMounted(() => {
+  scheduleLayoutSync()
   const el = rootRef.value
   if (!el || typeof ResizeObserver === 'undefined') {
     return
@@ -70,6 +100,18 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(() => syncMeasuredHeight())
   resizeObserver.observe(el)
 })
+
+onActivated(() => {
+  scheduleLayoutSync()
+})
+
+watch(
+  () => props.layoutActive,
+  (active) => {
+    if (active) scheduleLayoutSync()
+  },
+  { flush: 'post' },
+)
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
@@ -122,7 +164,7 @@ defineExpose({ scrollToIndex })
     ref="rootRef"
     class="rs-virtual-list"
     :class="{ 'rs-virtual-list--fill': fillHeight }"
-    :style="heightStyle"
+    :style="rootStyle"
     @scroll="scrollTop = ($event.target as HTMLElement).scrollTop"
   >
     <div class="rs-virtual-list__spacer" :style="{ height: `${totalHeight}px` }">
@@ -147,7 +189,7 @@ defineExpose({ scrollToIndex })
 .rs-virtual-list {
   overflow: auto;
   border: 1px solid var(--rs-border-subtle);
-  border-radius: var(--rs-radius-sm);
+  border-radius: var(--rs-virtual-list-radius, var(--rs-radius-sm));
 }
 .rs-virtual-list--fill {
   flex: 1;

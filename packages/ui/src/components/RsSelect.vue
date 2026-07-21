@@ -3,10 +3,13 @@
 import { computed, ref, watch } from 'vue'
 
 import { useRsI18n } from '../composables/useRsI18n'
-import type { RsComponentSize } from '../theme/types'
+import type { RsComponentSize, RsRadius } from '../theme/types'
+import { RS_COMPONENT_SIZE_ICON_PX } from '../theme/types'
 
 import RsIcon from './RsIcon.vue'
 import { useRsFormContext, useRsFormField } from './form-utils'
+import { useResolvedRsComponentSize } from './resolve-size'
+import { rsRadiusCss, useResolvedRsRadius } from './resolve-radius'
 
 import {
 
@@ -78,6 +81,13 @@ const props = withDefaults(
 
     searchable?: boolean
 
+    /**
+     * 允许把搜索框内容作为自定义值提交（Enter 或点「使用 xxx」）。
+     * 专业工具常见：类型名 / 枚举等不在预设列表时仍可手输。
+     * 开启后若未显式关 searchable，将自动启用搜索框。
+     */
+    creatable?: boolean
+
     /** 多选，v-model 为 string[] */
 
     multiple?: boolean
@@ -111,6 +121,25 @@ const props = withDefaults(
 
     size?: RsComponentSize
 
+    /** 圆角档位；默认 sm。直角 UI 传 `none`。 */
+
+    radius?: RsRadius
+
+    /**
+     * 下拉面板是否与触发器等宽。
+     *
+     * - 默认 `false`：面板 `min-width` 对齐触发器，可随选项文案变宽（受 max-width 限制），避免长文案大量省略。
+     * - `true`：面板强制与触发器同宽，适合表单栅格、筛选条等需要对齐的场景；长文案仍会 ellipsis。
+     *
+     * 注意：开启虚拟滚动时，列表项多为绝对定位，无法可靠把面板撑到「全局最长文案」宽度，
+     * 宽度可能随可见项变化或退回到触发器宽度；长列表若强依赖内容撑宽，请关闭 virtual，
+     * 或改用 `matchTriggerWidth` + 截断项 Tooltip。
+     */
+    matchTriggerWidth?: boolean
+
+    /** 根节点占满父级宽度（与按钮并排时用）。 */
+    block?: boolean
+
   }>(),
 
   {
@@ -118,6 +147,8 @@ const props = withDefaults(
     disabled: false,
 
     searchable: false,
+
+    creatable: false,
 
     multiple: false,
     required: false,
@@ -131,6 +162,10 @@ const props = withDefaults(
     remote: false,
 
     loading: false,
+
+    matchTriggerWidth: false,
+
+    block: false,
 
   },
 
@@ -155,7 +190,8 @@ const { contains } = useFilter({ sensitivity: 'base' })
 
 const searchQuery = ref('')
 
-const open = ref(false)
+/** 下拉显隐；支持 v-model:open（如表格多选关闭时提交） */
+const open = defineModel<boolean>('open', { default: false })
 
 
 
@@ -170,6 +206,9 @@ const resolvedSearchPlaceholder = computed(
 const resolvedEmptyText = computed(() => props.emptyText ?? t('select.empty'))
 
 const resolvedLoadingText = computed(() => props.loadingText ?? t('select.loading'))
+
+/** creatable 默认带搜索框，便于手输 */
+const isSearchable = computed(() => props.searchable || props.creatable)
 
 
 
@@ -198,9 +237,27 @@ const displayOptions = computed(() => {
   return filterSelectOptions(props.options, searchQuery.value, contains)
 })
 
+const createValue = computed(() => searchQuery.value.trim())
 
+const canCreate = computed(() => {
+  if (!props.creatable) return false
+  const q = createValue.value
+  if (!q) return false
+  const lower = q.toLowerCase()
+  return !flatOptions.value.some(
+    (opt) => opt.value.toLowerCase() === lower || String(opt.label).toLowerCase() === lower,
+  )
+})
 
-const virtualValues = computed(() => flattenSelectValues(displayOptions.value))
+const createOptionLabel = computed(() =>
+  t('select.createOption', '使用 “{query}”').replace('{query}', createValue.value),
+)
+
+const virtualValues = computed(() => {
+  const values = flattenSelectValues(displayOptions.value)
+  if (!canCreate.value) return values
+  return [createValue.value, ...values.filter((v) => String(v) !== createValue.value)]
+})
 
 
 
@@ -226,11 +283,12 @@ const selectedValues = computed<string[]>(() => {
 
 const hasValue = computed(() => selectedValues.value.length > 0)
 const resolvedDisabled = computed(() => props.disabled || formContext?.disabled.value || false)
-const resolvedSize = computed(() => props.size ?? formContext?.size.value ?? 'md')
-const triggerIconSize = computed(() => {
-  const sizeMap: Record<RsComponentSize, number> = { sm: 14, md: 16, lg: 18 }
-  return sizeMap[resolvedSize.value]
-})
+const resolvedSize = useResolvedRsComponentSize(() => props.size)
+const resolvedRadius = useResolvedRsRadius(() => props.radius, 'sm')
+const triggerIconSize = computed(() => RS_COMPONENT_SIZE_ICON_PX[resolvedSize.value])
+const rootStyle = computed(() => ({
+  '--rs-select-radius': rsRadiusCss(resolvedRadius.value),
+}))
 
 
 
@@ -281,10 +339,30 @@ watch(searchQuery, (query) => {
 
 
 watch(open, (isOpen) => {
-
-  if (!isOpen) searchQuery.value = ''
-
+  if (isOpen) searchQuery.value = ''
 })
+
+function commitCreatedValue(value: string): void {
+  const next = value.trim()
+  if (!next) return
+  if (props.multiple) {
+    const current = selectedValues.value
+    model.value = current.includes(next) ? current : [...current, next]
+  } else {
+    model.value = next
+    open.value = false
+  }
+  searchQuery.value = ''
+}
+
+function onSearchKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.isComposing) return
+  if (!canCreate.value) return
+  // 无精确匹配时 Enter 提交手输值；有匹配时交给 Combobox 默认选中行为
+  event.preventDefault()
+  event.stopPropagation()
+  commitCreatedValue(createValue.value)
+}
 
 
 
@@ -360,11 +438,16 @@ defineExpose({
 
       'rs-select--multiple': multiple,
 
-      'rs-select--searchable': searchable,
+      'rs-select--searchable': isSearchable,
+      'rs-select--creatable': creatable,
+
+      'rs-select--block': block,
 
       [`rs-select--${resolvedSize}`]: true,
 
     }"
+
+    :style="rootStyle"
 
     :multiple="multiple"
 
@@ -470,12 +553,13 @@ defineExpose({
 
       <ComboboxContent
         class="rs-select__content"
+        :class="{ 'rs-select__content--match-trigger': matchTriggerWidth }"
         align="start"
         :side-offset="4"
         position="popper"
       >
 
-        <div v-if="searchable" class="rs-select__search-bar">
+        <div v-if="isSearchable" class="rs-select__search-bar">
           <div class="rs-select__search-wrap">
             <RsIcon name="search" :size="14" class="rs-select__search-icon" aria-hidden="true" />
             <ComboboxInput
@@ -483,6 +567,7 @@ defineExpose({
               class="rs-select__search"
               :placeholder="resolvedSearchPlaceholder"
               auto-focus
+              @keydown="onSearchKeydown"
             />
           </div>
         </div>
@@ -493,7 +578,7 @@ defineExpose({
 
 
 
-        <ComboboxEmpty v-if="!loading" class="rs-select__empty">
+        <ComboboxEmpty v-if="!loading && !canCreate" class="rs-select__empty">
 
           {{ resolvedEmptyText }}
 
@@ -520,10 +605,17 @@ defineExpose({
             <ComboboxItem
               :value="option"
               :disabled="disabledMap.get(String(option))"
-              :text-value="labelMap.get(String(option))"
+              :text-value="labelMap.get(String(option)) ?? String(option)"
               class="rs-select__item"
+              :class="{ 'rs-select__item--create': canCreate && String(option) === createValue }"
             >
-              <span class="rs-select__item-label">{{ labelMap.get(String(option)) ?? option }}</span>
+              <span class="rs-select__item-label">
+                {{
+                  canCreate && String(option) === createValue
+                    ? createOptionLabel
+                    : (labelMap.get(String(option)) ?? option)
+                }}
+              </span>
               <ComboboxItemIndicator class="rs-select__item-check">
                 <RsIcon name="check" :size="14" />
               </ComboboxItemIndicator>
@@ -534,6 +626,18 @@ defineExpose({
 
 
           <template v-else>
+
+            <ComboboxItem
+              v-if="canCreate"
+              :value="createValue"
+              :text-value="createValue"
+              class="rs-select__item rs-select__item--create"
+            >
+              <span class="rs-select__item-label">{{ createOptionLabel }}</span>
+              <ComboboxItemIndicator class="rs-select__item-check">
+                <RsIcon name="check" :size="14" />
+              </ComboboxItemIndicator>
+            </ComboboxItem>
 
             <template v-for="(entry, index) in displayOptions" :key="index">
 
@@ -621,7 +725,7 @@ defineExpose({
 
   padding: 0 var(--rs-space-md);
 
-  border-radius: var(--rs-radius-sm);
+  border-radius: var(--rs-select-radius, var(--rs-radius-sm));
 
   border: 1px solid var(--rs-input-border, var(--rs-border));
 
@@ -661,36 +765,46 @@ defineExpose({
 
 }
 
-.rs-select--sm .rs-select__trigger {
+.rs-select--block {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
 
-  min-height: var(--rs-control-height-sm);
+.rs-select--block .rs-select__anchor,
+.rs-select--block .rs-select__trigger {
+  width: 100%;
+}
 
-  padding: 0 var(--rs-space-sm);
-
+.rs-select--ssm .rs-select__trigger {
+  min-height: var(--rs-control-height-ssm);
+  padding: 0 var(--rs-space-xs);
   font-size: var(--rs-font-size-xs);
+}
 
+.rs-select--ssm.rs-select--multiple .rs-select__trigger {
+  min-height: var(--rs-control-height-ssm);
+}
+
+.rs-select--sm .rs-select__trigger {
+  min-height: var(--rs-control-height-sm);
+  padding: 0 var(--rs-space-sm);
+  font-size: var(--rs-font-size-xs);
 }
 
 .rs-select--sm.rs-select--multiple .rs-select__trigger {
-
   min-height: var(--rs-control-height-sm);
-
 }
 
 .rs-select--lg .rs-select__trigger {
-
   min-height: var(--rs-control-height-lg);
-
   padding: 0 var(--rs-space-lg);
-
   font-size: var(--rs-font-size-base);
-
 }
 
 .rs-select--lg.rs-select--multiple .rs-select__trigger {
-
   min-height: var(--rs-control-height-lg);
-
 }
 
 .rs-select__trigger:hover:not([data-disabled]) {
@@ -745,15 +859,15 @@ defineExpose({
 
   display: flex;
 
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 
   gap: var(--rs-space-xs);
 
   align-items: center;
 
-  white-space: normal;
+  white-space: nowrap;
 
-  overflow: visible;
+  overflow: hidden;
 
 }
 
@@ -783,7 +897,9 @@ defineExpose({
 
   gap: 0.125rem;
 
-  max-width: 100%;
+  flex: 0 0 auto;
+
+  max-width: 10rem;
 
   padding: 0.125rem 0.25rem 0.125rem 0.5rem;
 
@@ -917,6 +1033,11 @@ defineExpose({
 
   transform: rotate(180deg);
 
+}
+
+.rs-select__item--create .rs-select__item-label {
+  color: var(--rs-primary);
+  font-weight: 500;
 }
 
 </style>

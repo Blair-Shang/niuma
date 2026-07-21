@@ -19,6 +19,18 @@ const modelOptions: RsSelectOption[] = [
   { label: 'Claude', value: 'claude' },
 ]
 
+/** 长文案 — 面板宽度策略对比 */
+const longLabel = ref('')
+const longLabelMatched = ref('')
+const longLabelOptions: RsSelectOption[] = [
+  { label: 'public.orders — 订单主表（含分区与历史归档）', value: 'orders' },
+  { label: 'analytics.daily_active_users_by_region_and_channel', value: 'dau' },
+  {
+    label: 'ops.job_run_history_with_very_long_identifier_for_demo',
+    value: 'job',
+  },
+]
+
 /** 默认选中 — 编辑态回显 */
 const plan = ref('pro')
 const planOptions: RsSelectOption[] = [
@@ -157,6 +169,7 @@ const priorityOptions: RsSelectOption[] = [
 
 /** 可搜索 */
 const searchableCountry = ref('')
+const creatableType = ref('')
 
 /** 多选 Tags */
 const skills = ref<string[]>(['vue', 'ts'])
@@ -274,6 +287,31 @@ const teamSkills = ref<string[]>([])
         <RsLabel for-id="pg-model">模型</RsLabel>
         <RsSelect id="pg-model" v-model="model" :options="modelOptions" placeholder="选择模型" />
         <p class="value-hint">当前值：<code>{{ model }}</code></p>
+      </div>
+    </DemoBlock>
+
+    <DemoBlock title="长文案面板宽度">
+      <p class="hint">
+        默认面板可宽于触发器；开启 <code>match-trigger-width</code> 后与触发器等宽（长文案省略）。
+      </p>
+      <div class="field">
+        <RsLabel for-id="pg-long-default">默认可变宽</RsLabel>
+        <RsSelect
+          id="pg-long-default"
+          v-model="longLabel"
+          :options="longLabelOptions"
+          placeholder="选择对象"
+        />
+      </div>
+      <div class="field">
+        <RsLabel for-id="pg-long-match">等宽对齐</RsLabel>
+        <RsSelect
+          id="pg-long-match"
+          v-model="longLabelMatched"
+          :options="longLabelOptions"
+          match-trigger-width
+          placeholder="选择对象"
+        />
       </div>
     </DemoBlock>
 
@@ -451,6 +489,29 @@ const teamSkills = ref<string[]>([])
           placeholder="搜索国家"
         />
         <p class="value-hint">当前值：<code>{{ searchableCountry || '（空）' }}</code></p>
+      </div>
+    </DemoBlock>
+
+    <DemoBlock title="可创建（手输自定义值）">
+      <p class="hint">
+        `creatable`：搜索无精确匹配时，Enter 或点「使用 xxx」提交自定义值（如表类型
+        <code>CITEXT</code>）。
+      </p>
+      <div class="field">
+        <RsLabel for-id="pg-creatable-type">数据类型</RsLabel>
+        <RsSelect
+          id="pg-creatable-type"
+          v-model="creatableType"
+          :options="[
+            { label: 'BIGINT', value: 'BIGINT' },
+            { label: 'VARCHAR', value: 'VARCHAR' },
+            { label: 'JSONB', value: 'JSONB' },
+          ]"
+          creatable
+          clearable
+          placeholder="选择或输入类型"
+        />
+        <p class="value-hint">当前值：<code>{{ creatableType || '（空）' }}</code></p>
       </div>
     </DemoBlock>
 

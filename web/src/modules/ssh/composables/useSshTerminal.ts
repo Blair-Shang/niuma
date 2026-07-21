@@ -1,5 +1,6 @@
 import { onBeforeUnmount, ref } from 'vue'
-import { sshApi, subscribeBridgeEventByPrefix } from '@/api'
+import { shellStreamApi, sshApi, subscribeBridgeEventByPrefix } from '@/api'
+import { STREAM_SSH_TERMINAL } from '@/modules/ssh/stream'
 import type {
   SshTerminalDataEvent,
   SshTerminalExitEvent,
@@ -22,6 +23,7 @@ export function useSshTerminal() {
   const message = ref('')
   const exitCode = ref<number | null>(null)
   let offEvent: (() => void) | null = null
+  let streamSessionId: string | null = null
 
   function ensureSubscribed(onData: (event: SshTerminalDataEvent) => void): void {
     if (offEvent) {
@@ -48,6 +50,28 @@ export function useSshTerminal() {
     })
   }
 
+  async function openStream(termId: string): Promise<void> {
+    streamSessionId = `ssh-term-${termId}`
+    await shellStreamApi.open({
+      method: STREAM_SSH_TERMINAL,
+      id: streamSessionId,
+      paramsJson: JSON.stringify({ terminalId: termId }),
+    })
+  }
+
+  async function closeStream(): Promise<void> {
+    const current = streamSessionId
+    streamSessionId = null
+    if (!current) {
+      return
+    }
+    try {
+      await shellStreamApi.close({ id: current })
+    } catch {
+      // 会话关闭时流可能已断开，忽略
+    }
+  }
+
   async function openTerminal(params: OpenTerminalParams, onData: (event: SshTerminalDataEvent) => void): Promise<string> {
     ensureSubscribed(onData)
     state.value = 'opening'
@@ -55,15 +79,16 @@ export function useSshTerminal() {
     exitCode.value = null
     const result = await sshApi.terminalOpen(params)
     terminalId.value = result.terminalId
+    await openStream(result.terminalId)
     state.value = 'ready'
     return result.terminalId
   }
 
-  async function input(data: string): Promise<void> {
+  function input(data: string): void {
     if (!terminalId.value || !data) {
       return
     }
-    await sshApi.terminalInput({ terminalId: terminalId.value, data })
+    void sshApi.terminalInput({ terminalId: terminalId.value, data })
   }
 
   async function resize(cols: number, rows: number): Promise<void> {
@@ -77,6 +102,7 @@ export function useSshTerminal() {
     const current = terminalId.value
     terminalId.value = null
     state.value = 'closed'
+    await closeStream()
     if (!current) {
       return
     }
@@ -90,6 +116,7 @@ export function useSshTerminal() {
   onBeforeUnmount(() => {
     offEvent?.()
     offEvent = null
+    void closeStream()
   })
 
   return {

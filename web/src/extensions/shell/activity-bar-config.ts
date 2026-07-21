@@ -50,6 +50,12 @@ export function filterNavItemsByCategory(
 
 const CONN_KIND_SET = new Set<ConnKind>(CONN_KIND_DEFS.map((k) => k.kind))
 
+const OPS_CONN_KINDS: ConnKind[] = CONN_KIND_DEFS
+  .map((k) => k.kind)
+  .filter((k) => k !== 'vastbase' && k !== 'mysql')
+
+const DATA_CONN_KINDS: ConnKind[] = ['vastbase', 'mysql']
+
 /**
  * Activity 分类对应的连接 kind 过滤；`null` 表示资源管理全量展示。
  */
@@ -58,15 +64,24 @@ export function connectionKindsForCategory(category: ModuleCategory): ConnKind[]
     return null
   }
   if (category === 'ops') {
-    return CONN_KIND_DEFS.map((k) => k.kind)
+    return OPS_CONN_KINDS
+  }
+  if (category === 'data') {
+    return DATA_CONN_KINDS
   }
   return []
 }
 
 /** 当前分类下可新建的连接 kind（驱动右键「新建」菜单）。 */
 export function creatableConnKindsForCategory(category: ModuleCategory): ConnKind[] {
-  if (category === 'explorer' || category === 'ops') {
+  if (category === 'explorer') {
     return CONN_KIND_DEFS.map((k) => k.kind)
+  }
+  if (category === 'ops') {
+    return OPS_CONN_KINDS
+  }
+  if (category === 'data') {
+    return DATA_CONN_KINDS
   }
   return []
 }
@@ -86,7 +101,11 @@ export interface CategoryModuleAction {
 
 export function categoryModuleActions(category: ModuleCategory): CategoryModuleAction[] {
   if (category === 'data') {
-    return [{ key: 'open-module:database', labelKey: 'opsNav.addDatabase', icon: 'database', moduleId: 'database' }]
+    return [
+      { key: 'open-module:mysql', labelKey: 'nav.mysql', icon: 'mysql', moduleId: 'mysql' },
+      { key: 'open-module:vastbase', labelKey: 'nav.vastbase', icon: 'vastbase', moduleId: 'vastbase' },
+      { key: 'open-module:database', labelKey: 'opsNav.addDatabase', icon: 'database', moduleId: 'database' },
+    ]
   }
   if (category === 'devtools') {
     return [{ key: 'open-module:api', labelKey: 'opsNav.addApi', icon: 'send', moduleId: 'api' }]

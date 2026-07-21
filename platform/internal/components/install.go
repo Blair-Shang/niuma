@@ -17,14 +17,40 @@ import (
 
 const installHTTPTimeout = 10 * time.Minute
 
+// progressEmitMinInterval 下载进度上报最小间隔，避免刷爆事件总线。
+const progressEmitMinInterval = 100 * time.Millisecond
+
+// InstallPhase 表示组件安装阶段。
+const (
+	InstallPhaseDownloading = "downloading"
+	InstallPhaseExtracting  = "extracting"
+	InstallPhaseFinalizing  = "finalizing"
+)
+
+// InstallProgress 是安装过程进度（供 UI 展示）。
+type InstallProgress struct {
+	BundleID      string  `json:"bundleId"`
+	ToolID        string  `json:"toolId,omitempty"`
+	PackageID     string  `json:"packageId,omitempty"`
+	Phase         string  `json:"phase"`
+	BytesReceived int64   `json:"bytesReceived,omitempty"`
+	BytesTotal    int64   `json:"bytesTotal,omitempty"`
+	Percent       float64 `json:"percent,omitempty"`
+}
+
+// InstallProgressFunc 接收安装进度回调；可为 nil。
+type InstallProgressFunc func(InstallProgress)
+
 // InstallPackageSpec 描述单个平台安装包。
 type InstallPackageSpec struct {
-	ID      string `yaml:"id"`
-	OS      string `yaml:"os"`
-	Arch    string `yaml:"arch"`
-	URL     string `yaml:"url"`
-	Archive string `yaml:"archive"`
-	BinDir  string `yaml:"binDir"`
+	ID      string   `yaml:"id"`
+	OS      string   `yaml:"os"`
+	Arch    string   `yaml:"arch"`
+	URL     string   `yaml:"url"`
+	Archive string   `yaml:"archive"`
+	BinDir  string   `yaml:"binDir"`
+	// Tools 声明本包覆盖的工具 id；空则仅当 package.id == toolId 时匹配单工具安装。
+	Tools []string `yaml:"tools"`
 }
 
 // BundleInstallSpec 是组件包级安装配置（Phase 4b）。
@@ -33,8 +59,9 @@ type BundleInstallSpec struct {
 	Packages []InstallPackageSpec `yaml:"packages"`
 }
 
-// Install 下载并解压 manifest 中当前平台匹配的安装包至 data/components/{bundleId}/bin/。
-func (r *Registry) Install(ctx context.Context, bundleID string) (BundleStatusDTO, error) {
+// Install 下载并解压安装包至 data/components/{bundleId}/bin/。
+// toolID 为空时安装当前平台全部匹配包；非空时仅安装覆盖该工具的包（支持单独重装）。
+func (r *Registry) Install(ctx context.Context, bundleID, toolID string, onProgress InstallProgressFunc) (BundleStatusDTO, error) {
 	m, ok := r.bundles[bundleID]
 	if !ok {
 		return BundleStatusDTO{}, fmt.Errorf("components: bundle not found: %s", bundleID)
@@ -42,8 +69,15 @@ func (r *Registry) Install(ctx context.Context, bundleID string) (BundleStatusDT
 	if m.Install.Mode != "optional_download" {
 		return BundleStatusDTO{}, fmt.Errorf("components: bundle does not support install: %s", bundleID)
 	}
-	pkgs := matchingPackages(m.Install.Packages)
+	toolID = strings.TrimSpace(toolID)
+	if toolID != "" && !m.hasTool(toolID) {
+		return BundleStatusDTO{}, fmt.Errorf("components: tool not found: %s/%s", bundleID, toolID)
+	}
+	pkgs := matchingPackages(m.Install.Packages, toolID)
 	if len(pkgs) == 0 {
+		if toolID != "" {
+			return BundleStatusDTO{}, fmt.Errorf("components: no install package for tool %s on %s/%s", toolID, runtime.GOOS, runtime.GOARCH)
+		}
 		return BundleStatusDTO{}, fmt.Errorf("components: no install package for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	if r.bundledRoot == "" {
@@ -55,11 +89,22 @@ func (r *Registry) Install(ctx context.Context, bundleID string) (BundleStatusDT
 		return BundleStatusDTO{}, fmt.Errorf("components: mkdir bin: %w", err)
 	}
 
+	report := func(p InstallProgress) {
+		if onProgress == nil {
+			return
+		}
+		p.BundleID = bundleID
+		p.ToolID = toolID
+		onProgress(p)
+	}
+
 	for _, pkg := range pkgs {
-		if err := r.installPackage(ctx, pkg, binDir); err != nil {
+		if err := r.installPackage(ctx, pkg, binDir, report); err != nil {
 			return BundleStatusDTO{}, fmt.Errorf("components: install %s: %w", pkg.ID, err)
 		}
 	}
+
+	report(InstallProgress{Phase: InstallPhaseFinalizing, Percent: 100})
 
 	paths, err := r.loadPaths(ctx)
 	if err != nil {
@@ -68,16 +113,45 @@ func (r *Registry) Install(ctx context.Context, bundleID string) (BundleStatusDT
 	return r.bundleStatus(ctx, m, paths)
 }
 
-func matchingPackages(all []InstallPackageSpec) []InstallPackageSpec {
+func matchingPackages(all []InstallPackageSpec, toolID string) []InstallPackageSpec {
 	osName := normalizePlatformOS(runtime.GOOS)
 	arch := normalizePlatformArch(runtime.GOARCH)
 	var out []InstallPackageSpec
 	for _, pkg := range all {
-		if strings.EqualFold(pkg.OS, osName) && archMatches(pkg.Arch, arch) {
-			out = append(out, pkg)
+		if !strings.EqualFold(pkg.OS, osName) || !archMatches(pkg.Arch, arch) {
+			continue
 		}
+		if !packageMatchesTool(pkg, toolID) {
+			continue
+		}
+		out = append(out, pkg)
 	}
 	return out
+}
+
+// packageMatchesTool 判断安装包是否覆盖指定工具；toolID 为空表示整包安装。
+func packageMatchesTool(pkg InstallPackageSpec, toolID string) bool {
+	if toolID == "" {
+		return true
+	}
+	if len(pkg.Tools) > 0 {
+		for _, id := range pkg.Tools {
+			if strings.EqualFold(strings.TrimSpace(id), toolID) {
+				return true
+			}
+		}
+		return false
+	}
+	// 未声明 tools 时按 package.id == toolId 匹配（如 mongosh）。
+	return strings.EqualFold(strings.TrimSpace(pkg.ID), toolID)
+}
+
+// toolInstallable 报告当前平台是否存在可下载安装该工具的包。
+func (m *BundleManifest) toolInstallable(toolID string) bool {
+	if !m.SupportsInstall() {
+		return false
+	}
+	return len(matchingPackages(m.Install.Packages, toolID)) > 0
 }
 
 func normalizePlatformOS(goos string) string {
@@ -114,7 +188,12 @@ func archMatches(specArch, runtimeArch string) bool {
 	return strings.EqualFold(specArch, runtimeArch)
 }
 
-func (r *Registry) installPackage(ctx context.Context, pkg InstallPackageSpec, binDir string) error {
+func (r *Registry) installPackage(
+	ctx context.Context,
+	pkg InstallPackageSpec,
+	binDir string,
+	report func(InstallProgress),
+) error {
 	url := strings.TrimSpace(pkg.URL)
 	if url == "" {
 		return fmt.Errorf("empty download url")
@@ -127,12 +206,35 @@ func (r *Registry) installPackage(ctx context.Context, pkg InstallPackageSpec, b
 	defer os.Remove(tmpPath)
 	defer tmpFile.Close()
 
-	if err := downloadFile(ctx, url, tmpFile); err != nil {
+	report(InstallProgress{
+		PackageID: pkg.ID,
+		Phase:     InstallPhaseDownloading,
+		Percent:   0,
+	})
+	if err := downloadFile(ctx, url, tmpFile, func(received, total int64) {
+		percent := 0.0
+		if total > 0 {
+			percent = float64(received) / float64(total) * 90 // 下载占 0–90%
+		}
+		report(InstallProgress{
+			PackageID:     pkg.ID,
+			Phase:         InstallPhaseDownloading,
+			BytesReceived: received,
+			BytesTotal:    total,
+			Percent:       percent,
+		})
+	}); err != nil {
 		return err
 	}
 	if err := tmpFile.Close(); err != nil {
 		return err
 	}
+
+	report(InstallProgress{
+		PackageID: pkg.ID,
+		Phase:     InstallPhaseExtracting,
+		Percent:   92,
+	})
 
 	extractRoot, err := os.MkdirTemp("", "niuma-component-extract-*")
 	if err != nil {
@@ -154,10 +256,18 @@ func (r *Registry) installPackage(ctx context.Context, pkg InstallPackageSpec, b
 	}
 
 	sourceBin := filepath.Join(extractRoot, filepath.FromSlash(strings.Trim(pkg.BinDir, "/\\")))
-	return copyBinaries(sourceBin, binDir)
+	if err := copyBinaries(sourceBin, binDir); err != nil {
+		return err
+	}
+	report(InstallProgress{
+		PackageID: pkg.ID,
+		Phase:     InstallPhaseExtracting,
+		Percent:   98,
+	})
+	return nil
 }
 
-func downloadFile(ctx context.Context, url string, dest *os.File) error {
+func downloadFile(ctx context.Context, url string, dest *os.File, onBytes func(received, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -171,8 +281,58 @@ func downloadFile(ctx context.Context, url string, dest *os.File) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("http %d", resp.StatusCode)
 	}
-	_, err = io.Copy(dest, resp.Body)
+	total := resp.ContentLength
+	if total < 0 {
+		total = 0
+	}
+	writer := &progressWriter{
+		w:        dest,
+		total:    total,
+		onBytes:  onBytes,
+		minInterval: progressEmitMinInterval,
+	}
+	_, err = io.Copy(writer, resp.Body)
+	if err == nil && onBytes != nil {
+		onBytes(writer.received, total)
+	}
 	return err
+}
+
+type progressWriter struct {
+	w           io.Writer
+	total       int64
+	received    int64
+	onBytes     func(received, total int64)
+	minInterval time.Duration
+	lastEmit    time.Time
+}
+
+func (p *progressWriter) Write(b []byte) (int, error) {
+	n, err := p.w.Write(b)
+	p.received += int64(n)
+	if p.onBytes != nil {
+		now := time.Now()
+		if p.lastEmit.IsZero() || now.Sub(p.lastEmit) >= p.minInterval {
+			p.onBytes(p.received, p.total)
+			p.lastEmit = now
+		}
+	}
+	return n, err
+}
+
+// safeExtractPath 将归档内相对路径解析到 dest 下，并拒绝跳出 dest 的路径穿越。
+// 允许 name 为 "." / "./"（归档根目录项），此时返回 dest 本身。
+func safeExtractPath(dest, name string) (string, error) {
+	cleanDest := filepath.Clean(dest)
+	target := filepath.Clean(filepath.Join(cleanDest, filepath.FromSlash(name)))
+	if target == cleanDest {
+		return target, nil
+	}
+	prefix := cleanDest + string(os.PathSeparator)
+	if !strings.HasPrefix(target, prefix) {
+		return "", fmt.Errorf("path slip: %s", name)
+	}
+	return target, nil
 }
 
 func extractZip(src, dest string) error {
@@ -182,8 +342,8 @@ func extractZip(src, dest string) error {
 	}
 	defer r.Close()
 	for _, f := range r.File {
-		target := filepath.Join(dest, f.Name)
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)+string(os.PathSeparator)) {
+		target, err := safeExtractPath(dest, f.Name)
+		if err != nil {
 			return fmt.Errorf("zip slip: %s", f.Name)
 		}
 		if f.FileInfo().IsDir() {
@@ -234,8 +394,8 @@ func extractTarGz(src, dest string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(dest, hdr.Name)
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)+string(os.PathSeparator)) {
+		target, err := safeExtractPath(dest, hdr.Name)
+		if err != nil {
 			return fmt.Errorf("tar slip: %s", hdr.Name)
 		}
 		switch hdr.Typeflag {

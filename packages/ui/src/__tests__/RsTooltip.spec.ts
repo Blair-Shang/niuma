@@ -89,4 +89,23 @@ describe('RsTooltip', () => {
     wrapper.unmount()
     expect(document.body.querySelector('.rs-tooltip__content')).toBeNull()
   })
+
+  it('renders suffix help icon when icon=true', async () => {
+    const wrapper = mountTooltip('<span class="field-label">Database</span>', {
+      content: 'Initial database hint',
+      icon: true,
+    })
+    expect(wrapper.find('.rs-tooltip__with-icon').exists()).toBe(true)
+    expect(wrapper.find('.field-label').exists()).toBe(true)
+    const trigger = wrapper.find('.rs-tooltip__icon-trigger')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.attributes('aria-label')).toBe('Initial database hint')
+    expect(document.body.querySelector('.rs-tooltip__content')).toBeNull()
+    await trigger.trigger('pointermove', { pointerType: 'mouse' })
+    await vi.runAllTimersAsync()
+    await flushPromises()
+    expect(document.body.querySelector('.rs-tooltip__content')).not.toBeNull()
+    expect(document.body.textContent).toContain('Initial database hint')
+    wrapper.unmount()
+  })
 })

@@ -22,7 +22,6 @@ import {
   type RsTerminalAction,
   type RsTerminalThemeMode,
 } from './terminal-utils'
-import { createTerminalZebraStripes, type TerminalZebraStripesHandle } from './terminal-zebra'
 import {
   attachWheelScrollGuard,
   type RsTerminalWheelScrollModifier,
@@ -38,7 +37,7 @@ const props = withDefaults(
     cursorBlink?: boolean
     fontFamily?: string
     fontSize?: number
-    fontWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '350' | '400' | '500' | '600' | '700' | '800' | '900'
+    fontWeight?: 'normal' | 'bold' | '100' | '200' | '300'  | '400' | '500' | '600' | '700' | '800' | '900'
     fontWeightBold?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900'
     allowTransparency?: boolean
     /** auto 跟随 data-rs-theme；也可强制 light / dark */
@@ -65,7 +64,7 @@ const props = withDefaults(
     fontFamily:
       '"SF Mono", "Cascadia Code", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace',
     fontSize: 13,
-    fontWeight: '350',
+    fontWeight: '300',
     fontWeightBold: '400',
     allowTransparency: false,
     themeMode: 'auto',
@@ -89,12 +88,25 @@ const emit = defineEmits<{
 
 const { t } = useRsI18n()
 const hostEl = ref<HTMLElement | null>(null)
-const zebraEl = ref<HTMLElement | null>(null)
 const terminalReady = ref(false)
 const hasSelection = ref(false)
 const resolvedThemeMode = ref(resolveTerminalTheme(props.themeMode))
+/** fit 后量一次真实行高，避免亚像素漂移；非每帧更新 */
+const zebraRowStepPx = ref<number | null>(null)
 
 const showLoading = computed(() => !terminalReady.value || props.loading)
+
+const zebraStyle = computed((): Record<string, string> | undefined => {
+  if (!props.zebraStripes) {
+    return undefined
+  }
+  const step = zebraRowStepPx.value ?? props.fontSize * TERMINAL_LINE_HEIGHT
+  return {
+    '--rs-terminal-font-size': `${props.fontSize}px`,
+    '--rs-terminal-line-height': String(TERMINAL_LINE_HEIGHT),
+    '--rs-terminal-zebra-step': `${step}px`,
+  }
+})
 
 const contextMenuItems = computed<RsContextMenuItem[]>(() => [
   {
@@ -130,7 +142,6 @@ let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let resizeObserver: ResizeObserver | null = null
 let themeObserver: MutationObserver | null = null
-let zebraStripesHandle: TerminalZebraStripesHandle | null = null
 let detachWheelGuard: (() => void) | null = null
 let lastGeometry = { cols: 0, rows: 0 }
 
@@ -149,7 +160,18 @@ function applyThemeToTerminal(): void {
     return
   }
   terminal.options.theme = buildXtermTheme()
-  zebraStripesHandle?.refresh()
+}
+
+function syncZebraRowStepFromDom(): void {
+  zebraRowStepPx.value = null
+  if (!props.zebraStripes || !hostEl.value) {
+    return
+  }
+  const rowEl = hostEl.value.querySelector<HTMLElement>('.xterm-rows > div, .xterm-row')
+  const height = rowEl?.offsetHeight ?? 0
+  if (height > 0) {
+    zebraRowStepPx.value = height
+  }
 }
 
 function attachWheelGuard(): void {
@@ -166,17 +188,6 @@ function attachWheelGuard(): void {
         emit('data', data)
       }
     },
-  })
-}
-
-function attachZebraStripes(): void {
-  if (!terminal || !zebraEl.value || !hostEl.value) {
-    return
-  }
-  zebraStripesHandle?.dispose()
-  zebraStripesHandle = createTerminalZebraStripes(terminal, zebraEl.value, hostEl.value, {
-    enabled: () => props.zebraStripes,
-    fallbackRowHeight: props.fontSize * TERMINAL_LINE_HEIGHT,
   })
 }
 
@@ -251,17 +262,18 @@ async function fit(): Promise<void> {
     return
   }
   emitResizeIfChanged()
-  zebraStripesHandle?.refresh()
+  syncZebraRowStepFromDom()
 }
 
 function write(data: string): void {
-  if (!terminal) {
+  const term = terminal
+  if (!term) {
     return
   }
   if (props.snapViewportOnTuiWrite && containsTuiRefreshSequence(data)) {
-    prepareTerminalForPtyWrite(terminal, data)
+    prepareTerminalForPtyWrite(term, data)
   }
-  terminal.write(data)
+  term.write(data)
 }
 
 function clear(): void {
@@ -404,13 +416,6 @@ watch(
     terminal.options.fontWeightBold = props.fontWeightBold
     terminal.options.allowTransparency = resolveAllowTransparency()
     terminal.options.convertEol = props.convertEol
-    if (props.zebraStripes) {
-      attachZebraStripes()
-    } else {
-      zebraStripesHandle?.dispose()
-      zebraStripesHandle = null
-    }
-    zebraStripesHandle?.refresh()
     attachWheelGuard()
     void fit()
   },
@@ -449,7 +454,6 @@ onMounted(async () => {
   })
   attachShortcuts()
   await nextTick()
-  attachZebraStripes()
   attachWheelGuard()
   terminalReady.value = true
   await fit()
@@ -476,8 +480,6 @@ onBeforeUnmount(() => {
   themeObserver = null
   resizeObserver?.disconnect()
   resizeObserver = null
-  zebraStripesHandle?.dispose()
-  zebraStripesHandle = null
   detachWheelGuard?.()
   detachWheelGuard = null
   terminal?.dispose()
@@ -507,10 +509,10 @@ defineExpose({
       <section
         class="rs-terminal"
         :class="{ 'rs-terminal--zebra': zebraStripes }"
+        :style="zebraStyle"
         @click="focus"
         @contextmenu.capture="onTerminalContextMenu"
       >
-        <div ref="zebraEl" class="rs-terminal__zebra" aria-hidden="true" />
         <div ref="hostEl" class="rs-terminal__host" />
         <RsLoading v-if="showLoading" class="rs-terminal__loading" />
         <output v-if="overlay" class="rs-terminal__overlay">
@@ -550,25 +552,8 @@ defineExpose({
     0 1px 4px color-mix(in srgb, #000 8%, transparent);
 }
 
-.rs-terminal__zebra {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  display: none;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    var(--rs-terminal-bg) 0,
-    var(--rs-terminal-bg) var(--rs-terminal-zebra-step, 1em),
-    var(--rs-terminal-row-stripe) var(--rs-terminal-zebra-step, 1em),
-    var(--rs-terminal-row-stripe) calc(var(--rs-terminal-zebra-step, 1em) * 2)
-  );
-  background-position: 0 var(--rs-terminal-zebra-offset, 0);
-}
-
 .rs-terminal__host {
   position: relative;
-  z-index: 1;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -599,11 +584,27 @@ defineExpose({
   height: 100%;
 }
 
+.rs-terminal--zebra :deep(.xterm) {
+  font-size: var(--rs-terminal-font-size, 13px);
+  line-height: var(--rs-terminal-line-height, 1.2);
+}
+
 .rs-terminal--zebra :deep(.xterm-viewport),
-.rs-terminal--zebra :deep(.xterm-screen),
 .rs-terminal--zebra :deep(.xterm-rows),
 .rs-terminal--zebra :deep(.xterm-rows > div) {
   background-color: transparent !important;
+}
+
+/* 条纹画在滚动坐标系内，随 scrollback 自然对齐，无需 JS 追 offset */
+.rs-terminal--zebra :deep(.xterm-screen) {
+  background-color: transparent !important;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--rs-terminal-bg) 0,
+    var(--rs-terminal-bg) var(--rs-terminal-zebra-step, 1lh),
+    var(--rs-terminal-row-stripe) var(--rs-terminal-zebra-step, 1lh),
+    var(--rs-terminal-row-stripe) calc(var(--rs-terminal-zebra-step, 1lh) * 2)
+  );
 }
 
 .rs-terminal :deep(.xterm-fg-257) {

@@ -409,9 +409,11 @@ go.mongodb.org/mongo-driver/mongo/options
 ### 8.1 模块注册
 
 - `web/src/extensions/registry/builtin-modules.ts` 追加 `mongodb` 模块（`category: 'ops'`）
-- `web/src/modules/ops/connection-kinds.ts` 注册 `MongoConnectionFields`
 - `web/src/modules/ops/types.ts` 的 `CONN_KIND_DEFS` 追加 `mongodb`
+- `modules/mongodb/register-conn-form.ts` + `register-conn-full.ts`（表单 / 树 / 导航自注册）
+- `ops/register-builtin-conn-kinds.ts` 挂 `loadForm` / `load`
 - `web/src/api/mongodb.ts` — `createCapabilityClient('mongodb')` 或显式方法表
+- 文案：`modules/mongodb/locale/{zh-CN,en-US}.ts`
 
 ### 8.2 连接树
 

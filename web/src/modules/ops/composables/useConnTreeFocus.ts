@@ -9,6 +9,8 @@ type TreeChildrenApi = ReturnType<typeof useConnTreeChildren>
 
 export type RsTreeExpose = {
   focusNode: (key: string) => void
+  expandNode: (key: string) => void
+  collapseNode: (key: string) => void
 }
 
 /**

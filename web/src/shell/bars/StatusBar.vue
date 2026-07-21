@@ -2,12 +2,14 @@
 import { useBridgeStore } from '@/stores/bridge'
 import { useShellStore } from '@/stores/shell'
 import { useTransferHubStore } from '@/stores/transfer-hub'
+import { useDataTaskHubStore } from '@/stores/data-task-hub'
 import { useI18n } from 'vue-i18n'
 import { computed } from 'vue'
 
 const bridgeStore = useBridgeStore()
 const shellStore = useShellStore()
 const transferHub = useTransferHubStore()
+const dataTaskHub = useDataTaskHubStore()
 const { t } = useI18n()
 
 const leftText = computed(() =>
@@ -22,12 +24,31 @@ const transferLabel = computed(() => {
   return t('shell.bottomDock.transfersActive', { count })
 })
 
+const dataTasksLabel = computed(() => {
+  const running = dataTaskHub.activeCount
+  if (running > 0) {
+    return t('shell.bottomDock.dataTasksActive', { count: running })
+  }
+  if (dataTaskHub.tasks.length > 0) {
+    return t('shell.bottomDock.dataTasksCount', { count: dataTaskHub.tasks.length })
+  }
+  return t('shell.bottomDock.dataTasks')
+})
+
 function onTransferClick(): void {
   if (shellStore.bottomDockOpen && shellStore.bottomDockTab === 'transfers') {
     shellStore.closeBottomDock()
     return
   }
   shellStore.openBottomDock('transfers')
+}
+
+function onDataTasksClick(): void {
+  if (shellStore.bottomDockOpen && shellStore.bottomDockTab === 'dataTasks') {
+    shellStore.closeBottomDock()
+    return
+  }
+  shellStore.openBottomDock('dataTasks')
 }
 </script>
 
@@ -47,11 +68,25 @@ function onTransferClick(): void {
         class="nm-statusbar__chip"
         :class="{
           'nm-statusbar__chip--active': transferHub.hasActiveTransfers,
-          'nm-statusbar__chip--open': shellStore.bottomDockOpen,
+          'nm-statusbar__chip--open':
+            shellStore.bottomDockOpen && shellStore.bottomDockTab === 'transfers',
         }"
         @click="onTransferClick"
       >
         {{ transferLabel }}
+      </button>
+      <button
+        v-if="dataTaskHub.hasTasks"
+        type="button"
+        class="nm-statusbar__chip"
+        :class="{
+          'nm-statusbar__chip--active': dataTaskHub.activeCount > 0,
+          'nm-statusbar__chip--open':
+            shellStore.bottomDockOpen && shellStore.bottomDockTab === 'dataTasks',
+        }"
+        @click="onDataTasksClick"
+      >
+        {{ dataTasksLabel }}
       </button>
       <span class="tabular-nums opacity-80">NiuMa {{ bridgeStore.shellVersion ?? 'v0.1' }}</span>
     </span>

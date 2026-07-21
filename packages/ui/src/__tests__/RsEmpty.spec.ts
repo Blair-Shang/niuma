@@ -59,7 +59,41 @@ describe('RsEmpty', () => {
       props: { description: '空状态' },
     })
     expect(wrapper.classes()).toContain('rs-empty')
+    expect(wrapper.classes()).not.toContain('rs-empty--fill')
     expect(wrapper.find('.rs-empty__text').exists()).toBe(true)
     expect(wrapper.find('.rs-empty__icon').exists()).toBe(true)
+  })
+
+  it('applies fill class for flush square layout', () => {
+    const wrapper = mount(RsEmpty, {
+      props: { description: '空状态', fill: true },
+    })
+    expect(wrapper.classes()).toContain('rs-empty--fill')
+  })
+
+  it('applies icon radius via CSS variable', () => {
+    const wrapper = mount(RsEmpty, {
+      props: { description: '空状态', iconRadius: 'none' },
+    })
+    const style = wrapper.attributes('style') ?? ''
+    expect(style).toContain('--rs-empty-icon-radius')
+    expect(style).toMatch(/--rs-empty-icon-radius:\s*0/)
+  })
+
+  it('applies outer radius via CSS variable', () => {
+    const wrapper = mount(RsEmpty, {
+      props: { description: '空状态', radius: 'sm' },
+    })
+    const style = wrapper.attributes('style') ?? ''
+    expect(style).toContain('--rs-empty-radius')
+    expect(style).toContain('--rs-radius-sm')
+  })
+
+  it('forces outer radius to 0 when fill is true', () => {
+    const wrapper = mount(RsEmpty, {
+      props: { description: '空状态', fill: true, radius: 'lg' },
+    })
+    const style = wrapper.attributes('style') ?? ''
+    expect(style).toMatch(/--rs-empty-radius:\s*0/)
   })
 })

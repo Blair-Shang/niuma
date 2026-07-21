@@ -14,7 +14,7 @@ body,
   --nm-statusbar-h: 1.625rem;
   --nm-activitybar-w: 3rem;
   --nm-sidebar-w: 13.5rem;
-  --nm-ai-panel-w: 22rem;
+  --nm-ai-panel-w: 26rem;
   --nm-tabbar-h: 2.125rem;
   /* Shell 区域背景 — 与设计系统暗色灰阶对齐（frame<内容<悬浮层） */
   --nm-frame-bg: #181818;

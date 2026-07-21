@@ -18,15 +18,19 @@ import (
 	"runtime"
 	"syscall"
 
-	"niuma/platform/internal/eventhub"
-	"niuma/platform/internal/handler"
-	"niuma/platform/internal/components"
 	"niuma/pkg/buildinfo"
 	"niuma/pkg/logutil"
+	"niuma/pkg/serviceipc/event"
+	"niuma/platform/internal/ai"
+	"niuma/platform/internal/components"
+	"niuma/platform/internal/eventhub"
+	"niuma/platform/internal/handler"
 	"niuma/platform/internal/idgen"
 	"niuma/platform/internal/migrate"
 	"niuma/platform/internal/server"
 	"niuma/platform/internal/store"
+	"niuma/platform/internal/streamregistry"
+	"niuma/platform/internal/streamserver"
 	"niuma/platform/internal/supervisor"
 
 	_ "modernc.org/sqlite"
@@ -93,12 +97,18 @@ func run() error {
 	}
 	var capabilities *handler.CapabilityRegistry
 	var sup *supervisor.Supervisor
+	var streamReg *streamregistry.Registry
 	if installDir != "" {
 		if s, supErr := supervisor.New(installDir); supErr != nil {
 			slog.Warn("supervisor init failed", "err", supErr)
 		} else {
 			sup = s
 			defer sup.Shutdown()
+			if reg, regErr := streamregistry.Load(sup); regErr != nil {
+				slog.Warn("stream registry init failed", "err", regErr)
+			} else {
+				streamReg = reg
+			}
 			if reg, regErr := handler.NewCapabilityRegistry(sup); regErr != nil {
 				slog.Warn("capability registry init failed", "err", regErr)
 			} else {
@@ -108,11 +118,17 @@ func run() error {
 	}
 
 	eventHub := eventhub.New()
+	if streamReg == nil {
+		streamReg, _ = streamregistry.Load(nil)
+	}
+	streamSrv := streamserver.New(event.StreamAddress(), streamReg)
+	eventHub.SetStreamDeliverer(streamSrv)
 	fileEditor := handler.NewFileEditorCoordinator(eventHub)
 
 	// VaultStore：AES-256-GCM 加密密文存 SQLite，OS Keychain 仅保留一条主密钥。
 	// 向后兼容旧版 KeychainStore：首次读取时自动迁移旧条目。
 	keychain := store.NewKeychainStore()
+	secrets := store.NewVaultStore(db, keychain)
 	settingStore := store.NewSettingStore(db)
 
 	var componentRegistry *components.Registry
@@ -127,20 +143,37 @@ func run() error {
 		slog.Info("tool components registry ready", "dir", componentsDir)
 	}
 
+	aiService := ai.NewService(ai.Deps{
+		Providers:     store.NewAIProviderStore(db),
+		Conversations: store.NewAIConversationStore(db),
+		MCP:           store.NewAIMCPStore(db),
+		Skills:        store.NewAISkillStore(db),
+		Secrets:       secrets,
+		IDs:           idGen,
+		Events:        eventHub,
+	})
 	dispatcher := handler.New(handler.Deps{
 		Settings:     settingStore,
 		Connections:  store.NewConnectionStore(db),
 		Credentials:  store.NewCredentialStore(db),
-		Secrets:      store.NewVaultStore(db, keychain),
+		Secrets:      secrets,
 		IDs:          idGen,
 		Capabilities: capabilities,
 		FileEditor:   fileEditor,
 		Components:   componentRegistry,
+		AI:           aiService,
+		Events:       eventHub,
 	})
+	go aiService.SoftDiscoverBuiltinMCP(context.Background())
 	srv := server.New(ipcAddress(), dispatcher)
 	go func() {
 		if err := eventHub.Serve(ctx); err != nil && ctx.Err() == nil {
 			slog.Error("event hub error", "err", err)
+		}
+	}()
+	go func() {
+		if err := streamSrv.Serve(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("stream server error", "err", err)
 		}
 	}()
 	return srv.Serve(ctx)

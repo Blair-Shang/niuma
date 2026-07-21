@@ -54,3 +54,41 @@ func TestInjectSSHProfile(t *testing.T) {
 		t.Fatalf("options = %s", got.Tunnel.SSHProfile.Options)
 	}
 }
+
+func TestSameTunnelHost(t *testing.T) {
+	if !sameTunnelHost("172.16.83.84", "172.16.83.84") {
+		t.Fatal("same IP should match")
+	}
+	if !sameTunnelHost(" Host.Example ", "host.example") {
+		t.Fatal("case/space insensitive")
+	}
+	if sameTunnelHost("10.0.0.1", "10.0.0.2") {
+		t.Fatal("different hosts")
+	}
+	if sameTunnelHost("", "10.0.0.1") {
+		t.Fatal("empty should not match")
+	}
+}
+
+func TestResolveTunnelTargetHairpin(t *testing.T) {
+	profile := &SSHProfile{HostAddress: "172.16.83.84"}
+	opts := &Options{Type: TypeSSH}
+	host, port := resolveTunnelTarget(opts, profile, "172.16.83.84", 65432)
+	if host != "127.0.0.1" || port != 65432 {
+		t.Fatalf("got %s:%d, want 127.0.0.1:65432", host, port)
+	}
+
+	opts.TargetHost = "10.0.0.9"
+	opts.TargetPort = 5432
+	host, port = resolveTunnelTarget(opts, profile, "172.16.83.84", 65432)
+	if host != "10.0.0.9" || port != 5432 {
+		t.Fatalf("explicit target should win: %s:%d", host, port)
+	}
+
+	opts.TargetHost = "172.16.83.84"
+	opts.TargetPort = 0
+	host, port = resolveTunnelTarget(opts, profile, "ignored", 65432)
+	if host != "127.0.0.1" || port != 65432 {
+		t.Fatalf("explicit same-as-jump should hairpin: %s:%d", host, port)
+	}
+}

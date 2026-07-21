@@ -57,6 +57,43 @@ import DemoPage from '../components/DemoPage.vue'
       </RsEmpty>
     </DemoBlock>
 
+    <DemoBlock title="占满父级（fill）">
+      <p class="hint">
+        <code>fill</code> 占满父级并去除外层虚线框；图标圆角仍由 <code>iconRadius</code> 控制。
+      </p>
+      <div class="fill-host">
+        <RsEmpty fill description="结果区暂无数据，执行查询后显示在这里。">
+          <template #icon>
+            <RsIcon name="play-circle" :size="22" label="无结果" />
+          </template>
+        </RsEmpty>
+      </div>
+    </DemoBlock>
+
+    <DemoBlock title="圆角档位">
+      <p class="hint">
+        <code>radius</code> 控制外层容器，<code>iconRadius</code> 控制图标区；档位
+        <code>none | xs | sm | md | lg | full</code>。业务勿用 <code>:deep</code> 改圆角。
+      </p>
+      <div class="stack">
+        <RsEmpty radius="none" icon-radius="none" description="外层与图标均为直角。">
+          <template #icon>
+            <RsIcon name="inbox" :size="22" label="直角" />
+          </template>
+        </RsEmpty>
+        <RsEmpty radius="sm" icon-radius="sm" description="外层与图标均为 sm。">
+          <template #icon>
+            <RsIcon name="folder-open" :size="22" label="小圆角" />
+          </template>
+        </RsEmpty>
+        <RsEmpty fill icon-radius="none" description="fill + 直角图标（面板内嵌）。">
+          <template #icon>
+            <RsIcon name="play-circle" :size="22" label="面板空态" />
+          </template>
+        </RsEmpty>
+      </div>
+    </DemoBlock>
+
     <DemoBlock title="业务场景示例">
       <div class="stack">
         <div class="panel">
@@ -130,5 +167,13 @@ import DemoPage from '../components/DemoPage.vue'
   font-size: var(--rs-font-size-xs);
   font-weight: 500;
   color: var(--rs-muted);
+}
+.fill-host {
+  display: flex;
+  flex-direction: column;
+  height: 12rem;
+  border: 1px solid var(--rs-border-subtle);
+  background: var(--rs-surface);
+  overflow: hidden;
 }
 </style>

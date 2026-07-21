@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"niuma/platform/internal/idgen"
+	"niuma/platform/internal/ai"
 	"niuma/platform/internal/components"
 	"niuma/platform/internal/store"
 )
@@ -32,11 +33,11 @@ const (
 	MethodConnectionUpdate = "platform.connection.update"
 	// MethodConnectionDelete 删除连接站点并级联清理孤儿凭据。
 	MethodConnectionDelete = "platform.connection.delete"
-	// MethodCredentialSet 写入或更新凭据（密钥落 OS Keychain）。
+	// MethodCredentialSet 写入或更新凭据（明文经 VaultStore 加密写入 cipher_text）。
 	MethodCredentialSet = "platform.credential.set"
-	// MethodCredentialDelete 删除凭据（连同 Keychain 密钥与关联）。
+	// MethodCredentialDelete 删除凭据（密文行与关联一并清理）。
 	MethodCredentialDelete = "platform.credential.delete"
-	// MethodCredentialGet 按站点 ID 从 OS Keychain 读取凭据明文（仅供本地 IPC 使用）。
+	// MethodCredentialGet 按站点 ID 解密读取凭据明文（仅供本地 IPC 使用）。
 	MethodCredentialGet = "platform.credential.get"
 	// MethodComponentsList 列出工具组件包及探测状态。
 	MethodComponentsList = "platform.components.list"
@@ -48,6 +49,66 @@ const (
 	MethodComponentsGetDownload = "platform.components.getDownload"
 	// MethodComponentsInstall 下载并安装组件包至 data/components/。
 	MethodComponentsInstall = "platform.components.install"
+	// MethodAIProviderList 列出 LLM Provider。
+	MethodAIProviderList = "platform.ai.provider.list"
+	// MethodAIProviderGet 读取单个 Provider（含模型列表）。
+	MethodAIProviderGet = "platform.ai.provider.get"
+	// MethodAIProviderUpsert 新建或更新 Provider（API Key 经 Vault 加密）。
+	MethodAIProviderUpsert = "platform.ai.provider.upsert"
+	// MethodAIProviderDelete 删除 Provider 并级联清理模型与凭据。
+	MethodAIProviderDelete = "platform.ai.provider.delete"
+	// MethodAIProviderTest 探测 Provider 连通性（OpenAI 兼容 /models）。
+	MethodAIProviderTest = "platform.ai.provider.test"
+	// MethodAIProviderListRemoteModels 从上游拉取可用模型列表。
+	MethodAIProviderListRemoteModels = "platform.ai.provider.listRemoteModels"
+	// MethodAIProviderGetApiKey 解密读取 Provider API Key（仅本地 IPC，供编辑回填）。
+	MethodAIProviderGetApiKey = "platform.ai.provider.getApiKey"
+	// MethodAIModelList 列出模型。
+	MethodAIModelList = "platform.ai.model.list"
+	// MethodAIModelUpsert 新建或更新模型。
+	MethodAIModelUpsert = "platform.ai.model.upsert"
+	// MethodAIModelDelete 删除模型。
+	MethodAIModelDelete = "platform.ai.model.delete"
+	// MethodAIConversationList 列出 AI 对话会话。
+	MethodAIConversationList = "platform.ai.conversation.list"
+	// MethodAIConversationGet 读取会话及消息。
+	MethodAIConversationGet = "platform.ai.conversation.get"
+	// MethodAIConversationCreate 新建会话。
+	MethodAIConversationCreate = "platform.ai.conversation.create"
+	// MethodAIConversationDelete 删除会话（级联消息）。
+	MethodAIConversationDelete = "platform.ai.conversation.delete"
+	// MethodAIConversationUpdate 更新会话标题等元数据。
+	MethodAIConversationUpdate = "platform.ai.conversation.update"
+	// MethodAIChatStream 启动流式对话（立即返回 runId）。
+	MethodAIChatStream = "platform.ai.chat.stream"
+	// MethodAIChatCancel 取消进行中的流式 run。
+	MethodAIChatCancel = "platform.ai.chat.cancel"
+	// MethodAIMCPList 列出 MCP Server。
+	MethodAIMCPList = "platform.ai.mcp.list"
+	// MethodAIMCPGet 读取单个 MCP Server（含工具缓存）。
+	MethodAIMCPGet = "platform.ai.mcp.get"
+	// MethodAIMCPUpsert 新建或更新 MCP Server。
+	MethodAIMCPUpsert = "platform.ai.mcp.upsert"
+	// MethodAIMCPDelete 删除 MCP Server 及工具缓存。
+	MethodAIMCPDelete = "platform.ai.mcp.delete"
+	// MethodAIMCPRefresh 发现工具并写入 nm_mcp_tool。
+	MethodAIMCPRefresh = "platform.ai.mcp.refresh"
+	// MethodAIMCPSetToolEnabled 启用/禁用工具。
+	MethodAIMCPSetToolEnabled = "platform.ai.mcp.setToolEnabled"
+	// MethodAIMCPSetToolRisk 设置工具风险等级。
+	MethodAIMCPSetToolRisk = "platform.ai.mcp.setToolRisk"
+	// MethodAIPolicyConfirm 确认或拒绝待执行工具。
+	MethodAIPolicyConfirm = "platform.ai.policy.confirm"
+	// MethodAIPolicyListPending 列出当前待确认工具。
+	MethodAIPolicyListPending = "platform.ai.policy.listPending"
+	// MethodAISkillList 列出 AI Skill。
+	MethodAISkillList = "platform.ai.skill.list"
+	// MethodAISkillGet 读取单个 Skill。
+	MethodAISkillGet = "platform.ai.skill.get"
+	// MethodAISkillUpsert 新建或更新 Skill。
+	MethodAISkillUpsert = "platform.ai.skill.upsert"
+	// MethodAISkillDelete 删除 Skill。
+	MethodAISkillDelete = "platform.ai.skill.delete"
 )
 
 // Request 是 Shell 透传过来的原始请求（cefQuery 请求体）。
@@ -97,14 +158,16 @@ type settingSetParams struct {
 // 仅设置 Settings 也可用于只涉及 platform.settings.* 的场景（如往返测试）；
 // 连接/凭据相关方法需要 Connections、Credentials、Secrets 与 IDs 均就位。
 type Deps struct {
-	Settings    *store.SettingStore
-	Connections *store.ConnectionStore
-	Credentials *store.CredentialStore
-	Secrets     store.SecretStore
-	IDs         idgen.Generator
+	Settings     *store.SettingStore
+	Connections  *store.ConnectionStore
+	Credentials  *store.CredentialStore
+	Secrets      store.SecretStore
+	IDs          idgen.Generator
 	Capabilities *CapabilityRegistry
-	FileEditor  *FileEditorCoordinator
-	Components  *components.Registry
+	FileEditor   *FileEditorCoordinator
+	Components *components.Registry
+	AI         *ai.Service
+	Events     EventPublisher
 }
 
 // Dispatcher 持有各处理逻辑所需的依赖并执行方法分发。
@@ -116,20 +179,24 @@ type Dispatcher struct {
 	ids          idgen.Generator
 	capabilities *CapabilityRegistry
 	fileEditor   *FileEditorCoordinator
-	components   *components.Registry
+	components *components.Registry
+	ai         *ai.Service
+	events     EventPublisher
 }
 
 // New 依据 deps 创建 Dispatcher。
 func New(deps Deps) *Dispatcher {
 	return &Dispatcher{
-		settings:    deps.Settings,
-		connections: deps.Connections,
-		credentials: deps.Credentials,
-		secrets:     deps.Secrets,
+		settings:     deps.Settings,
+		connections:  deps.Connections,
+		credentials:  deps.Credentials,
+		secrets:      deps.Secrets,
 		ids:          deps.IDs,
 		capabilities: deps.Capabilities,
 		fileEditor:   deps.FileEditor,
 		components:   deps.Components,
+		ai:           deps.AI,
+		events:       deps.Events,
 	}
 }
 
@@ -182,6 +249,66 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 		return d.componentsGetDownload(ctx, req)
 	case MethodComponentsInstall:
 		return d.componentsInstall(ctx, req)
+	case MethodAIProviderList:
+		return d.aiProviderList(ctx, req)
+	case MethodAIProviderGet:
+		return d.aiProviderGet(ctx, req)
+	case MethodAIProviderUpsert:
+		return d.aiProviderUpsert(ctx, req)
+	case MethodAIProviderDelete:
+		return d.aiProviderDelete(ctx, req)
+	case MethodAIProviderTest:
+		return d.aiProviderTest(ctx, req)
+	case MethodAIProviderListRemoteModels:
+		return d.aiProviderListRemoteModels(ctx, req)
+	case MethodAIProviderGetApiKey:
+		return d.aiProviderGetApiKey(ctx, req)
+	case MethodAIModelList:
+		return d.aiModelList(ctx, req)
+	case MethodAIModelUpsert:
+		return d.aiModelUpsert(ctx, req)
+	case MethodAIModelDelete:
+		return d.aiModelDelete(ctx, req)
+	case MethodAIConversationList:
+		return d.aiConversationList(ctx, req)
+	case MethodAIConversationGet:
+		return d.aiConversationGet(ctx, req)
+	case MethodAIConversationCreate:
+		return d.aiConversationCreate(ctx, req)
+	case MethodAIConversationDelete:
+		return d.aiConversationDelete(ctx, req)
+	case MethodAIConversationUpdate:
+		return d.aiConversationUpdate(ctx, req)
+	case MethodAIChatStream:
+		return d.aiChatStream(ctx, req)
+	case MethodAIChatCancel:
+		return d.aiChatCancel(ctx, req)
+	case MethodAIMCPList:
+		return d.aiMCPList(ctx, req)
+	case MethodAIMCPGet:
+		return d.aiMCPGet(ctx, req)
+	case MethodAIMCPUpsert:
+		return d.aiMCPUpsert(ctx, req)
+	case MethodAIMCPDelete:
+		return d.aiMCPDelete(ctx, req)
+	case MethodAIMCPRefresh:
+		return d.aiMCPRefresh(ctx, req)
+	case MethodAIMCPSetToolEnabled:
+		return d.aiMCPSetToolEnabled(ctx, req)
+	case MethodAIMCPSetToolRisk:
+		return d.aiMCPSetToolRisk(ctx, req)
+	case MethodAIPolicyConfirm:
+		return d.aiPolicyConfirm(ctx, req)
+	case MethodAIPolicyListPending:
+		return d.aiPolicyListPending(ctx, req)
+	case MethodAISkillList:
+		return d.aiSkillList(ctx, req)
+	case MethodAISkillGet:
+		return d.aiSkillGet(ctx, req)
+	case MethodAISkillUpsert:
+		return d.aiSkillUpsert(ctx, req)
+	case MethodAISkillDelete:
+		return d.aiSkillDelete(ctx, req)
 	default:
 		if d.fileEditor != nil {
 			if resp, handled := d.fileEditor.Dispatch(ctx, req); handled {

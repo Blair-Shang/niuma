@@ -3,6 +3,8 @@ import {
   buildTableEntries,
   clampColumnWidth,
   filterTableRows,
+  filterTableRowsByColumnFilters,
+  isColumnFilterActive,
   fixedCellStyle,
   groupTableRows,
   injectExpandRows,
@@ -12,6 +14,8 @@ import {
   resolveSelectAllState,
   resolveTableVirtualEnabled,
   selectRowKeys,
+  selectRowKeysByClick,
+  sliceVirtualColumns,
   sliceVirtualTableEntries,
   sortTableRows,
   toggleMultiSortState,
@@ -42,6 +46,25 @@ describe('table-utils', () => {
     expect(filterTableRows(rows, 'alp', columns).map((row) => row.name)).toEqual(['Alpha'])
     expect(filterTableRows(rows, 'running', columns, ['status'])).toHaveLength(2)
     expect(filterTableRows(rows, '  ', columns)).toHaveLength(3)
+  })
+
+  it('filters rows by per-column filters', () => {
+    expect(
+      filterTableRowsByColumnFilters(rows, columns, { name: 'beta' }).map((row) => row.name),
+    ).toEqual(['Beta'])
+    expect(filterTableRowsByColumnFilters(rows, columns, { status: 'running' })).toHaveLength(2)
+    expect(
+      filterTableRowsByColumnFilters(rows, columns, { name: 'alp', status: 'running' }).map((row) => row.name),
+    ).toEqual(['Alpha'])
+    expect(isColumnFilterActive({ name: 'x' }, 'name')).toBe(true)
+    expect(isColumnFilterActive({ name: '  ' }, 'name')).toBe(false)
+  })
+
+  it('applies column filters in buildTableEntries', () => {
+    const entries = buildTableEntries(rows, columns, { columnFilters: { name: 'gamma' } })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.type).toBe('row')
+    if (entries[0]?.type === 'row') expect(entries[0].row.name).toBe('Gamma')
   })
 
   it('toggles sort state', () => {
@@ -127,6 +150,30 @@ describe('table-utils', () => {
     expect(resolveSelectAllState(['1'], keys)).toBe('indeterminate')
     expect(toggleSelectAll([], keys, true)).toEqual(['1', '3'])
     expect(toggleRowSelection(['1', '3'], '1')).toEqual(['3'])
+    expect(
+      selectRowKeysByClick(['1'], '3', {
+        toggle: false,
+        range: false,
+        orderedKeys: keys,
+        anchorKey: '1',
+      }),
+    ).toEqual(['3'])
+    expect(
+      selectRowKeysByClick(['1'], '3', {
+        toggle: true,
+        range: false,
+        orderedKeys: keys,
+        anchorKey: '1',
+      }),
+    ).toEqual(['1', '3'])
+    expect(
+      selectRowKeysByClick(['1'], '3', {
+        toggle: false,
+        range: true,
+        orderedKeys: ['1', '2', '3'],
+        anchorKey: '1',
+      }),
+    ).toEqual(['1', '2', '3'])
   })
 
   it('injects expand rows after expanded keys', () => {
@@ -164,6 +211,27 @@ describe('table-utils', () => {
       zIndex: '2',
       right: '12px',
     })
+  })
+
+  it('slices visible columns for horizontal virtualization', () => {
+    const cols = Array.from({ length: 20 }, (_, i) => ({
+      key: `c${i}`,
+      title: `C${i}`,
+      width: 100,
+    }))
+    const sliced = sliceVirtualColumns(cols, {
+      scrollLeft: 500,
+      viewportWidth: 300,
+      getWidth: (c) => (typeof c.width === 'number' ? c.width : 100),
+      overscan: 1,
+    })
+    // 500→Start near col 5; viewport 300px ≈ 3 cols + overscan
+    expect(sliced.startIndex).toBeGreaterThanOrEqual(3)
+    expect(sliced.endIndex).toBeLessThanOrEqual(12)
+    expect(sliced.paddingLeft).toBe(sliced.startIndex * 100)
+    expect(sliced.paddingLeft + sliced.columns.reduce((n, c) => n + 100, 0) + sliced.paddingRight).toBe(
+      2000,
+    )
   })
 
   it('selects single row in radio mode', () => {

@@ -29,8 +29,9 @@ import type { ConnItem, ConnKind } from '@/modules/ops/types'
  * - `#credential-section`：完整替换默认「用户名 + 密码」区。SSH 用此注入含认证方式
  *   选择器的 SshConnectionFields。未提供时显示默认用户名 + 密码行。
  * - `#credential-hint`：凭据区下方的提示文本，默认为空。Redis 用此注入可选密码提示。
- * - `#options`：协议专属选项区（追加在凭据区之后）。FTP 注入 FtpConnectionFields，
- *   Redis 注入 RedisConnectionFields，MongoDB 等未来协议同理。
+ * - `#options`：协议专属选项区（追加在凭据区之后）。FTP / Redis / MySQL 基础字段等。
+ * - `#ssl`：独立 SSL Tab（MySQL 等）。
+ * - `#advanced`：独立高级 Tab（字符集、超时等）。
  */
 
 const open = defineModel<boolean>('open', { required: true })
@@ -78,11 +79,18 @@ const dlgTitle = computed(() => {
 })
 
 const formTabs = computed(() => {
+  const kindDef = getConnectionKindDef(props.kind)
   const tabs: Array<{ value: string; label: string }> = [
     { value: 'basic', label: t('connection.form.tabBasic') },
-    { value: 'proxy', label: t('connection.form.tabProxy') },
   ]
-  if (getConnectionKindDef(props.kind)?.supportsTunnel) {
+  if (kindDef?.ssl) {
+    tabs.push({ value: 'ssl', label: t('connection.form.tabSsl') })
+  }
+  if (kindDef?.advanced) {
+    tabs.push({ value: 'advanced', label: t('connection.form.tabAdvanced') })
+  }
+  tabs.push({ value: 'proxy', label: t('connection.form.tabProxy') })
+  if (kindDef?.supportsTunnel) {
     tabs.push({ value: 'tunnel', label: t('connection.form.tabTunnel') })
   }
   return tabs
@@ -110,9 +118,12 @@ function close(): void {
     :title="dlgTitle"
     width="lg"
     layout="confirm"
+    :resizable="false"
+    :fullscreenable="false"
     :show-overlay="false"
     :close-on-overlay-click="false"
   >
+    <template #body>
     <form class="nm-conn-form" autocomplete="off" @submit.prevent="emit('save')">
       <div class="nm-conn-form__tabs" role="tablist">
         <button
@@ -179,6 +190,14 @@ function close(): void {
         <slot name="options" />
       </div>
 
+      <div v-show="formTab === 'ssl'" class="nm-conn-form__tab-panel">
+        <slot name="ssl" />
+      </div>
+
+      <div v-show="formTab === 'advanced'" class="nm-conn-form__tab-panel">
+        <slot name="advanced" />
+      </div>
+
       <div v-show="formTab === 'proxy'" class="nm-conn-form__tab-panel">
         <ConnectionProxyFields :form="form" :mode="formMode" />
       </div>
@@ -210,6 +229,7 @@ function close(): void {
         </RsButton>
       </div>
     </form>
+    </template>
   </RsDialog>
 
   <RsConfirmDialog

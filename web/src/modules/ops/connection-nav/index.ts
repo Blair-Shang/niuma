@@ -18,4 +18,5 @@ export {
   redisDatabaseFromContext,
   mongoResourceFromContext,
   buildConnectionTabTitle,
+  buildConnectionTabTooltip,
 } from './utils'

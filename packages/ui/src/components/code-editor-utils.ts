@@ -28,6 +28,29 @@ export interface RsCodeEditorDiagnostic {
   severity?: 'error' | 'warning' | 'info'
 }
 
+/** CodeMirror SQL 字段/表补全（对应 @codemirror/lang-sql SQLConfig 子集） */
+export type RsCodeEditorSqlDialect = 'postgresql' | 'standard' | 'mysql'
+
+export interface RsCodeEditorSqlColumn {
+  label: string
+  /** 展示用类型，如 integer / text */
+  detail?: string
+  type?: string
+  boost?: number
+}
+
+export type RsCodeEditorSqlNamespace =
+  | readonly (string | RsCodeEditorSqlColumn)[]
+  | { [name: string]: RsCodeEditorSqlNamespace }
+
+export interface RsCodeEditorSqlConfig {
+  dialect?: RsCodeEditorSqlDialect
+  schema?: RsCodeEditorSqlNamespace
+  /** 顶层直接补全该表列（适合 WHERE 片段） */
+  defaultTable?: string
+  defaultSchema?: string
+}
+
 const SUPPORTED_LANGUAGES: RsCodeEditorLanguage[] = [
   'plaintext', 'json', 'typescript', 'javascript', 'css', 'html', 'sql',
   'go', 'python', 'rust', 'java', 'cpp', 'c', 'shell', 'yaml', 'toml', 'markdown', 'vue',

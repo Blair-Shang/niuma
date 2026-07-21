@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,8 +22,12 @@ const (
 	progressStep    = 256 * 1024
 	progressEmitMin = 250 * time.Millisecond
 
-	errFmtMkdirRemote = "mkdir remote %q: %w"
+	errFmtMkdirRemote  = "mkdir remote %q: %w"
 	errFmtTaskNotFound = "task not found: %s"
+
+	logMsgTransferDone     = "transfer.done"
+	logMsgTransferFailed   = "transfer.failed"
+	logMsgTransferCanceled = "transfer.canceled"
 )
 
 // Emitter 向 Platform 事件入口上报 JSON 事件（异步、可忽略错误）。
@@ -83,19 +88,26 @@ type task struct {
 // SessionConn 按 sessionId 获取 FTP 连接；release 在传输结束后调用。
 type SessionConn func(sessionID string) (conn *ftp.ServerConn, release func(), err error)
 
-// Manager 管理传输任务队列（桌面端不设全局并发上限；不同 session 并行，同 session 受单连接互斥）。
+type sessionRunner struct {
+	tasks chan *task
+}
+
+// Manager 管理传输任务队列（桌面端不设全局并发上限；不同 session 并行，同 session 串行执行）。
 type Manager struct {
-	mu      sync.Mutex
-	tasks   map[string]*task
-	ids     idgen.Generator
-	getConn SessionConn
-	emit    Emitter
+	mu        sync.Mutex
+	tasks     map[string]*task
+	runners   map[string]*sessionRunner
+	runnersMu sync.Mutex
+	ids       idgen.Generator
+	getConn   SessionConn
+	emit      Emitter
 }
 
 // New 创建 Manager。
 func New(ids idgen.Generator, getConn SessionConn, emit Emitter) *Manager {
 	return &Manager{
 		tasks:   make(map[string]*task),
+		runners: make(map[string]*sessionRunner),
 		ids:     ids,
 		getConn: getConn,
 		emit:    emit,
@@ -138,8 +150,31 @@ func (m *Manager) Enqueue(params EnqueueParams) (string, error) {
 	m.mu.Unlock()
 
 	m.emitState(t)
-	go m.runTask(t)
+	m.dispatchTask(t)
 	return taskID, nil
+}
+
+func (m *Manager) dispatchTask(t *task) {
+	m.runnersMu.Lock()
+	r, ok := m.runners[t.SessionID]
+	if !ok {
+		r = &sessionRunner{tasks: make(chan *task, 256)}
+		m.runners[t.SessionID] = r
+		go m.runSessionLoop(t.SessionID, r)
+	}
+	m.runnersMu.Unlock()
+	r.tasks <- t
+}
+
+func (m *Manager) runSessionLoop(sessionID string, r *sessionRunner) {
+	for t := range r.tasks {
+		m.runTask(t)
+	}
+	m.runnersMu.Lock()
+	if cur, ok := m.runners[sessionID]; ok && cur == r {
+		delete(m.runners, sessionID)
+	}
+	m.runnersMu.Unlock()
 }
 
 // Pause 暂停运行中的任务。
@@ -222,7 +257,22 @@ func (m *Manager) CancelSession(sessionID string) {
 	}
 }
 
+// StopSession 取消会话任务并停止串行调度器（会话关闭时调用）。
+func (m *Manager) StopSession(sessionID string) {
+	m.CancelSession(sessionID)
+	m.runnersMu.Lock()
+	r, ok := m.runners[sessionID]
+	if ok {
+		delete(m.runners, sessionID)
+		close(r.tasks)
+	}
+	m.runnersMu.Unlock()
+}
+
 func (m *Manager) runTask(t *task) {
+	if t.State == StateCanceled {
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
 	defer cancel()
@@ -232,6 +282,7 @@ func (m *Manager) runTask(t *task) {
 	conn, release, err := m.getConn(t.SessionID)
 	if err != nil {
 		m.setState(t, StateFailed, err.Error())
+		logTransferFailed(t, err)
 		return
 	}
 	defer release()
@@ -247,14 +298,17 @@ func (m *Manager) runTask(t *task) {
 	if ctx.Err() != nil {
 		if t.State != StateCanceled {
 			m.setState(t, StateCanceled, "")
+			logTransferCanceled(t)
 		}
 		return
 	}
 	if runErr != nil {
 		m.setState(t, StateFailed, runErr.Error())
+		logTransferFailed(t, runErr)
 		return
 	}
 	m.setState(t, StateDone, "")
+	logTransferDone(t)
 }
 
 func (m *Manager) download(ctx context.Context, conn *ftp.ServerConn, t *task) error {
@@ -453,4 +507,30 @@ func (m *Manager) fireEvent(ev map[string]any) {
 	if m.emit != nil {
 		m.emit(ev)
 	}
+}
+
+func transferLogAttrs(t *task) []any {
+	return []any{
+		"task", t.TaskID,
+		"session", t.SessionID,
+		"dir", t.Direction,
+		"local", t.LocalPath,
+		"remote", t.RemotePath,
+	}
+}
+
+func logTransferDone(t *task) {
+	attrs := transferLogAttrs(t)
+	attrs = append(attrs, "bytes", atomic.LoadInt64(&t.Transferred))
+	slog.Info(logMsgTransferDone, attrs...)
+}
+
+func logTransferFailed(t *task, err error) {
+	attrs := transferLogAttrs(t)
+	attrs = append(attrs, "err", err)
+	slog.Error(logMsgTransferFailed, attrs...)
+}
+
+func logTransferCanceled(t *task) {
+	slog.Info(logMsgTransferCanceled, transferLogAttrs(t)...)
 }

@@ -17,6 +17,8 @@ type ToolStatusDTO struct {
 	Path         string `json:"path,omitempty"`
 	Version      string `json:"version,omitempty"`
 	DownloadPage string `json:"downloadPage,omitempty"`
+	// Installable 表示当前平台可为该工具单独下载安装 / 重新安装。
+	Installable bool `json:"installable,omitempty"`
 }
 
 // BundleStatusDTO 是组件包及其工具列表的探测结果。
@@ -208,14 +210,16 @@ func (m *BundleManifest) toolByID(toolID string) *ToolSpec {
 func (r *Registry) bundleStatus(ctx context.Context, m *BundleManifest, paths pathMap) (BundleStatusDTO, error) {
 	tools := make([]ToolStatusDTO, 0, len(m.Tools))
 	for _, tool := range m.Tools {
-		tools = append(tools, r.resolveTool(ctx, m.ID, tool, paths))
+		dto := r.resolveTool(ctx, m.ID, tool, paths)
+		dto.Installable = m.toolInstallable(tool.ID)
+		tools = append(tools, dto)
 	}
 	return BundleStatusDTO{
-		BundleID: m.ID,
-		Name:     m.Name,
-		Module:   m.Module,
-		Tools:    tools,
-		Installable: m.SupportsInstall(),
+		BundleID:    m.ID,
+		Name:        m.Name,
+		Module:      m.Module,
+		Tools:       tools,
+		Installable: m.SupportsInstall() && len(matchingPackages(m.Install.Packages, "")) > 0,
 	}, nil
 }
 

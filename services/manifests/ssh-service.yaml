@@ -25,3 +25,12 @@ ipc:
 lifecycle:
   startup: lazy
 permissions: []
+streams:
+  - method: stream.ssh.terminal
+    bind_param: terminalId
+    match_field: terminalId
+    event_types:
+      - ssh.terminal.data
+      - ssh.terminal.exit
+      - ssh.terminal.state
+    exclusive: true

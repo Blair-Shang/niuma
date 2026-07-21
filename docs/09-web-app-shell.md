@@ -121,7 +121,7 @@ web/src/shell/
 ├── SideNav.vue               # 当前领域模块列表
 ├── TabBar.vue                # 编辑组 Tab 条（每组各一条）
 ├── ModuleWorkspace.vue       # Tab 内容区（多编辑组 keep-alive；模块 + 内置视图统一渲染）
-├── AiPanel.vue               # 全局 AI 助手面板（右侧常驻，Ctrl+I 开关）
+├── AiPanel.vue               # 全局 AI 助手面板（右侧常驻，Ctrl+I 开关；设计见 [24](./24-ai-assistant.md)）
 ├── CommandPalettePanel.vue   # ⌘K 命令面板（TopBar 弹出）
 ├── StatusBar.vue             # 全局状态展示
 ├── internal-views.ts         # 内置视图注册表（settings 等非模块 Tab 的元数据 + 组件加载器）

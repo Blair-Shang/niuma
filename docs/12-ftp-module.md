@@ -49,7 +49,7 @@
     │ 4B 长度前缀 + JSON 帧（请求/响应）  │ 事件帧（Platform→Shell 主动推送）
 ┌ Layer 2 ─ platform-core（Go）─────────┴──────────────────────┐
 │ handler 分发：platform.connection.* / platform.credential.*  │
-│ + ftp.* 代理转发；nm_connection_profile / Keychain            │
+│ + ftp.* 代理转发；nm_connection_profile / Vault 凭据            │
 │ + 【新增】FtpServiceClient（拉起/管理 ftp-service，转发+聚合事件）
 └───┼───────────────────────────────────▲──────────────────────┘
     │ 帧协议（请求/响应 + 事件）           │ 传输进度/目录事件
@@ -63,7 +63,7 @@
 - **两级进程模型（已定）**：壳层**只拉起 platform-core 这一个根进程**、只做字节透传（壳层零业务）；`ftp-service`、未来 `ssh-service` 及插件后端一律由 **platform-core 作为编排者**拉起/守护/路由。服务 manifest（`services/manifests/*.yaml`）的**消费方从 C++ 壳层上移到 platform-core**（壳层仅保留 platform-core 自身那条）。理由与权衡见 §7.1。
 - **platform-core 是编排者**：负责拉起/守护 `ftp-service`、注入凭据、鉴权，并在 `ftp.*` 方法上做代理转发。Web 永远只跟壳层对话，不直连 `ftp-service`。
 - **两段事件链路**（本期需新建，见 §7.2）：`ftp-service → platform-core → C++ Shell → Web(niuma:event)`。
-- **凭据边界**：明文密码只在 platform-core 从 Keychain 取出后、注入给 `ftp-service` 的一次性调用中出现，**绝不落库、不回传 Web**。
+- **凭据边界**：明文密码只在 platform-core 从 Vault 解密后、注入给 `ftp-service` 的一次性调用中出现，**绝不回传 Web**；库内仅存 AES-256-GCM 密文。
 - **大数据不过桥**：GB 级文件字节只在 `ftp-service ↔ 本地磁盘 / 远端` 之间流动，**绝不经过 IPC 帧 / cefQuery**；桥上只走控制指令与进度事件。高并发/大数据评估见 §7.3。
 
 ---
@@ -75,7 +75,7 @@
 | 表 | 用途 | FTP 用法 |
 |----|------|----------|
 | `nm_connection_profile` | 连接站点 | `connection_kind = 'ftp'`；FTPS 通过 `connection_options` 区分 |
-| `nm_credential_ref` | 凭据引用（不含明文） | `credential_kind = 'password'`；`keychain_service = NiuMa/credential/{credential_id}` |
+| `nm_credential_ref` | 凭据（不含明文） | `credential_kind = 'password'`；`cipher_text` = Vault 密文 |
 | `nm_profile_credential` | 站点↔凭据 多对多 | 一个 FTP 站点关联一条 password 凭据 |
 
 ### 3.1 `connection_options`（JSON，FTP 专用字段）
@@ -120,7 +120,7 @@
 
 沿用 [11-platform-core §2](./11-platform-core.md) 的帧协议与「`result` 为再编码字符串」约定。方法名分两个命名空间：
 
-- `platform.connection.*` / `platform.credential.*`：由 **platform-core 直接**处理（DB + Keychain）。
+- `platform.connection.*` / `platform.credential.*`：由 **platform-core 直接**处理（DB + VaultStore）。
 - `ftp.*`：platform-core **代理转发**给 `ftp-service`。
 
 ### 4.1 连接与凭据（platform-core，Phase 1）
@@ -148,7 +148,7 @@
 }
 ```
 
-规则：`profile_id`/`credential_id` 由 platform-core 应用层生成（TEXT，见 database-schema.mdc）；`create` 时若带 `credential`，先写 Keychain → 建 `nm_credential_ref` → 建 `nm_profile_credential`；`update` 校验 `rowVersion` 乐观锁；`delete` 在 Service 层级联删 `nm_profile_credential` 与孤立凭据。
+规则：`profile_id`/`credential_id` 由 platform-core 应用层生成（TEXT，见 database-schema.mdc）；`create` 时若带 `credential`，先建 `nm_credential_ref` → Vault 写入密文 → 建 `nm_profile_credential`；`update` 校验 `rowVersion` 乐观锁；`delete` 在 Service 层级联删 `nm_profile_credential` 与孤立凭据。
 
 ### 4.2 会话与浏览（ftp-service，Phase 2）
 
@@ -161,7 +161,7 @@
 | `ftp.dir.make` | `{ sessionId, path }` | `{ created: true }` |
 
 `FtpEntry`：`{ name, kind: "file"|"dir"|"link", size, modifiedAt, permissions }`。
-`ftp.session.open` 由 platform-core 取 profile + 从 Keychain 取密码，注入 `ftp-service` 建连；`sessionId` 仅 `ftp-service` 内有效，Web 后续操作携带它。
+`ftp.session.open` 由 platform-core 取 profile + 从 Vault 解密密码，注入 `ftp-service` 建连；`sessionId` 仅 `ftp-service` 内有效，Web 后续操作携带它。
 
 ### 4.3 文件操作与传输（ftp-service，Phase 3–4）
 
@@ -242,7 +242,7 @@ const off = bridgeOnEvent((detail) => {
 
 在帧协议上**新增两处能力**：
 
-1. **子进程管理 + 请求转发**：platform-core 新增 `FtpServiceClient`，在首个 `ftp.*` 请求时按 `ftp-service` 的 manifest 地址（独立命名管道 `\\.\pipe\niuma.ftp` / UDS）建连；`handler.dispatch` 对 `ftp.*` 前缀方法转发，密码从 Keychain 注入后随 `ftp.session.open` 下发。
+1. **子进程管理 + 请求转发**：platform-core 新增 `FtpServiceClient`，在首个 `ftp.*` 请求时按 `ftp-service` 的 manifest 地址（独立命名管道 `\\.\pipe\niuma.ftp` / UDS）建连；`handler.dispatch` 对 `ftp.*` 前缀方法转发，密码从 Vault 解密后随 `ftp.session.open` 下发。
 2. **反向事件帧**：`ftp-service` 在传输过程中主动写「事件帧」给 platform-core；platform-core 再推给壳层。**这是本期新链路的核心**：
    - platform-core → 壳层：需壳层在 `platform_client.cpp` 的连接上支持接收**非请求响应**的推送帧，并 `PostMessage`/`ExecuteJavaScript` 触发 Web 的 `niuma:event`（`web/src/api/client.ts` 已在监听）。
    - **事件与 RPC 分离**：事件帧走独立方向/独立连接，不与请求响应复用同一顺序流，互不阻塞。
@@ -297,7 +297,7 @@ web/src/api/types/ftp.ts     # ConnectionProfile / FtpEntry / TransferTask 类�
 | Phase | 目标 | 后端 | 前端 | 事件链路 |
 |-------|------|------|------|----------|
 | **0** | 设计对齐 | 本文 | — | — |
-| **1** | 连接与凭据数据层 + 站点管理器 | `platform.connection.*` / `platform.credential.*`（store + handler + Keychain） | 模块注册 + `SiteManager` CRUD | 不需要 |
+| **1** | 连接与凭据数据层 + 站点管理器 | `platform.connection.*` / `platform.credential.*`（store + handler + VaultStore） | 模块注册 + `SiteManager` CRUD | 不需要 |
 | **2** | 连接与只读浏览 | `ftp-service` 进程 + `ftp.session.*` / `ftp.dir.list`；platform-core 代理转发 | 双栏浏览、导航、刷新 | `ftp.session.state` |
 | **3** | 文件传输（核心） | `ftp.transfer.*`、队列、断点续传、限速 | 传输队列面板、拖拽、覆盖策略 | **建成 progress/state 推送**（§7.2 反向事件帧 + 壳层改造） |
 | **4** | 远程文件操作 | `ftp.entry.*`（rename/delete/chmod）、远程编辑回传 | 右键菜单、编辑器联动 | 复用 |
@@ -309,7 +309,7 @@ web/src/api/types/ftp.ts     # ConnectionProfile / FtpEntry / TransferTask 类�
 
 ## 10. 安全
 
-- 密码/密钥仅存 OS Keychain（`keychain_service` 引用），DB 与 `connection_options` 无明文（database-schema.mdc）。
+- 密码/密钥经 Vault 加密存 `nm_credential_ref.cipher_text`（主密钥在 OS Keychain）；DB 业务字段与 `connection_options` 无明文（database-schema.mdc）。
 - 明文密码生命周期：platform-core 取出 → 随 `ftp.session.open` 一次性注入 `ftp-service` → 建连后即释放；不回传 Web、不写日志。
 - FTPS 默认校验证书（`tls_verify:true`）；明文 FTP 在 UI 上明确风险提示。
 - 协议日志（Phase 5）对 `PASS`/`ACCT` 等命令做脱敏。
@@ -321,7 +321,7 @@ web/src/api/types/ftp.ts     # ConnectionProfile / FtpEntry / TransferTask 类�
 
 **Go 依赖（ftp-service）**：
 - FTP/FTPS 客户端：`github.com/jlaffaye/ftp`（纯 Go，支持显式 FTPS）。隐式 FTPS 若该库支持不足，则在其 `DialWithTLS` 之上自行封装 TLS 拨号。
-- Keychain（platform-core）：`github.com/zalando/go-keyring`（Windows 走 Credential Manager）或直接封装 DPAPI。
+- VaultStore（platform-core）：AES-256-GCM 密文 + `go-keyring` 存主密钥（Windows Credential Manager）。
 - 保持纯 Go / 无 cgo，与 `modernc.org/sqlite` 基线一致（Go 1.22）。
 
 **已决**：

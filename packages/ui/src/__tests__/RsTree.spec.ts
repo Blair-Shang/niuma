@@ -159,6 +159,52 @@ describe('RsTree', () => {
     expect(wrapper.find('.rs-tree__empty').exists()).toBe(true)
   })
 
+  it('restores expanded keys after clearing a filter with no matches', async () => {
+    const wrapper = mount(RsTree, {
+      props: {
+        nodes: [nodes[0]],
+        autoExpandParent: true,
+        expandedKeys: ['root'] as string[],
+        'onUpdate:expandedKeys': (value: string[] | undefined) => {
+          if (value !== undefined) void wrapper.setProps({ expandedKeys: value })
+        },
+      },
+    })
+    expect(wrapper.props('expandedKeys')).toEqual(['root'])
+    await wrapper.setProps({ filter: '不存在的内容' })
+    expect(wrapper.find('.rs-tree__empty').exists()).toBe(true)
+    expect(wrapper.props('expandedKeys')).toEqual(['root'])
+    await wrapper.setProps({ filter: '' })
+    expect(wrapper.props('expandedKeys')).toEqual(['root'])
+  })
+
+  it('restores pre-filter expanded keys after clearing a matching filter', async () => {
+    const treeNodes = [
+      {
+        key: 'root',
+        label: '根',
+        children: [
+          { key: 'keep', label: '保留', children: [{ key: 'keep-1', label: '保留子' }] },
+          { key: 'hide', label: '隐藏', children: [{ key: 'hide-1', label: '隐藏子' }] },
+        ],
+      },
+    ]
+    const wrapper = mount(RsTree, {
+      props: {
+        nodes: treeNodes,
+        autoExpandParent: true,
+        expandedKeys: ['root', 'hide'] as string[],
+        'onUpdate:expandedKeys': (value: string[] | undefined) => {
+          if (value !== undefined) void wrapper.setProps({ expandedKeys: value })
+        },
+      },
+    })
+    await wrapper.setProps({ filter: '保留' })
+    expect(wrapper.props('expandedKeys')).toEqual(expect.arrayContaining(['root', 'keep']))
+    await wrapper.setProps({ filter: '' })
+    expect(wrapper.props('expandedKeys')).toEqual(['root', 'hide'])
+  })
+
   it('loads children lazily on expand', async () => {
     const loadData = vi.fn(async (node: { key?: string }) => {
       if (node.key === 'lazy-root') {
@@ -298,7 +344,9 @@ describe('RsTree', () => {
     })
     expect(wrapper.classes()).toContain('rs-tree--line')
     expect(wrapper.classes()).toContain('rs-tree--block')
-    expect(wrapper.find('.rs-tree__line-guide').exists()).toBe(true)
+    expect(wrapper.find('.rs-tree__lines').exists()).toBe(true)
+    expect(wrapper.find('.rs-tree__line-vert').exists()).toBe(true)
+    expect(wrapper.find('.rs-tree__line-horz').exists()).toBe(true)
   })
 
   it('applies focused row class to the focused node', async () => {
@@ -364,8 +412,8 @@ describe('tree-utils basics', () => {
 
   it('resolveTreeFocusKey moves across flat nodes', () => {
     const flat = [
-      { key: 'a', node: {}, depth: 0, hasChildren: false, isLast: false, parentKey: null },
-      { key: 'b', node: {}, depth: 0, hasChildren: false, isLast: true, parentKey: null },
+      { key: 'a', node: {}, depth: 0, hasChildren: false, isLast: false, parentKey: null, levelLines: [] },
+      { key: 'b', node: {}, depth: 0, hasChildren: false, isLast: true, parentKey: null, levelLines: [] },
     ]
     const index = new Map([
       ['a', { node: {}, parentKey: null, childrenKeys: [] }],
@@ -401,5 +449,38 @@ describe('tree-utils basics', () => {
     expect(wrapper.props('checkedKeys')).toEqual(['child-a'])
     await flushPromises()
     expect(halfUpdates.at(-1)).toEqual(['parent'])
+  })
+
+  it('enables fill-capture layer when height or virtual is set', () => {
+    const withHeight = mount(RsTree, {
+      props: { nodes, height: 200 },
+    })
+    expect(withHeight.classes()).toContain('rs-tree--fill-capture')
+
+    const withVirtual = mount(RsTree, {
+      props: { nodes, virtual: true },
+    })
+    expect(withVirtual.classes()).toContain('rs-tree--fill-capture')
+
+    const plain = mount(RsTree, {
+      props: { nodes },
+    })
+    expect(plain.classes()).not.toContain('rs-tree--fill-capture')
+  })
+
+  it('does not stop contextmenu propagation for parent handlers', async () => {
+    const onContextmenu = vi.fn()
+    const wrapper = mount({
+      components: { RsTree },
+      template: '<div class="host" @contextmenu="onContextmenu"><RsTree :nodes="nodes" :height="200" /></div>',
+      setup() {
+        return {
+          nodes: [{ key: 'only', label: '唯一节点' }],
+          onContextmenu,
+        }
+      },
+    })
+    await wrapper.find('.rs-tree').trigger('contextmenu')
+    expect(onContextmenu).toHaveBeenCalledTimes(1)
   })
 })

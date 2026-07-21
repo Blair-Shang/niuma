@@ -3,12 +3,15 @@ import { RsIcon } from '@niuma/ui'
 import { onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TransferQueue from '@/modules/ftp/components/TransferQueue.vue'
+import DataTaskDockPanel from '@/shell/data-tasks/DataTaskDockPanel.vue'
 import { useShellStore } from '@/stores/shell'
 import { useTransferHubStore } from '@/stores/transfer-hub'
+import { useDataTaskHubStore } from '@/stores/data-task-hub'
 
 const { t } = useI18n()
 const shellStore = useShellStore()
 const transferHub = useTransferHubStore()
+const dataTaskHub = useDataTaskHubStore()
 
 let stopDrag: (() => void) | null = null
 
@@ -62,6 +65,24 @@ onBeforeUnmount(() => stopDrag?.())
                 {{ transferHub.activeCount }}
               </span>
             </button>
+            <button
+              type="button"
+              class="nm-bottom-dock__tab"
+              :class="{ 'nm-bottom-dock__tab--active': shellStore.bottomDockTab === 'dataTasks' }"
+              @click="shellStore.bottomDockTab = 'dataTasks'"
+            >
+              {{ t('shell.bottomDock.dataTasks') }}
+              <span
+                v-if="dataTaskHub.tasks.length > 0"
+                class="nm-bottom-dock__badge"
+              >
+                {{
+                  dataTaskHub.activeCount > 0
+                    ? dataTaskHub.activeCount
+                    : dataTaskHub.tasks.length
+                }}
+              </span>
+            </button>
           </div>
           <button
             type="button"
@@ -84,6 +105,10 @@ onBeforeUnmount(() => stopDrag?.())
             @pause="(id) => void transferHub.pause(id)"
             @resume="(id) => void transferHub.resume(id)"
           />
+          <DataTaskDockPanel
+            v-else-if="shellStore.bottomDockTab === 'dataTasks'"
+            class="nm-bottom-dock__queue"
+          />
         </div>
       </section>
     </Transition>
@@ -96,7 +121,7 @@ onBeforeUnmount(() => stopDrag?.())
   right: 0;
   bottom: var(--nm-statusbar-h, 1.625rem);
   left: 0;
-  z-index: 120;
+  z-index: var(--rs-z-panel, 80);
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--rs-border-subtle);
@@ -106,7 +131,6 @@ onBeforeUnmount(() => stopDrag?.())
   box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
 }
 
-/* 滑入/滑出动画 */
 .nm-dock-slide-enter-from,
 .nm-dock-slide-leave-to {
   transform: translateY(105%);

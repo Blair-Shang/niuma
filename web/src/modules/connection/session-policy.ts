@@ -31,6 +31,8 @@ export const SESSION_POLICY: Record<ConnKind, SessionPolicy> = {
   ftp: { sharing: 'per_tab', closeOnRelease: true },
   redis: { sharing: 'scoped', scopeField: 'database', closeOnRelease: false, idleMs: 60_000 },
   mongodb: { sharing: 'per_profile', closeOnRelease: false, idleMs: 60_000 },
+  vastbase: { sharing: 'per_profile', closeOnRelease: false, idleMs: 60_000 },
+  mysql: { sharing: 'per_profile', closeOnRelease: false, idleMs: 60_000 },
 }
 
 export interface AcquireOpts {

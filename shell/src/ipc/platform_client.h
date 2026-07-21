@@ -55,6 +55,28 @@ class PlatformClient {
 
   /** 停止事件监听（进程退出前调用）。 */
   static void StopEventListener();
+
+  /**
+   * @brief 设置流帧回调（与事件回调相同线程语义：CEF UI 线程）。
+   *
+   * 须在首次 `OpenStream` 前调用；帧内容为完整事件 JSON，由 Platform stream 管道推送。
+   */
+  static void SetStreamFrameCallback(PlatformEventCallback callback);
+
+  /**
+   * @brief 打开一条 Platform 长流：发送开流帧后持续读取并回调。
+   *
+   * @param open_request_json 开流请求 JSON（method/params/id），与 niuma.platform 同帧格式。
+   * @param stream_id         Shell 侧会话标识，供 `CloseStream` 取消。
+   */
+  static void OpenStream(const std::string& open_request_json,
+                         const std::string& stream_id);
+
+  /** 关闭指定流会话（幂等）。 */
+  static void CloseStream(const std::string& stream_id);
+
+  /** 关闭全部流会话（进程退出前调用）。 */
+  static void CloseAllStreams();
 };
 
 }  // namespace niuma

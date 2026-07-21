@@ -4,7 +4,9 @@ import { computed, ref, useAttrs, useId, useSlots } from 'vue'
 
 import { useRsI18n } from '../composables/useRsI18n'
 
-import type { RsComponentSize } from '../theme/types'
+import type { RsComponentSize, RsRadius } from '../theme/types'
+import { useResolvedRsComponentSize } from './resolve-size'
+import { rsRadiusCss, useResolvedRsRadius } from './resolve-radius'
 
 import {
 
@@ -48,7 +50,7 @@ const props = withDefaults(
 
     id?: string
 
-    type?: 'text' | 'email' | 'password' | 'search' | 'tel' | 'url'
+    type?: 'text' | 'email' | 'password' | 'search' | 'tel' | 'url' | 'number' | 'date' | 'datetime-local'
 
     placeholder?: string
 
@@ -63,6 +65,10 @@ const props = withDefaults(
     errorMessage?: string
 
     size?: RsComponentSize
+
+    /** 圆角档位；默认 sm。直角 UI 传 `none`。 */
+
+    radius?: RsRadius
 
     /** 预设格式规则 */
 
@@ -218,7 +224,13 @@ const resolvedDisabled = computed(() => props.disabled || formContext?.disabled.
 
 const resolvedReadonly = computed(() => props.readonly)
 
-const resolvedSize = computed(() => props.size ?? formContext?.size.value ?? 'md')
+const resolvedSize = useResolvedRsComponentSize(() => props.size)
+
+const resolvedRadius = useResolvedRsRadius(() => props.radius, 'sm')
+
+const radiusStyle = computed(() => ({
+  '--rs-input-radius': rsRadiusCss(resolvedRadius.value),
+}))
 
 const resolvedShowPassword = computed(
 
@@ -482,7 +494,7 @@ defineExpose({
 
     ]"
 
-    :style="fieldStyle"
+    :style="[fieldStyle, radiusStyle]"
 
   >
 
@@ -700,6 +712,12 @@ defineExpose({
 
 }
 
+.rs-input-field--ssm.rs-field--label-left .rs-field__label {
+
+  min-height: var(--rs-control-height-ssm);
+
+}
+
 .rs-input-field--sm.rs-field--label-left .rs-field__label {
 
   min-height: var(--rs-control-height-sm);
@@ -722,7 +740,7 @@ defineExpose({
 
   min-height: var(--rs-control-height-md);
 
-  border-radius: var(--rs-radius-sm);
+  border-radius: var(--rs-input-radius, var(--rs-radius-sm));
 
   border: 1px solid var(--rs-input-border, var(--rs-border));
 
@@ -737,6 +755,12 @@ defineExpose({
     box-shadow var(--rs-transition-fast),
 
     background var(--rs-transition-fast);
+
+}
+
+.rs-input-group--ssm {
+
+  min-height: var(--rs-control-height-ssm);
 
 }
 
@@ -839,6 +863,18 @@ defineExpose({
   gap: var(--rs-space-xs);
 
   padding-right: var(--rs-space-sm);
+
+}
+
+.rs-input-group--ssm .rs-input-group__affix--prefix {
+
+  padding-left: var(--rs-space-xs);
+
+}
+
+.rs-input-group--ssm .rs-input-group__affix--suffix {
+
+  padding-right: var(--rs-space-xs);
 
 }
 
@@ -947,6 +983,14 @@ defineExpose({
   font-size: var(--rs-font-size-sm);
 
   line-height: var(--rs-line-height-tight);
+
+}
+
+.rs-input-group__control--ssm {
+
+  padding: 0 var(--rs-space-xs);
+
+  font-size: var(--rs-font-size-xs);
 
 }
 

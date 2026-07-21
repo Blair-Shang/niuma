@@ -5,6 +5,7 @@
  *
  * ```
  * connect(item, ctx)
+ *   → ensureConnKind(item.kind)
  *   → getConnectionNavStrategy(item.kind)
  *   → strategy.buildTabSpec(item, ctx)
  *   → [dedupFocus] strategy.findExistingTab → activateTab
@@ -13,10 +14,11 @@
  *
  * **不调用** `session.open/close`（L4 Session Registry，见 docs/21）。
  *
- * @see web/src/modules/ops/conn-nav-providers.ts 内置注册
+ * @see web/src/modules/ops/register-builtin-conn-kinds.ts 内置 loader 登记
  * @see docs/18-ops-connection-tree.md §7
  */
 import { getModuleById } from '@/extensions/registry/extension-registry'
+import { ensureConnKind } from '@/modules/ops/conn-kind-loaders'
 import {
   getConnectionNavStrategy,
   type ConnectionNavConnectOptions,
@@ -38,6 +40,16 @@ export function useConnectionNavigation() {
    * @param options.forceNew - 跳过去重，始终新建 Tab
    */
   function connect(item: ConnItem, ctx?: ConnOpenContext, options?: ConnectionNavConnectOptions): void {
+    void connectAsync(item, ctx, options)
+  }
+
+  async function connectAsync(
+    item: ConnItem,
+    ctx?: ConnOpenContext,
+    options?: ConnectionNavConnectOptions,
+  ): Promise<void> {
+    await ensureConnKind(item.kind)
+
     const descriptor = getModuleById(item.kind)
     if (descriptor?.load && typeof descriptor.load === 'function') {
       void (descriptor.load as () => Promise<unknown>)()
@@ -60,6 +72,7 @@ export function useConnectionNavigation() {
       title: spec.title,
       icon: spec.icon,
       closable: true,
+      tooltip: spec.tooltip,
       props: spec.props,
     })
   }

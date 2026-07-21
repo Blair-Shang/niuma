@@ -10,6 +10,7 @@ std::string GetRuntimeDir();
 std::string GetWebResourcesPath();
 std::string GetPlatformIpcAddress();
 std::string GetPlatformEventAddress();
+std::string GetPlatformStreamAddress();
 
 /**
  * 插件包根目录（`plugins/`）。

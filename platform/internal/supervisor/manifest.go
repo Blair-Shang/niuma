@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"niuma/pkg/serviceipc/streamspec"
 )
 
 // Manifest 描述一个 Layer-1 能力服务的注册信息（对应 services/manifests/*.yaml）。
@@ -41,6 +43,7 @@ type Manifest struct {
 	Lifecycle struct {
 		Startup string `yaml:"startup"`
 	} `yaml:"lifecycle"`
+	Streams []streamspec.Spec `yaml:"streams"`
 }
 
 // LoadManifests 从 servicesDir/manifests 读取全部 *.yaml（不含 platform-core）。

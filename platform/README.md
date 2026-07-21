@@ -4,6 +4,7 @@ Layer 2：**Go** 实现的业务中枢 — 插件注册、数据权限、模块�
 
 > 语言决策见 [docs/architecture.md §7.1](../docs/architecture.md#71-platform-core-语言决策go)。
 > 设计与协议细节见 [docs/11-platform-core.md](../docs/11-platform-core.md)。
+> AI 领域服务见 [docs/24-ai-assistant.md](../docs/24-ai-assistant.md)（`platform/internal/ai`）。
 
 ## 技术栈
 
@@ -13,7 +14,7 @@ Layer 2：**Go** 实现的业务中枢 — 插件注册、数据权限、模块�
 | IPC（当前） | **命名管道 + 4 字节小端长度前缀 + UTF-8 JSON**（Windows）/ UDS（其他平台） |
 | IPC（规划） | gRPC over Named Pipe / UDS，替换上面的过渡协议 |
 | 本地库 | SQLite（`modernc.org/sqlite` v1.29.10，纯 Go，无 cgo） |
-| 凭据 | OS Keychain 封装（规划） |
+| 凭据 | **VaultStore**（AES-256-GCM 密文 + Keychain 主密钥） |
 | 契约 | `proto/` Protobuf（gRPC 上线后） |
 
 > **依赖版本说明**：`modernc.org/sqlite` 最新版（v1.53+）已要求 Go ≥ 1.25，与本仓
@@ -30,14 +31,14 @@ platform/
 └── internal/
     ├── protocol/            # ✅ 报文分帧（长度前缀 + JSON）
     ├── server/              # ✅ 应用 IPC 服务端（命名管道 / UDS）
-    ├── handler/             # ✅ 方法分发（platform.settings.*、platform.components.*）
+    ├── handler/             # ✅ Bridge 分发（platform.settings.* / components.* / ai.* 薄入口）
     ├── components/          # ✅ 工具组件 manifest 加载与 CLI 探测
     ├── store/               # ✅ SQLite 仓储（nm_app_setting KV）
     ├── migrate/             # ✅ 执行内嵌 SQL 迁移（go:embed；copy_migrations.go 从 scripts/sql 生成）
     ├── auth/                # ○ 数据权限 · 模块访问
-    ├── credential/          # ○ Keychain 读写
+    ├── credential/          # ○ 凭据业务封装（底层见 store.VaultStore）
     ├── plugin/              # ○ 插件注册表
-    └── orchestrator/        # ○ AI Tool 编排
+    └── ai/                  # ✅ AI 领域服务（会话 / 流式对话）；Agent Loop·MCP 待后续
 ```
 
 ## 已实现的方法

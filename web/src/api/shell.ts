@@ -1,5 +1,11 @@
 import { bridgeInvoke } from '@/api/client'
-import type { PingResult, ShellInfo, ShellVersion } from '@/api/types/shell'
+import type {
+  PingResult,
+  ShellInfo,
+  ShellOpenExternalParams,
+  ShellOpenExternalResult,
+  ShellVersion,
+} from '@/api/types/shell'
 
 /** Shell 元信息与连通性（`ping` / `shell.version` / `shell.info`） */
 export const shellApi = {
@@ -28,5 +34,14 @@ export const shellApi = {
    */
   getInfo(): Promise<ShellInfo> {
     return bridgeInvoke<ShellInfo>('shell.info')
+  },
+
+  /**
+   * 使用系统默认浏览器打开 http(s) 链接（不占用 CEF 窗口）。
+   *
+   * @param params - 目标 URL
+   */
+  openExternal(params: ShellOpenExternalParams): Promise<ShellOpenExternalResult> {
+    return bridgeInvoke<ShellOpenExternalResult>('shell.openExternal', params)
   },
 } as const

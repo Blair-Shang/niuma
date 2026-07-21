@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import {
   RsBadge,
   RsButton,
+  RsEmpty,
+  RsIcon,
   RsInput,
   RsPagination,
   RsScrollbar,
@@ -93,6 +95,7 @@ const customColumns: RsTableColumn<TaskRow>[] = [
 ]
 
 const loading = ref(false)
+const emptyDemoHasData = ref(false)
 const clickedRow = ref<string | null>(null)
 
 const allUsers = Array.from({ length: 47 }, (_, index) => ({
@@ -108,7 +111,15 @@ const tablePageSize = ref(8)
 const pagedRows = computed(() => slicePageData(allUsers, tablePage.value, tablePageSize.value))
 
 const filterText = ref('')
+const columnFilters = ref<Record<string, string>>({})
 const statusFilter = ref<TaskRow['status'] | ''>('')
+
+const filterableColumns: RsTableColumn<TaskRow>[] = [
+  { key: 'name', title: '名称', sortable: true, filterable: true, width: 180 },
+  { key: 'status', title: '状态', sortable: true, filterable: true, width: 120 },
+  { key: 'count', title: '数量', align: 'right', sortable: true, width: 100 },
+  { key: 'updatedAt', title: '更新日期', sortable: true, width: 140 },
+]
 
 const filteredRows = computed(() => {
   if (!statusFilter.value) return allUsers
@@ -143,12 +154,17 @@ const infiniteHasMore = computed(() => infiniteRows.value.length < INFINITE_TOTA
 const infiniteLoadingMore = ref(false)
 
 const resizeColumns = ref(sortColumns.map((column) => ({ ...column })))
-const columnWidths = ref<Record<string, number>>({
+const resizeInitialWidths: Record<string, number> = {
   name: 180,
   status: 120,
   count: 100,
   updatedAt: 140,
-})
+}
+const lastColumnResize = ref<string | null>(null)
+
+function onColumnResize(key: string, width: number): void {
+  lastColumnResize.value = `${key}: ${width}px`
+}
 
 const selectedRowKeys = ref<string[]>(['1'])
 
@@ -159,8 +175,63 @@ const selectableRows = [
 
 const ellipsisColumns: RsTableColumn<TaskRow>[] = [
   { key: 'name', title: '名称', ellipsis: true, width: 120 },
+  {
+    key: 'status',
+    title: '状态',
+    width: 88,
+    tooltip: (row) => `当前状态：${statusLabels[row.status]}（count=${row.count}）`,
+  },
   { key: 'updatedAt', title: '更新日期', ellipsis: true, width: 100 },
 ]
+
+const editableRows = ref<TaskRow[]>([...basicRows])
+const highlightedRowKey = ref<string | undefined>('1')
+
+const editableColumns: RsTableColumn<TaskRow>[] = [
+  { key: 'name', title: '名称', editable: true, width: 180 },
+  {
+    key: 'count',
+    title: '数量',
+    align: 'right',
+    editable: true,
+    valueType: 'number',
+    width: 100,
+    validator: (value) => (Number(value) >= 0 ? null : '不能为负数'),
+  },
+  {
+    key: 'updatedAt',
+    title: '更新日期',
+    editable: true,
+    valueType: 'date',
+    width: 160,
+  },
+  {
+    key: 'status',
+    title: '状态',
+    width: 120,
+    editable: true,
+    valueType: 'select',
+    editorOptions: {
+      options: [
+        { value: 'running', label: '运行中' },
+        { value: 'done', label: '已完成' },
+        { value: 'failed', label: '失败' },
+      ],
+      searchable: true,
+    },
+  },
+]
+
+function onEditableCellCommit(
+  row: TaskRow,
+  column: RsTableColumn<TaskRow>,
+  _index: number,
+  value: unknown,
+): void {
+  editableRows.value = editableRows.value.map((item) =>
+    item.id === row.id ? { ...item, [column.key]: value as never } : item,
+  )
+}
 
 const ellipsisRows: TaskRow[] = [
   {
@@ -406,6 +477,26 @@ function onIntoRowDrop(
         通过 <code>columns</code> 定义列、<code>data</code> 传入行数据；默认带边框，表头吸顶。
       </p>
       <RsTable :columns="basicColumns" :data="basicRows" row-key="id" />
+    </DemoBlock>
+
+    <DemoBlock title="表头列筛选">
+      <p class="hint">
+        列配置 <code>filterable: true</code> 时在表头显示筛选图标；点击输入条件后确定生效。支持
+        <code>v-model:column-filters</code> 受控。
+      </p>
+      <RsTable
+        v-model:column-filters="columnFilters"
+        :columns="filterableColumns"
+        :data="allUsers"
+        row-key="id"
+      >
+        <template #status="{ row }">
+          <RsBadge :variant="statusVariants[row.status]">{{ statusLabels[row.status] }}</RsBadge>
+        </template>
+      </RsTable>
+      <p class="meta">
+        列筛选：<code>{{ Object.keys(columnFilters).length ? JSON.stringify(columnFilters) : '（无）' }}</code>
+      </p>
     </DemoBlock>
 
     <DemoBlock title="过滤">
@@ -734,28 +825,63 @@ function onIntoRowDrop(
 
     <DemoBlock title="文本省略 ellipsis">
       <p class="hint">
-        列配置 <code>ellipsis: true</code> + 固定列宽；超出部分显示省略号（悬停可看完整内容需业务层 tooltip）。
+        列配置 <code>ellipsis: true</code> + 固定列宽；超出部分省略，悬停由表格级共享 Tooltip 展示完整内容。
       </p>
       <div class="ellipsis-wrap">
-        <RsTable :columns="ellipsisColumns" :data="ellipsisRows" row-key="id" />
+        <RsTable
+          :columns="ellipsisColumns"
+          :data="ellipsisRows"
+          row-key="id"
+          :cell-tooltip-delay="200"
+        />
       </div>
       <p class="meta">窄容器宽度 <code>22rem</code>，名称列 <code>120px</code></p>
     </DemoBlock>
 
-    <DemoBlock title="列宽拖拽">
+    <DemoBlock title="行高亮 + 行内编辑">
       <p class="hint">
-        <code>resizable</code> 在表头右侧拖拽调整列宽；可用 <code>v-model:column-widths</code>
-        持久化宽度。
+        <code>highlight-row</code> 单击任意数据单元格即可高亮当前行（与 checkbox 选区独立，可通过 <code>--rs-table-row-highlight*</code> 定制样式）；
+        <code>editable</code> 开启后双击可编辑单元格，左侧行号列默认带列边框（<code>edit-gutter-width</code> 设置初始宽度，默认 32px），
+        有未提交变更时行号位置显示「提交」提示。
+        通过 <code>@cell-edit-commit</code> 回写数据。列级 <code>valueType</code>：
+        <code>text</code> / <code>number</code> / <code>boolean</code>（单击勾选）/
+        <code>select</code>（单击下拉）/ <code>date</code> / <code>datetime</code>；
+        编辑器仅在进入编辑态时挂载，不影响大表展示性能。
       </p>
       <RsTable
-        v-model:column-widths="columnWidths"
-        :columns="resizeColumns"
-        :data="basicRows"
-        resizable
+        v-model:highlighted-row-key="highlightedRowKey"
+        :columns="editableColumns"
+        :data="editableRows"
         row-key="id"
+        highlight-row
+        editable
+        column-bordered
+        striped
+        @cell-edit-commit="onEditableCellCommit"
       />
       <p class="meta">
-        列宽：<code>{{ JSON.stringify(columnWidths) }}</code>
+        当前高亮行：<code>{{ highlightedRowKey ?? '—' }}</code>
+      </p>
+    </DemoBlock>
+
+    <DemoBlock title="列宽拖拽">
+      <p class="hint">
+        <code>resizable</code> 在表头列边框处悬浮拖拽调整列宽；通过 <code>initial-column-widths</code> 传入初始宽度，
+        拖拽后由表格内部维护（非双向绑定）。<code>column-layout="auto"</code> 下未指定宽度的列随内容自适应。
+      </p>
+      <RsTable
+        :columns="resizeColumns"
+        :data="basicRows"
+        :initial-column-widths="resizeInitialWidths"
+        resizable
+        column-bordered
+        column-layout="auto"
+        row-key="id"
+        @column-resize="onColumnResize"
+      />
+      <p class="meta">
+        初始列宽：<code>{{ JSON.stringify(resizeInitialWidths) }}</code>
+        <template v-if="lastColumnResize"> · 最近拖拽：<code>{{ lastColumnResize }}</code></template>
       </p>
     </DemoBlock>
 
@@ -766,7 +892,7 @@ function onIntoRowDrop(
       <RsTable :columns="alignColumns" :data="alignRows" />
     </DemoBlock>
 
-    <DemoBlock title="紧凑模式与无边框">
+    <DemoBlock title="紧凑模式、无边框与直角">
       <div class="stack">
         <div>
           <p class="panel-label">compact</p>
@@ -775,6 +901,10 @@ function onIntoRowDrop(
         <div>
           <p class="panel-label">bordered=false</p>
           <RsTable :columns="basicColumns" :data="basicRows" :bordered="false" row-key="id" />
+        </div>
+        <div>
+          <p class="panel-label">rounded=false（嵌套父级容器时用）</p>
+          <RsTable :columns="basicColumns" :data="basicRows" :rounded="false" row-key="id" />
         </div>
       </div>
     </DemoBlock>
@@ -790,15 +920,86 @@ function onIntoRowDrop(
     </DemoBlock>
 
     <DemoBlock title="空数据">
+      <p class="hint">
+        <code>data</code> 为空且非 <code>loading</code> 时渲染空态行；可用
+        <code>#empty</code> 插槽覆盖默认文案，常见做法是嵌套 <code>RsEmpty</code>。
+      </p>
       <div class="stack">
         <div>
-          <p class="panel-label">默认空态</p>
-          <RsTable :columns="basicColumns" :data="[]" />
+          <p class="panel-label">默认空态（i18n：table.empty）</p>
+          <RsTable :columns="basicColumns" :data="[]" row-key="id" />
         </div>
         <div>
-          <p class="panel-label">自定义 #empty 插槽</p>
-          <RsTable :columns="basicColumns" :data="[]">
+          <p class="panel-label">自定义 #empty 文案</p>
+          <RsTable :columns="basicColumns" :data="[]" row-key="id">
             <template #empty>暂无任务，点击右上角新建。</template>
+          </RsTable>
+        </div>
+        <div>
+          <p class="panel-label">#empty 嵌套 RsEmpty（图标 + 描述 + 操作）</p>
+          <RsTable :columns="basicColumns" :data="[]" row-key="id">
+            <template #empty>
+              <RsEmpty
+                fill
+                title="还没有任务"
+                description="创建第一条任务后，列表会显示在这里。"
+              >
+                <template #icon>
+                  <RsIcon name="inbox" :size="22" label="空列表" />
+                </template>
+                <div class="row" style="margin: 0; justify-content: center">
+                  <RsButton size="sm">新建任务</RsButton>
+                </div>
+              </RsEmpty>
+            </template>
+          </RsTable>
+        </div>
+        <div>
+          <p class="panel-label">fill + 固定高度容器（面板内空态）</p>
+          <div class="empty-fill-host">
+            <RsTable :columns="basicColumns" :data="[]" fill size="sm" row-key="id">
+              <template #empty>
+                <RsEmpty fill description="查询结果为空，调整条件后再试。">
+                  <template #icon>
+                    <RsIcon name="search-x" :size="22" label="无结果" />
+                  </template>
+                </RsEmpty>
+              </template>
+            </RsTable>
+          </div>
+        </div>
+        <div>
+          <p class="panel-label">切换有/无数据（对照空态与正常行）</p>
+          <div class="row">
+            <RsButton
+              size="sm"
+              :variant="emptyDemoHasData ? 'default' : 'primary'"
+              @click="emptyDemoHasData = false"
+            >
+              无数据
+            </RsButton>
+            <RsButton
+              size="sm"
+              :variant="emptyDemoHasData ? 'primary' : 'default'"
+              @click="emptyDemoHasData = true"
+            >
+              有数据
+            </RsButton>
+          </div>
+          <RsTable
+            :columns="basicColumns"
+            :data="emptyDemoHasData ? basicRows : []"
+            row-key="id"
+            striped
+            column-bordered
+          >
+            <template #empty>
+              <RsEmpty fill description="当前没有可展示的行。">
+                <template #icon>
+                  <RsIcon name="table" :size="22" label="空表" />
+                </template>
+              </RsEmpty>
+            </template>
           </RsTable>
         </div>
       </div>
@@ -899,10 +1100,11 @@ function onIntoRowDrop(
     </DemoBlock>
     <DemoBlock title="🔬 空白区域右键（RsTable 内置菜单）">
       <p class="hint">
-        仅使用 <code>RsTable</code> 的 <code>context-menu-items</code> / <code>@context-menu-select</code>，
-        不额外包裹 <code>RsContextMenu</code> 或 <code>RsScrollbar</code>。表格置于固定 <code>300px</code> 高容器内（Table 内部滚动），
+        默认启用内置右键菜单：<strong>复制单元格</strong>（数据列上右键）、<strong>复制行</strong>（任意行区域右键）。
+        可通过 <code>context-menu-items</code> 追加自定义项，<code>context-menu="false"</code> 关闭内置菜单。
+        表格置于固定 <code>300px</code> 高容器内（Table 内部滚动），
         调整行数为 <strong>0 行</strong> 或 <strong>1 行</strong>，在下方空白处右键，
-        应弹出「<strong>新建文件夹 / 刷新</strong>」；在行上右键应弹出「打开 / 重命名 / 删除」。
+        应弹出「<strong>新建文件夹 / 刷新</strong>」；在行上右键应弹出「打开 / 重命名 / 删除」及默认复制项。
       </p>
       <div class="row">
         <label class="hint" style="margin: 0;">
@@ -1015,6 +1217,19 @@ function onIntoRowDrop(
 .scroll-x-demo {
   max-width: 28rem;
   min-width: 0;
+}
+
+.empty-fill-host {
+  height: 240px;
+  border: 1px dashed var(--rs-border);
+  border-radius: var(--rs-radius-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.empty-fill-host :deep(.rs-table-shell--fill) {
+  flex: 1;
+  min-height: 0;
 }
 
 /* ── 空白区域右键测试（RsTable 内置滚动 + 菜单） ── */

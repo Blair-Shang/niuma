@@ -8,32 +8,22 @@ import type { Component } from 'vue'
  * │ 字段速查                                                                │
  * ├─────────────────────┬───────────────────────────────────────────────────┤
  * │ credentialSection   │ 替换整个「用户名 + 密码」区。                     │
- * │                     │ props: { form: ConnectionFormState,               │
- * │                     │          mode: ConnectionDlgMode }                │
- * │                     │ 适合凭据结构特殊的协议（SSH 多认证方式等）。      │
- * │                     │ 不填 → 显示默认「用户名 + 密码」行。              │
- * ├─────────────────────┼───────────────────────────────────────────────────┤
  * │ credentialHint      │ 凭据区下方提示文字的 i18n key。                   │
- * │                     │ 仅对默认 credentialSection 有效；               │
- * │                     │ 自定义 credentialSection 由组件自行处理提示。     │
- * ├─────────────────────┼───────────────────────────────────────────────────┤
- * │ options             │ 协议专属选项区组件，追加在凭据区之后。            │
- * │                     │ props: { form: ConnectionFormState }              │
- * │                     │ 适合有额外配置的协议（FTP 编码/被动模式、        │
- * │                     │ Redis 拓扑/数据库/节点、MySQL 数据库名等）。      │
- * ├─────────────────────┼───────────────────────────────────────────────────┤
+ * │ options             │ 协议专属选项（追加在「基础信息」凭据区之后）。    │
+ * │ ssl                 │ 独立「SSL」Tab 内容（对齐 Navicat / DBeaver）。   │
+ * │ advanced            │ 独立「高级」Tab 内容（编码、超时等）。            │
  * │ passwordOptional    │ true → 默认凭据区密码字段不标 required。          │
- * │                     │ 适合密码为可选的协议（Redis、某些 FTP 匿名站）。  │
- * │                     │ 使用自定义 credentialSection 时此字段无效。       │
- * ├─────────────────────┼───────────────────────────────────────────────────┤
- * │ supportsTunnel      │ true → 连接表单展示「隧道」Tab 并校验隧道字段。   │
- * │                     │ 仅 Redis v0.1 为 true；FTP/SSH 隧道尚未实现。     │
+ * │ supportsTunnel      │ true → 连接表单展示「隧道」Tab。                  │
  * └─────────────────────┴───────────────────────────────────────────────────┘
  */
 export interface ConnectionKindSlotDef {
   credentialSection?: Component
   credentialHint?: string
   options?: Component
+  /** SSL / TLS 独立 Tab（props: { form }） */
+  ssl?: Component
+  /** 高级选项独立 Tab（props: { form }） */
+  advanced?: Component
   passwordOptional?: boolean
   supportsTunnel?: boolean
 }
@@ -46,8 +36,8 @@ export interface ConnectionKindSlotDef {
  *
  * 生命周期要求：
  *   所有 registerConnectionKind() 调用必须在使用此注册表的组件（OpsConnectionPanel
- *   等）挂载之前完成。项目中通过 main.ts 在挂载前调用
- *   registerBuiltinConnectionKinds() 来保证顺序（参见 modules/ops/connection-kinds.ts）。
+ *   等）挂载之前完成——或在首次使用前经由 ensureConnKind() 完成。
+ *   项目中通过 main.ts 调用 registerBuiltinConnKindLoaders() 登记懒加载入口。
  */
 const _registry: Record<string, ConnectionKindSlotDef> = {}
 

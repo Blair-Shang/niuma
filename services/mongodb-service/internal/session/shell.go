@@ -2,13 +2,13 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
+	"strings"
 	"sync"
 
-	"github.com/creack/pty"
+	gopty "github.com/aymanbagabas/go-pty"
 
 	"niuma/services/mongodb-service/internal/idgen"
 )
@@ -38,8 +38,8 @@ type ShellManager struct {
 type shellEntry struct {
 	shellID   string
 	sessionID string
-	cmd       *exec.Cmd
-	pty       *os.File
+	pty       gopty.Pty
+	cmd       *gopty.Cmd
 	cancel    context.CancelFunc
 }
 
@@ -89,7 +89,7 @@ func (m *ShellManager) Open(ctx context.Context, sessionID string, cols, rows ui
 		return "", fmt.Errorf("mongosh not found: configure path in Settings → Tool Components")
 	}
 
-	uri, env, err := CLIEnv(sess.Params, sess.ActiveDatabase())
+	uri, env, err := ShellCLIEnv(sess)
 	if err != nil {
 		return "", err
 	}
@@ -99,21 +99,34 @@ func (m *ShellManager) Open(ctx context.Context, sessionID string, cols, rows ui
 		return "", err
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(runCtx, exe, MongoshArgs(uri)...)
-	cmd.Env = env
-
-	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
+	pt, err := gopty.New()
 	if err != nil {
+		return "", fmt.Errorf("mongosh: create pty: %w", formatPtyStartError(err))
+	}
+
+	if err := pt.Resize(int(cols), int(rows)); err != nil {
+		_ = pt.Close()
+		return "", fmt.Errorf("mongosh: resize pty: %w", err)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	args := MongoshArgs(uri)
+	if secret := strings.TrimSpace(sess.Params.Secret); secret != "" {
+		args = append(args, "--password", secret)
+	}
+	cmd := pt.CommandContext(runCtx, exe, args...)
+	cmd.Env = env
+	if err := cmd.Start(); err != nil {
 		cancel()
-		return "", fmt.Errorf("mongosh: start pty: %w", err)
+		_ = pt.Close()
+		return "", fmt.Errorf("mongosh: start pty: %w", formatPtyStartError(err))
 	}
 
 	entry := &shellEntry{
 		shellID:   shellID,
 		sessionID: sessionID,
+		pty:       pt,
 		cmd:       cmd,
-		pty:       ptyFile,
 		cancel:    cancel,
 	}
 
@@ -124,7 +137,7 @@ func (m *ShellManager) Open(ctx context.Context, sessionID string, cols, rows ui
 
 	m.emitState(shellID, ShellStateOpening)
 	m.emitState(shellID, ShellStateConnected)
-	go m.readLoop(shellID, ptyFile, runCtx)
+	go m.readLoop(shellID, pt, runCtx)
 	go m.waitExit(shellID, cmd, runCtx)
 
 	return shellID, nil
@@ -152,7 +165,7 @@ func (m *ShellManager) Resize(shellID string, cols, rows uint16) error {
 	if cols == 0 || rows == 0 {
 		return fmt.Errorf("cols and rows required")
 	}
-	return pty.Setsize(entry.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	return entry.pty.Resize(int(cols), int(rows))
 }
 
 // Close 关闭指定 Shell。
@@ -168,11 +181,11 @@ func (m *ShellManager) Close(shellID string) error {
 	m.mu.Unlock()
 
 	entry.cancel()
-	if entry.pty != nil {
-		_ = entry.pty.Close()
-	}
 	if entry.cmd != nil && entry.cmd.Process != nil {
 		_ = entry.cmd.Process.Kill()
+	}
+	if entry.pty != nil {
+		_ = entry.pty.Close()
 	}
 	m.emitState(shellID, ShellStateClosed)
 	return nil
@@ -220,7 +233,7 @@ func (m *ShellManager) readLoop(shellID string, r io.Reader, ctx context.Context
 	}
 }
 
-func (m *ShellManager) waitExit(shellID string, cmd *exec.Cmd, ctx context.Context) {
+func (m *ShellManager) waitExit(shellID string, cmd *gopty.Cmd, ctx context.Context) {
 	_ = cmd.Wait()
 	select {
 	case <-ctx.Done():
@@ -246,4 +259,11 @@ func (m *ShellManager) emitEvent(payload map[string]any) {
 	if m.emit != nil {
 		m.emit(payload)
 	}
+}
+
+func formatPtyStartError(err error) error {
+	if errors.Is(err, gopty.ErrUnsupported) {
+		return fmt.Errorf("%w: interactive PTY is unavailable on this platform (Windows 10 1809+ required for ConPTY)", gopty.ErrUnsupported)
+	}
+	return err
 }

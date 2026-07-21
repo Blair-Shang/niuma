@@ -12,6 +12,8 @@ export interface MongoToolTaskLine {
 
 export function useMongoToolTasks() {
   const lines = ref<MongoToolTaskLine[]>([])
+  /** 当前未结束的工具任务；用于停止按钮与互斥启动 */
+  const activeTaskId = ref<string | null>(null)
   let offEvent: (() => void) | null = null
 
   function ensureSubscribed(): void {
@@ -24,6 +26,9 @@ export function useMongoToolTasks() {
       }
       const event = detail as MongoToolsProgressEvent | MongoToolsDoneEvent
       if (event.type === 'mongodb.tools.progress') {
+        if (event.phase === 'queued' || event.phase === 'running') {
+          activeTaskId.value = event.taskId
+        }
         lines.value = [
           ...lines.value.slice(-199),
           {
@@ -35,11 +40,14 @@ export function useMongoToolTasks() {
         return
       }
       if (event.type === 'mongodb.tools.done') {
+        if (activeTaskId.value === event.taskId) {
+          activeTaskId.value = null
+        }
         lines.value = [
           ...lines.value.slice(-199),
           {
             taskId: event.taskId,
-            phase: event.ok ? 'done' : 'failed',
+            phase: event.ok ? 'done' : event.message === 'canceled' ? 'canceled' : 'failed',
             message: event.message ?? (event.ok ? 'completed' : 'failed'),
             ok: event.ok,
             outputPath: event.outputPath,
@@ -53,6 +61,11 @@ export function useMongoToolTasks() {
     ensureSubscribed()
   }
 
+  function trackTask(taskId: string): void {
+    ensureSubscribed()
+    activeTaskId.value = taskId
+  }
+
   function clear(): void {
     lines.value = []
   }
@@ -62,5 +75,5 @@ export function useMongoToolTasks() {
     offEvent = null
   })
 
-  return { lines, track, clear }
+  return { lines, activeTaskId, track, trackTask, clear }
 }

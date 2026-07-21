@@ -99,11 +99,14 @@ function onCancel(): void {
 .rs-confirm-dialog__content {
   position: fixed;
   left: 50%;
-  top: 50%;
+  top: calc(
+    var(--rs-dialog-inset-top, 1rem) +
+      (100vh - var(--rs-dialog-inset-top, 1rem) - var(--rs-dialog-inset-bottom, 1rem)) / 2
+  );
   z-index: calc(var(--rs-z-modal) + 1);
   display: flex;
   gap: var(--rs-space-lg);
-  width: calc(100% - 2rem);
+  width: calc(100vw - 2 * var(--rs-dialog-inset-x, 1rem));
   max-width: 28rem;
   transform: translate(-50%, -50%);
   box-sizing: border-box;

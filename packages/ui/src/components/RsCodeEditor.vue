@@ -4,7 +4,12 @@ import { basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
 import { EditorView, placeholder as cmPlaceholder } from '@codemirror/view'
 import { oneDark } from '@codemirror/theme-one-dark'
-import type { RsCodeEditorDiagnostic, RsCodeEditorLanguage, RsCodeEditorTheme } from './code-editor-utils'
+import type {
+  RsCodeEditorDiagnostic,
+  RsCodeEditorLanguage,
+  RsCodeEditorSqlConfig,
+  RsCodeEditorTheme,
+} from './code-editor-utils'
 import {
   codeEditorLanguageLabel,
   resolveCodeEditorLanguage,
@@ -44,6 +49,8 @@ const props = withDefaults(
     showToolbar?: boolean
     diagnostics?: RsCodeEditorDiagnostic[]
     placeholder?: string
+    /** SQL 表/字段补全（language=sql 时生效） */
+    sqlConfig?: RsCodeEditorSqlConfig
     filePath?: string
     hoverRequest?: (line: number, column: number) => Promise<string | null>
     definitionRequest?: (line: number, column: number) => Promise<{
@@ -157,7 +164,9 @@ async function initEditor() {
   view.value?.destroy()
   view.value = null
 
-  const langExts = await resolveCodeMirrorLanguage(resolvedLanguage.value)
+  const langExts = await resolveCodeMirrorLanguage(resolvedLanguage.value, {
+    sql: props.sqlConfig,
+  })
   if (unmounted || !targetEl.isConnected || seq !== initSeq) return
 
   const editable = !props.readonly && !props.disabled
@@ -222,6 +231,13 @@ onUnmounted(() => {
 
 watch(() => props.language, () => { void initEditor() })
 watch(() => props.inlineEditRequest, () => { void initEditor() })
+watch(
+  () => props.sqlConfig,
+  () => {
+    if (resolvedLanguage.value === 'sql') void initEditor()
+  },
+  { deep: true },
+)
 
 watch(
   () => model.value,

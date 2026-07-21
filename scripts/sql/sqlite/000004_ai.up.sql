@@ -1,6 +1,6 @@
 -- 000004_ai.up.sql
 -- AI 域：LLM Provider / 模型 / MCP Server / MCP 工具缓存 / Skill 模板
--- 约定：API Key、MCP Token 等密钥不入库，仅以 credential_id 逻辑关联 nm_credential_ref
+-- 约定：明文不入业务表；以 credential_id 关联 nm_credential_ref，密文由 VaultStore 写入 cipher_text
 -- 约定：工具与 MCP 的“执行”在外部进程，本域仅存配置与发现缓存
 
 -- LLM Provider（服务商/接入点）
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS nm_ai_provider (
     provider_name       TEXT NOT NULL,                  -- 展示名，如 "OpenAI 官方"
     provider_kind       TEXT NOT NULL,                  -- openai | anthropic | azure_openai | ollama | custom
     base_url            TEXT,                           -- 接入地址；官方默认可空
-    credential_id       TEXT,                           -- 逻辑关联 nm_credential_ref（API Key 密文）
+    credential_id       TEXT,                           -- 逻辑关联 nm_credential_ref（Vault 密文）
     default_model_code  TEXT,                           -- 默认模型的 model_code
     provider_options    TEXT NOT NULL DEFAULT '{}',     -- JSON：api_version、organization、extra_headers 等
     record_status       TEXT NOT NULL DEFAULT 'active', -- active | disabled

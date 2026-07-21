@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { monacoZhNlsPlugin } from '../vite-plugins/monaco-zh-nls'
+import { silenceAntlrParseConsole } from '../vite-plugins/silence-antlr-parse-console'
 
 const playgroundRoot = fileURLToPath(new URL('.', import.meta.url))
 const faviconSvgPath = path.join(playgroundRoot, 'public', 'favicon.svg')
@@ -11,8 +14,8 @@ const faviconSvgPath = path.join(playgroundRoot, 'public', 'favicon.svg')
 /** 浏览器默认请求 /favicon.ico，回退到 SVG 避免 404 噪音 */
 function faviconIcoFallback(): Plugin {
   const serveSvgAsIco = (
-    req: { url?: string },
-    res: { setHeader: (k: string, v: string) => void },
+    req: IncomingMessage,
+    res: ServerResponse,
     next: () => void,
   ) => {
     if (req.url !== '/favicon.ico') {
@@ -41,7 +44,14 @@ function faviconIcoFallback(): Plugin {
 export default defineConfig({
   root: playgroundRoot,
   publicDir: 'public',
-  plugins: [vue(), tailwindcss(), faviconIcoFallback()],
+  plugins: [
+    vue(),
+    tailwindcss(),
+    faviconIcoFallback(),
+    // Monaco 原生右键菜单中文化
+    monacoZhNlsPlugin(),
+    silenceAntlrParseConsole(),
+  ],
   resolve: {
     alias: {
       '@ruoshui/ui': fileURLToPath(new URL('../src', import.meta.url)),

@@ -8,11 +8,11 @@
     "isolatedModules": true,
     "strict": true,
     "jsx": "preserve",
-    "types": ["vitest/globals"],
+    "types": ["vitest/globals", "node", "vite/client"],
     "paths": {
       "@ruoshui/ui": ["./src/index.ts"],
       "@niuma/ui": ["./src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "playground/**/*.ts", "playground/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "playground/**/*.ts", "playground/**/*.vue", "vite-plugins/**/*.ts"]
 }

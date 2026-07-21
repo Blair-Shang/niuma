@@ -1,7 +1,7 @@
 # 20 — 工具组件管理（设置 → 外部 CLI）
 
-> 版本：v0.1 · 日期：2026-07-09
-> 状态：Phase 4a 已启动（检测 / 路径配置 / 下载引导）
+> 版本：v0.3 · 日期：2026-07-17
+> 状态：Phase 4a/4b 已落地（检测 / 路径配置 / 一键下载安装）
 
 ---
 
@@ -14,7 +14,7 @@
 | 分区 | 管理对象 | 典型操作 |
 |------|----------|----------|
 | 插件 | `plugins/` manifest 扩展 | 启用 / 禁用 |
-| **工具组件** | 本机可执行文件 | 检测 / 指定路径 / 打开官方下载页 |
+| **工具组件** | 本机可执行文件 | 检测 / 指定路径 / 一键下载安装 / 打开官方下载页 |
 
 能力服务（如 `mongodb-service`）通过 `platform.components.*` 读取**合并后的有效路径**，不在各服务内重复维护 UI 配置。
 
@@ -29,7 +29,7 @@ Web SettingsView → componentsApi → platform.components.*
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼
            components/*/manifest   nm_app_setting      data/components/
-           （声明需要哪些工具）    （用户配置路径）    （可选安装目录，Phase 4b）
+           （声明需要哪些工具）    （用户配置路径）    （可选安装目录）
                     └───────────────────┬───────────────────┘
                                         ▼
                               PATH 自动探测
@@ -43,7 +43,11 @@ Web SettingsView → componentsApi → platform.components.*
 
 ```
 components/
-└── mongodb-tools/
+├── mongodb-tools/
+│   └── manifest.yaml
+├── vastbase-tools/
+│   └── manifest.yaml
+└── postgresql-client/
     └── manifest.yaml
 ```
 
@@ -60,11 +64,19 @@ tools:
       executables: [mongosh, mongo]      # PATH 探测名（Windows 自动补 .exe）
       versionArgs: ["--version"]
     install:
-      mode: detect_only                  # detect_only | optional_download（后者 Phase 4b）
+      mode: optional_download            # detect_only | optional_download
       downloadPage: https://...
 ```
 
-新增组件包：在 `components/<name>/manifest.yaml` 声明即可，**无需改 platform 业务代码**。
+包级 `install.mode: optional_download` 且声明 `packages[]`（按 os/arch 的直链 zip/tgz）时，设置页显示「下载安装」，解压到 `{dataDir}/components/<bundleId>/bin/`。
+
+| 组件包 | 工具 | 安装 |
+|--------|------|------|
+| `mongodb-tools` | mongosh / mongodump / … | `optional_download`（官方 zip/tgz） |
+| `vastbase-tools` | vb_dump / vb_restore / vsql（兼认 gs_* / gsql） | `detect_only`（官方无公开便携直链；浏览指定路径或 PATH） |
+| `postgresql-client` | pg_dump / pg_restore / psql | `optional_download`（通用 PG 备选；Vastbase 备份请用 vastbase-tools） |
+
+新增组件包：在 `components/<name>/manifest.yaml` 声明即可；Web 侧可在 `components-settings/bundles/` 追加展示 handler（图标 / i18n）。
 
 ---
 
@@ -76,6 +88,7 @@ tools:
 | `platform.components.detect` | `{ bundleId }` | `{ bundle: BundleStatus }` |
 | `platform.components.setPath` | `{ bundleId, toolId, path }` | `{ updated: true }` |
 | `platform.components.getDownload` | `{ bundleId, toolId }` | `{ url }` |
+| `platform.components.install` | `{ bundleId, toolId? }` | `{ bundle: BundleStatus }` |
 
 ### 4.1 `BundleStatus`
 
@@ -149,21 +162,24 @@ tools:
 - **重新检测**：`platform.components.detect`
 - **浏览…**：`shell.dialog.openFile` 选 exe → `platform.components.setPath`
 - **清除路径**：`setPath` 传空字符串
-- **官方下载**：`getDownload` 取 URL → `window.open`
+- **官方下载**：`getDownload` 取 URL → `shell.openExternal`（系统默认浏览器）
+- **下载安装**：`platform.components.install`（仅 `installable` 包）
 
-### 5.3 与 MongoDB 模块联动（后续）
+### 5.3 与模块联动
 
-MongoDB Console / Tools Tab 缺工具时展示横幅，跳转设置 `components` 分区（`tabStore.openSettings` + section 参数，待扩展）。
+MongoDB / Vastbase Tools 面板通过 `load*ToolPaths()` 读取合并后的有效路径；缺工具时提示前往「设置 → 工具组件」。
 
-### 5.4 Phase 4a 已落地文件
+### 5.4 已落地文件
 
 | 路径 | 状态 |
 |------|------|
 | `components/mongodb-tools/manifest.yaml` | ✅ |
-| `platform/internal/components/` | ✅ |
+| `components/vastbase-tools/manifest.yaml` | ✅ |
+| `components/postgresql-client/manifest.yaml` | ✅ |
+| `platform/internal/components/`（含 `install.go`） | ✅ |
 | `platform/internal/handler/components.go` | ✅ |
 | `web/src/api/components.ts` | ✅ |
-| `web/src/shell/views/ComponentsSettingsPanel.vue` | ✅ |
+| `web/src/shell/views/components-settings/` | ✅ |
 | `web/src/shell/views/SettingsView.vue`（`components` 分区） | ✅ |
 
 ---
@@ -186,8 +202,9 @@ MongoDB Console / Tools Tab 缺工具时展示横幅，跳转设置 `components`
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | **4a** | list / detect / setPath / getDownload + 设置页 UI | **已落地** |
-| **4b** | `platform.components.install` 下载解压至 `data/components/` | 未开始 |
-| **5** | 版本更新提醒、校验和 | 未开始 |
+| **4b** | `platform.components.install` 下载解压至 `data/components/` | **已落地**（mongodb-tools、postgresql-client） |
+| **4c** | `vastbase-tools`（vb_dump / vb_restore / vsql）detect_only + 浏览路径 | **已落地** |
+| **5** | 版本更新提醒、校验和；postgresql-client macOS 直链包；vastbase-tools 便携直链（若官方提供） | 未开始 |
 
 ---
 
@@ -205,3 +222,5 @@ MongoDB Console / Tools Tab 缺工具时展示横幅，跳转设置 `components`
 |------|------|------|
 | v0.1 | 2026-07-09 | 初版；Phase 4a 契约与实现启动 |
 | v0.2 | 2026-07-09 | Phase 4a 落地：platform.components.*、设置页、mongodb-tools manifest |
+| v0.3 | 2026-07-17 | Phase 4b：postgresql-client 改为 optional_download；设置页可一键安装 |
+| v0.4 | 2026-07-17 | Phase 4c：vastbase-tools（vb_dump / vb_restore / vsql）；Vastbase 备份默认走官方工具 |

@@ -3,7 +3,12 @@ import type { VNodeChild } from 'vue'
 export type RsTableColumnAlign = 'left' | 'center' | 'right'
 export type RsTableColumnFixed = 'left' | 'right'
 export type RsTableSortOrder = 'asc' | 'desc' | null
-export type RsTableSelectionType = 'checkbox' | 'radio'
+/**
+ * 行选择模式：
+ * - checkbox / radio：左侧选择列
+ * - row：无选择列，点击行多选（Ctrl/Cmd 切换、Shift 范围）
+ */
+export type RsTableSelectionType = 'checkbox' | 'radio' | 'row'
 export type RsTableSize = 'sm' | 'md' | 'lg'
 
 /** 行数据最小约束：任意非原始类型对象（interface / type 均可） */
@@ -37,6 +42,54 @@ export type RsTableGroupBy<T extends RsTableRowData = RsTableRowData> = RsTableF
 
 /** 单元格 render 返回值（文本、数字或 Vue VNode） */
 export type RsTableCellRenderResult = VNodeChild
+
+/** 单元格编辑/展示值类型 */
+export type RsTableCellValueType =
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'datetime'
+  | 'boolean'
+  | 'select'
+  | 'textarea'
+
+/** 列级编辑器选项（仅编辑挂载时读取，不影响展示路径）。 */
+export interface RsTableColumnEditorOptions {
+  /**
+   * select：选项列表；也可按行返回（如外键引用表随 schema 变化）。
+   * 函数形式在进入编辑态时按当前行解析。
+   */
+  options?:
+    | import('./select-utils').RsSelectOptions
+    | ((row: RsTableRowData, index: number) => import('./select-utils').RsSelectOptions)
+  /** select：可搜索 */
+  searchable?: boolean
+  /**
+   * select：允许搜索框手输自定义值（Enter / 「使用 xxx」）。
+   * 适合类型名、厂商扩展类型等预设列表外的输入。
+   */
+  creatable?: boolean
+  /**
+   * select：多选。草稿仍为字符串，选项间以 `, ` 拼接；
+   * 多选时在下拉关闭时提交（避免每点一项就结束编辑）。
+   */
+  multiple?: boolean
+  /** select / date：可清空；表格单元格 select 默认 false（仅选择，无清除 X） */
+  clearable?: boolean
+  /** datetime：是否含秒 */
+  withSeconds?: boolean
+  /** datetime：时区策略（utc 提交时补 Z） */
+  timezone?: 'local' | 'utc'
+  /** textarea：可见行数 */
+  rows?: number
+  /** 进入编辑时光标策略覆盖 */
+  focusMode?: 'end' | 'select' | 'start'
+}
+
+/** 已按行解析后的编辑器选项（options 仅为列表，供单元格编辑器使用）。 */
+export type RsTableColumnEditorOptionsResolved = Omit<RsTableColumnEditorOptions, 'options'> & {
+  options?: import('./select-utils').RsSelectOptions
+}
 
 function readConvention(row: object): Partial<RsTableRowConvention> {
   const record = row as Record<string, unknown>
@@ -78,8 +131,43 @@ export interface RsTableColumn<T extends RsTableRowData = Record<string, unknown
   align?: RsTableColumnAlign
   sortable?: boolean
   sorter?: (left: T, right: T) => number
+  /** 表头显示筛选图标，配合表格 `columnFilters` 使用 */
+  filterable?: boolean
+  /** 自定义列筛选；默认对单元格值做包含匹配 */
+  filter?: (value: unknown, row: T, query: string) => boolean
   fixed?: RsTableColumnFixed
   ellipsis?: boolean
+  /**
+   * 悬停提示文案。启用表格级共享 Tooltip（整表单浮层），适合大表场景。
+   * 与 `ellipsis` 独立：未省略时也会显示。
+   */
+  tooltip?: (row: T, index: number) => string | null | undefined
+  /** 表头原生 title（宽表勿逐列挂 RsTooltip，避免成百实例） */
+  headerTip?: string
+  /** 是否允许行内编辑；也可在表格级设置 editable */
+  editable?: boolean | ((row: T, index: number) => boolean)
+  /** 单元格值类型，控制行内编辑控件（默认 text） */
+  valueType?: RsTableCellValueType
+  /** 编辑器附加选项（select options 等）；仅进入编辑态时使用 */
+  editorOptions?: RsTableColumnEditorOptions
+  /** 展示格式化 */
+  formatter?: (value: unknown, row: T, index: number) => string
+  /** 编辑输入解析 */
+  parser?: (input: string, row: T, index: number) => unknown
+  /** 编辑校验，返回错误文案；支持异步 */
+  validator?: (
+    value: unknown,
+    row: T,
+    index: number,
+  ) => string | null | Promise<string | null>
+  /** 是否允许 NULL（覆盖表格 allowNull） */
+  nullable?: boolean
+  /** 空字符串提交为 null（需 nullable） */
+  emptyAsNull?: boolean
+  /** 提交时机 */
+  commitOn?: 'blur' | 'enter' | 'change' | 'manual'
+  /** 进入编辑的触发方式 */
+  editTrigger?: 'click' | 'dblclick'
   render?: (row: T, index: number) => RsTableCellRenderResult
 }
 
@@ -106,6 +194,35 @@ export interface RsTableFixedCellStyle {
 
 export function getCellValue<T extends RsTableRowData>(row: T, column: RsTableColumn<T>): unknown {
   return row[(column.dataIndex ?? column.key) as keyof T]
+}
+
+export type RsTableCellTooltipMode = 'overflow' | 'always'
+
+export function columnUsesSharedTooltip<T extends RsTableRowData>(column: RsTableColumn<T>): boolean {
+  return Boolean(column.ellipsis || column.tooltip)
+}
+
+export function resolveCellTooltipMode<T extends RsTableRowData>(
+  column: RsTableColumn<T>,
+): RsTableCellTooltipMode | null {
+  if (column.tooltip) return 'always'
+  if (column.ellipsis) return 'overflow'
+  return null
+}
+
+export function resolveCellTooltipText<T extends RsTableRowData>(
+  column: RsTableColumn<T>,
+  row: T,
+  index: number,
+): string {
+  if (column.tooltip) {
+    const tip = column.tooltip(row, index)
+    if (tip != null && tip !== '') return String(tip)
+    return ''
+  }
+  const value = column.render ? column.render(row, index) : getCellValue(row, column)
+  if (value == null) return ''
+  return String(value)
 }
 
 export function compareTableValues(a: unknown, b: unknown): number {
@@ -165,9 +282,9 @@ export function sortTableRows<T extends RsTableRowData>(
   columns: readonly RsTableColumn<T>[],
   sort: RsTableSortState | null,
 ): T[] {
-  if (!sort) return [...rows]
+  if (!sort) return rows as T[]
   const column = columns.find((item) => item.key === sort.key)
-  if (!column) return [...rows]
+  if (!column) return rows as T[]
   return [...rows].sort((left, right) => compareTableRowsBySort(left, right, column, sort.order))
 }
 
@@ -176,7 +293,7 @@ export function sortTableRowsMulti<T extends RsTableRowData>(
   columns: readonly RsTableColumn<T>[],
   sorts: readonly RsTableSortState[],
 ): T[] {
-  if (sorts.length === 0) return [...rows]
+  if (sorts.length === 0) return rows as T[]
   return [...rows].sort((left, right) => {
     for (const sort of sorts) {
       const column = columns.find((item) => item.key === sort.key)
@@ -195,7 +312,7 @@ export function filterTableRows<T extends RsTableRowData>(
   keys?: string[],
 ): T[] {
   const trimmed = query.trim()
-  if (!trimmed) return [...rows]
+  if (!trimmed) return rows as T[]
   const searchKeys = keys ?? columns.map((column) => column.key)
   const lower = trimmed.toLowerCase()
   return rows.filter((row) =>
@@ -205,6 +322,33 @@ export function filterTableRows<T extends RsTableRowData>(
       return formatComparableValue(value).toLowerCase().includes(lower)
     }),
   )
+}
+
+export function filterTableRowsByColumnFilters<T extends RsTableRowData>(
+  rows: readonly T[],
+  columns: readonly RsTableColumn<T>[],
+  filters: Record<string, string>,
+): T[] {
+  const active = Object.entries(filters)
+    .map(([key, query]) => [key, query.trim()] as const)
+    .filter(([, query]) => query.length > 0)
+  if (!active.length) return rows as T[]
+
+  const columnMap = new Map(columns.map((column) => [column.key, column]))
+  return rows.filter((row) =>
+    active.every(([key, query]) => {
+      const column = columnMap.get(key)
+      if (!column) return true
+      const value = getCellValue(row, column)
+      if (column.filter) return column.filter(value, row, query)
+      const lower = query.toLowerCase()
+      return formatComparableValue(value).toLowerCase().includes(lower)
+    }),
+  )
+}
+
+export function isColumnFilterActive(filters: Record<string, string>, key: string): boolean {
+  return Boolean(filters[key]?.trim())
 }
 
 export function resolveGroupKey<T extends RsTableRowData>(
@@ -291,17 +435,26 @@ export function buildTableEntries<T extends RsTableRowData>(
     multiSort?: boolean
     filterText?: string
     filterKeys?: string[]
+    columnFilters?: Record<string, string>
     groupBy?: RsTableGroupBy<T>
     groupLabel?: (key: string) => string
     remoteSort?: boolean
   } = {},
 ): RsTableRowEntry<T>[] {
-  let processed = filterTableRows(rows, options.filterText ?? '', columns, options.filterKeys)
+  let processed: readonly T[] = rows
+  const filterText = options.filterText ?? ''
+  if (filterText.trim()) {
+    processed = filterTableRows(processed, filterText, columns, options.filterKeys)
+  }
+  const columnFilters = options.columnFilters ?? {}
+  if (Object.values(columnFilters).some((q) => q.trim())) {
+    processed = filterTableRowsByColumnFilters(processed, columns, columnFilters)
+  }
   if (!options.remoteSort) {
     if (options.multiSort && options.sorts?.length) {
       processed = sortTableRowsMulti(processed, columns, options.sorts)
-    } else {
-      processed = sortTableRows(processed, columns, options.sort ?? null)
+    } else if (options.sort) {
+      processed = sortTableRows(processed, columns, options.sort)
     }
   }
   if (options.groupBy) {
@@ -389,6 +542,8 @@ export function resolveScrollWidth(scrollX?: number | string, _columns?: readonl
 export function resolveLeadingColumnWidth(options: {
   selectable?: boolean
   showIndex?: boolean
+  showEditGutter?: boolean
+  gutterWidth?: number
   expandable?: boolean
   rowDraggable?: boolean
 }): number {
@@ -396,7 +551,8 @@ export function resolveLeadingColumnWidth(options: {
   if (options.rowDraggable) width += 40
   if (options.expandable) width += 40
   if (options.selectable) width += 40
-  if (options.showIndex) width += 56
+  if (options.showEditGutter) width += options.gutterWidth ?? 32
+  else if (options.showIndex) width += 56
   return width
 }
 
@@ -406,6 +562,8 @@ export function resolveFixedColumnStyles<T extends RsTableRowData>(
   options: {
     selectable?: boolean
     showIndex?: boolean
+    showEditGutter?: boolean
+    gutterWidth?: number
     expandable?: boolean
     rowDraggable?: boolean
   } = {},
@@ -461,6 +619,34 @@ export function selectRowKeys(
   return toggleRowSelection(selectedKeys, key)
 }
 
+/** 行点击多选（plain / Ctrl·Cmd / Shift），供 selectionType=`row` 使用。 */
+export function selectRowKeysByClick(
+  selectedKeys: readonly string[],
+  key: string,
+  options: {
+    toggle: boolean
+    range: boolean
+    /** 有序行键（当前可见数据顺序），用于 Shift 范围选 */
+    orderedKeys: readonly string[]
+    /** Shift 范围的锚点行键 */
+    anchorKey?: string | null
+  },
+): string[] {
+  if (options.range && options.orderedKeys.length > 0) {
+    const anchor = options.anchorKey && options.orderedKeys.includes(options.anchorKey)
+      ? options.anchorKey
+      : key
+    const from = options.orderedKeys.indexOf(anchor)
+    const to = options.orderedKeys.indexOf(key)
+    if (from < 0 || to < 0) return [key]
+    const start = Math.min(from, to)
+    const end = Math.max(from, to)
+    return options.orderedKeys.slice(start, end + 1)
+  }
+  if (options.toggle) return toggleRowSelection(selectedKeys, key)
+  return [key]
+}
+
 export function sliceVirtualTableEntries<T extends RsTableRowData>(
   entries: readonly RsTableRowEntry<T>[],
   scrollTop: number,
@@ -475,40 +661,141 @@ export function sliceVirtualTableEntries<T extends RsTableRowData>(
   paddingBottom: number
 } {
   if (entries.length === 0) return { entries: [], paddingTop: 0, paddingBottom: 0 }
+  const model = buildVirtualHeightModel(entries, rowHeight, groupRowHeight, expandRowHeight)
+  return sliceVirtualHeightModel(model, scrollTop, viewportHeight, rowHeight, overscan)
+}
 
-  const heights = entries.map((entry) => entryHeight(entry, rowHeight, groupRowHeight, expandRowHeight))
-  const totalHeight = heights.reduce((sum, height) => sum + height, 0)
+/** 预计算行高前缀和，供虚拟滚动复用，避免每次 scroll 全量 map/reduce */
+export function buildVirtualHeightModel<T extends RsTableRowData>(
+  entries: readonly RsTableRowEntry<T>[],
+  rowHeight: number,
+  groupRowHeight = TABLE_ROW_HEIGHT.group,
+  expandRowHeight = TABLE_ROW_HEIGHT.expand,
+): {
+  entries: readonly RsTableRowEntry<T>[]
+  prefix: number[]
+  total: number
+} {
+  const prefix = new Array<number>(entries.length + 1)
+  prefix[0] = 0
+  for (let index = 0; index < entries.length; index += 1) {
+    prefix[index + 1] = prefix[index] + entryHeight(entries[index], rowHeight, groupRowHeight, expandRowHeight)
+  }
+  return { entries, prefix, total: prefix[entries.length] ?? 0 }
+}
+
+function findVirtualStartIndex(prefix: readonly number[], targetTop: number): number {
+  let low = 0
+  let high = prefix.length - 2
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2)
+    if ((prefix[mid + 1] ?? 0) <= targetTop) low = mid + 1
+    else high = mid
+  }
+  return low
+}
+
+export function sliceVirtualHeightModel<T extends RsTableRowData>(
+  model: {
+    entries: readonly RsTableRowEntry<T>[]
+    prefix: readonly number[]
+    total: number
+  },
+  scrollTop: number,
+  viewportHeight: number,
+  rowHeight: number,
+  overscan = 4,
+): {
+  entries: RsTableRowEntry<T>[]
+  paddingTop: number
+  paddingBottom: number
+} {
+  const { entries, prefix, total } = model
+  if (entries.length === 0) return { entries: [], paddingTop: 0, paddingBottom: 0 }
+
   const overscanPx = overscan * rowHeight
   const targetTop = Math.max(0, scrollTop - overscanPx)
+  const start = findVirtualStartIndex(prefix, targetTop)
+  const paddingTop = prefix[start] ?? 0
 
-  let acc = 0
-  let start = 0
-  for (let index = 0; index < heights.length; index += 1) {
-    if (acc + heights[index] > targetTop) {
-      start = index
-      break
-    }
-    acc += heights[index]
-    if (index === heights.length - 1) start = heights.length
-  }
-
-  const paddingTop = heights.slice(0, start).reduce((sum, height) => sum + height, 0)
-
-  let visibleHeight = 0
+  const maxVisible = viewportHeight + overscanPx * 2
   let end = start
-  for (let index = start; index < heights.length; index += 1) {
-    visibleHeight += heights[index]
-    end = index + 1
-    if (visibleHeight >= viewportHeight + overscanPx * 2) break
+  while (end < entries.length && (prefix[end] ?? 0) - paddingTop < maxVisible) {
+    end += 1
   }
+  if (end === start) end = Math.min(start + 1, entries.length)
 
-  const renderedHeight = heights.slice(start, end).reduce((sum, height) => sum + height, 0)
-  const paddingBottom = Math.max(0, totalHeight - paddingTop - renderedHeight)
+  const renderedBottom = prefix[end] ?? total
+  const paddingBottom = Math.max(0, total - renderedBottom)
 
   return {
-    entries: entries.slice(start, end),
+    entries: entries.slice(start, end) as RsTableRowEntry<T>[],
     paddingTop,
     paddingBottom,
+  }
+}
+
+/** 列像素宽：优先已测量/配置 widths，其次 column.width / minWidth */
+export function resolveColumnPixelWidth<T extends RsTableRowData>(
+  column: RsTableColumn<T>,
+  widths?: Record<string, number | string>,
+  fallback = 120,
+): number {
+  const fromMap = widths?.[column.key]
+  if (fromMap !== undefined) return parseColumnWidth(fromMap, fallback)
+  return parseColumnWidth(column.width ?? column.minWidth, fallback)
+}
+
+/**
+ * 横向列虚拟切片（仅针对可横滚的流体列）。
+ * 调用方负责：冻结列始终实体渲染；`scrollLeft` 为相对流体区起点的偏移
+ * （即容器 scrollLeft 减去前缀列与左冻结列宽度）。
+ */
+export function sliceVirtualColumns<T extends RsTableRowData>(
+  columns: readonly RsTableColumn<T>[],
+  options: {
+    scrollLeft: number
+    viewportWidth: number
+    getWidth: (column: RsTableColumn<T>) => number
+    overscan?: number
+  },
+): {
+  columns: RsTableColumn<T>[]
+  paddingLeft: number
+  paddingRight: number
+  startIndex: number
+  endIndex: number
+} {
+  const n = columns.length
+  if (n === 0) {
+    return { columns: [], paddingLeft: 0, paddingRight: 0, startIndex: 0, endIndex: 0 }
+  }
+
+  const overscan = options.overscan ?? 2
+  const prefix: number[] = new Array(n + 1)
+  prefix[0] = 0
+  for (let i = 0; i < n; i += 1) {
+    prefix[i + 1] = (prefix[i] ?? 0) + Math.max(1, options.getWidth(columns[i]!))
+  }
+  const total = prefix[n] ?? 0
+
+  const viewLeft = Math.max(0, options.scrollLeft)
+  const viewRight = viewLeft + Math.max(1, options.viewportWidth)
+
+  let start = 0
+  while (start < n && (prefix[start + 1] ?? 0) <= viewLeft) start += 1
+  start = Math.max(0, start - overscan)
+
+  let end = start
+  while (end < n && (prefix[end] ?? 0) < viewRight) end += 1
+  end = Math.min(n, Math.max(end + overscan, start + 1))
+
+  return {
+    columns: columns.slice(start, end) as RsTableColumn<T>[],
+    paddingLeft: prefix[start] ?? 0,
+    paddingRight: Math.max(0, total - (prefix[end] ?? total)),
+    startIndex: start,
+    endIndex: end,
   }
 }
 
@@ -531,9 +818,15 @@ export function resolveColumnStyle<T extends RsTableRowData = Record<string, unk
   column: RsTableColumn<T>,
   widths?: Record<string, number | string>,
 ): Record<string, string> | undefined {
+  const style: Record<string, string> = {}
   const width = widths?.[column.key] ?? column.width
-  if (width === undefined) return undefined
-  return { width: typeof width === 'number' ? `${width}px` : width }
+  if (width !== undefined) {
+    style.width = typeof width === 'number' ? `${width}px` : width
+  }
+  if (column.minWidth !== undefined) {
+    style.minWidth = typeof column.minWidth === 'number' ? `${column.minWidth}px` : column.minWidth
+  }
+  return Object.keys(style).length ? style : undefined
 }
 
 export function clampColumnWidth(width: number, min = 48, max = 640): number {
@@ -549,6 +842,7 @@ export function parseColumnWidth(width: number | string | undefined, fallback = 
 export function createInitialColumnWidths<T extends RsTableRowData>(
   columns: readonly RsTableColumn<T>[],
   overrides?: Record<string, number | string>,
+  options?: { forceAll?: boolean },
 ): Record<string, number> {
   const result: Record<string, number> = {}
   for (const column of columns) {
@@ -563,6 +857,11 @@ export function createInitialColumnWidths<T extends RsTableRowData>(
     }
     if (typeof column.width === 'number') {
       result[column.key] = column.width
+      continue
+    }
+    // resizable 模式下，确保所有列都有显式宽度，避免 table-layout:auto 重分配
+    if (options?.forceAll) {
+      result[column.key] = parseColumnWidth(column.width ?? column.minWidth)
     }
   }
   return result

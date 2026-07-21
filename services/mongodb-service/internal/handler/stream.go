@@ -29,18 +29,22 @@ func (d *Dispatcher) monitorStreamStart(ctx context.Context, req Request) Respon
 	if _, resp, ok := d.requireSession(req.ID, params.SessionID); !ok {
 		return resp
 	}
+	scope := scopeAttrs(params.SessionID, params.Database, params.Collection)
 	pipeline := make([]bson.M, 0, len(params.Pipeline))
 	for _, stage := range params.Pipeline {
 		doc, err := session.ParseDocument(stage)
 		if err != nil {
+			logOpError(MethodMonitorStreamStart, err, append(scope, "stages", len(params.Pipeline))...)
 			return errorResponse(req.ID, err.Error())
 		}
 		pipeline = append(pipeline, doc)
 	}
 	streamID, err := d.streams.Start(ctx, params.SessionID, params.Database, params.Collection, pipeline)
 	if err != nil {
+		logOpError(MethodMonitorStreamStart, err, append(scope, "stages", len(pipeline))...)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodMonitorStreamStart, append(scope, "stream", streamID, "stages", len(pipeline))...)
 	return okResponse(req.ID, map[string]any{"streamId": streamID})
 }
 
@@ -53,7 +57,9 @@ func (d *Dispatcher) monitorStreamStop(_ context.Context, req Request) Response 
 		return errorResponse(req.ID, "streamId required")
 	}
 	if err := d.streams.Stop(params.StreamID); err != nil {
+		logOpError(MethodMonitorStreamStop, err, "stream", params.StreamID)
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodMonitorStreamStop, "stream", params.StreamID)
 	return okResponse(req.ID, map[string]any{"stopped": true})
 }

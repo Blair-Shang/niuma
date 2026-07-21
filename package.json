@@ -24,6 +24,7 @@
     "cef:download:macos": "bash scripts/entry/cef-download.sh --platform macos",
     "build:web": "pnpm version:sync && pnpm --filter @niuma/web build",
     "test:ui": "pnpm --filter @niuma/ui test",
+    "test:web": "pnpm --filter @niuma/web test",
     "build": "pnpm build:web && pnpm build:platform",
     "build:platform": "pnpm build:services && pnpm build:shell",
     "build:shell": "powershell -ExecutionPolicy Bypass -File scripts/entry/build.ps1 -Target shell -Platform windows -Arch x64",

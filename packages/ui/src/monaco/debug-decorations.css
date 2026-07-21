@@ -1,0 +1,20 @@
+/**
+ * Monaco 调试装饰（glyph / 行装饰）。
+ * 选择器勿绑死 .cgmr / .cldr：Monaco 版本间 class 组合会变，类名本身即可命中。
+ */
+
+.monaco-editor .rs-monaco-debug-bp {
+  background: no-repeat center center !important;
+  background-size: 10px 10px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='5' fill='%23e51400'/%3E%3C/svg%3E") !important;
+}
+
+.monaco-editor .rs-monaco-debug-stack {
+  background: no-repeat left 1px center !important;
+  background-size: 9px 11px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='11' viewBox='0 0 9 11'%3E%3Cpath d='M0 0L9 5.5L0 11Z' fill='%23f5a623'/%3E%3C/svg%3E") !important;
+}
+
+.monaco-editor .rs-monaco-debug-current-line {
+  background: color-mix(in srgb, #f59e0b 16%, transparent) !important;
+}

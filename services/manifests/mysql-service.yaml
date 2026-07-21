@@ -1,0 +1,51 @@
+id: com.niuma.mysql
+name: MySQL Service
+version: 0.1.0
+bridge:
+  namespace: mysql
+  connection_kind: mysql
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+    - tree.databases
+    - tree.tables
+    - tree.routines
+    - meta.columns
+    - meta.indexes
+    - meta.ddl
+    - meta.routineSource
+    - meta.processlist
+    - meta.kill
+    - meta.instanceOverview
+    - meta.locks
+    - meta.primaryKey
+    - meta.foreignKeys
+    - catalog.schemas
+    - catalog.tables
+    - catalog.columns
+    - ddl.designPreview
+    - ddl.designApply
+    - ddl.createTable
+    - io.exportCsv
+    - io.importCsv
+    - io.dumpSql
+    - io.execSqlFile
+    - io.cancel
+runtime:
+  executable: bin/niuma-mysql-service.exe
+  executable_windows: bin/niuma-mysql-service.exe
+  executable_unix: bin/niuma-mysql-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.mysql'
+  address_windows: '\\.\pipe\niuma.mysql'
+  address_unix: '/tmp/niuma.mysql.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

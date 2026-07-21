@@ -1,9 +1,9 @@
 import { inject, onBeforeUnmount, ref } from 'vue'
 import { mongodbApi, subscribeBridgeEventByPrefix } from '@/api'
-import type { MongoMonitorEvent } from '@/api/types/mongodb'
+import type { MongoMonitorEvent, MongoMonitorStateEvent } from '@/api/types/mongodb'
 import { SESSION_RELEASE_CLEANUP_KEY } from '@/modules/connection/session-release'
 
-export type MongoChangeStreamState = 'idle' | 'starting' | 'ready' | 'closed'
+export type MongoChangeStreamState = 'idle' | 'starting' | 'ready' | 'closed' | 'lost'
 
 interface StartParams {
   sessionId: string
@@ -15,6 +15,7 @@ interface StartParams {
 export function useMongoChangeStream() {
   const streamId = ref<string | null>(null)
   const state = ref<MongoChangeStreamState>('idle')
+  const message = ref('')
   let offEvent: (() => void) | null = null
 
   function ensureSubscribed(onEvent: (event: MongoMonitorEvent) => void): void {
@@ -22,14 +23,22 @@ export function useMongoChangeStream() {
       return
     }
     offEvent = subscribeBridgeEventByPrefix('mongodb.monitor.', (detail) => {
-      if (typeof detail !== 'object' || detail === null) {
+      if (typeof detail !== 'object' || detail === null || !('type' in detail)) {
         return
       }
-      const event = detail as MongoMonitorEvent
-      if (event.type !== 'mongodb.monitor.event' || !streamId.value || event.streamId !== streamId.value) {
+      const event = detail as MongoMonitorEvent | MongoMonitorStateEvent
+      if (!streamId.value || event.streamId !== streamId.value) {
         return
       }
-      onEvent(event)
+      if (event.type === 'mongodb.monitor.event') {
+        onEvent(event)
+        return
+      }
+      state.value = event.state
+      message.value = event.message
+      if (event.state === 'closed' || event.state === 'lost') {
+        streamId.value = null
+      }
     })
   }
 
@@ -39,9 +48,16 @@ export function useMongoChangeStream() {
     }
     ensureSubscribed(onEvent)
     state.value = 'starting'
-    const result = await mongodbApi.monitorStreamStart(params)
-    streamId.value = result.streamId
-    state.value = 'ready'
+    message.value = ''
+    try {
+      const result = await mongodbApi.monitorStreamStart(params)
+      streamId.value = result.streamId
+      state.value = 'ready'
+    } catch (e) {
+      state.value = 'idle'
+      streamId.value = null
+      throw e
+    }
   }
 
   async function stop(): Promise<void> {
@@ -67,5 +83,5 @@ export function useMongoChangeStream() {
     void stop()
   })
 
-  return { streamId, state, start, stop }
+  return { streamId, state, message, start, stop }
 }

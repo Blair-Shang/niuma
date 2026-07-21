@@ -1,6 +1,6 @@
 # NiuMa 本地数据库设计规范
 
-> 版本：v1.0 · 更新：2026-07-03  
+> 版本：v1.1 · 更新：2026-07-17  
 > 适用：**离线桌面客户端** · 数据存本机，无云端 SaaS 依赖  
 > 参考实现：**SQLite 3**（唯一必选方言）  
 > 可选扩展：PostgreSQL / MySQL（仅当用户连接「本地 Profile 同步库」或企业自建同步服务时）
@@ -16,7 +16,7 @@
 | 部署 | PG/MySQL 集群 | **单机 SQLite 文件** |
 | 租户 | 必备 `org_id` | **无多租户**；可选 `workspace_id` 做本地分组 |
 | 删除 | 逻辑删 `is_deleted` | **仅物理删除** `DELETE` |
-| 凭据 | 库内 hash | **不入库**；`secret_ref` 指向 OS Keychain |
+| 凭据 | 库内 hash | **明文不入库**；`nm_credential_ref.cipher_text` 存 AES-256-GCM 密文，OS Keychain **仅存主密钥** |
 | ID 服务 | Redis / 分布式 Snowflake | **进程内 Snowflake** 或本地号段 |
 | 向量 / 大文件 | pgvector / 对象存储 | 大文件走文件系统；向量后期独立文件或扩展表 |
 
@@ -55,7 +55,7 @@
 
 - 单用户单库文件；WAL 模式开启：`PRAGMA journal_mode=WAL`
 - 迁移版本表：`nm_schema_migration`（基础设施表，不计业务清单）
-- 备份：用户可导出 `.db` 或平台提供「导出配置」JSON（不含 Keychain 明文）
+- 备份：用户可导出 `.db` 或平台提供「导出配置」JSON（**不含**凭据明文；密文导出亦无主密钥则不可用）
 
 ---
 
@@ -158,7 +158,7 @@ PRIMARY KEY (parent_id, child_id)
 | 表名 | 说明 | 主键 |
 |------|------|------|
 | `nm_connection_profile` | SSH / DB / FTP 连接配置（无密码明文） | `profile_id` |
-| `nm_credential_ref` | 凭据引用（Keychain 键名 + 类型） | `credential_id` |
+| `nm_credential_ref` | 凭据（标签/类型 + Vault 密文） | `credential_id` |
 | `nm_profile_credential` | Profile 与凭据多对多 | `(profile_id, credential_id)` |
 | `nm_recent_access` | 最近打开的连接/文件 | `recent_id` |
 | `nm_sql_snippet` | 保存的 SQL 片段 | `snippet_id` |
@@ -178,15 +178,15 @@ PRIMARY KEY (parent_id, child_id)
 | `nm_ai_provider` | LLM Provider（服务商/接入点）配置 | `provider_id` | 000004 |
 | `nm_ai_model` | Provider 下的模型条目 | `model_id` | 000004 |
 | `nm_mcp_server` | MCP Server 注册 | `server_id` | 000004 |
-| `nm_mcp_tool` | MCP 工具发现缓存 + 启用开关 | `tool_id` | 000004 |
+| `nm_mcp_tool` | MCP 工具发现缓存 + 启用开关 + `risk_level` | `tool_id` | 000004 / 000006 |
 | `nm_ai_skill` | Skill 提示词模板 + 参数 schema | `skill_id` | 000004 |
-| `nm_ai_conversation` | AI 对话 | `conversation_id` | 规划中 |
-| `nm_ai_message` | 对话消息 | `message_id` | 规划中 |
-| `nm_ai_tool_invocation` | Tool 调用流水 | `invocation_id` | 规划中 |
+| `nm_ai_conversation` | AI 对话 | `conversation_id` | 000005 |
+| `nm_ai_message` | 对话消息 | `message_id` | 000005 |
+| `nm_ai_tool_invocation` | Tool 调用流水 | `invocation_id` | 000005 |
 
-> **架构约束**（见 `.cursor/rules/external-tools-mcp-skills.mdc`）：MCP / Tool / Skill 的**执行**一律在外部进程（外部 MCP Server），本域仅存**配置与发现缓存**，不把工具实现编译进 Platform Core。`nm_mcp_tool` 是从 MCP Server 拉取的工具清单缓存，可随时按 `server_id` 重建。
+> **架构约束**（见 `.cursor/rules/external-tools-mcp-skills.mdc`）：MCP / Tool / Skill 的**执行**一律在外部进程（外部 MCP Server），本域仅存**配置与发现缓存**，不把工具实现编译进 Platform Core。`nm_mcp_tool` 是从 MCP Server 拉取的工具清单缓存，可随时按 `server_id` 重建。完整 AI 助手设计与分阶段实现见 **[24 — AI 助手](./24-ai-assistant.md)**。
 >
-> **密钥不入库**：Provider 的 API Key、MCP Server 的 Token 等只以 `credential_id` 逻辑关联 `nm_credential_ref`（密文/Keychain），业务表不存明文。
+> **密钥不落明文**：Provider 的 API Key、MCP Server 的 Token 等只以 `credential_id` 逻辑关联 `nm_credential_ref`；密文由 **VaultStore**（AES-256-GCM）写入 `cipher_text`，OS Keychain 仅保留主密钥。业务表不存明文或密文。
 
 ### 5.5 API 测试
 
@@ -227,7 +227,7 @@ CREATE UNIQUE INDEX uk_nm_workspace_name ON nm_workspace (workspace_name);
 ### 6.2 nm_connection_profile
 
 ```sql
--- 连接配置：SSH / database / ftp；密码走 Keychain
+-- 连接配置：SSH / database / ftp；密码经 Vault 加密存 nm_credential_ref
 CREATE TABLE nm_connection_profile (
     profile_id        TEXT NOT NULL PRIMARY KEY,
     workspace_id      TEXT NOT NULL,           -- 逻辑关联 nm_workspace.workspace_id
@@ -250,13 +250,13 @@ CREATE UNIQUE INDEX uk_nm_conn_profile_name ON nm_connection_profile (workspace_
 ### 6.3 nm_credential_ref
 
 ```sql
--- 凭据引用：明文只在 OS Keychain
+-- 凭据：明文永不落库；cipher_text 为 VaultStore AES-256-GCM 密文
+-- OS Keychain 仅存主密钥 NiuMa/master-vault（见 platform/internal/store/vault.go）
 CREATE TABLE nm_credential_ref (
     credential_id     TEXT NOT NULL PRIMARY KEY,
     credential_label  TEXT NOT NULL,
     credential_kind   TEXT NOT NULL,           -- password | private_key | api_key | db_password
-    keychain_service  TEXT NOT NULL,           -- 如 NiuMa/credential/{credential_id}
-    keychain_account  TEXT,
+    cipher_text       TEXT NOT NULL DEFAULT '', -- AES-256-GCM 密文
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL
 );
@@ -333,6 +333,7 @@ CREATE TABLE nm_mcp_tool (
     tool_description    TEXT,
     input_schema        TEXT NOT NULL DEFAULT '{}',     -- JSON Schema 缓存
     enabled             INTEGER NOT NULL DEFAULT 1,     -- 0/1
+    risk_level          TEXT NOT NULL DEFAULT 'read',   -- read | write | dangerous（000006）
     discovered_at       TEXT NOT NULL,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
@@ -417,11 +418,11 @@ CREATE INDEX idx_nm_audit_log_kind ON nm_audit_log (action_kind, created_at DESC
 |------|------------------|
 | `nm_workspace` | 删其下 `nm_connection_profile`、`nm_ai_conversation`（或禁止删，提示先迁移） |
 | `nm_connection_profile` | 删 `nm_profile_credential`、`nm_recent_access` 引用 |
-| `nm_ai_provider` | 删其下 `nm_ai_model`；清 `credential_id` 指向的 Keychain 条目 |
-| `nm_mcp_server` | 删其下 `nm_mcp_tool` 缓存；清 `credential_id` 指向的 Keychain 条目 |
+| `nm_ai_provider` | 删其下 `nm_ai_model`；清 `credential_id` 指向的凭据（密文行） |
+| `nm_mcp_server` | 删其下 `nm_mcp_tool` 缓存；清 `credential_id` 指向的凭据（密文行） |
 | `nm_ai_conversation` | 删 `nm_ai_message`、`nm_ai_tool_invocation` |
 | `nm_api_collection` | 删 `nm_api_folder`、`nm_api_request` |
-| `nm_credential_ref` | 删 Keychain 条目 + `nm_profile_credential`；**无软删恢复** |
+| `nm_credential_ref` | 删 `nm_profile_credential` 关联；密文随行删除（主密钥仍留在 Keychain）；**无软删恢复** |
 
 ```sql
 -- ✅ 物理删除
@@ -500,7 +501,7 @@ CREATE TABLE connection (
 1. 主键是否为 `{entity}_id` TEXT，且无 `AUTOINCREMENT`？
 2. 是否 **无** `is_deleted` / `deleted_at`？
 3. 删除路径是否为物理 `DELETE` + 应用层级联？
-4. 密码/密钥是否仅通过 `keychain_service` 引用，不进库？
+4. 密码/密钥是否经 Vault 加密（`cipher_text`），业务表仅 `credential_id`、无明文？
 5. 业务状态是否为 TEXT 字符串枚举（如 `record_status`）？
 6. 表名/索引是否符合 `nm_` / `uk_` / `idx_` 且 ≤ 30 字符？
 7. 是否无 `REFERENCES` 物理外键？
@@ -513,3 +514,4 @@ CREATE TABLE connection (
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v1.0 | 2026-07-03 | 自云端规范适配：离线 SQLite、物理删除、nm_ 前缀、NiuMa 业务域 |
+| v1.1 | 2026-07-17 | 凭据对齐实现：VaultStore 密文存 `cipher_text`，OS Keychain 仅主密钥 |

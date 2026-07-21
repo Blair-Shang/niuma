@@ -11,7 +11,7 @@ import {
 
 export type RsFormLabelPosition = 'top' | 'left'
 export type RsFormLabelAlign = 'start' | 'end'
-export type RsFormSize = 'sm' | 'md' | 'lg'
+export type RsFormSize = 'ssm' | 'sm' | 'md' | 'lg'
 export type RsFormGap = 'sm' | 'md' | 'lg'
 export type RsFormMaxWidth = 'sm' | 'md' | 'lg' | 'full' | 'none'
 

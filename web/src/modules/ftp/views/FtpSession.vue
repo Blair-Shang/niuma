@@ -29,6 +29,7 @@ import {
   writeFtpDragData,
   type FtpDragEntry,
 } from '@/modules/ftp/utils/ftpDrag'
+import { isFtpConnectionError } from '@/modules/ftp/utils/ftpConnectionError'
 import {
   canGoUpLocalPath,
   joinLocalPath,
@@ -460,6 +461,27 @@ async function openSession(): Promise<void> {
   }
 }
 
+async function silentReconnect(): Promise<void> {
+  await reconnectSession()
+  if (!sessionId.value) {
+    throw new Error(t('modules.ftp.session.connectError'))
+  }
+}
+
+/** 远程操作失败且像连接断开时，自动 forceReconnect 后重试一次。 */
+async function withRemoteReconnect<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e) {
+    if (!isFtpConnectionError(e)) {
+      throw e
+    }
+    await silentReconnect()
+    toast.info(t('modules.ftp.session.reconnected'))
+    return fn()
+  }
+}
+
 async function reconnect(): Promise<void> {
   connecting.value = true
   error.value = null
@@ -480,14 +502,19 @@ async function refreshRemote(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const result = await ftpApi.dirList({
-      sessionId: sessionId.value,
+    const result = await withRemoteReconnect(() => ftpApi.dirList({
+      sessionId: sessionId.value!,
       path: remotePath.value,
-    })
+    }))
     remotePath.value = result.path || remotePath.value
     entries.value = result.entries ?? []
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('modules.ftp.session.listError')
+    const message = e instanceof Error ? e.message : ''
+    if (message.includes('session busy')) {
+      toast.warning(t('modules.ftp.session.listBusy'))
+      return
+    }
+    error.value = message || t('modules.ftp.session.listError')
   } finally {
     loading.value = false
   }
@@ -581,12 +608,12 @@ async function deleteRemoteEntries(items: FtpPaneEntry[]): Promise<void> {
   try {
     for (const entry of items) {
       try {
-        await ftpApi.entryDelete({
-          sessionId: sessionId.value,
+        await withRemoteReconnect(() => ftpApi.entryDelete({
+          sessionId: sessionId.value!,
           path: joinRemotePath(remotePath.value, entry.name),
           kind: entry.kind,
           recursive: entry.kind === 'dir',
-        })
+        }))
         deleted++
       } catch (e) {
         const errorMsg = e instanceof Error ? e.message : t('modules.ftp.session.deleteError')
@@ -631,11 +658,11 @@ async function renameRemoteEntry(entry: FtpPaneEntry): Promise<void> {
   }
   loading.value = true
   try {
-    await ftpApi.entryRename({
-      sessionId: sessionId.value,
+    await withRemoteReconnect(() => ftpApi.entryRename({
+      sessionId: sessionId.value!,
       fromPath: joinRemotePath(remotePath.value, entry.name),
       toPath: joinRemotePath(remotePath.value, newName.trim()),
-    })
+    }))
     toast.success(t('modules.ftp.session.renamed'))
     await refreshRemote()
   } catch (e) {
@@ -752,10 +779,10 @@ async function mkdirRemote(): Promise<void> {
   }
   loading.value = true
   try {
-    await ftpApi.dirMake({
-      sessionId: sessionId.value,
+    await withRemoteReconnect(() => ftpApi.dirMake({
+      sessionId: sessionId.value!,
       path: joinRemotePath(remotePath.value, name.trim()),
-    })
+    }))
     await refreshRemote()
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t('modules.ftp.session.listError'))
@@ -911,11 +938,11 @@ async function moveRemoteEntries(sources: FtpPaneEntry[], target: FtpMoveTarget)
   loading.value = true
   try {
     for (const entry of dragEntries) {
-      await ftpApi.entryRename({
-        sessionId: sessionId.value,
+      await withRemoteReconnect(() => ftpApi.entryRename({
+        sessionId: sessionId.value!,
         fromPath: entry.path,
         toPath: joinRemotePath(destinationDir, entry.name),
-      })
+      }))
     }
     toast.success(t('modules.ftp.session.moved'))
     remotePaneRef.value?.clearSelection()
@@ -1006,6 +1033,7 @@ watch(
     if (val) void reconnect()
   },
 )
+
 </script>
 
 <template>
@@ -1123,14 +1151,19 @@ watch(
       v-model:open="promptOpen"
       :title="promptTitle"
       width="sm"
+      layout="confirm"
+      :resizable="false"
+      :fullscreenable="false"
       :show-close="false"
     >
+      <template #body>
       <RsInput
         ref="promptInputRef"
         v-model="promptValue"
         :placeholder="promptPlaceholder"
         @press-enter="onPromptConfirm"
       />
+      </template>
       <template #footer>
         <RsButton variant="default" @click="onPromptCancel">{{ t('common.cancel') }}</RsButton>
         <RsButton variant="primary" :disabled="!promptValue.trim()" @click="onPromptConfirm">
@@ -1157,7 +1190,6 @@ watch(
   min-height: 0;
   background: var(--nm-editor-bg, var(--rs-surface));
 }
-
 
 .nm-ftp-session__error {
   margin: 0;

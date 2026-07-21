@@ -10,11 +10,13 @@ import { useConnectionProfiles } from '@/modules/ops/composables/useConnectionPr
 import type { ConnItem } from '@/modules/ops/types'
 import MongoConnectionFields from '@/modules/mongodb/components/MongoConnectionFields.vue'
 import MongoSession from '@/modules/mongodb/views/MongoSession.vue'
+import type { MongoSessionTab } from '@/modules/mongodb/pane-registry'
 
 const props = defineProps<{
   profileId?: string
   database?: string
   collection?: string
+  initialTab?: MongoSessionTab
   tabId?: string
 }>()
 
@@ -81,6 +83,7 @@ onMounted(() => {
     :profile-id="props.profileId"
     :database="props.database"
     :collection="props.collection"
+    :initial-tab="props.initialTab"
     :tab-id="props.tabId"
     class="nm-mongo-tab"
   />

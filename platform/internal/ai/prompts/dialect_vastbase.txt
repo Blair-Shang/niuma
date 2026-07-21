@@ -1,0 +1,14 @@
+[Dialect · Vastbase / openGauss]
+Fallback when the client did not send capabilities/dialectRules.
+Prefer session CapabilitySet when present (DBeaver/Navicat-style); this file only describes the default Vastbase profile.
+
+Wire protocol resembles PostgreSQL; default procedural style for CREATE PROCEDURE is PL/SQL (capability proc.plsql_bare):
+1) CREATE PROCEDURE / REPLACE PROCEDURE (default):
+   - Use: AS|IS … [DECLARE …] BEGIN … END;
+   - Do NOT use: LANGUAGE plpgsql / AS $$ … $$ unless capability proc.plpgsql_dollar is also enabled
+   - Prefer parameter form: name IN|OUT|INOUT type
+2) CREATE FUNCTION (default func.plpgsql_dollar): LANGUAGE plpgsql AS $$ … $$ is usually OK; bare AS BEGIN…END also OK.
+3) Do not suggest PERFORM inside CREATE PROCEDURE PL/SQL bodies; prefer plain statements or CALL.
+4) Prefer RAISE INFO / dbe_output over PostgreSQL-only RAISE NOTICE patterns when unsure.
+5) If editor.suppress_pg_diagnostics is on, PG-parser red underlines on PL/SQL may be false positives; trust SQLSTATE.
+6) When fixing "syntax error at or near LANGUAGE" or "subprogram body is not ended correctly", rewrite to bare AS/IS PL/SQL unless proc.plpgsql_dollar is listed.

@@ -33,8 +33,20 @@ import type {
   MongoDocumentInsertResult,
   MongoDocumentUpdateParams,
   MongoDocumentUpdateResult,
+  MongoIndexCreateParams,
+  MongoIndexCreateResult,
+  MongoIndexDropParams,
+  MongoIndexDropResult,
+  MongoIndexListParams,
+  MongoIndexListResult,
   MongoMonitorCurrentOpParams,
   MongoMonitorCurrentOpResult,
+  MongoMonitorSlowLogParams,
+  MongoMonitorSlowLogResult,
+  MongoProfilerSetParams,
+  MongoProfilerSetResult,
+  MongoProfilerStatusParams,
+  MongoProfilerStatusResult,
   MongoMonitorStreamStartParams,
   MongoMonitorStreamStartResult,
   MongoMonitorStreamStopParams,
@@ -42,6 +54,16 @@ import type {
   MongoMonitorStatsResult,
   MongoSchemaSampleParams,
   MongoSchemaSampleResult,
+  MongoSchemaValidator,
+  MongoSchemaValidatorParams,
+  MongoSchemaValidatorSetParams,
+  MongoSchemaValidatorSetResult,
+  MongoPipelineSuggestParams,
+  MongoPipelineSuggestResult,
+  MongoQuerySuggestParams,
+  MongoQuerySuggestResult,
+  MongoQueryExecParams,
+  MongoQueryExecResult,
   MongoSessionCloseParams,
   MongoSessionOpenParams,
   MongoSessionOpenResult,
@@ -95,6 +117,18 @@ export const mongodbApi = {
     return bridgeInvoke<MongoDocumentDeleteResult>('mongodb.document.delete', params)
   },
 
+  indexList(params: MongoIndexListParams): Promise<MongoIndexListResult> {
+    return bridgeInvoke<MongoIndexListResult>('mongodb.index.list', params)
+  },
+
+  indexCreate(params: MongoIndexCreateParams): Promise<MongoIndexCreateResult> {
+    return bridgeInvoke<MongoIndexCreateResult>('mongodb.index.create', params)
+  },
+
+  indexDrop(params: MongoIndexDropParams): Promise<MongoIndexDropResult> {
+    return bridgeInvoke<MongoIndexDropResult>('mongodb.index.drop', params)
+  },
+
   aggregateRun(params: MongoAggregateRunParams): Promise<MongoAggregateRunResult> {
     return bridgeInvoke<MongoAggregateRunResult>('mongodb.aggregate.run', params)
   },
@@ -111,6 +145,18 @@ export const mongodbApi = {
     return bridgeInvoke<MongoMonitorCurrentOpResult>('mongodb.monitor.currentOp', params)
   },
 
+  monitorSlowLog(params: MongoMonitorSlowLogParams): Promise<MongoMonitorSlowLogResult> {
+    return bridgeInvoke<MongoMonitorSlowLogResult>('mongodb.monitor.slowLog', params)
+  },
+
+  monitorProfilerStatus(params: MongoProfilerStatusParams): Promise<MongoProfilerStatusResult> {
+    return bridgeInvoke<MongoProfilerStatusResult>('mongodb.monitor.profiler.status', params)
+  },
+
+  monitorProfilerSet(params: MongoProfilerSetParams): Promise<MongoProfilerSetResult> {
+    return bridgeInvoke<MongoProfilerSetResult>('mongodb.monitor.profiler.set', params)
+  },
+
   monitorStreamStart(params: MongoMonitorStreamStartParams): Promise<MongoMonitorStreamStartResult> {
     return bridgeInvoke<MongoMonitorStreamStartResult>('mongodb.monitor.stream.start', params)
   },
@@ -121,6 +167,26 @@ export const mongodbApi = {
 
   schemaSample(params: MongoSchemaSampleParams): Promise<MongoSchemaSampleResult> {
     return bridgeInvoke<MongoSchemaSampleResult>('mongodb.schema.sample', params)
+  },
+
+  schemaValidatorGet(params: MongoSchemaValidatorParams): Promise<MongoSchemaValidator> {
+    return bridgeInvoke<MongoSchemaValidator>('mongodb.schema.validator.get', params)
+  },
+
+  schemaValidatorSet(params: MongoSchemaValidatorSetParams): Promise<MongoSchemaValidatorSetResult> {
+    return bridgeInvoke<MongoSchemaValidatorSetResult>('mongodb.schema.validator.set', params)
+  },
+
+  pipelineSuggest(params: MongoPipelineSuggestParams): Promise<MongoPipelineSuggestResult> {
+    return bridgeInvoke<MongoPipelineSuggestResult>('mongodb.pipeline.suggest', params)
+  },
+
+  querySuggest(params: MongoQuerySuggestParams): Promise<MongoQuerySuggestResult> {
+    return bridgeInvoke<MongoQuerySuggestResult>('mongodb.query.suggest', params)
+  },
+
+  queryExec(params: MongoQueryExecParams): Promise<MongoQueryExecResult> {
+    return bridgeInvoke<MongoQueryExecResult>('mongodb.query.exec', params)
   },
 
   commandExec(params: MongoCommandExecParams): Promise<MongoCommandExecResult> {

@@ -12,7 +12,7 @@ alwaysApply: false
 
 - **离线桌面**：默认 SQLite 单文件，路径见文档 §1.4
 - **物理删除**：禁止软删除字段与 `UPDATE ... is_deleted` 模式
-- **凭据不入库**：密码/密钥用 `keychain_service` + OS Keychain
+- **明文凭据不入库**：密码/API Key 经 VaultStore 以 AES-256-GCM 写入 `nm_credential_ref.cipher_text`；OS Keychain **仅存主密钥** `NiuMa/master-vault`
 
 ## 迁移目录
 
@@ -81,7 +81,7 @@ idx_{表名核心}_{列名}
 2. `down` 与 `up` 对称
 3. `nm_schema_migration` 仅迁移工具使用
 4. 无多租户：不用 `org_id`；可选 `workspace_id` 本地分组
-5. 敏感字段：仅 `secret_ref` / `keychain_service`，禁止明文密码列
+5. 敏感字段：业务表仅 `credential_id`；密文在 `nm_credential_ref.cipher_text`；禁止明文密码列
 
 ## 正例 / 反例
 
@@ -114,5 +114,5 @@ CREATE TABLE connection (
 3. 删除是否为 `DELETE` + 应用层级联？
 4. 表名 `nm_` 前缀、索引 `uk_`/`idx_`？
 5. 无 `REFERENCES`？
-6. 凭据是否走 Keychain 引用？
+6. 凭据是否经 Vault 加密（`cipher_text`），无明文列？
 7. SQLite 迁移在 `scripts/sql/sqlite/` 且含 `down`？

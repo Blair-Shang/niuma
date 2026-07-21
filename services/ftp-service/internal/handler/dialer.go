@@ -12,5 +12,13 @@ import (
 type ProxyOptions = netproxy.Options
 
 func dialTCP(ctx context.Context, proxyOpts *ProxyOptions, network, address string, timeout time.Duration) (net.Conn, error) {
-	return netproxy.DialContext(ctx, proxyOpts, network, address, timeout)
+	conn, err := netproxy.DialContext(ctx, proxyOpts, network, address, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		_ = tcpConn.SetKeepAlive(true)
+		_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
+	return conn, nil
 }

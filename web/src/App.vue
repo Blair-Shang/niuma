@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsConfigProvider, RsToaster } from '@niuma/ui'
+import { RsConfigProvider, RsToaster, RsTooltipProvider } from '@niuma/ui'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import { watch } from 'vue'
@@ -21,8 +21,10 @@ watch(
 
 <template>
   <RsConfigProvider :theme="appStore.theme" :locale="appStore.locale" class="nm-root">
-    <RsToaster />
-    <router-view class="nm-root__view" />
+    <RsTooltipProvider>
+      <RsToaster />
+      <router-view class="nm-root__view" />
+    </RsTooltipProvider>
   </RsConfigProvider>
 </template>
 
@@ -40,5 +42,15 @@ watch(
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/*
+ * 桌面 Shell 对话框安全区（RsDialog / RsConfirmDialog 读取）。
+ * Teleport 到 body 时仍生效，避免 window 布局全屏/缩放覆盖顶栏与状态栏。
+ */
+:root {
+  --rs-dialog-inset-top: var(--nm-topbar-h);
+  --rs-dialog-inset-bottom: var(--nm-statusbar-h);
+  --rs-dialog-inset-x: 1rem;
 }
 </style>

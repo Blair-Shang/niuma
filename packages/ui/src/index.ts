@@ -2,7 +2,9 @@ export { default as RsConfigProvider } from './components/RsConfigProvider.vue'
 export { default as RsBadge } from './components/RsBadge.vue'
 export { default as RsContainer } from './components/RsContainer.vue'
 export { default as RsBreadcrumb } from './components/RsBreadcrumb.vue'
+export { default as RsToolbar } from './components/RsToolbar.vue'
 export { default as RsButton } from './components/RsButton.vue'
+export { default as RsCheckbox } from './components/RsCheckbox.vue'
 export { default as RsDropdown } from './components/RsDropdown.vue'
 export { default as RsIcon } from './components/RsIcon.vue'
 export { default as RsInput } from './components/RsInput.vue'
@@ -38,6 +40,7 @@ export { default as RsSplitPane } from './components/RsSplitPane.vue'
 export { default as RsStatCard } from './components/RsStatCard.vue'
 export { default as RsSteps } from './components/RsSteps.vue'
 export { default as RsTable } from './components/RsTable.vue'
+export { default as RsTableCellEditor } from './components/table/RsTableCellEditor.vue'
 export { default as RsTableHeaderRow } from './components/RsTableHeaderRow.vue'
 export { default as RsTableColgroup } from './components/RsTableColgroup.vue'
 export { default as RsPagination } from './components/RsPagination.vue'
@@ -45,6 +48,29 @@ export { default as RsTree } from './components/RsTree.vue'
 export { default as RsUpload } from './components/RsUpload.vue'
 export { default as RsVirtualList } from './components/RsVirtualList.vue'
 export { default as RsCodeEditor } from './components/RsCodeEditor.vue'
+export { default as RsMonacoEditor } from './components/RsMonacoEditor.vue'
+export type {
+  MonacoCompletionContext,
+  MonacoCompletionPrefixResolver,
+  MonacoCompletionRequest,
+  MonacoCompletionSnippet,
+} from './components/RsMonacoEditor.vue'
+export type {
+  MonacoBuiltinLanguage,
+  MonacoLanguage,
+  MonacoSqlLanguageId,
+} from './monaco'
+export {
+  applyMonacoDebugDecorations,
+  buildMonacoDebugDecorations,
+  ensureMongodbShellLanguage,
+  MONACO_MONGODB_SHELL_LANGUAGE,
+  MONACO_PGSQL_LANGUAGE,
+  patchMonacoCreateWebWorkerCompat,
+  RS_MONACO_DEBUG,
+  setupMonacoWorkers,
+} from './monaco'
+export type { MonacoDebugDecorationState } from './monaco'
 export { default as RsCodeBlock } from './components/RsCodeBlock.vue'
 export { default as RsProseEditor } from './components/RsProseEditor.vue'
 export { default as RsTerminal } from './components/RsTerminal.vue'
@@ -59,6 +85,7 @@ export {
 export { resolveCodeMirrorLanguage, isCodeMirrorLightTheme, prewarmCodeMirrorEditor } from './components/code-mirror-lang'
 export {
   buildAnsiColorDemo,
+  containsEscapeSequence,
   getTerminalThemePalette,
   mergeTerminalTheme,
   readTerminalThemeFromCss,
@@ -80,13 +107,14 @@ export type {
   RsContainerResponsive,
 } from './components/RsContainer.vue'
 export type { RsBreadcrumbItem } from './components/RsBreadcrumb.vue'
+export type { RsToolbarBorder, RsToolbarSize } from './components/RsToolbar.vue'
 export type { RsContextMenuItem } from './components/context-menu-utils'
 export type { RsDropdownItem, RsDropdownItemGroup, RsDropdownItems } from './components/dropdown-utils'
 export type { RsMenuItem, RsMenuItemGroup, RsMenuItems } from './components/menu-utils'
 export type { RsScrollbarOrientation, RsScrollbarType } from './components/scrollbar-utils'
 export type { RsSelectOption, RsSelectOptionGroup, RsSelectOptions } from './components/select-utils'
 export type { RsFeedbackTone, RsToastPosition, RsToastType } from './components/overlay-utils'
-export { RS_TOAST_DEFAULT_POSITION, rsToastPositions, rsFeedbackIconClass } from './components/overlay-utils'
+export { RS_TOAST_DEFAULT_GAP, RS_TOAST_DEFAULT_POSITION, rsToastPositions, rsFeedbackIconClass } from './components/overlay-utils'
 export type {
   RsFormContext,
   RsFormFieldExpose,
@@ -123,8 +151,47 @@ export {
   resolveSplitConstraints,
   splitSizesEqual,
 } from './components/split-pane-utils'
+export type {
+  RsTableCellCommitTrigger,
+  RsTableCellEditFocusMode,
+  RsTableCellEditTrigger,
+  RsTableCellEditorInputType,
+  RsTableCellNavigateDirection,
+  RsTableEditableCellRef,
+} from './components/table/table-edit-utils'
+export {
+  RS_TABLE_NULL_DRAFT,
+  isNullDraft,
+  nullToEditText,
+  parseClipboardGrid,
+  navigateEditableCell,
+  listEditableCells,
+  listBatchColumnTargets,
+  validateCellValueAsync,
+} from './components/table/table-edit-utils'
+export type { RsTableStagedCell, RsTableUndoEntry, RsTableFocusCell } from './composables/useTableEdit'
 export type { RsTableRowDragTrigger, RsTableRowDropMode } from './components/table-drag'
-export type { RsTableCellRenderResult, RsTableColumn, RsTableColumnAlign, RsTableColumnFixed, RsTableFieldAccessor, RsTableGroupBy, RsTableRowConvention, RsTableRowData, RsTableRowDropPosition, RsTableRowEntry, RsTableRowKey, RsTableSelectAllState, RsTableSelectionType, RsTableSize, RsTableSortOrder, RsTableSortState } from './components/table-utils'
+export type {
+  RsTableCellRenderResult,
+  RsTableColumn,
+  RsTableColumnAlign,
+  RsTableColumnEditorOptions,
+  RsTableColumnEditorOptionsResolved,
+  RsTableColumnFixed,
+  RsTableCellValueType,
+  RsTableFieldAccessor,
+  RsTableGroupBy,
+  RsTableRowConvention,
+  RsTableRowData,
+  RsTableRowDropPosition,
+  RsTableRowEntry,
+  RsTableRowKey,
+  RsTableSelectAllState,
+  RsTableSelectionType,
+  RsTableSize,
+  RsTableSortOrder,
+  RsTableSortState,
+} from './components/table-utils'
 export {
   buildTableEntries,
   clampColumnWidth,
@@ -152,6 +219,7 @@ export {
   resolveTableSize,
   resolveTableVirtualEnabled,
   selectRowKeys,
+  selectRowKeysByClick,
   sliceVirtualTableEntries,
   sortTableRows,
   sortTableRowsMulti,
@@ -210,6 +278,10 @@ export { resolveItemSize, resolveVirtualListHeight } from './components/virtual-
 export type {
   RsCodeEditorDiagnostic,
   RsCodeEditorLanguage,
+  RsCodeEditorSqlColumn,
+  RsCodeEditorSqlConfig,
+  RsCodeEditorSqlDialect,
+  RsCodeEditorSqlNamespace,
   RsCodeEditorTheme,
   RsResolvedCodeEditorTheme,
 } from './components/code-editor-utils'
@@ -309,8 +381,11 @@ export {
   lucideIconCount,
   isRsIconName,
 } from './icons/registry'
-export type { RsThemeMode, RsThemeTokens, RsComponentSize } from './theme/types'
+export type { RsThemeMode, RsThemeTokens, RsComponentSize, RsRadius } from './theme/types'
+export { RS_COMPONENT_SIZES, RS_COMPONENT_SIZE_ICON_PX, RS_RADII, RS_RADIUS_CSS } from './theme/types'
 export type { RsLocale } from './locale/types'
-export { useRsConfig, createRsConfigState } from './composables/useRsConfig'
+export { useRsConfig, useRsConfigOptional, createRsConfigState } from './composables/useRsConfig'
+export { useResolvedRsComponentSize, resolveRsComponentSize } from './components/resolve-size'
+export { useResolvedRsRadius, rsRadiusCss } from './components/resolve-radius'
 export { themePresets } from './theme/presets'
 export { applyTheme } from './theme/apply'

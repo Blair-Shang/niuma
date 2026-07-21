@@ -8,11 +8,26 @@ import { pluginApi } from '@/api'
 import type { PluginRecord } from '@/api/types/plugin'
 import { useBridgeStore } from '@/stores/bridge'
 import type { ExtensionManifest } from '@/extensions/types/manifest'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import ComponentsSettingsPanel from '@/shell/views/ComponentsSettingsPanel.vue'
+import AiProvidersSettingsPanel from '@/shell/views/ai-settings/AiProvidersSettingsPanel.vue'
+import AiMcpSettingsPanel from '@/shell/views/ai-settings/AiMcpSettingsPanel.vue'
+import AiSkillsSettingsPanel from '@/shell/views/ai-settings/AiSkillsSettingsPanel.vue'
 
 /** 设置分区（VS Code 左右布局：左导航 + 右内容） */
-type SettingsSection = 'appearance' | 'plugins' | 'components' | 'runtime'
+type SettingsSection =
+  | 'appearance'
+  | 'plugins'
+  | 'components'
+  | 'ai-providers'
+  | 'ai-mcp'
+  | 'ai-skills'
+  | 'runtime'
+
+const props = defineProps<{
+  section?: string
+  tabId?: string
+}>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -25,9 +40,22 @@ const sections = computed(
     { id: 'appearance', labelKey: 'settings.appearance', descKey: 'settings.appearanceDesc', icon: 'palette' },
     { id: 'plugins', labelKey: 'settings.plugins', descKey: 'settings.pluginsDesc', icon: 'puzzle' },
     { id: 'components', labelKey: 'settings.components', descKey: 'settings.componentsDesc', icon: 'wrench' },
+    { id: 'ai-providers', labelKey: 'settings.aiProviders', descKey: 'settings.aiProvidersDesc', icon: 'bot' },
+    { id: 'ai-mcp', labelKey: 'settings.aiMcp', descKey: 'settings.aiMcpDesc', icon: 'plug-zap' },
+    { id: 'ai-skills', labelKey: 'settings.aiSkills', descKey: 'settings.aiSkillsDesc', icon: 'sparkles' },
     { id: 'runtime', labelKey: 'settings.runtime', descKey: 'settings.runtimeDesc', icon: 'activity' },
   ],
 )
+
+const validSections = new Set<SettingsSection>([
+  'appearance',
+  'plugins',
+  'components',
+  'ai-providers',
+  'ai-mcp',
+  'ai-skills',
+  'runtime',
+])
 
 const themeOptions = computed(
   (): { value: ThemePreference; label: string; icon: string }[] => [
@@ -99,6 +127,22 @@ async function loadPlugins(): Promise<void> {
     pluginsLoading.value = false
   }
 }
+
+function applySectionProp(section: string | undefined): void {
+  if (!section || !validSections.has(section as SettingsSection)) {
+    return
+  }
+  activeSection.value = section as SettingsSection
+  if (section === 'plugins' && !plugins.value.length) {
+    void loadPlugins()
+  }
+}
+
+watch(
+  () => props.section,
+  (section) => applySectionProp(section),
+  { immediate: true },
+)
 
 /** 切换插件启用状态；变更后刷新页面以重建路由 */
 async function togglePlugin(record: PluginRecord): Promise<void> {
@@ -226,6 +270,15 @@ onMounted(() => {
       <!-- 工具组件 -->
       <ComponentsSettingsPanel v-else-if="activeSection === 'components'" />
 
+      <!-- 模型接入 -->
+      <AiProvidersSettingsPanel v-else-if="activeSection === 'ai-providers'" />
+
+      <!-- MCP 服务 -->
+      <AiMcpSettingsPanel v-else-if="activeSection === 'ai-mcp'" />
+
+      <!-- AI Skills -->
+      <AiSkillsSettingsPanel v-else-if="activeSection === 'ai-skills'" />
+
       <!-- 运行时 -->
       <section v-else class="nm-settings__panel">
         <header class="nm-settings__panel-head">
@@ -305,10 +358,13 @@ onMounted(() => {
   color: var(--rs-primary);
 }
 
-/* 右内容 */
+/* 右内容：纵向铺满，便于「工具组件 / 模型接入」等全高面板贴边 */
 .nm-settings__content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
 }
 

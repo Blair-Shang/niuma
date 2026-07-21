@@ -19,6 +19,8 @@ class LocalFs {
   static bool Rename(const std::string& from_path, const std::string& to_path,
                      std::string& error);
   static bool Delete(const std::string& path, std::string& error);
+  /** 使用系统默认浏览器打开 http(s) URL。 */
+  static bool OpenExternalUrl(const std::string& url, std::string& error);
 
  private:
   static bool IsAccessiblePath(const std::string& path, std::string& error);

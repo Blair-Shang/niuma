@@ -10,10 +10,12 @@ import type { WorkspaceTab } from '@/stores/tab'
 export interface ConnectionNavTabSpec {
   /** 与模块 registry 的 moduleId / ConnKind 一致 */
   moduleId: ConnKind
-  /** TabBar 显示标题 */
+  /** TabBar 显示标题（可为短标签，如库名） */
   title: string
   /** lucide 图标名 */
   icon: string
+  /** 悬浮提示，含完整连接信息（host + db 等）；不设则退化为 title */
+  tooltip?: string
   /** 透传给 *Session.vue（至少含 profileId） */
   props: Record<string, unknown>
 }
@@ -39,8 +41,8 @@ export interface ConnectionNavConnectOptions {
  * ## 新增协议步骤（MySQL 示例）
  *
  * 1. 在 `modules/mysql/conn-nav-strategy.ts` 实现并 export `mysqlConnectionNavStrategy`
- * 2. 在 `ops/conn-nav-providers.ts` 调用 `registerConnectionNavStrategy('mysql', ...)`
- * 3. 在 `ops/types.ts` 的 `CONN_KIND_DEFS` 追加 kind
+ * 2. 在本模块 `register-conn-full.ts` 调用 `registerConnectionNavStrategy('mysql', ...)`
+ * 3. 在 `ops/register-builtin-conn-kinds.ts` 挂 loader；`CONN_KIND_DEFS` 追加 kind
  *
  * `OpsConnectionPanel` / `useConnectionNavigation` **无需修改**。
  *

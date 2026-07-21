@@ -10,7 +10,9 @@ import (
 
 type schemaSampleParams struct {
 	documentScopeParams
-	SampleSize int `json:"sampleSize"`
+	SampleSize int             `json:"sampleSize"`
+	Filter     json.RawMessage `json:"filter,omitempty"`
+	MaxTimeMS  int64           `json:"maxTimeMS,omitempty"`
 }
 
 func (d *Dispatcher) schemaSample(ctx context.Context, req Request) Response {
@@ -22,9 +24,26 @@ func (d *Dispatcher) schemaSample(ctx context.Context, req Request) Response {
 	if !ok {
 		return resp
 	}
-	fields, err := session.SampleSchema(ctx, s.Client, params.Database, params.Collection, params.SampleSize)
+	scope := scopeAttrs(params.SessionID, params.Database, params.Collection)
+	result, err := session.SampleSchema(ctx, s.Client, session.SchemaSampleParams{
+		Database:   params.Database,
+		Collection: params.Collection,
+		SampleSize: params.SampleSize,
+		Filter:     params.Filter,
+		MaxTimeMS:  params.MaxTimeMS,
+	})
 	if err != nil {
+		logOpError(MethodSchemaSample, err, append(scope, "sampleSize", params.SampleSize)...)
 		return errorResponse(req.ID, err.Error())
 	}
-	return okResponse(req.ID, map[string]any{"fields": fields})
+	logOpInfo(MethodSchemaSample, append(scope,
+		"sampleSize", result.SampleSize,
+		"sampleCount", result.SampleCount,
+		"fields", len(result.Fields),
+	)...)
+	return okResponse(req.ID, map[string]any{
+		"fields":      result.Fields,
+		"sampleCount": result.SampleCount,
+		"sampleSize":  result.SampleSize,
+	})
 }

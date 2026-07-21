@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RsBadge, RsButton, RsInput, RsTree, type RsTreeDropPosition, type RsTreeNode } from '@ruoshui/ui'
+import {
+  RsBadge,
+  RsButton,
+  RsContextMenu,
+  RsInput,
+  RsTree,
+  type RsContextMenuItem,
+  type RsTreeDropPosition,
+  type RsTreeNode,
+} from '@ruoshui/ui'
 import DemoBlock from '../components/DemoBlock.vue'
 import DemoPage from '../components/DemoPage.vue'
 
@@ -43,6 +52,58 @@ const highlightDemoFilter = ref('flow')
 const treeRef = ref<InstanceType<typeof RsTree> | null>(null)
 const keyboardTreeRef = ref<InstanceType<typeof RsTree> | null>(null)
 const lastDrop = ref('')
+
+const ctxTestLog = ref<string[]>([])
+const ctxConnNodes: RsTreeNode[] = [
+  {
+    key: 'folder-dev',
+    label: '开发环境',
+    icon: 'folder',
+    children: [
+      { key: 'conn-local', label: '本地 MongoDB', icon: 'database' },
+      { key: 'conn-staging', label: 'Staging Redis', icon: 'database' },
+    ],
+  },
+  { key: 'conn-prod', label: '生产只读', icon: 'database' },
+]
+
+const rootCtxItems: RsContextMenuItem[] = [
+  { key: 'new-conn', label: '新建连接', icon: 'plus' },
+  { key: 'new-folder', label: '新建文件夹', icon: 'folder-plus' },
+  { key: 'refresh', label: '刷新', icon: 'refresh-cw' },
+]
+
+const folderCtxItems: RsContextMenuItem[] = [
+  { key: 'new-conn', label: '在此文件夹新建', icon: 'plus' },
+  { key: 'rename', label: '重命名', icon: 'pen-line' },
+  { key: 'delete', label: '删除文件夹', icon: 'trash-2', danger: true },
+]
+
+const connCtxItems: RsContextMenuItem[] = [
+  { key: 'connect', label: '连接', icon: 'plug' },
+  { key: 'edit', label: '编辑', icon: 'pen-line' },
+  { key: 'delete', label: '删除', icon: 'trash-2', danger: true },
+]
+
+function logCtx(source: string, key: string): void {
+  ctxTestLog.value = [`${source} → ${key}`, ...ctxTestLog.value].slice(0, 6)
+}
+
+function onRootCtx(key: string): void {
+  logCtx('空白区域', key)
+}
+
+function onFolderCtx(key: string, label: string): void {
+  logCtx(`文件夹「${label}」`, key)
+}
+
+function onConnCtx(key: string, label: string): void {
+  logCtx(`连接「${label}」`, key)
+}
+
+function isFolderNode(node: RsTreeNode): boolean {
+  return Array.isArray(node.children) && node.children.length > 0
+}
 
 const apiNodes = ref([
   {
@@ -606,6 +667,50 @@ function statusVariant(status: unknown): 'success' | 'default' {
         </p>
       </div>
     </DemoBlock>
+
+    <DemoBlock title="🔬 连接树右键（空白区域 + 节点）">
+      <p class="hint">
+        模拟侧栏连接树：<code>RsContextMenu</code> 包裹整棵树作为根菜单，节点在
+        <code>#title</code> 插槽内嵌套各自菜单。树置于固定高度容器（<code>virtual</code> +
+        <code>height</code>），在节点列表<strong>下方空白处</strong>右键应弹出根菜单（新建连接 / 文件夹）；
+        在节点上右键弹出对应菜单。节点菜单已 <code>@contextmenu.stop</code>，不会冒泡到根菜单。
+      </p>
+      <RsContextMenu :items="rootCtxItems" @select="onRootCtx">
+        <div class="ctx-tree-host">
+          <RsTree
+            :nodes="ctxConnNodes"
+            :height="220"
+            virtual
+            block-node
+            show-line
+            default-expand-all
+            :selectable="false"
+            size="sm"
+          >
+            <template #title="{ node, label }">
+              <RsContextMenu
+                v-if="isFolderNode(node)"
+                :items="folderCtxItems"
+                @select="onFolderCtx($event, label)"
+              >
+                <span class="ctx-tree-node">{{ label }}</span>
+              </RsContextMenu>
+              <RsContextMenu
+                v-else
+                :items="connCtxItems"
+                @select="onConnCtx($event, label)"
+              >
+                <span class="ctx-tree-node">{{ label }}</span>
+              </RsContextMenu>
+            </template>
+          </RsTree>
+        </div>
+      </RsContextMenu>
+      <div class="ctx-test-log">
+        <div v-if="!ctxTestLog.length" class="ctx-test-log__empty">在树上右键试试</div>
+        <div v-for="(line, i) in ctxTestLog" :key="i">{{ line }}</div>
+      </div>
+    </DemoBlock>
   </DemoPage>
 </template>
 
@@ -700,5 +805,31 @@ function statusVariant(status: unknown): 'success' | 'default' {
   font-size: var(--rs-font-size-xs);
   font-weight: 600;
   color: var(--rs-muted);
+}
+.ctx-tree-host {
+  height: 220px;
+  border: 1px solid var(--rs-border-subtle);
+  border-radius: var(--rs-radius-sm);
+  overflow: hidden;
+  background: var(--rs-bg);
+}
+.ctx-tree-node {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-test-log {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--rs-radius-sm);
+  background: var(--rs-surface-subtle);
+  font-size: var(--rs-font-size-xs);
+  color: var(--rs-muted);
+  line-height: 1.6;
+}
+.ctx-test-log__empty {
+  font-style: italic;
 }
 </style>

@@ -8,7 +8,7 @@
 ## 1. 定位
 
 Platform Core 是 **Layer 2** 的业务中枢（Go 常驻进程 `platform-core`）：权限、SQLite、凭据、
-审计、AI 编排等**唯一裁决点**。C++ 壳层（Layer 3）**零业务**——只做字节透传与进程启停。
+审计、AI 编排等**唯一裁决点**（AI 助手细则见 [24 — AI 助手](./24-ai-assistant.md)）。C++ 壳层（Layer 3）**零业务**——只做字节透传与进程启停。
 
 ```
 Web UI ──① CEF IPC──> C++ Shell ──② 应用 IPC──> Platform Core ──> Services

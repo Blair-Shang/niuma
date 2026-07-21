@@ -32,6 +32,11 @@ export interface RsTreeFlatNode {
   hasChildren: boolean
   isLast: boolean
   parentKey: string | null
+  /**
+   * showLine 用：下标对应祖先深度 `0..depth-1`。
+   * `true` 表示该祖先不是同级最后一项，竖线需贯穿当前行；`false` 则留空缺口。
+   */
+  levelLines: boolean[]
 }
 
 export interface RsTreeNodeIndex {
@@ -232,13 +237,17 @@ export function flattenVisibleTreeNodes(
   lazy = false,
   depth = 0,
   parentKey: string | null = null,
+  /** 路径上各祖先是否为同级最后一项（长度 = depth） */
+  ancestorIsLast: readonly boolean[] = [],
 ): RsTreeFlatNode[] {
   const result: RsTreeFlatNode[] = []
   nodes.forEach((node, index) => {
     const key = getTreeKey(node, fields)
     const hasChildren = hasTreeChildren(node, fields, lazy)
     const isLast = index === nodes.length - 1
-    result.push({ key, node, depth, hasChildren, isLast, parentKey })
+    // 祖先非末项 → 画贯穿竖线；末项 → 该列断开，避免「幽灵」延伸
+    const levelLines = ancestorIsLast.map((last) => !last)
+    result.push({ key, node, depth, hasChildren, isLast, parentKey, levelLines })
     if (hasChildren && expandedKeys.has(key)) {
       result.push(
         ...flattenVisibleTreeNodes(
@@ -248,6 +257,7 @@ export function flattenVisibleTreeNodes(
           lazy,
           depth + 1,
           key,
+          [...ancestorIsLast, isLast],
         ),
       )
     }

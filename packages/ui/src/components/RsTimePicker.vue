@@ -467,8 +467,9 @@ watch(open, async (isOpen) => {
 .rs-time-picker__content--range {
   width: min(28rem, calc(100vw - 2rem));
 }
+/* 嵌套在日期时间面板内：须高于 .rs-date-picker__content（modal+2），否则时间列被日历遮挡 */
 .rs-time-picker__content--embedded {
-  z-index: calc(var(--rs-z-dropdown) + 10);
+  z-index: calc(var(--rs-z-modal) + 3);
 }
 .rs-time-picker__panel {
   display: flex;

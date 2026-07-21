@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, useSlots } from 'vue'
+import type { RsRadius } from '../theme/types'
 import { Primitive } from './reka'
+import { rsRadiusCss, useResolvedRsRadius } from './resolve-radius'
 
 export type RsCardVariant = 'grouped' | 'plain' | 'outlined' | 'filled' | 'glass'
 
@@ -13,6 +15,8 @@ const props = withDefaults(
     elevated?: boolean
     /** grouped=mac 分组面板；plain=mac 小组件；outlined/filled=Material 3；glass=mac 毛玻璃 */
     variant?: RsCardVariant
+    /** 圆角档位；默认 lg。直角面板传 `none`。 */
+    radius?: RsRadius
   }>(),
   {
     as: 'section',
@@ -24,6 +28,10 @@ const props = withDefaults(
 
 const slots = useSlots()
 const hasHeader = computed(() => Boolean(props.title || props.description || slots.header))
+const resolvedRadius = useResolvedRsRadius(() => props.radius, 'lg')
+const rootStyle = computed(() => ({
+  '--rs-card-radius': rsRadiusCss(resolvedRadius.value),
+}))
 </script>
 
 <template>
@@ -34,6 +42,7 @@ const hasHeader = computed(() => Boolean(props.title || props.description || slo
       `rs-card--${variant}`,
       { 'rs-card--elevated': elevated },
     ]"
+    :style="rootStyle"
   >
     <header v-if="hasHeader" class="rs-card__header">
       <div class="rs-card__heading">
@@ -56,7 +65,7 @@ const hasHeader = computed(() => Boolean(props.title || props.description || slo
 .rs-card {
   position: relative;
   overflow: hidden;
-  border-radius: var(--rs-radius-lg);
+  border-radius: var(--rs-card-radius, var(--rs-radius-lg));
   border: 1px solid var(--rs-card-border);
   background: var(--rs-card-body-bg);
   box-shadow: var(--rs-card-shadow);

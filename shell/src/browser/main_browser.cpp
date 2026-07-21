@@ -1,5 +1,5 @@
 #include "browser/main_browser.h"
-#include "bridge/stream_proxy.h"
+#include "ipc/platform_client.h"
 #include "browser/handlers/drag_handler.h"
 #include "core/window/main_window.h"
 #include "core/window/window_manager.h"
@@ -116,21 +116,21 @@ void NiuMaClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     if (!event_listener_started_) {
       event_listener_started_ = true;
       NiuMaMessageRouterHandler* handler = message_router_handler_.get();
-      PlatformClient::StartEventListener(
-          [this, handler](const std::string& json) {
-            if (!handler) {
-              return;
-            }
-            niuma::BridgeEvent ev;
-            ev.type = niuma::JsonGetString(json, "type");
-            ev.data = json;
-            // 向所有主窗口扇出 Platform 事件（含文件工作台跨窗口 Tab 投递）。
-            for (const auto& entry : browsers_) {
-              if (entry && !IsDevToolsBrowser(entry)) {
-                handler->PushEvent(entry, ev);
-              }
-            }
-          });
+      auto dispatch_platform_event = [this, handler](const std::string& json) {
+        if (!handler) {
+          return;
+        }
+        niuma::BridgeEvent ev;
+        ev.type = niuma::JsonGetString(json, "type");
+        ev.data = json;
+        for (const auto& entry : browsers_) {
+          if (entry && !IsDevToolsBrowser(entry)) {
+            handler->PushEvent(entry, ev);
+          }
+        }
+      };
+      PlatformClient::SetStreamFrameCallback(dispatch_platform_event);
+      PlatformClient::StartEventListener(dispatch_platform_event);
     }
     // 兜底：主窗口在 Web reveal 失败时 3 秒后强制显示。
     const WindowRecord* entry = WindowRegistry::Instance().FindByBrowser(browser);
@@ -295,6 +295,7 @@ void NiuMaClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   }
 
   if (!WindowManager::Instance().HasManagedWindow()) {
+    PlatformClient::CloseAllStreams();
     PlatformClient::StopEventListener();
     if (browser_router_ && message_router_handler_) {
       browser_router_->RemoveHandler(message_router_handler_.get());
@@ -303,7 +304,7 @@ void NiuMaClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
       message_router_handler_->CancelAllPending();
       message_router_handler_.reset();
     }
-    StreamProxy::Instance().CancelAll();
+    PlatformClient::CloseAllStreams();
     CefQuitMessageLoop();
   }
 }

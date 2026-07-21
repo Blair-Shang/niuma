@@ -233,6 +233,9 @@ $ftpOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ftp-service' 
 $sshOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ssh-service' -PlatformName $Platform)
 $redisOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-redis-service' -PlatformName $Platform)
 $mongoOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-mongodb-service' -PlatformName $Platform)
+$vastbaseOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-vastbase-service' -PlatformName $Platform)
+$mysqlOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-mysql-service' -PlatformName $Platform)
+$mcpVastOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'mcp-vastbase-readonly' -PlatformName $Platform)
 
 $MigrateDir = Join-Path $Root 'platform/internal/migrate'
 Write-Host "==> go generate (sync SQL migrations)" -ForegroundColor Cyan
@@ -258,6 +261,18 @@ Build-GoService -ModuleDir (Join-Path $Root 'services/mongodb-service') `
     -Package './cmd/mongodb-service' `
     -Output $mongoOut
 
+Build-GoService -ModuleDir (Join-Path $Root 'services/vastbase-service') `
+    -Package './cmd/vastbase-service' `
+    -Output $vastbaseOut
+
+Build-GoService -ModuleDir (Join-Path $Root 'services/mysql-service') `
+    -Package './cmd/mysql-service' `
+    -Output $mysqlOut
+
+Build-GoService -ModuleDir (Join-Path $Root 'services/mcp-vastbase-readonly') `
+    -Package '.' `
+    -Output $mcpVastOut
+
 $sshBuilt = Build-RustService -CrateDir (Join-Path $Root 'services/ssh-service') `
     -BinName 'niuma-ssh-service' `
     -Output $sshOut
@@ -272,9 +287,15 @@ if (Should-SyncLegacyBin) {
     $legacySshOut = Join-Path $BinDir 'niuma-ssh-service.exe'
     $legacyRedisOut = Join-Path $BinDir 'niuma-redis-service.exe'
     $legacyMongoOut = Join-Path $BinDir 'niuma-mongodb-service.exe'
+    $legacyVastbaseOut = Join-Path $BinDir 'niuma-vastbase-service.exe'
+    $legacyMysqlOut = Join-Path $BinDir 'niuma-mysql-service.exe'
+    $legacyMcpVastOut = Join-Path $BinDir 'mcp-vastbase-readonly.exe'
     Copy-Item -Force $platformOut $legacyPlatformOut
     Copy-Item -Force $ftpOut $legacyFtpOut
     Copy-Item -Force $mongoOut $legacyMongoOut
+    Copy-Item -Force $vastbaseOut $legacyVastbaseOut
+    Copy-Item -Force $mysqlOut $legacyMysqlOut
+    Copy-Item -Force $mcpVastOut $legacyMcpVastOut
     if ($sshBuilt -and (Test-Path $sshOut)) {
         Copy-Item -Force $sshOut $legacySshOut
     }
@@ -287,6 +308,8 @@ Write-Host "==> services ready for ${Platform}/${Arch}:" -ForegroundColor Green
 Write-Host "    $platformOut"
 Write-Host "    $ftpOut"
 Write-Host "    $mongoOut"
+Write-Host "    $vastbaseOut"
+Write-Host "    $mcpVastOut"
 if ($sshBuilt -and (Test-Path $sshOut)) {
     Write-Host "    $sshOut"
 } elseif (Test-Path $sshOut) {

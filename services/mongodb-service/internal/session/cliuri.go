@@ -6,10 +6,51 @@ import (
 	"strings"
 )
 
-// CLIEnv 为外部 CLI 工具准备连接 URI 与环境变量（密码不入 URI、不写日志）。
+// CLIEnv 为 mongosh 准备连接 URI 与环境变量。
+// 密码不写入 URI；mongosh 通过 --password 传入（见 query_exec / shell）。
+// MONGODB_PASSWORD 仍写入环境供兼容，但官方 CLI 不会自动读取。
 func CLIEnv(params ConnectParams, database string) (uri string, env []string, err error) {
+	return cliEnv(params, database, false)
+}
+
+// ShellCLIEnv 为 mongosh 准备启动环境：默认库仅来自连接配置或 REPL `use`，不回落到 test。
+func ShellCLIEnv(sess *Session) (uri string, env []string, err error) {
+	return cliEnv(sess.Params, shellStartupDatabase(sess), false)
+}
+
+// CLIToolURI 为 mongo-tools 构造连接 URI。
+//
+// 有密码时：与 Go 驱动相同，写入完整 userinfo + authSource（特殊字符经 url.UserPassword 编码）。
+// 无密码时：去掉用户名与 authSource/authMechanism —— 连接表单默认 auth_database=admin，
+// 若仍写入 authSource，部分 mongodump/mongoexport 会发起空凭据 SCRAM 并 AuthenticationFailed，
+// 而 Go 驱动 / mongosh 在无凭据时可正常忽略 authSource。
+func CLIToolURI(params ConnectParams) (uri string, env []string, err error) {
+	p := params
+	secret := strings.TrimSpace(p.Secret)
+	user := strings.TrimSpace(p.LoginAccount)
+	if secret == "" {
+		p.Secret = ""
+		p.LoginAccount = ""
+		p.Options.AuthDatabase = ""
+		p.Options.AuthMechanism = ""
+	} else if user == "" {
+		return "", nil, fmt.Errorf("username required when password is set")
+	}
+	uri, err = buildURI(p)
+	if err != nil {
+		return "", nil, err
+	}
+	return uri, os.Environ(), nil
+}
+
+func cliEnv(params ConnectParams, database string, stripAuth bool) (uri string, env []string, err error) {
 	p := params
 	p.Secret = ""
+	if stripAuth {
+		p.LoginAccount = ""
+		p.Options.AuthDatabase = ""
+		p.Options.AuthMechanism = ""
+	}
 	uri, err = buildURI(p)
 	if err != nil {
 		return "", nil, err
@@ -22,6 +63,17 @@ func CLIEnv(params ConnectParams, database string) (uri string, env []string, er
 		env = append(env, "MONGODB_PASSWORD="+secret)
 	}
 	return uri, env, nil
+}
+
+// shellStartupDatabase 返回 mongosh 启动时应写入 URI 的默认库。
+func shellStartupDatabase(s *Session) string {
+	s.mu.Lock()
+	current := s.currentDatabase
+	s.mu.Unlock()
+	if current != "" {
+		return current
+	}
+	return strings.TrimSpace(s.Params.Options.DefaultDatabase)
 }
 
 func withDatabase(uri, database string) string {

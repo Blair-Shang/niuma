@@ -35,9 +35,12 @@ function close(): void {
     :title="dlgTitle"
     width="md"
     layout="confirm"
+    :resizable="false"
+    :fullscreenable="false"
     :show-overlay="false"
     :close-on-overlay-click="false"
   >
+    <template #body>
     <form class="nm-folder-form" autocomplete="off" @submit.prevent="emit('save')">
       <section class="nm-folder-form__section">
         <div class="nm-folder-form__identity">
@@ -65,6 +68,7 @@ function close(): void {
         </RsButton>
       </div>
     </form>
+    </template>
   </RsDialog>
 </template>
 

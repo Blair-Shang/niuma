@@ -29,8 +29,10 @@ func (d *Dispatcher) commandExec(ctx context.Context, req Request) Response {
 	}
 	result, err := session.ExecCommand(ctx, s, params.Input)
 	if err != nil {
+		logOpError(MethodCommandExec, err, "session", params.SessionID, "inputLen", len(params.Input))
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodCommandExec, "session", params.SessionID, "inputLen", len(params.Input))
 	return okResponse(req.ID, result)
 }
 
@@ -44,7 +46,9 @@ func (d *Dispatcher) commandSuggest(ctx context.Context, req Request) Response {
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(session.SuggestCommandsJSON(params.Input), &payload); err != nil {
+		logOpError(MethodCommandSuggest, err, "session", params.SessionID, "inputLen", len(params.Input))
 		return errorResponse(req.ID, err.Error())
 	}
+	logOpInfo(MethodCommandSuggest, "session", params.SessionID, "inputLen", len(params.Input))
 	return okResponse(req.ID, payload)
 }

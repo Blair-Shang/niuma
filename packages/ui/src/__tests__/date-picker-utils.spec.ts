@@ -34,9 +34,36 @@ describe('date-picker-utils (dayjs)', () => {
     })
   })
 
-  it('rejects non-canonical datetime strings', () => {
-    expect(parseDateTimeValue('2025-06-16T14:30')).toBeNull()
-    expect(parseDateTimeValue('2025-06-16 14:30')).toBeNull()
-    expect(formatDateTimeValue('2025-06-16T14:30')).toBe('2025-06-16T14:30')
+  it('parses ISO-like datetime and normalizes to canonical form', () => {
+    expect(parseDateTimeValue('2025-06-16T14:30:00')).toEqual({
+      year: 2025,
+      month: 6,
+      day: 16,
+      hour: 14,
+      minute: 30,
+      second: 0,
+    })
+    expect(parseDateTimeValue('2025-06-16T14:30')).toEqual({
+      year: 2025,
+      month: 6,
+      day: 16,
+      hour: 14,
+      minute: 30,
+      second: 0,
+    })
+    expect(parseDateTimeValue('2025-06-16 14:30')).toEqual({
+      year: 2025,
+      month: 6,
+      day: 16,
+      hour: 14,
+      minute: 30,
+      second: 0,
+    })
+    expect(formatDateTimeValue('2025-06-16T14:30:00')).toBe('2025-06-16 14:30:00')
+  })
+
+  it('rejects unrecognizable datetime strings', () => {
+    expect(parseDateTimeValue('not-a-date')).toBeNull()
+    expect(formatDateTimeValue('not-a-date')).toBe('not-a-date')
   })
 })

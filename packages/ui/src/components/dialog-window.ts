@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { dialogViewportSize, readDialogViewportInsets } from './dialog-viewport'
 
 export type RsDialogWidth = 'sm' | 'md' | 'lg'
 export type RsDialogResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
@@ -20,7 +21,6 @@ const defaultWidthRatio = 0.8
 const defaultHeightRatio = 0.75
 const minWidth = 320
 const minHeight = 240
-const viewportGap = 16
 
 export function useRsDialogWindow(options: {
   open: Ref<boolean>
@@ -28,11 +28,17 @@ export function useRsDialogWindow(options: {
   draggable: Ref<boolean>
   resizable: Ref<boolean>
   compact?: Ref<boolean>
+  /** 全屏/还原时是否播放 left/top/width/height 过渡（含编辑器时建议 false） */
+  boundsTransition?: Ref<boolean>
 }) {
   const isFullscreen = ref(false)
+  const boundsTransitionEnabled = ref(false)
   const bounds = ref<RsDialogBounds>({ x: 0, y: 0, width: widthMap.md, height: minHeight })
   const restoreBounds = ref<RsDialogBounds | null>(null)
   const resizeHandles: RsDialogResizeHandle[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+
+  let boundsTransitionTimer: ReturnType<typeof setTimeout> | null = null
+  let cachedInsets = readDialogViewportInsets()
 
   let dragState: { startX: number; startY: number; origin: RsDialogBounds } | null = null
   let resizeState: {
@@ -43,22 +49,26 @@ export function useRsDialogWindow(options: {
   } | null = null
 
   function defaultWindowSize(): Pick<RsDialogBounds, 'width' | 'height'> {
-    const maxW = window.innerWidth - viewportGap * 2
-    const maxH = window.innerHeight - viewportGap * 2
+    const { width: maxW, height: maxH } = dialogViewportSize()
     return {
-      width: Math.min(maxW, Math.max(minWidth, Math.round(window.innerWidth * defaultWidthRatio))),
-      height: Math.min(maxH, Math.max(minHeight, Math.round(window.innerHeight * defaultHeightRatio))),
+      width: Math.min(maxW, Math.max(minWidth, Math.round(maxW * defaultWidthRatio))),
+      height: Math.min(maxH, Math.max(minHeight, Math.round(maxH * defaultHeightRatio))),
     }
   }
 
+  function refreshCachedInsets(): void {
+    cachedInsets = readDialogViewportInsets()
+  }
+
   function clampBounds(next: RsDialogBounds): RsDialogBounds {
-    const maxW = window.innerWidth - viewportGap * 2
-    const maxH = window.innerHeight - viewportGap * 2
+    const insets = cachedInsets
+    const maxW = window.innerWidth - insets.left - insets.right
+    const maxH = window.innerHeight - insets.top - insets.bottom
     const width = Math.min(maxW, Math.max(minWidth, next.width))
     const height = Math.min(maxH, Math.max(minHeight, next.height))
     return {
-      x: Math.min(window.innerWidth - width - viewportGap, Math.max(viewportGap, next.x)),
-      y: Math.min(window.innerHeight - height - viewportGap, Math.max(viewportGap, next.y)),
+      x: Math.min(window.innerWidth - width - insets.right, Math.max(insets.left, next.x)),
+      y: Math.min(window.innerHeight - height - insets.bottom, Math.max(insets.top, next.y)),
       width,
       height,
     }
@@ -71,27 +81,36 @@ export function useRsDialogWindow(options: {
       bounds.value = { x: bounds.value.x, y: bounds.value.y, width: widthMap[options.widthPreset.value], height: 0 }
       return
     }
+    refreshCachedInsets()
+    const insets = cachedInsets
     const { width, height } = defaultWindowSize()
+    const availableH = window.innerHeight - insets.top - insets.bottom
     bounds.value = clampBounds({
-      x: (window.innerWidth - width) / 2,
-      y: (window.innerHeight - height) / 2,
+      x: insets.left + (window.innerWidth - insets.left - insets.right - width) / 2,
+      y: insets.top + (availableH - height) / 2,
       width,
       height,
     })
   }
 
-  watch(options.open, (value) => {
-    if (value) resetOnOpen()
-    else stopInteractions()
-  })
+  watch(
+    options.open,
+    (value) => {
+      if (value) resetOnOpen()
+      else stopInteractions()
+    },
+    // 弹出等场景：组件挂载时 open 已为 true，需立即居中，不能只等 false→true
+    { immediate: true },
+  )
 
   const dialogStyle = computed(() => {
+    const insets = cachedInsets
     if (isFullscreen.value) {
       return {
-        left: `${viewportGap}px`,
-        top: `${viewportGap}px`,
-        width: `calc(100vw - ${viewportGap * 2}px)`,
-        height: `calc(100vh - ${viewportGap * 2}px)`,
+        left: `${insets.left}px`,
+        top: `${insets.top}px`,
+        width: `calc(100vw - ${insets.left + insets.right}px)`,
+        height: `calc(100vh - ${insets.top + insets.bottom}px)`,
         transform: 'none',
       }
     }
@@ -99,9 +118,9 @@ export function useRsDialogWindow(options: {
       const width = widthMap[options.widthPreset.value]
       return {
         left: '50%',
-        top: '50%',
+        top: `calc(${insets.top}px + (100vh - ${insets.top + insets.bottom}px) / 2)`,
         width: `${width}px`,
-        maxWidth: `calc(100vw - ${viewportGap * 2}px)`,
+        maxWidth: `calc(100vw - ${insets.left + insets.right}px)`,
         height: 'auto',
         transform: 'translate(-50%, -50%)',
       }
@@ -116,7 +135,26 @@ export function useRsDialogWindow(options: {
     }
   })
 
+  function clearBoundsTransitionTimer(): void {
+    if (!boundsTransitionTimer) return
+    clearTimeout(boundsTransitionTimer)
+    boundsTransitionTimer = null
+  }
+
+  function enableBoundsTransition(): void {
+    boundsTransitionEnabled.value = true
+    clearBoundsTransitionTimer()
+    boundsTransitionTimer = setTimeout(() => {
+      boundsTransitionEnabled.value = false
+      boundsTransitionTimer = null
+    }, 280)
+  }
+
   function toggleFullscreen(): void {
+    refreshCachedInsets()
+    if (options.boundsTransition?.value) {
+      enableBoundsTransition()
+    }
     if (isFullscreen.value) {
       isFullscreen.value = false
       bounds.value = restoreBounds.value ? { ...restoreBounds.value } : bounds.value
@@ -162,6 +200,9 @@ export function useRsDialogWindow(options: {
   }
 
   function startInteraction(cursor: string): void {
+    boundsTransitionEnabled.value = false
+    clearBoundsTransitionTimer()
+    refreshCachedInsets()
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', stopInteractions)
     document.body.style.userSelect = 'none'
@@ -195,10 +236,14 @@ export function useRsDialogWindow(options: {
     startInteraction(resizeCursor[handle])
   }
 
-  onBeforeUnmount(stopInteractions)
+  onBeforeUnmount(() => {
+    stopInteractions()
+    clearBoundsTransitionTimer()
+  })
 
   return {
     isFullscreen,
+    boundsTransitionEnabled,
     dialogStyle,
     resizeHandles,
     toggleFullscreen,

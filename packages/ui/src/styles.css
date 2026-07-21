@@ -17,6 +17,7 @@
   --rs-line-height-tight: 1.25;
   --rs-line-height-normal: 1.5;
 
+  --rs-control-height-ssm: 1.25rem;
   --rs-control-height-sm: 1.5rem;
   --rs-control-height-md: 2rem;
   --rs-control-height-lg: 2.5rem;
@@ -35,6 +36,8 @@
 
   --rs-z-tooltip: 10;
   --rs-z-dropdown: 50;
+  /* Shell 底部 Dock / 常驻面板：低于 modal，避免盖住弹出对话框 */
+  --rs-z-panel: 80;
   --rs-z-modal: 100;
   --rs-z-toast: 200;
 
@@ -50,6 +53,12 @@
 
   /* MongoDB 品牌图标默认强调色（MongoDB 官方绿） */
   --rs-icon-mongodb-accent: #47a248;
+
+  /* Vastbase 品牌图标默认强调色（海量数据官网橙） */
+  --rs-icon-vastbase-accent: #ff6f1a;
+
+  /* MySQL 品牌图标默认强调色（MySQL 官方蓝） */
+  --rs-icon-mysql-accent: #4479a1;
 
   /* macOS 风格原生滚动条（与 RsScrollbar 视觉一致） */
   --rs-scrollbar-size: 13px;
@@ -78,14 +87,17 @@
   --rs-table-radius: var(--rs-radius-sm);
   --rs-table-border: #2b2b2b;
   --rs-table-cell-divider: #262626;
-  --rs-table-fg: #cccccc;
+  --rs-table-fg: #dddddd;
   --rs-table-muted-fg: #9d9d9d;
   --rs-table-bg: #1f1f1f;
   --rs-table-bg-header: #1f1f1f;
   --rs-table-body-bg: #1f1f1f;
   --rs-table-header-bg: #1f1f1f;
-  --rs-table-header-fg: #9d9d9d;
-  --rs-table-header-weight: 500;
+  --rs-table-header-fg: #f3f3f3;
+  --rs-table-header-weight: 600;
+  --rs-table-header-size: var(--rs-table-cell-size, var(--rs-font-size-xs));
+  --rs-table-cell-size: var(--rs-font-size-xs);
+  --rs-table-cell-weight: 400;
   --rs-table-footer-bg: #1f1f1f;
   --rs-table-group-bg: #2d2d2d;
   --rs-table-expand-bg: #2d2d2d;
@@ -95,6 +107,12 @@
   --rs-table-row-selected-hover: color-mix(in srgb, var(--rs-primary) 30%, var(--rs-table-body-bg));
   --rs-table-row-selected-fg: #ffffff;
   --rs-table-row-selected-accent: var(--rs-primary);
+  --rs-table-row-highlight: color-mix(in srgb, var(--rs-primary) 12%, var(--rs-table-body-bg));
+  --rs-table-row-highlight-hover: color-mix(in srgb, var(--rs-primary) 18%, var(--rs-table-body-bg));
+  --rs-table-row-highlight-fg: var(--rs-table-fg);
+  --rs-table-row-highlight-accent: color-mix(in srgb, var(--rs-primary) 65%, transparent);
+  --rs-table-gutter-bg: color-mix(in srgb, var(--rs-border) 10%, var(--rs-table-header-bg));
+  --rs-table-gutter-border: var(--rs-table-cell-divider);
   --rs-table-scrollbar-corner: var(--rs-table-bg-header);
   --rs-table-checkbox-bg: #313131;
   --rs-table-sort-active-fg: var(--rs-primary);
@@ -130,6 +148,8 @@
   --rs-icon-ftp-on-accent: #ffffff;
   --rs-icon-redis-accent: #ff6f61;
   --rs-icon-mongodb-accent: #5cb85c;
+  --rs-icon-vastbase-accent: #ff8a3d;
+  --rs-icon-mysql-accent: #5a9fd4;
   --rs-focus-border: var(--rs-primary);
   --rs-focus-ring: color-mix(in srgb, var(--rs-primary) 28%, transparent);
   --rs-focus-ring-width: 2px;
@@ -224,14 +244,17 @@
   --rs-table-radius: var(--rs-radius-sm);
   --rs-table-border: #e5e5e5;
   --rs-table-cell-divider: #e5e5e5;
-  --rs-table-fg: #3b3b3b;
+  --rs-table-fg: #333333;
   --rs-table-muted-fg: #616161;
   --rs-table-bg: #ffffff;
   --rs-table-bg-header: #f8f8f8;
   --rs-table-body-bg: #ffffff;
   --rs-table-header-bg: #f8f8f8;
-  --rs-table-header-fg: #616161;
-  --rs-table-header-weight: 500;
+  --rs-table-header-fg: #1a1a1a;
+  --rs-table-header-weight: 600;
+  --rs-table-header-size: var(--rs-table-cell-size, var(--rs-font-size-xs));
+  --rs-table-cell-size: var(--rs-font-size-xs);
+  --rs-table-cell-weight: 400;
   --rs-table-footer-bg: #f8f8f8;
   --rs-table-group-bg: #f3f3f3;
   --rs-table-expand-bg: #f3f3f3;
@@ -241,6 +264,12 @@
   --rs-table-row-selected-hover: color-mix(in srgb, var(--rs-primary) 16%, var(--rs-table-body-bg));
   --rs-table-row-selected-fg: var(--rs-text);
   --rs-table-row-selected-accent: var(--rs-primary);
+  --rs-table-row-highlight: color-mix(in srgb, var(--rs-primary) 8%, var(--rs-table-body-bg));
+  --rs-table-row-highlight-hover: color-mix(in srgb, var(--rs-primary) 12%, var(--rs-table-body-bg));
+  --rs-table-row-highlight-fg: var(--rs-text);
+  --rs-table-row-highlight-accent: color-mix(in srgb, var(--rs-primary) 45%, transparent);
+  --rs-table-gutter-bg: color-mix(in srgb, var(--rs-border) 6%, var(--rs-table-header-bg));
+  --rs-table-gutter-border: var(--rs-table-cell-divider);
   --rs-table-scrollbar-corner: var(--rs-table-bg-header);
   --rs-table-checkbox-bg: #ffffff;
   --rs-table-sort-active-fg: var(--rs-primary);
@@ -346,6 +375,8 @@
   --rs-icon-ftp-on-accent: #ffffff;
   --rs-icon-redis-accent: #dc382d;
   --rs-icon-mongodb-accent: #47a248;
+  --rs-icon-vastbase-accent: #ff6f1a;
+  --rs-icon-mysql-accent: #4479a1;
 }
 
 /**
@@ -436,11 +467,17 @@ code {
   box-shadow: 0 0 0 var(--rs-focus-ring-width, 2px) var(--rs-focus-ring);
 }
 
+/*
+ * 默认：面板可宽于触发器（min-width 对齐触发器，width 随内容，max-width 封顶）。
+ * matchTriggerWidth：加 --match-trigger，强制与触发器等宽。
+ * 注意：虚拟列表绝对定位项不参与撑开父级宽度，内容撑宽在 virtual 下不可靠（见 RsSelect prop 注释）。
+ */
 .rs-select__content {
   z-index: calc(var(--rs-z-modal) + 2);
   box-sizing: border-box;
-  width: var(--reka-combobox-trigger-width, var(--reka-popper-anchor-width));
+  width: max-content;
   min-width: var(--reka-combobox-trigger-width, var(--reka-popper-anchor-width));
+  max-width: min(24rem, calc(100vw - 1rem));
   max-height: var(--reka-combobox-content-available-height);
   overflow: hidden;
   display: flex;
@@ -454,16 +491,33 @@ code {
   outline: none;
 }
 
-/* Popper 外层默认 min-width:max-content 会按内容收缩，需与触发器等宽 */
+.rs-select__content--match-trigger {
+  width: var(--reka-combobox-trigger-width, var(--reka-popper-anchor-width));
+  max-width: none;
+}
+
+/* Popper 外层：默认允许随内容变宽；等宽模式锁死为触发器宽度 */
 /* z-index 提升到 modal 之上，避免在 RsDialog 内被对话框遮挡 */
 [data-reka-popper-content-wrapper]:has(> .rs-select__content) {
   z-index: calc(var(--rs-z-modal) + 2);
+  width: max-content;
+  min-width: var(--reka-popper-anchor-width);
+  max-width: min(24rem, calc(100vw - 1rem));
+}
+
+[data-reka-popper-content-wrapper]:has(> .rs-select__content--match-trigger) {
   width: var(--reka-popper-anchor-width);
   min-width: var(--reka-popper-anchor-width);
+  max-width: none;
 }
 
 [data-reka-popper-content-wrapper]:has(> .rs-date-picker__content) {
   z-index: calc(var(--rs-z-modal) + 2);
+}
+
+/* 日期面板内嵌时间选择：wrapper 也须高于日期面板，否则 portal 后仍被日历盖住 */
+[data-reka-popper-content-wrapper]:has(> .rs-time-picker__content--embedded) {
+  z-index: calc(var(--rs-z-modal) + 3);
 }
 
 .rs-select__search-bar {
@@ -851,5 +905,25 @@ code {
 
 .rs-context-menu__item[data-highlighted] .lucide-mongodb-icon .mongodb-icon__mark,
 .rs-context-menu__item[data-state='open'] .lucide-mongodb-icon .mongodb-icon__mark {
+  fill: rgb(255 255 255 / 0.95);
+}
+
+/* Vastbase 自定义图标：海量数据官方品牌 mark，单色填充随主题调整明暗对比度 */
+.lucide-vastbase-icon .vastbase-icon__mark {
+  fill: var(--rs-icon-vastbase-accent);
+}
+
+.rs-context-menu__item[data-highlighted] .lucide-vastbase-icon .vastbase-icon__mark,
+.rs-context-menu__item[data-state='open'] .lucide-vastbase-icon .vastbase-icon__mark {
+  fill: rgb(255 255 255 / 0.95);
+}
+
+/* MySQL 自定义图标：官方品牌 mark，单色填充随主题调整明暗对比度 */
+.lucide-mysql-icon .mysql-icon__mark {
+  fill: var(--rs-icon-mysql-accent);
+}
+
+.rs-context-menu__item[data-highlighted] .lucide-mysql-icon .mysql-icon__mark,
+.rs-context-menu__item[data-state='open'] .lucide-mysql-icon .mysql-icon__mark {
   fill: rgb(255 255 255 / 0.95);
 }

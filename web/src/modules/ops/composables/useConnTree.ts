@@ -8,6 +8,7 @@ import {
   folderTreeKey,
   parseTreeKey,
 } from '@/modules/ops/conn-tree/keys'
+import { connKindHasTree } from '@/modules/ops/conn-kind-loaders'
 import { getConnTreeProvider } from '@/modules/ops/conn-tree/registry'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import {
@@ -43,7 +44,7 @@ export type ConnTreeNode = ConnFolderNode | ConnLeafNode | ConnResourceNode
 
 function makeLeaf(conn: ConnItem): ConnLeafNode {
   const provider = getConnTreeProvider(conn.kind)
-  const expandable = provider?.canExpand(conn) ?? false
+  const expandable = provider?.canExpand(conn) ?? connKindHasTree(conn.kind)
   return {
     key: connTreeKey(conn.profileId),
     label: conn.profileName,

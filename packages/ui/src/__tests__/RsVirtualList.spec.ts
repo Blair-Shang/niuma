@@ -66,4 +66,12 @@ describe('RsVirtualList', () => {
     expect(listEl.scrollTop).toBeGreaterThan(0)
     wrapper.unmount()
   })
+
+  it('applies radius none as CSS variable', () => {
+    const wrapper = mount(RsVirtualList, {
+      props: { items: ['A'], height: 64, itemSize: 32, radius: 'none' },
+    })
+    const el = wrapper.find('.rs-virtual-list').element as HTMLElement
+    expect(el.style.getPropertyValue('--rs-virtual-list-radius')).toBe('0')
+  })
 })

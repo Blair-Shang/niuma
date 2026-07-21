@@ -29,10 +29,11 @@ import {
   type ConnectionFormState,
   type ConnectionTestParams,
 } from '@/modules/ops/connection-form/index'
+import { ensureConnKindForm, prefetchConnKindForms } from '@/modules/ops/conn-kind-loaders'
 
 export type { ConnectionDlgMode, ConnectionFormState } from '@/modules/ops/connection-form/index'
 
-function emptyForm(kind: ConnKind): ConnectionFormState {
+function baseEmptyForm(kind: ConnKind): ConnectionFormState {
   return {
     profileName: '',
     hostAddress: '',
@@ -45,26 +46,17 @@ function emptyForm(kind: ConnKind): ConnectionFormState {
     sshPassphrase: '',
     connectTimeoutSeconds: '',
     accentColor: DEFAULT_CONN_ACCENT,
-    protocol: 'ftp',
-    ftpTlsMode: 'explicit',
-    ftpTlsVerify: 'true',
-    passive: 'true',
-    encoding: 'utf-8',
-    redisDatabase: '0',
-    redisTopology: 'standalone',
-  redisSentinelMasterName: '',
-  redisNodes: '',
-  mongoTopology: 'standalone',
-  mongoAuthMechanism: 'default',
-  mongoAuthDatabase: 'admin',
-  mongoReplicaSet: '',
-  mongoReadPreference: 'primary',
-  mongoSrvRecord: 'false',
-  mongoClientDriver: 'default',
-  mongoDefaultDatabase: '',
-  ...emptyProxyFormState(),
+    ...emptyProxyFormState(),
     ...emptyTunnelFormState(),
-    ...getConnectionFormAdapter(kind).defaults(),
+  }
+}
+
+function emptyForm(kind: ConnKind): ConnectionFormState {
+  const base = baseEmptyForm(kind)
+  try {
+    return { ...base, ...getConnectionFormAdapter(kind).defaults() }
+  } catch {
+    return base
   }
 }
 
@@ -78,6 +70,9 @@ function emptyProfileMap(): Record<ConnKind, ConnItem[]> {
  */
 export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k) => k.kind)) {
   const { t } = useI18n()
+
+  // 进入面板/模块页即预热表单 chunk，降低首次新建/编辑等待
+  prefetchConnKindForms(kinds)
 
   const profileMap = ref<Record<ConnKind, ConnItem[]>>(emptyProfileMap())
   const loading = ref(false)
@@ -120,6 +115,13 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
         next[kind] = profiles.map((p) => ({ ...p, kind }))
       }
       profileMap.value = next
+      // 已有站点：预取完整 kind（树菜单等）；表单另由面板 idle 预热
+      const present = new Set(results.filter((r) => r.profiles.length > 0).map((r) => r.kind))
+      void Promise.all(
+        [...present].map((kind) =>
+          import('@/modules/ops/conn-kind-loaders').then((m) => m.ensureConnKind(kind).catch(() => undefined)),
+        ),
+      )
     } catch {
       /* Platform 未就绪时静默 */
     } finally {
@@ -131,7 +133,8 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     Object.assign(form, emptyForm(kind))
   }
 
-  function openCreate(kind: ConnKind): void {
+  async function openCreate(kind: ConnKind): Promise<void> {
+    await ensureConnKindForm(kind)
     dlgMode.value = 'create'
     dlgKind.value = kind
     dlgProfile.value = null
@@ -142,6 +145,7 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
   }
 
   async function openEdit(item: ConnItem): Promise<void> {
+    await ensureConnKindForm(item.kind)
     dlgMode.value = 'edit'
     dlgKind.value = item.kind
     dlgProfile.value = item

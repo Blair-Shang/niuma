@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useSlots, watch } from 'vue'
-import type { RsComponentSize } from '../theme/types'
+import type { RsComponentSize, RsRadius } from '../theme/types'
+import { RS_COMPONENT_SIZE_ICON_PX } from '../theme/types'
+import { useResolvedRsComponentSize } from './resolve-size'
+import { rsRadiusCss, useResolvedRsRadius } from './resolve-radius'
 import RsIcon from './RsIcon.vue'
 
 const props = withDefaults(
   defineProps<{
     variant?: 'primary' | 'default' | 'secondary' | 'ghost' | 'danger' | 'link'
     size?: RsComponentSize
+    /** 圆角档位；默认 full（胶囊）。直角 UI 传 `none`。 */
+    radius?: RsRadius
     type?: 'button' | 'submit' | 'reset'
     disabled?: boolean
     loading?: boolean
@@ -17,16 +22,16 @@ const props = withDefaults(
     iconOnly?: boolean
     /** 悬浮提示文案 */
     tooltip?: string
+    /** icon-only 时无障碍标签（与 tooltip 二选一，避免与外部 RsTooltip 重复） */
+    ariaLabel?: string
     /** 默认收起文字，悬浮时展开（需配合 slot 文案） */
     revealLabel?: boolean
   }>(),
   {
     variant: 'primary',
-    size: 'md',
     type: 'button',
     disabled: false,
     loading: false,
-    iconSize: 16,
     iconOnly: false,
     revealLabel: false,
   },
@@ -34,16 +39,27 @@ const props = withDefaults(
 
 const slots = useSlots()
 const btnRef = ref<HTMLButtonElement | null>(null)
+const resolvedSize = useResolvedRsComponentSize(() => props.size)
+const resolvedRadius = useResolvedRsRadius(() => props.radius, 'full')
+const resolvedIconSize = computed(
+  () => props.iconSize ?? RS_COMPONENT_SIZE_ICON_PX[resolvedSize.value],
+)
+const rootStyle = computed(() => ({
+  '--rs-btn-radius': rsRadiusCss(resolvedRadius.value),
+}))
 
 const hasLabel = computed(() => Boolean(slots.default))
 
 const resolvedVariant = computed(() => (props.variant === 'secondary' ? 'default' : props.variant))
 
-const showFloatingText = computed(() => props.iconOnly || Boolean(props.tooltip))
+/** 仅在有 tooltip 文案或 icon-only 默认插槽文案时展示内置悬浮层 */
+const showFloatingText = computed(
+  () => Boolean(props.tooltip) || (props.iconOnly && hasLabel.value),
+)
 
 const ariaLabel = computed(() => {
   if (!props.iconOnly) return undefined
-  return props.tooltip || undefined
+  return props.ariaLabel || props.tooltip || undefined
 })
 
 /** tooltip 水平对齐方式：center / left / right */
@@ -90,11 +106,12 @@ watch(
     class="rs-btn"
     :class="{
       [`rs-btn--${resolvedVariant}`]: true,
-      [`rs-btn--${size}`]: true,
+      [`rs-btn--${resolvedSize}`]: true,
       'rs-btn--icon-only': iconOnly,
       'rs-btn--reveal-label': revealLabel && icon && hasLabel,
       'rs-btn--loading': loading,
     }"
+    :style="rootStyle"
     :aria-busy="loading || undefined"
     :aria-disabled="disabled || loading || undefined"
     :aria-label="ariaLabel"
@@ -107,7 +124,7 @@ watch(
       v-if="icon && !loading"
       class="rs-btn__icon"
       :name="icon"
-      :size="iconSize"
+      :size="resolvedIconSize"
       :label="iconOnly && tooltip ? tooltip : undefined"
     />
     <span
@@ -138,12 +155,13 @@ watch(
   gap: var(--rs-space-sm);
   min-height: var(--rs-control-height-md);
   padding: 0 var(--rs-space-lg);
-  border-radius: var(--rs-radius-full);
+  border-radius: var(--rs-btn-radius, var(--rs-radius-full));
   border: 1px solid transparent;
   font-size: var(--rs-font-size-sm);
   font-weight: 500;
   letter-spacing: 0.01em;
   line-height: var(--rs-line-height-tight);
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background var(--rs-transition-fast),
@@ -152,6 +170,12 @@ watch(
     box-shadow var(--rs-transition-fast),
     padding var(--rs-transition-normal),
     gap var(--rs-transition-normal);
+}
+.rs-btn--ssm {
+  min-height: var(--rs-control-height-ssm);
+  padding: 0 var(--rs-space-xs);
+  font-size: var(--rs-font-size-xs);
+  gap: var(--rs-space-xs);
 }
 .rs-btn--sm {
   min-height: var(--rs-control-height-sm);
@@ -194,6 +218,9 @@ watch(
 .rs-btn--icon-only {
   padding: 0;
   min-width: var(--rs-control-height-md);
+}
+.rs-btn--icon-only.rs-btn--ssm {
+  min-width: var(--rs-control-height-ssm);
 }
 .rs-btn--icon-only.rs-btn--sm {
   min-width: var(--rs-control-height-sm);
@@ -292,6 +319,9 @@ watch(
 }
 .rs-btn__icon {
   flex-shrink: 0;
+}
+.rs-btn__label {
+  white-space: nowrap;
 }
 .rs-btn__label--reveal {
   display: inline-block;

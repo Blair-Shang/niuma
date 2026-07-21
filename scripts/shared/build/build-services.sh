@@ -112,10 +112,16 @@ ftp_out="$TARGET_BIN_DIR/$(binary_name niuma-ftp-service "$PLATFORM")"
 ssh_out="$TARGET_BIN_DIR/$(binary_name niuma-ssh-service "$PLATFORM")"
 redis_out="$TARGET_BIN_DIR/$(binary_name niuma-redis-service "$PLATFORM")"
 mongo_out="$TARGET_BIN_DIR/$(binary_name niuma-mongodb-service "$PLATFORM")"
+vastbase_out="$TARGET_BIN_DIR/$(binary_name niuma-vastbase-service "$PLATFORM")"
+mysql_out="$TARGET_BIN_DIR/$(binary_name niuma-mysql-service "$PLATFORM")"
+mcp_vast_out="$TARGET_BIN_DIR/$(binary_name mcp-vastbase-readonly "$PLATFORM")"
 
 build_go_service "$REPO_ROOT/platform" "./cmd/platform-core" "$platform_out"
 build_go_service "$REPO_ROOT/services/ftp-service" "./cmd/ftp-service" "$ftp_out"
 build_go_service "$REPO_ROOT/services/mongodb-service" "./cmd/mongodb-service" "$mongo_out"
+build_go_service "$REPO_ROOT/services/vastbase-service" "./cmd/vastbase-service" "$vastbase_out"
+build_go_service "$REPO_ROOT/services/mysql-service" "./cmd/mysql-service" "$mysql_out"
+build_go_service "$REPO_ROOT/services/mcp-vastbase-readonly" "." "$mcp_vast_out"
 ssh_built="false"
 if build_rust_service "$REPO_ROOT/services/ssh-service" "niuma-ssh-service" "$ssh_out"; then
   ssh_built="true"
@@ -129,6 +135,9 @@ if should_sync_legacy_bin; then
   cp "$platform_out" "$BIN_DIR/$(binary_name niuma-platform-core "$PLATFORM")"
   cp "$ftp_out" "$BIN_DIR/$(binary_name niuma-ftp-service "$PLATFORM")"
   cp "$mongo_out" "$BIN_DIR/$(binary_name niuma-mongodb-service "$PLATFORM")"
+  cp "$vastbase_out" "$BIN_DIR/$(binary_name niuma-vastbase-service "$PLATFORM")"
+  cp "$mysql_out" "$BIN_DIR/$(binary_name niuma-mysql-service "$PLATFORM")"
+  cp "$mcp_vast_out" "$BIN_DIR/$(binary_name mcp-vastbase-readonly "$PLATFORM")"
   if [[ "$ssh_built" == "true" && -f "$ssh_out" ]]; then
     cp "$ssh_out" "$BIN_DIR/$(binary_name niuma-ssh-service "$PLATFORM")"
   fi

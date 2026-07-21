@@ -38,13 +38,13 @@ export class ConnMetadataCache {
     return task
   }
 
-  invalidate(prefix?: string): void {
-    if (!prefix) {
+  invalidate(match?: string): void {
+    if (!match) {
       this.entries.clear()
       return
     }
     for (const key of this.entries.keys()) {
-      if (key.startsWith(prefix)) {
+      if (key.includes(match)) {
         this.entries.delete(key)
       }
     }

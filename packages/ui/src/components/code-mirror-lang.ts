@@ -1,7 +1,15 @@
 import type { Extension } from '@codemirror/state'
+import type { RsCodeEditorSqlConfig } from './code-editor-utils'
+
+export interface ResolveCodeMirrorLanguageOptions {
+  sql?: RsCodeEditorSqlConfig
+}
 
 /** 按语言标识动态加载 CodeMirror 语言扩展 */
-export async function resolveCodeMirrorLanguage(lang: string): Promise<Extension[]> {
+export async function resolveCodeMirrorLanguage(
+  lang: string,
+  options?: ResolveCodeMirrorLanguageOptions,
+): Promise<Extension[]> {
   const l = lang.toLowerCase().trim()
   try {
     switch (l) {
@@ -43,8 +51,19 @@ export async function resolveCodeMirrorLanguage(lang: string): Promise<Extension
         return [json()]
       }
       case 'sql': {
-        const { sql } = await import('@codemirror/lang-sql')
-        return [sql()]
+        const { sql, PostgreSQL, StandardSQL, MySQL } = await import('@codemirror/lang-sql')
+        const dialectName = options?.sql?.dialect ?? 'postgresql'
+        let dialect = PostgreSQL
+        if (dialectName === 'mysql') dialect = MySQL
+        else if (dialectName === 'standard') dialect = StandardSQL
+        return [
+          sql({
+            dialect,
+            schema: options?.sql?.schema as never,
+            defaultTable: options?.sql?.defaultTable,
+            defaultSchema: options?.sql?.defaultSchema,
+          }),
+        ]
       }
       case 'rust':
       case 'rs': {

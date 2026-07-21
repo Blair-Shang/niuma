@@ -125,6 +125,14 @@ export interface MongoCollectionInfo {
   name: string
   type: string
   count?: number
+  /** 存储占用（字节） */
+  storageSize?: number
+  /** 平均文档大小（字节） */
+  avgObjSize?: number
+  /** 索引数量 */
+  indexCount?: number
+  /** 索引总大小（字节） */
+  indexSize?: number
 }
 
 export interface MongoTreeCollectionsResult {
@@ -197,6 +205,56 @@ export interface MongoDocumentDeleteResult {
   deleted: number
 }
 
+/** index.list 返回的单条索引摘要 */
+export interface MongoIndexInfo {
+  name: string
+  /** 索引键定义（Extended JSON 对象，保留字段顺序） */
+  keys: Record<string, unknown>
+  unique?: boolean
+  sparse?: boolean
+  /** TTL 索引过期秒数；非 TTL 索引缺省 */
+  expireAfterSeconds?: number
+  /** 完整索引定义（原始 listIndexes 文档） */
+  raw: Record<string, unknown>
+}
+
+export interface MongoIndexListParams {
+  sessionId: string
+  database: string
+  collection: string
+}
+
+export interface MongoIndexListResult {
+  indexes: MongoIndexInfo[]
+}
+
+export interface MongoIndexCreateParams {
+  sessionId: string
+  database: string
+  collection: string
+  /** 索引键（如 { userId: 1, createdAt: -1 }），顺序敏感 */
+  keys: Record<string, unknown>
+  name?: string
+  unique?: boolean
+  sparse?: boolean
+  expireAfterSeconds?: number
+}
+
+export interface MongoIndexCreateResult {
+  name: string
+}
+
+export interface MongoIndexDropParams {
+  sessionId: string
+  database: string
+  collection: string
+  name: string
+}
+
+export interface MongoIndexDropResult {
+  dropped: boolean
+}
+
 export interface MongoAggregateRunParams {
   sessionId: string
   database: string
@@ -221,6 +279,7 @@ export interface MongoAggregateExplainResult {
 
 export interface MongoMonitorStatsParams {
   sessionId: string
+  database?: string
 }
 
 export interface MongoMonitorStatsResult {
@@ -239,21 +298,211 @@ export interface MongoMonitorCurrentOpResult {
   raw?: MongoDocument
 }
 
+export interface MongoMonitorSlowLogParams {
+  sessionId: string
+  database?: string
+  count?: number
+}
+
+export interface MongoProfilingStatus {
+  level: number
+  slowms: number
+  enabled: boolean
+}
+
+export interface MongoSlowLogEntry {
+  timestamp?: string
+  durationMs: number
+  op: string
+  ns: string
+  command?: string
+  user?: string
+  client?: string
+  planSummary?: string
+  raw?: Record<string, unknown>
+}
+
+export interface MongoMonitorSlowLogResult {
+  database: string
+  profiling: MongoProfilingStatus
+  entries: MongoSlowLogEntry[]
+}
+
+export interface MongoProfilerStatusParams {
+  sessionId: string
+  database?: string
+}
+
+export interface MongoProfilerStatusResult {
+  database: string
+  profiling: MongoProfilingStatus
+}
+
+export interface MongoProfilerSetParams {
+  sessionId: string
+  database?: string
+  enabled: boolean
+  slowms?: number
+}
+
+export interface MongoProfilerSetResult {
+  database: string
+  profiling: MongoProfilingStatus
+}
+
 export interface MongoSchemaSampleParams {
   sessionId: string
   database: string
   collection: string
   sampleSize?: number
+  filter?: unknown
+  maxTimeMS?: number
+}
+
+export interface MongoSchemaTypeStat {
+  type: string
+  frequency: number
+}
+
+export interface MongoSchemaNumberBucket {
+  from: number
+  to: number
+  frequency: number
+}
+
+export interface MongoSchemaNumberStats {
+  min: number
+  max: number
+  buckets?: MongoSchemaNumberBucket[]
+}
+
+export interface MongoSchemaDateStats {
+  min: string
+  max: string
+  buckets?: MongoSchemaDateBucket[]
+}
+
+export interface MongoSchemaDateBucket {
+  from: string
+  to: string
+  frequency: number
+}
+
+export interface MongoSchemaGeoPoint {
+  lng: number
+  lat: number
+}
+
+export interface MongoSchemaGeoStats {
+  points: MongoSchemaGeoPoint[]
+}
+
+export interface MongoSchemaStringBucket {
+  value: string
+  frequency: number
+}
+
+export interface MongoSchemaStringStats {
+  topValues: MongoSchemaStringBucket[]
 }
 
 export interface MongoSchemaField {
   path: string
   types: string[]
   frequency: number
+  typeBreakdown?: MongoSchemaTypeStat[]
+  numberStats?: MongoSchemaNumberStats
+  dateStats?: MongoSchemaDateStats
+  stringStats?: MongoSchemaStringStats
+  geoStats?: MongoSchemaGeoStats
+  samples?: string[]
 }
 
 export interface MongoSchemaSampleResult {
   fields: MongoSchemaField[]
+  sampleCount: number
+  sampleSize: number
+}
+
+export interface MongoSchemaValidatorParams {
+  sessionId: string
+  database: string
+  collection: string
+}
+
+export interface MongoSchemaValidator {
+  validator?: Record<string, unknown>
+  validationLevel?: string
+  validationAction?: string
+}
+
+export interface MongoSchemaValidatorSetParams extends MongoSchemaValidatorParams {
+  validator: unknown
+  validationLevel?: string
+  validationAction?: string
+}
+
+export interface MongoSchemaValidatorSetResult {
+  applied: boolean
+}
+
+export interface MongoPipelineSuggestParams {
+  sessionId: string
+  database: string
+  collection: string
+  text: string
+  line: number
+  column: number
+  prefix?: string
+  triggerCharacter?: string
+}
+
+export interface MongoPipelineSuggestion {
+  label: string
+  insertText: string
+  detail?: string
+  documentation?: string
+  filterText?: string
+  sortText?: string
+  kind?: 'snippet' | 'keyword' | 'property' | 'field' | 'function' | 'value'
+}
+
+export interface MongoPipelineSuggestResult {
+  suggestions: MongoPipelineSuggestion[]
+  context?: string
+}
+
+export interface MongoQuerySuggestParams {
+  sessionId: string
+  database: string
+  collection: string
+  text: string
+  line: number
+  column: number
+  prefix?: string
+  triggerCharacter?: string
+}
+
+export interface MongoQuerySuggestResult {
+  suggestions: MongoPipelineSuggestion[]
+  context?: string
+}
+
+export interface MongoQueryExecParams {
+  sessionId: string
+  database: string
+  input: string
+  explain?: boolean
+  toolPaths?: Record<string, string>
+}
+
+export interface MongoQueryExecResult {
+  documents?: unknown[]
+  document?: unknown
+  explain?: unknown
+  count?: number
+  output?: string
+  engine?: 'mongosh' | 'driver' | string
 }
 
 export interface MongoCommandExecParams {
@@ -285,7 +534,10 @@ export interface MongoShellDetectParams {
   toolPaths?: Record<string, string>
 }
 
-export interface MongoShellDetectResult extends MongoToolDetectEntry {}
+export interface MongoShellDetectResult extends MongoToolDetectEntry {
+  /** 当前平台是否支持交互式 PTY；Windows 上为 false */
+  ptySupported?: boolean
+}
 
 export interface MongoShellOpenParams {
   sessionId: string
@@ -412,8 +664,20 @@ export interface MongoMonitorStreamStopResult {
   stopped: boolean
 }
 
+export type MongoChangeStreamState = 'idle' | 'starting' | 'ready' | 'closed' | 'lost'
+
+export interface MongoMonitorStateEvent {
+  type: 'mongodb.monitor.state'
+  streamId: string
+  sessionId: string
+  state: 'ready' | 'closed' | 'lost'
+  message: string
+}
+
 export interface MongoMonitorEvent {
   type: 'mongodb.monitor.event'
   streamId: string
   document: Record<string, unknown>
 }
+
+export type MongoMonitorStreamEvent = MongoMonitorStateEvent | MongoMonitorEvent

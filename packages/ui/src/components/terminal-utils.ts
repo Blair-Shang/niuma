@@ -211,6 +211,11 @@ export function readTerminalRowStripeFromCss(mode: RsResolvedTerminalTheme): str
   return readCssVar(TERMINAL_ROW_STRIPE_VAR, themeSourceElement(mode))
 }
 
+/** PTY 输出是否含终端控制序列（ESC / CSI），此类数据不应批量延迟。 */
+export function containsEscapeSequence(data: string): boolean {
+  return data.includes('\x1b') || data.includes('\x9b')
+}
+
 const TUI_REFRESH_PATTERN =
   /\x1b\[[0-9;]*[Hf]|\x1b\[2J|\x1b\[\?1049[hl]|\x1b\[\?47[hl]|\x1b\[1049[hl]/
 

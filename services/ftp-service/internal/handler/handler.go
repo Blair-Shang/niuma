@@ -70,6 +70,7 @@ const (
 	errSessionIDRequired      = "sessionId required"
 	errSessionIDPathRequired  = "sessionId and path required"
 	errTaskIDRequired         = "taskId required"
+	errSessionBusy            = "ftp: session busy: transfer in progress"
 )
 
 type Request struct {
@@ -193,10 +194,11 @@ type FtpEntry struct {
 }
 
 type session struct {
-	id         string
-	conn       *ftp.ServerConn
-	mu         sync.Mutex
-	tunnelStop func() // non-nil when a SSH tunnel is active; call to tear down forwarding
+	id            string
+	conn          *ftp.ServerConn
+	mu            sync.Mutex
+	tunnelStop    func() // non-nil when a SSH tunnel is active; call to tear down forwarding
+	keepaliveStop chan struct{}
 }
 
 // Dispatcher 管理 FTP 会话并处理方法。
@@ -283,8 +285,14 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 		}
 		return errorResponse(req.ID, err.Error())
 	}
+	sess := &session{id: sessionID, conn: conn, tunnelStop: tunnelStop}
+	keepaliveSecs := params.Options.effectiveKeepaliveSeconds()
+	if keepaliveSecs <= 0 {
+		keepaliveSecs = defaultKeepaliveSeconds
+	}
+	startSessionKeepalive(sess, keepaliveSecs)
 	d.mu.Lock()
-	d.sessions[sessionID] = &session{id: sessionID, conn: conn, tunnelStop: tunnelStop}
+	d.sessions[sessionID] = sess
 	d.mu.Unlock()
 	slog.Info(MethodSessionOpen, "session", sessionID, "host", params.HostAddress, "port", params.PortNumber)
 	return okResponse(req.ID, map[string]any{"sessionId": sessionID})
@@ -299,9 +307,10 @@ func (d *Dispatcher) sessionClose(_ context.Context, req Request) Response {
 		return errorResponse(req.ID, errSessionIDRequired)
 	}
 	if err := d.closeSession(params.SessionID); err != nil {
+		slog.Error(MethodSessionClose, "session", params.SessionID, "err", err)
 		return errorResponse(req.ID, err.Error())
 	}
-	slog.Info("session.close", "session", params.SessionID)
+	slog.Info(MethodSessionClose, "session", params.SessionID)
 	return okResponse(req.ID, map[string]any{"closed": true})
 }
 
@@ -312,12 +321,14 @@ func (d *Dispatcher) sessionTest(ctx context.Context, req Request) Response {
 	}
 	conn, tunnelStop, err := dialFTPWithTunnel(ctx, params)
 	if err != nil {
+		slog.Warn(MethodSessionTest, "host", params.HostAddress, "port", params.PortNumber, "ok", false, "err", err)
 		return okResponse(req.ID, map[string]any{"ok": false, "message": err.Error()})
 	}
 	_ = conn.Quit()
 	if tunnelStop != nil {
 		tunnelStop()
 	}
+	slog.Info(MethodSessionTest, "host", params.HostAddress, "port", params.PortNumber, "ok", true)
 	return okResponse(req.ID, map[string]any{"ok": true, "message": "connected"})
 }
 
@@ -329,21 +340,26 @@ func (d *Dispatcher) dirList(_ context.Context, req Request) Response {
 	if params.SessionID == "" {
 		return errorResponse(req.ID, errSessionIDRequired)
 	}
-	s, err := d.getSession(params.SessionID)
-	if err != nil {
-		return errorResponse(req.ID, err.Error())
-	}
 	path := normalizeRemotePath(params.Path)
-	s.mu.Lock()
-	entries, err := s.conn.List(path)
-	s.mu.Unlock()
+	var entries []*ftp.Entry
+	err := d.withSessionTryLock(params.SessionID, func(conn *ftp.ServerConn) error {
+		var listErr error
+		entries, listErr = conn.List(path)
+		return listErr
+	})
 	if err != nil {
+		if err.Error() == errSessionBusy {
+			slog.Warn(MethodDirList, "session", params.SessionID, "path", path, "reason", "busy")
+		} else {
+			slog.Error(MethodDirList, "session", params.SessionID, "path", path, "err", err)
+		}
 		return errorResponse(req.ID, fmt.Sprintf("ftp: list %q: %v", path, err))
 	}
 	out := make([]FtpEntry, 0, len(entries))
 	for _, ent := range entries {
 		out = append(out, toFtpEntry(ent))
 	}
+	slog.Info(MethodDirList, "session", params.SessionID, "path", path, "entries", len(out))
 	return okResponse(req.ID, map[string]any{"path": path, "entries": out})
 }
 
@@ -355,16 +371,16 @@ func (d *Dispatcher) dirMake(_ context.Context, req Request) Response {
 	if params.SessionID == "" {
 		return errorResponse(req.ID, errSessionIDRequired)
 	}
-	s, err := d.getSession(params.SessionID)
-	if err != nil {
-		return errorResponse(req.ID, err.Error())
-	}
 	path := normalizeRemotePath(params.Path)
-	s.mu.Lock()
-	err = s.conn.MakeDir(path)
-	s.mu.Unlock()
+	err := d.withSessionTryLock(params.SessionID, func(conn *ftp.ServerConn) error {
+		return conn.MakeDir(path)
+	})
 	if err != nil {
-		slog.Error(MethodDirMake, "session", params.SessionID, "path", path, "err", err)
+		if err.Error() == errSessionBusy {
+			slog.Warn(MethodDirMake, "session", params.SessionID, "path", path, "reason", "busy")
+		} else {
+			slog.Error(MethodDirMake, "session", params.SessionID, "path", path, "err", err)
+		}
 		return errorResponse(req.ID, fmt.Sprintf("ftp: mkdir %q: %v", path, err))
 	}
 	slog.Info(MethodDirMake, "session", params.SessionID, "path", path)
@@ -381,40 +397,43 @@ func (d *Dispatcher) entryDelete(_ context.Context, req Request) Response {
 		slog.Warn(MethodEntryDelete, "result", "rejected", "reason", "missing sessionId or path")
 		return errorResponse(req.ID, errSessionIDPathRequired)
 	}
-	s, err := d.getSession(params.SessionID)
-	if err != nil {
-		slog.Warn(MethodEntryDelete, "result", "rejected", "session", params.SessionID, "reason", err.Error())
-		return errorResponse(req.ID, err.Error())
-	}
 	targetPath := normalizeRemotePath(params.Path)
 	kind := params.Kind
 	if kind == "" {
 		kind = "file"
 	}
-	s.mu.Lock()
-	if kind == "dir" {
-		if params.Recursive {
-			err = removeRemoteDirRecursiveSafe(s.conn, targetPath)
+	var cwd string
+	err := d.withSessionTryLock(params.SessionID, func(conn *ftp.ServerConn) error {
+		var opErr error
+		if kind == "dir" {
+			if params.Recursive {
+				opErr = removeRemoteDirRecursiveSafe(conn, targetPath)
+			} else {
+				leaveDeleteTargetIfInside(conn, targetPath)
+				opErr = conn.RemoveDir(targetPath)
+			}
 		} else {
-			leaveDeleteTargetIfInside(s.conn, targetPath)
-			err = s.conn.RemoveDir(targetPath)
+			opErr = conn.Delete(targetPath)
 		}
-	} else {
-		err = s.conn.Delete(targetPath)
-	}
-	// 失败时记录当前 CWD，便于定位 ftp 库的递归删除/切目录假设问题。
-	cwd, _ := s.conn.CurrentDir()
-	s.mu.Unlock()
+		if opErr != nil {
+			cwd, _ = conn.CurrentDir()
+		}
+		return opErr
+	})
 	if err != nil {
-		slog.Error(MethodEntryDelete,
-			"session", params.SessionID,
-			"path", targetPath,
-			"kind", kind,
-			"recursive", params.Recursive,
-			"cwd", normalizeRemotePath(cwd),
-			"result", "failed",
-			"err", err,
-		)
+		if err.Error() == errSessionBusy {
+			slog.Warn(MethodEntryDelete, "session", params.SessionID, "path", targetPath, "reason", "busy")
+		} else {
+			slog.Error(MethodEntryDelete,
+				"session", params.SessionID,
+				"path", targetPath,
+				"kind", kind,
+				"recursive", params.Recursive,
+				"cwd", normalizeRemotePath(cwd),
+				"result", "failed",
+				"err", err,
+			)
+		}
 		return errorResponse(req.ID, fmt.Sprintf("ftp: delete %q: %v", targetPath, err))
 	}
 	slog.Info(MethodEntryDelete,
@@ -435,17 +454,17 @@ func (d *Dispatcher) entryRename(_ context.Context, req Request) Response {
 	if params.SessionID == "" || params.FromPath == "" || params.ToPath == "" {
 		return errorResponse(req.ID, "sessionId, fromPath and toPath required")
 	}
-	s, err := d.getSession(params.SessionID)
-	if err != nil {
-		return errorResponse(req.ID, err.Error())
-	}
 	fromPath := normalizeRemotePath(params.FromPath)
 	toPath := normalizeRemotePath(params.ToPath)
-	s.mu.Lock()
-	err = s.conn.Rename(fromPath, toPath)
-	s.mu.Unlock()
+	err := d.withSessionTryLock(params.SessionID, func(conn *ftp.ServerConn) error {
+		return conn.Rename(fromPath, toPath)
+	})
 	if err != nil {
-		slog.Error(MethodEntryRename, "session", params.SessionID, "from", fromPath, "to", toPath, "err", err)
+		if err.Error() == errSessionBusy {
+			slog.Warn(MethodEntryRename, "session", params.SessionID, "from", fromPath, "to", toPath, "reason", "busy")
+		} else {
+			slog.Error(MethodEntryRename, "session", params.SessionID, "from", fromPath, "to", toPath, "err", err)
+		}
 		return errorResponse(req.ID, fmt.Sprintf("ftp: rename %q -> %q: %v", fromPath, toPath, err))
 	}
 	slog.Info(MethodEntryRename, "session", params.SessionID, "from", fromPath, "to", toPath)
@@ -459,6 +478,18 @@ func (d *Dispatcher) acquireConn(sessionID string) (*ftp.ServerConn, func(), err
 	}
 	s.mu.Lock()
 	return s.conn, func() { s.mu.Unlock() }, nil
+}
+
+func (d *Dispatcher) withSessionTryLock(sessionID string, fn func(*ftp.ServerConn) error) error {
+	s, err := d.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	if !s.mu.TryLock() {
+		return fmt.Errorf("%s", errSessionBusy)
+	}
+	defer s.mu.Unlock()
+	return fn(s.conn)
 }
 
 type transferEnqueueParams struct {
@@ -510,8 +541,10 @@ func (d *Dispatcher) transferCancel(_ context.Context, req Request) Response {
 		return errorResponse(req.ID, errTaskIDRequired)
 	}
 	if err := d.xfers.Cancel(params.TaskID); err != nil {
+		slog.Error(MethodTransferCancel, "task", params.TaskID, "err", err)
 		return errorResponse(req.ID, err.Error())
 	}
+	slog.Info(MethodTransferCancel, "task", params.TaskID)
 	return okResponse(req.ID, map[string]any{"ok": true})
 }
 
@@ -524,8 +557,10 @@ func (d *Dispatcher) transferPause(_ context.Context, req Request) Response {
 		return errorResponse(req.ID, errTaskIDRequired)
 	}
 	if err := d.xfers.Pause(params.TaskID); err != nil {
+		slog.Error(MethodTransferPause, "task", params.TaskID, "err", err)
 		return errorResponse(req.ID, err.Error())
 	}
+	slog.Info(MethodTransferPause, "task", params.TaskID)
 	return okResponse(req.ID, map[string]any{"ok": true})
 }
 
@@ -538,8 +573,10 @@ func (d *Dispatcher) transferResume(_ context.Context, req Request) Response {
 		return errorResponse(req.ID, errTaskIDRequired)
 	}
 	if err := d.xfers.Resume(params.TaskID); err != nil {
+		slog.Error(MethodTransferResume, "task", params.TaskID, "err", err)
 		return errorResponse(req.ID, err.Error())
 	}
+	slog.Info(MethodTransferResume, "task", params.TaskID)
 	return okResponse(req.ID, map[string]any{"ok": true})
 }
 
@@ -561,27 +598,32 @@ func (d *Dispatcher) fileRead(_ context.Context, req Request) Response {
 	if params.SessionID == "" || params.Path == "" {
 		return errorResponse(req.ID, errSessionIDPathRequired)
 	}
-	s, err := d.getSession(params.SessionID)
-	if err != nil {
-		return errorResponse(req.ID, err.Error())
-	}
 	path := normalizeRemotePath(params.Path)
-	s.mu.Lock()
-	resp, err := s.conn.Retr(path)
-	s.mu.Unlock()
+	var data []byte
+	err := d.withSessionTryLock(params.SessionID, func(conn *ftp.ServerConn) error {
+		resp, retrErr := conn.Retr(path)
+		if retrErr != nil {
+			return retrErr
+		}
+		defer resp.Close()
+		limited := io.LimitReader(resp, maxFileReadSize+1)
+		var readErr error
+		data, readErr = io.ReadAll(limited)
+		return readErr
+	})
 	if err != nil {
+		if err.Error() == errSessionBusy {
+			slog.Warn(MethodFileRead, "session", params.SessionID, "path", path, "reason", "busy")
+		} else {
+			slog.Error(MethodFileRead, "session", params.SessionID, "path", path, "err", err)
+		}
 		return errorResponse(req.ID, fmt.Sprintf("ftp: retr %q: %v", path, err))
 	}
-	defer resp.Close()
-
-	limited := io.LimitReader(resp, maxFileReadSize+1)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return errorResponse(req.ID, fmt.Sprintf("ftp: read %q: %v", path, err))
-	}
 	if len(data) > maxFileReadSize {
+		slog.Warn(MethodFileRead, "session", params.SessionID, "path", path, "reason", "too_large", "bytes", len(data))
 		return errorResponse(req.ID, "file too large")
 	}
+	slog.Info(MethodFileRead, "session", params.SessionID, "path", path, "bytes", len(data))
 	return okResponse(req.ID, map[string]any{
 		"content": string(data),
 		"size":    len(data),
@@ -597,16 +639,16 @@ func (d *Dispatcher) fileWrite(_ context.Context, req Request) Response {
 	if params.SessionID == "" || params.Path == "" {
 		return errorResponse(req.ID, errSessionIDPathRequired)
 	}
-	s, err := d.getSession(params.SessionID)
-	if err != nil {
-		return errorResponse(req.ID, err.Error())
-	}
 	path := normalizeRemotePath(params.Path)
-	s.mu.Lock()
-	err = s.conn.Stor(path, bytes.NewReader([]byte(params.Content)))
-	s.mu.Unlock()
+	err := d.withSessionTryLock(params.SessionID, func(conn *ftp.ServerConn) error {
+		return conn.Stor(path, bytes.NewReader([]byte(params.Content)))
+	})
 	if err != nil {
-		slog.Error(MethodFileWrite, "session", params.SessionID, "path", path, "err", err)
+		if err.Error() == errSessionBusy {
+			slog.Warn(MethodFileWrite, "session", params.SessionID, "path", path, "reason", "busy")
+		} else {
+			slog.Error(MethodFileWrite, "session", params.SessionID, "path", path, "err", err)
+		}
 		return errorResponse(req.ID, fmt.Sprintf("ftp: stor %q: %v", path, err))
 	}
 	slog.Info(MethodFileWrite, "session", params.SessionID, "path", path, "bytes", len(params.Content))
@@ -632,7 +674,8 @@ func (d *Dispatcher) closeSession(sessionID string) error {
 	}
 	delete(d.sessions, sessionID)
 	d.mu.Unlock()
-	d.xfers.CancelSession(sessionID)
+	stopSessionKeepalive(s)
+	d.xfers.StopSession(sessionID)
 	var connErr error
 	if s.conn != nil {
 		connErr = s.conn.Quit()

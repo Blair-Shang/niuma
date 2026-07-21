@@ -148,6 +148,8 @@ const expandedKeysInternal = ref<string[]>(
     ? collectExpandableKeys(props.nodes, fields.value, props.lazy)
     : [...props.defaultExpandedKeys],
 )
+/** 进入过滤前的展开快照；清空过滤时还原，避免无匹配时被清空后无法恢复 */
+const expandedKeysBeforeFilter = ref<string[] | null>(null)
 const checkedKeysInternal = ref<string[]>([...props.defaultCheckedKeys])
 const scrollTop = ref(0)
 const focusedKey = ref<string | null>(null)
@@ -235,7 +237,7 @@ if (import.meta.env.DEV) {
 
 const viewportHeightPx = computed(() => {
   if (props.height !== undefined) {
-    return Number.parseInt(resolveVirtualListHeight(props.height, 320), 10)
+    return Number.parseInt(resolveVirtualListHeight(props.height, 320) ?? '', 10)
   }
   return _measuredHeight.value > 0 ? _measuredHeight.value : 320
 })
@@ -257,6 +259,8 @@ const visibleFlatNodes = computed(() => virtualSlice.value.nodes)
 const isEmpty = computed(() => displayNodes.value.length === 0)
 const showDragHandle = computed(() => props.draggable && props.dragTrigger === 'handle')
 const dragWholeRow = computed(() => props.draggable && props.dragTrigger === 'row')
+/** 限定高度或虚拟滚动时铺满父级，并用 ::before 捕获空白区右键（对齐 RsTable shell） */
+const fillCapture = computed(() => props.virtual || props.height !== undefined)
 
 const viewportStyle = computed(() => {
   if (!useVirtualScroll.value && props.height === undefined) return undefined
@@ -275,15 +279,25 @@ const selectedSet = computed(() => {
 watch(
   () => props.filter,
   (keyword) => {
-    if (!props.autoExpandParent || !keyword.trim()) return
-    expandedKeys.value = collectExpandableKeys(
-      filterTreeNodes(props.nodes, keyword, {
-        fieldNames: fields.value,
-        filterNode: props.filterNode,
-      }),
-      fields.value,
-      props.lazy,
-    )
+    if (!props.autoExpandParent) return
+    const query = keyword.trim()
+    if (!query) {
+      if (expandedKeysBeforeFilter.value !== null) {
+        expandedKeys.value = expandedKeysBeforeFilter.value
+        expandedKeysBeforeFilter.value = null
+      }
+      return
+    }
+    if (expandedKeysBeforeFilter.value === null) {
+      expandedKeysBeforeFilter.value = [...expandedKeys.value]
+    }
+    const filtered = filterTreeNodes(props.nodes, keyword, {
+      fieldNames: fields.value,
+      filterNode: props.filterNode,
+    })
+    // 无匹配时不覆盖展开键，否则清空搜索后原展开状态会丢失
+    if (filtered.length === 0) return
+    expandedKeys.value = collectExpandableKeys(filtered, fields.value, props.lazy)
   },
   { immediate: true },
 )
@@ -610,6 +624,7 @@ defineExpose({
       `rs-tree--${size}`,
       {
         'rs-tree--virtual': useVirtualScroll,
+        'rs-tree--fill-capture': fillCapture,
         'rs-tree--block': blockNode,
         'rs-tree--line': showLine,
         'rs-tree--draggable': draggable,
@@ -624,6 +639,7 @@ defineExpose({
   >
     <RsEmpty
       v-if="isEmpty"
+      fill
       class="rs-tree__empty"
       :description="t('tree.empty')"
     />
@@ -678,12 +694,27 @@ defineExpose({
             @click="blockNode ? handleRowClick(entry.node, entry.key, $event) : undefined"
             @dblclick="handleRowDblclick(entry.node, entry.key, $event)"
           >
-            <span
-              v-if="showLine"
-              class="rs-tree__line-guide"
-              :style="{ insetInlineStart: `${entry.depth * indentPx + indentPx / 2}px` }"
-              aria-hidden="true"
-            />
+            <span v-if="showLine" class="rs-tree__lines" aria-hidden="true">
+              <span
+                v-for="(draw, level) in entry.levelLines"
+                v-show="draw"
+                :key="`v-${level}`"
+                class="rs-tree__line-vert"
+                :style="{ insetInlineStart: `${level * indentPx + indentPx / 2}px` }"
+              />
+              <span
+                class="rs-tree__line-vert rs-tree__line-vert--self"
+                :class="{ 'rs-tree__line-vert--end': entry.isLast }"
+                :style="{ insetInlineStart: `${entry.depth * indentPx + indentPx / 2}px` }"
+              />
+              <span
+                class="rs-tree__line-horz"
+                :style="{
+                  insetInlineStart: `${entry.depth * indentPx + indentPx / 2}px`,
+                  width: `${indentPx / 2}px`,
+                }"
+              />
+            </span>
 
             <span
               v-if="showDragHandle"
@@ -816,6 +847,29 @@ defineExpose({
   outline: none;
 }
 
+/* 限定高度 / 虚拟滚动：铺满父级，::before 捕获节点列表下方空白区右键 */
+.rs-tree--fill-capture {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+
+.rs-tree--fill-capture::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.rs-tree--fill-capture > .rs-tree__empty,
+.rs-tree--fill-capture > .rs-tree__viewport {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
 .rs-tree:focus-visible {
   box-shadow: 0 0 0 var(--rs-focus-ring-width, 2px) var(--rs-focus-ring);
   border-radius: var(--rs-radius-sm);
@@ -914,41 +968,39 @@ defineExpose({
   background: color-mix(in srgb, var(--rs-primary) 8%, transparent);
 }
 
-.rs-tree--line .rs-tree__line-guide {
+.rs-tree--line .rs-tree__lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rs-tree--line .rs-tree__line-vert {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 1px;
   background: var(--rs-border-subtle);
-  pointer-events: none;
 }
 
-.rs-tree--line .rs-tree__item:not(:last-child) .rs-tree__row::after {
-  content: '';
+.rs-tree--line .rs-tree__line-vert--self.rs-tree__line-vert--end {
+  bottom: 50%;
+}
+
+.rs-tree--line .rs-tree__line-horz {
   position: absolute;
   top: 50%;
-  left: calc(var(--rs-space-xs) + 0.625rem);
-  width: 0.625rem;
   height: 1px;
   background: var(--rs-border-subtle);
-  pointer-events: none;
 }
 
 .rs-tree__drag-handle {
   display: inline-flex;
   align-items: center;
   color: var(--rs-muted);
-  cursor: grab;
+  cursor: move;
   flex: 0 0 auto;
 }
 
-.rs-tree--drag-row .rs-tree__row:not(.rs-tree__row--disabled) {
-  cursor: grab;
-}
-
-.rs-tree--drag-row .rs-tree__row:not(.rs-tree__row--disabled):active {
-  cursor: grabbing;
-}
 
 .rs-tree__toggle,
 .rs-tree__spacer {

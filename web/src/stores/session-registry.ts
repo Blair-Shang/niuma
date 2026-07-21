@@ -44,7 +44,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { ftpApi, mongodbApi, redisApi, sshApi } from '@/api'
+import { ftpApi, mongodbApi, mysqlApi, redisApi, sshApi, vastbaseApi } from '@/api'
 import type { ConnKind } from '@/modules/ops/types'
 import {
   SESSION_POLICY,
@@ -52,6 +52,28 @@ import {
   type AcquireOpts,
 } from '@/modules/connection/session-policy'
 import type { SessionReleaseCleanup } from '@/modules/connection/session-release'
+import type { SqlServerProfile } from '@/modules/sql-editor/capabilities'
+import { defaultMySQLProfile, defaultVastbaseProfile } from '@/modules/sql-editor/capabilities'
+
+/** Bridge dialect 原始形状（Vastbase / MySQL 同构） */
+interface BridgeDialectProfile {
+  family: string
+  version?: string
+  versionNum?: string
+  sqlCompatibility?: string
+  capabilities: string[]
+}
+
+function toSqlServerProfile(raw: BridgeDialectProfile | undefined): SqlServerProfile | undefined {
+  if (!raw?.family || !Array.isArray(raw.capabilities)) return undefined
+  return {
+    family: raw.family,
+    version: raw.version,
+    versionNum: raw.versionNum,
+    sqlCompatibility: raw.sqlCompatibility,
+    capabilities: raw.capabilities,
+  }
+}
 
 /** `acquire` / `forceReconnect` 的返回值 */
 export interface AcquireResult {
@@ -77,6 +99,8 @@ interface SessionLease {
   kind: ConnKind
   profileId: string
   sessionId: string
+  /** Vastbase 等：会话探测的方言能力集 */
+  dialect?: SqlServerProfile
   /** 当前借用此连接的 Tab 集合；size=0 时进入断开判定 */
   tabBindings: Map<string, TabBinding>
   lastUsedAt: number
@@ -96,7 +120,7 @@ export const useSessionRegistry = defineStore('session-registry', () => {
    * 并发 acquire 去重：同一 key 同时只有一个 in-flight `session.open`。
    * 避免两个 Tab 几乎同时打开时重复建连。
    */
-  const inflightOpens = new Map<string, Promise<string>>()
+  const inflightOpens = new Map<string, Promise<{ sessionId: string; dialect?: SqlServerProfile }>>()
 
   /**
    * 不可变更新 leases（替换整个 Map 引用），保证 Pinia 响应式与连接树「已连接」态刷新。
@@ -118,16 +142,33 @@ export const useSessionRegistry = defineStore('session-registry', () => {
   }
 
   /** Bridge 调用：按协议打开 Layer-1 物理会话 */
-  async function openRemoteSession(kind: ConnKind, profileId: string): Promise<string> {
+  async function openRemoteSession(
+    kind: ConnKind,
+    profileId: string,
+  ): Promise<{ sessionId: string; dialect?: SqlServerProfile }> {
     switch (kind) {
       case 'ssh':
-        return (await sshApi.sessionOpen({ profileId })).sessionId
+        return { sessionId: (await sshApi.sessionOpen({ profileId })).sessionId }
       case 'ftp':
-        return (await ftpApi.sessionOpen({ profileId })).sessionId
+        return { sessionId: (await ftpApi.sessionOpen({ profileId })).sessionId }
       case 'redis':
-        return (await redisApi.sessionOpen({ profileId })).sessionId
+        return { sessionId: (await redisApi.sessionOpen({ profileId })).sessionId }
       case 'mongodb':
-        return (await mongodbApi.sessionOpen({ profileId })).sessionId
+        return { sessionId: (await mongodbApi.sessionOpen({ profileId })).sessionId }
+      case 'vastbase': {
+        const r = await vastbaseApi.sessionOpen({ profileId })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultVastbaseProfile(),
+        }
+      }
+      case 'mysql': {
+        const r = await mysqlApi.sessionOpen({ profileId })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultMySQLProfile(),
+        }
+      }
     }
   }
 
@@ -146,6 +187,12 @@ export const useSessionRegistry = defineStore('session-registry', () => {
           break
         case 'mongodb':
           await mongodbApi.sessionClose({ sessionId })
+          break
+        case 'vastbase':
+          await vastbaseApi.sessionClose({ sessionId })
+          break
+        case 'mysql':
+          await mysqlApi.sessionClose({ sessionId })
           break
       }
     } catch {
@@ -210,14 +257,16 @@ export const useSessionRegistry = defineStore('session-registry', () => {
   }
 
   /**
-   * 确保某 sessionKey 对应 Layer-1 已有 sessionId。
+   * 确保某 sessionKey 对应 Layer-1 已有 sessionId（及可选方言档案）。
    * lease 未登记但 open 已在进行时，复用 inflightOpens 中的 Promise。
    */
-  async function ensureSessionId(opts: AcquireOpts): Promise<string> {
+  async function ensureSessionOpen(
+    opts: AcquireOpts,
+  ): Promise<{ sessionId: string; dialect?: SqlServerProfile }> {
     const key = buildSessionKey(opts)
     const existing = leases.value.get(key)
     if (existing) {
-      return existing.sessionId
+      return { sessionId: existing.sessionId, dialect: existing.dialect }
     }
 
     let inflight = inflightOpens.get(key)
@@ -256,19 +305,20 @@ export const useSessionRegistry = defineStore('session-registry', () => {
       return { sessionId: existing.sessionId, isNew: false }
     }
 
-    const sessionId = await ensureSessionId(opts)
+    const opened = await ensureSessionOpen(opts)
     const lease: SessionLease = {
       key,
       kind: opts.kind,
       profileId: opts.profileId,
-      sessionId,
+      sessionId: opened.sessionId,
+      dialect: opened.dialect,
       tabBindings: new Map([[opts.tabId, { tabId: opts.tabId, onRelease: hooks?.onRelease }]]),
       lastUsedAt: Date.now(),
     }
     replaceLeases((map) => {
       map.set(key, lease)
     })
-    return { sessionId, isNew: true }
+    return { sessionId: opened.sessionId, isNew: true }
   }
 
   /**
@@ -365,6 +415,43 @@ export const useSessionRegistry = defineStore('session-registry', () => {
     return getLeaseByTabId(tabId)?.sessionId ?? null
   }
 
+  /** 按 sessionId 取方言能力集（Vastbase 等） */
+  function getDialectForSession(sessionId: string | null | undefined): SqlServerProfile | null {
+    if (!sessionId) return null
+    for (const lease of leases.value.values()) {
+      if (lease.sessionId === sessionId) {
+        return lease.dialect ?? null
+      }
+    }
+    return null
+  }
+
+  /** 按 Tab 取方言能力集 */
+  function getDialectForTab(tabId: string): SqlServerProfile | null {
+    return getLeaseByTabId(tabId)?.dialect ?? null
+  }
+
+  /** 按 profile 取任一存活 lease（树右键新建 DDL 等无 Tab 上下文时） */
+  function getLeaseByProfile(
+    profileId: string,
+    kind?: ConnKind,
+  ): SessionLease | null {
+    for (const lease of leases.value.values()) {
+      if (lease.profileId !== profileId) continue
+      if (kind && lease.kind !== kind) continue
+      return lease
+    }
+    return null
+  }
+
+  function getSessionIdForProfile(profileId: string, kind?: ConnKind): string | null {
+    return getLeaseByProfile(profileId, kind)?.sessionId ?? null
+  }
+
+  function getDialectForProfile(profileId: string, kind?: ConnKind): SqlServerProfile | null {
+    return getLeaseByProfile(profileId, kind)?.dialect ?? null
+  }
+
   return {
     /** 只读租约表（调试 / 连接树响应式） */
     leases,
@@ -375,5 +462,10 @@ export const useSessionRegistry = defineStore('session-registry', () => {
     disconnect,
     isProfileConnected,
     getSessionIdForTab,
+    getDialectForSession,
+    getDialectForTab,
+    getLeaseByProfile,
+    getSessionIdForProfile,
+    getDialectForProfile,
   }
 })

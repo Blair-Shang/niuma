@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,10 +84,16 @@ func (m *ToolsManager) Dump(ctx context.Context, sessionID, database, outputDir 
 			return "", err
 		}
 	}
-	uri, env, err := CLIEnv(sess.Params, database)
+	uri, env, err := CLIToolURI(sess.Params)
 	if err != nil {
 		return "", err
 	}
+	slog.Info("tools.dump.auth",
+		"session", sessionID,
+		"hasUser", strings.TrimSpace(sess.Params.LoginAccount) != "",
+		"hasSecret", strings.TrimSpace(sess.Params.Secret) != "",
+		"authDatabase", strings.TrimSpace(sess.Params.Options.AuthDatabase),
+	)
 	args := MongodumpArgs(uri, database, outputDir, options)
 	return m.start(ctx, sessionID, exe, args, env, outputDir)
 }
@@ -100,7 +107,7 @@ func (m *ToolsManager) Restore(ctx context.Context, sessionID, inputDir string, 
 	if strings.TrimSpace(inputDir) == "" {
 		return "", fmt.Errorf("inputDir required")
 	}
-	uri, env, err := CLIEnv(sess.Params, "")
+	uri, env, err := CLIToolURI(sess.Params)
 	if err != nil {
 		return "", err
 	}
@@ -123,10 +130,16 @@ func (m *ToolsManager) Export(ctx context.Context, sessionID, database, collecti
 			return "", err
 		}
 	}
-	uri, env, err := CLIEnv(sess.Params, database)
+	uri, env, err := CLIToolURI(sess.Params)
 	if err != nil {
 		return "", err
 	}
+	slog.Info("tools.export.auth",
+		"session", sessionID,
+		"hasUser", strings.TrimSpace(sess.Params.LoginAccount) != "",
+		"hasSecret", strings.TrimSpace(sess.Params.Secret) != "",
+		"authDatabase", strings.TrimSpace(sess.Params.Options.AuthDatabase),
+	)
 	args := MongoexportArgs(uri, database, collection, format, outputPath)
 	return m.start(ctx, sessionID, exe, args, env, outputPath)
 }
@@ -140,7 +153,7 @@ func (m *ToolsManager) Import(ctx context.Context, sessionID, database, collecti
 	if database == "" || collection == "" || strings.TrimSpace(inputPath) == "" {
 		return "", fmt.Errorf("database, collection and inputPath required")
 	}
-	uri, env, err := CLIEnv(sess.Params, database)
+	uri, env, err := CLIToolURI(sess.Params)
 	if err != nil {
 		return "", err
 	}
@@ -148,7 +161,7 @@ func (m *ToolsManager) Import(ctx context.Context, sessionID, database, collecti
 	return m.start(ctx, sessionID, exe, args, env, "")
 }
 
-// Cancel 取消任务。
+// Cancel 取消任务（通过 context 终止子进程，由 run 统一上报 done）。
 func (m *ToolsManager) Cancel(taskID string) error {
 	m.mu.Lock()
 	t, ok := m.tasks[taskID]
@@ -159,8 +172,6 @@ func (m *ToolsManager) Cancel(taskID string) error {
 	if t.cancel != nil {
 		t.cancel()
 	}
-	m.emitProgress(taskID, ToolTaskCanceled, 0, "canceled")
-	m.emitDone(taskID, false, "canceled", "")
 	return nil
 }
 
@@ -222,50 +233,69 @@ func (m *ToolsManager) run(ctx context.Context, taskID string, cmd *exec.Cmd, ou
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		m.logTaskDone(taskID, false, err.Error())
 		m.emitDone(taskID, false, err.Error(), "")
 		return
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		m.logTaskDone(taskID, false, err.Error())
 		m.emitDone(taskID, false, err.Error(), "")
 		return
 	}
 
 	m.emitProgress(taskID, ToolTaskRunning, 0, "running")
 	if err := cmd.Start(); err != nil {
+		m.logTaskDone(taskID, false, err.Error())
 		m.emitDone(taskID, false, err.Error(), "")
 		return
 	}
 
+	var lastErrLine string
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); m.scanLines(taskID, stdout) }()
-	go func() { defer wg.Done(); m.scanLines(taskID, stderr) }()
+	go func() {
+		defer wg.Done()
+		lastErrLine = m.scanLines(taskID, stderr)
+	}()
 	wg.Wait()
 
 	err = cmd.Wait()
 	select {
 	case <-ctx.Done():
+		m.logTaskDone(taskID, false, "canceled")
 		m.emitDone(taskID, false, "canceled", outputPath)
 		return
 	default:
 	}
 	if err != nil {
-		m.emitDone(taskID, false, sanitizeToolError(err), outputPath)
+		msg := lastErrLine
+		if msg == "" {
+			msg = sanitizeToolError(err)
+		} else {
+			msg = sanitizeToolError(fmt.Errorf("%s", msg))
+		}
+		m.logTaskDone(taskID, false, msg)
+		m.emitDone(taskID, false, msg, outputPath)
 		return
 	}
+	m.logTaskDone(taskID, true, "completed")
 	m.emitDone(taskID, true, "completed", outputPath)
 }
 
-func (m *ToolsManager) scanLines(taskID string, r io.Reader) {
+func (m *ToolsManager) scanLines(taskID string, r io.Reader) string {
+	last := ""
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		m.emitProgress(taskID, ToolTaskRunning, 0, line)
+		last = sanitizeToolMessage(line)
+		m.emitProgress(taskID, ToolTaskRunning, 0, last)
 	}
+	return last
 }
 
 func (m *ToolsManager) tempOutput(prefix, format string) (string, error) {
@@ -283,12 +313,37 @@ func (m *ToolsManager) tempOutput(prefix, format string) (string, error) {
 }
 
 func sanitizeToolError(err error) string {
-	msg := err.Error()
-	// 避免 stderr 中偶发的 URI 片段进入事件载荷。
-	if idx := strings.Index(msg, "mongodb://"); idx >= 0 {
-		return msg[:idx] + "mongodb://…"
-	}
+	return sanitizeToolMessage(err.Error())
+}
+
+// sanitizeToolMessage 脱敏工具 stderr / 错误中的连接串与 userinfo。
+func sanitizeToolMessage(msg string) string {
+	msg = redactURI(msg, "mongodb://")
+	msg = redactURI(msg, "mongodb+srv://")
 	return msg
+}
+
+func redactURI(msg, scheme string) string {
+	var b strings.Builder
+	for {
+		idx := strings.Index(msg, scheme)
+		if idx < 0 {
+			b.WriteString(msg)
+			return b.String()
+		}
+		b.WriteString(msg[:idx])
+		b.WriteString(scheme)
+		b.WriteString("...")
+		rest := msg[idx+len(scheme):]
+		end := len(rest)
+		for i, r := range rest {
+			if r == ' ' || r == '\t' || r == '"' || r == '\'' {
+				end = i
+				break
+			}
+		}
+		msg = rest[end:]
+	}
 }
 
 func (m *ToolsManager) emitProgress(taskID string, phase ToolTaskState, percent int, message string) {
@@ -317,5 +372,26 @@ func (m *ToolsManager) emitDone(taskID string, ok bool, message, outputPath stri
 func (m *ToolsManager) emitEvent(payload map[string]any) {
 	if m.emit != nil {
 		m.emit(payload)
+	}
+}
+
+func (m *ToolsManager) logTaskDone(taskID string, ok bool, message string) {
+	m.mu.Lock()
+	t, found := m.tasks[taskID]
+	sessionID := ""
+	if found {
+		sessionID = t.sessionID
+	}
+	m.mu.Unlock()
+
+	attrs := []any{"task", taskID}
+	if sessionID != "" {
+		attrs = append(attrs, "session", sessionID)
+	}
+	attrs = append(attrs, "ok", ok, "message", message)
+	if ok {
+		slog.Info("tools.task.done", attrs...)
+	} else {
+		slog.Error("tools.task.done", attrs...)
 	}
 }

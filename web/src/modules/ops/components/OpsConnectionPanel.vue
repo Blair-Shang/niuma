@@ -2,15 +2,14 @@
 /**
  * 运维连接面板 — 薄壳，仅负责组合：搜索 + 连接树 + 表单对话框。
  *
- * 扩展指南（新增 Redis / MongoDB / 数据库等连接类型）：
- *   1. 在 types.ts 的 CONN_KIND_DEFS 追加一条 kind 定义
- *   2. 在 connectionApi 中添加对应接口
- *   3. 在 ConnectionFormDialog.vue 增加该 kind 的表单字段
- *   本文件无需任何修改。
+ * 扩展指南（新增连接类型）：
+ *   1. 在 types.ts 的 CONN_KIND_DEFS 追加 kind
+ *   2. 在 modules/<kind>/register-conn-full.ts 自注册，并在 register-builtin-conn-kinds.ts 挂 loader
+ *   本文件无需修改。
  */
 import { RsContextMenu, RsIcon, RsInput, RsLoading, RsTree, useRsToast } from '@niuma/ui'
 import type { RsContextMenuItem, RsTreeDropPosition, RsTreeNode } from '@niuma/ui'
-import { computed, onMounted, onUnmounted, ref, toRef, toRefs, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRef, toRefs, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getModuleById } from '@/extensions/registry/extension-registry'
 import type { ModuleCategory } from '@/extensions/types/module'
@@ -18,8 +17,13 @@ import { useRoute, useRouter } from 'vue-router'
 import ConnectionFormDialog from '@/modules/ops/components/ConnectionFormDialog.vue'
 import FolderFormDialog from '@/modules/ops/components/FolderFormDialog.vue'
 import { getConnectionKindDef } from '@/modules/connection'
-import { connTreeKey, resourceTreeKey } from '@/modules/ops/conn-tree/keys'
-import { getConnTreeProvider } from '@/modules/ops/conn-tree/registry'
+import { connKindHasTree, ensureConnKind, isConnKindLoaded } from '@/modules/ops/conn-kind-loaders'
+import {
+  getConnTreeProvider,
+  useConnTreeActionHosts,
+  useConnTreeRegistryEpoch,
+} from '@/modules/ops/conn-tree/registry'
+import { getConnTreeTabSync } from '@/modules/ops/conn-tree/tab-sync'
 import type { ConnOpenContext } from '@/modules/ops/conn-tree/types'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import { useConnectionProfiles } from '@/modules/ops/composables/useConnectionProfiles'
@@ -38,11 +42,10 @@ import {
   type ConnTreeNode,
 } from '@/modules/ops/composables/useConnTree'
 import { useConnFolders, type ConnFolder } from '@/modules/ops/composables/useConnFolders'
-import { readRedisDatabaseFromOptions } from '@/modules/redis/composables/useRedisDatabase'
 import { useConnTreeSyncStore } from '@/stores/conn-tree-sync'
 import { useSessionRegistry } from '@/stores/session-registry'
 import { useTabStore } from '@/stores/tab'
-import { CONN_KIND_DEFS, DEFAULT_FOLDER_ACCENT, folderAccentColor, kindIcon, profileAccentColor, type ConnAccentColor, type ConnItem } from '@/modules/ops/types'
+import { CONN_KIND_DEFS, DEFAULT_FOLDER_ACCENT, folderAccentColor, kindIcon, profileAccentColor, type ConnAccentColor, type ConnItem, type ConnKind } from '@/modules/ops/types'
 
 const props = withDefaults(
   defineProps<{
@@ -63,6 +66,51 @@ const sessionRegistry = useSessionRegistry()
 const connTreeSync = useConnTreeSyncStore()
 
 const treeRef = ref<RsTreeExpose | null>(null)
+
+/** 协议注册的树操作宿主（确认框等）；响应式列表，懒注册后自动挂载。 */
+const connTreeActionHosts = useConnTreeActionHosts()
+/** Provider 懒注册世代：右键菜单构建时读取，避免 items 仍是 ensure 前的精简版。 */
+const connTreeRegistryEpoch = useConnTreeRegistryEpoch()
+
+/**
+ * 右键打开前若树协议尚未 ensure：拦住菜单，加载并等下一帧刷新 items 后再重放 contextmenu。
+ * 无树协议（ssh/ftp 等）或已加载时直接放行，无额外延迟。
+ */
+const ctxMenuReplay = ref(false)
+
+function warmConnKind(kind: ConnKind): void {
+  if (!connKindHasTree(kind)) return
+  void ensureConnKind(kind).catch(() => undefined)
+}
+
+function onConnKindContextMenu(e: MouseEvent, kind: ConnKind): void {
+  if (ctxMenuReplay.value || !connKindHasTree(kind) || isConnKindLoaded(kind)) return
+  e.preventDefault()
+  e.stopPropagation()
+  const target = e.currentTarget as HTMLElement
+  const { clientX, clientY } = e
+  void (async () => {
+    await ensureConnKind(kind).catch(() => undefined)
+    await nextTick()
+    ctxMenuReplay.value = true
+    try {
+      target.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY,
+          button: 2,
+          buttons: 2,
+          view: window,
+        }),
+      )
+      await nextTick()
+    } finally {
+      ctxMenuReplay.value = false
+    }
+  })()
+}
 
 /* ── 连接 CRUD ── */
 const cx = useConnectionProfiles()
@@ -100,7 +148,9 @@ let _searchTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(searchQuery, (v) => {
   if (_searchTimer !== null) clearTimeout(_searchTimer)
-  _searchTimer = setTimeout(() => { treeFilter.value = v }, 250)
+  _searchTimer = setTimeout(() => {
+    treeFilter.value = v
+  }, 250)
 })
 
 onUnmounted(() => {
@@ -124,46 +174,35 @@ const { applyTreeFocus } = useConnTreeFocus({
   treeChildren,
 })
 
-function redisDbResourceKey(profileId: string, db: number): string {
-  return resourceTreeKey(profileId, { segments: [{ kind: 'db', name: String(db) }] })
-}
-
-function resolveRedisTabDb(profileId: string, tabDatabase: unknown): number | null {
-  const conn = allProfiles.value.find((p) => p.profileId === profileId && p.kind === 'redis')
-  if (!conn) {
-    return null
-  }
-  const provider = getConnTreeProvider('redis')
-  if (!provider?.canExpand(conn)) {
-    return null
-  }
-  if (typeof tabDatabase === 'number') {
-    return tabDatabase
-  }
-  return readRedisDatabaseFromOptions(conn.connectionOptions).database
-}
-
-function syncTreeToActiveTab(): void {
+/** 活跃 Tab → 侧栏树聚焦；协议差异由 ConnTreeTabSyncStrategy 提供。 */
+async function syncTreeToActiveTab(): Promise<void> {
   const tab = tabStore.activeTab
-  if (!tab || tab.moduleId !== 'redis') {
+  if (!tab?.moduleId) {
     return
   }
-  const profileId = tab.props.profileId
-  if (typeof profileId !== 'string' || !profileId) {
+  const kind = tab.moduleId as ConnKind
+  if (!CONN_KIND_DEFS.some((d) => d.kind === kind)) {
     return
   }
-  const db = resolveRedisTabDb(profileId, tab.props.database)
-  if (db === null) {
-    void applyTreeFocus(connTreeKey(profileId))
+  try {
+    await ensureConnKind(kind)
+  } catch {
     return
   }
-  void applyTreeFocus(redisDbResourceKey(profileId, db))
+  const strategy = getConnTreeTabSync(kind)
+  if (!strategy) {
+    return
+  }
+  const key = strategy.resolveFocusKey(tab, { profiles: allProfiles.value })
+  if (key) {
+    void applyTreeFocus(key)
+  }
 }
 
 watch(
   () => tabStore.activeTabId,
   () => {
-    syncTreeToActiveTab()
+    void syncTreeToActiveTab()
   },
   { immediate: true },
 )
@@ -223,7 +262,7 @@ const rootCtxItems = computed<RsContextMenuItem[]>(() => [
 
 function onRootCtx(key: string): void {
   const hit = CONN_KIND_DEFS.find((k) => key === `new-${k.kind}`)
-  if (hit) { cx.openCreate(hit.kind); return }
+  if (hit) { void cx.openCreate(hit.kind); return }
   if (key.startsWith('open-module:')) {
     const moduleId = key.slice('open-module:'.length)
     const mod = getModuleById(moduleId)
@@ -241,11 +280,27 @@ function doCreateFolder(parentId: string | null = null): void {
 
 /* ── 连接项右键菜单 ── */
 function connCtxItemsFor(item: ConnItem): RsContextMenuItem[] {
+  void connTreeRegistryEpoch.value
   const connected = sessionRegistry.isProfileConnected(item.profileId, item.kind)
+  const provider = getConnTreeProvider(item.kind)
+  const providerItems = provider?.connMenuItems?.(item) ?? []
+  const expandable = provider?.canExpand(item) ?? connKindHasTree(item.kind)
   const items: RsContextMenuItem[] = [
     { key: 'connect', label: t('opsNav.connect'), icon: 'plug' },
     ...(connected
       ? [{ key: 'disconnect', label: t('opsNav.disconnect'), icon: 'unplug' } as RsContextMenuItem]
+      : []),
+    ...(providerItems.length
+      ? ([
+          { key: 'sep-provider', label: '', separator: true },
+          ...providerItems,
+        ] as RsContextMenuItem[])
+      : []),
+    ...(expandable
+      ? ([
+          { key: 'sep-refresh', label: '', separator: true },
+          { key: 'conn-refresh', label: t('opsNav.refresh'), icon: 'refresh-cw' },
+        ] as RsContextMenuItem[])
       : []),
     { key: 'sep1', label: '', separator: true },
     { key: 'edit', label: t('opsNav.editConn'), icon: 'pencil' },
@@ -271,15 +326,30 @@ function connCtxItemsFor(item: ConnItem): RsContextMenuItem[] {
   return items
 }
 
-function onConnCtx(key: string, item: ConnItem): void {
-  if (key === 'connect') connect(item)
-  else if (key === 'disconnect') void sessionRegistry.disconnect(item.profileId, item.kind)
-  else if (key === 'edit') cx.openEdit(item)
-  else if (key === 'delete') cx.openDelete(item)
-  else if (key.startsWith('move-folder:')) {
-    const folderId = key.slice('move-folder:'.length)
-    cf.moveToFolder(item.profileId, folderId === '__none__' ? null : folderId)
-  }
+function onConnCtx(key: string, node: ConnLeafNode): void {
+  const item = node._conn
+  void (async () => {
+    await ensureConnKind(item.kind)
+    if (key === 'conn-refresh') {
+      const nodeKey = node.key
+      if (nodeKey) {
+        treeChildren.refreshNode(nodeKey, node).catch(() => undefined)
+      }
+      return
+    }
+    const provider = getConnTreeProvider(item.kind)
+    if (provider?.onConnMenuSelect?.(item, key)) {
+      return
+    }
+    if (key === 'connect') connect(item)
+    else if (key === 'disconnect') void sessionRegistry.disconnect(item.profileId, item.kind)
+    else if (key === 'edit') void cx.openEdit(item)
+    else if (key === 'delete') void cx.openDelete(item)
+    else if (key.startsWith('move-folder:')) {
+      const folderId = key.slice('move-folder:'.length)
+      cf.moveToFolder(item.profileId, folderId === '__none__' ? null : folderId)
+    }
+  })()
 }
 
 /* ── 文件夹右键菜单 ── */
@@ -313,7 +383,7 @@ function onFolderCtx(key: string, folder: ConnFolder): void {
   const hitKind = CONN_KIND_DEFS.find((k) => key === `new-${k.kind}`)
   if (hitKind) {
     pendingFolderId.value = folder.id
-    cx.openCreate(hitKind.kind)
+    void cx.openCreate(hitKind.kind)
     return
   }
   if (key === 'new-subfolder') {
@@ -369,13 +439,29 @@ function onNodeDrop(dragKey: string, dropKey: string, position: RsTreeDropPositi
 }
 
 /** 双击叶节点打开连接（须在 RsTree 行级监听，避免首次单击切换 focused 时 slot 重渲染打断 dblclick） */
-function onNodeDblclick(node: RsTreeNode): void {
+async function onNodeDblclick(node: RsTreeNode): Promise<void> {
   const n = node as ConnTreeNode
   if (n._type === 'conn') {
     connect(n._conn)
     return
   }
   if (n._type === 'resource') {
+    if (!n.isLeaf) {
+      const nodeKey = node.key
+      if (!nodeKey) return
+      if (treeExpandedKeys.value.includes(nodeKey)) {
+        treeRef.value?.collapseNode(nodeKey)
+        return
+      }
+      try {
+        await treeChildren.loadData(node, nodeKey)
+        treeRef.value?.expandNode(nodeKey)
+      } catch {
+        // ignore
+      }
+      return
+    }
+    await ensureConnKind(n._conn.kind)
     const provider = getConnTreeProvider(n._conn.kind)
     if (provider?.activate) {
       provider.activate(n._conn, n._path)
@@ -384,6 +470,34 @@ function onNodeDblclick(node: RsTreeNode): void {
     const ctx: ConnOpenContext = { resourcePath: n._path }
     connect(n._conn, ctx)
   }
+}
+
+/* ── 资源节点右键菜单 ── */
+
+function resourceMenuItemsFor(node: ConnResourceNode): RsContextMenuItem[] {
+  void connTreeRegistryEpoch.value
+  const provider = getConnTreeProvider(node._conn.kind)
+  const providerItems = provider?.resourceMenuItems?.(node._conn, node._path) ?? []
+  return [
+    ...providerItems,
+    ...(providerItems.length ? [{ key: 'sep-refresh', label: '', separator: true } as RsContextMenuItem] : []),
+    { key: 'resource-refresh', label: t('opsNav.refresh'), icon: 'refresh-cw' },
+  ]
+}
+
+function onResourceCtx(key: string, node: ConnResourceNode): void {
+  void (async () => {
+    if (key === 'resource-refresh') {
+      const nodeKey = node.key
+      if (nodeKey) {
+        treeChildren.refreshNode(nodeKey, node).catch(() => undefined)
+      }
+      return
+    }
+    await ensureConnKind(node._conn.kind)
+    const provider = getConnTreeProvider(node._conn.kind)
+    provider?.onResourceMenuSelect?.(node._conn, node._path, key)
+  })()
 }
 
 /* ── 保存 / 删除 ── */
@@ -414,7 +528,9 @@ async function onDelete(): Promise<void> {
   else if (formError.value) toast.error(formError.value)
 }
 
-onMounted(async () => { await cx.loadAll() })
+onMounted(() => {
+  void cx.loadAll()
+})
 
 /* ── 类型守卫（模板用） ── */
 function asFolderNode(n: ConnTreeNode): ConnFolderNode { return n as ConnFolderNode }
@@ -447,6 +563,7 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
           ref="treeRef"
           v-else
           virtual
+          show-line
           lazy
           :load-data="treeChildren.loadData"
           :nodes="categoryTreeNodes"
@@ -485,11 +602,13 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
             <RsContextMenu
               v-else-if="(node as ConnTreeNode)._type === 'conn'"
               :items="connCtxItemsFor(asLeafNode(node as ConnTreeNode)._conn)"
-              @select="onConnCtx($event, asLeafNode(node as ConnTreeNode)._conn)"
+              @select="onConnCtx($event, asLeafNode(node as ConnTreeNode))"
             >
               <div
                 class="nm-conn-row"
                 :title="`${asLeafNode(node as ConnTreeNode)._conn.hostAddress}:${asLeafNode(node as ConnTreeNode)._conn.portNumber}`"
+                @pointerenter="warmConnKind(asLeafNode(node as ConnTreeNode)._conn.kind)"
+                @contextmenu.capture="onConnKindContextMenu($event, asLeafNode(node as ConnTreeNode)._conn.kind)"
               >
                 <RsIcon
                   :name="kindIcon(asLeafNode(node as ConnTreeNode)._conn.kind)"
@@ -506,26 +625,33 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
               </div>
             </RsContextMenu>
 
-            <!-- 资源子节点（逻辑库 / 未来 schema 等） -->
-            <div
+            <!-- 资源子节点（逻辑库 / 集合 / 未来 schema 等） -->
+            <RsContextMenu
               v-else-if="(node as ConnTreeNode)._type === 'resource'"
-              class="nm-conn-row nm-conn-row--resource"
-              :title="asResourceNode(node as ConnTreeNode).label"
+              :items="resourceMenuItemsFor(asResourceNode(node as ConnTreeNode))"
+              @select="onResourceCtx($event, asResourceNode(node as ConnTreeNode))"
             >
-              <RsIcon
-                :name="asResourceNode(node as ConnTreeNode)._icon ?? 'database'"
-                :size="14"
-                class="nm-conn-row__icon"
-                :color="profileAccentColor(asResourceNode(node as ConnTreeNode)._conn.connectionOptions)"
-              />
-              <span class="nm-conn-row__label">{{ node.label }}</span>
-              <span
-                v-if="asResourceNode(node as ConnTreeNode)._badge"
-                class="nm-conn-row__badge"
+              <div
+                class="nm-conn-row nm-conn-row--resource"
+                :title="asResourceNode(node as ConnTreeNode).label"
+                @pointerenter="warmConnKind(asResourceNode(node as ConnTreeNode)._conn.kind)"
+                @contextmenu.capture="onConnKindContextMenu($event, asResourceNode(node as ConnTreeNode)._conn.kind)"
               >
-                {{ asResourceNode(node as ConnTreeNode)._badge }}
-              </span>
-            </div>
+                <RsIcon
+                  :name="asResourceNode(node as ConnTreeNode)._icon ?? 'database'"
+                  :size="14"
+                  class="nm-conn-row__icon"
+                  :color="profileAccentColor(asResourceNode(node as ConnTreeNode)._conn.connectionOptions)"
+                />
+                <span class="nm-conn-row__label">{{ node.label }}</span>
+                <span
+                  v-if="asResourceNode(node as ConnTreeNode)._badge"
+                  class="nm-conn-row__badge"
+                >
+                  {{ asResourceNode(node as ConnTreeNode)._badge }}
+                </span>
+              </div>
+            </RsContextMenu>
           </template>
         </RsTree>
       </div>
@@ -533,7 +659,7 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
       <!--
         连接表单对话框。
         协议专属字段通过注册表（connection/registry.ts）动态注入，本组件无需感知具体协议。
-        新增协议只需在 modules/ops/connection-kinds.ts 追加一行 registerConnectionKind()。
+        新增协议：modules/<kind>/register-conn-form.ts + register-builtin-conn-kinds.ts 挂 loader。
       -->
       <ConnectionFormDialog
         v-model:open="dlgOpen"
@@ -566,6 +692,12 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
         <template v-if="kindDef?.options" #options>
           <component :is="kindDef.options" :form="form" />
         </template>
+        <template v-if="kindDef?.ssl" #ssl>
+          <component :is="kindDef.ssl" :form="form" />
+        </template>
+        <template v-if="kindDef?.advanced" #advanced>
+          <component :is="kindDef.advanced" :form="form" />
+        </template>
       </ConnectionFormDialog>
 
       <FolderFormDialog
@@ -575,6 +707,13 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
         :mode="folderDlgMode"
         :form-error="folderDlgError"
         @save="onFolderSave"
+      />
+
+      <!-- 协议树操作宿主：由 conn-tree 注册表贡献，面板不感知具体协议。 -->
+      <component
+        :is="Host"
+        v-for="(Host, index) in connTreeActionHosts"
+        :key="index"
       />
     </div>
   </RsContextMenu>

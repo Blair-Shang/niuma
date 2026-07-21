@@ -6,21 +6,40 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@niuma/ui": "workspace:*",
+    "dompurify": "^3.4.12",
+    "echarts": "^6.1.0",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.17.0",
+    "marked": "^18.0.6",
+    "mermaid": "^11.16.0",
+    "monaco-editor": "^0.55.1",
+    "monaco-sql-languages": "^1.2.0",
     "pinia": "catalog:",
+    "sql-formatter": "^15.8.2",
+    "vite-plugin-monaco-editor": "^1.1.0",
     "vue": "catalog:",
+    "vue-echarts": "^8.0.1",
     "vue-i18n": "catalog:",
     "vue-router": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
+    "@types/katex": "^0.16.8",
     "@vitejs/plugin-vue": "catalog:",
+    "esbuild": "^0.28.1",
+    "jsdom": "^29.1.1",
+    "monaco-editor-nls": "^3.1.0",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
+    "vite-plugin-monaco-editor-nls": "^3.0.1",
+    "vitest": "catalog:",
     "vue-tsc": "catalog:"
   }
 }

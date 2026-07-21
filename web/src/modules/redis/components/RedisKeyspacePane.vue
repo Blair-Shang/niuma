@@ -275,8 +275,10 @@ watch(
     </footer>
 
     <RsDialog v-model:open="viewOpen" :title="viewKey" width="lg">
+      <template #body>
       <RsLoading v-if="viewLoading" />
       <pre v-else class="nm-redis-keyspace__value">{{ viewContent }}</pre>
+      </template>
     </RsDialog>
 
     <RsConfirmDialog

@@ -3,18 +3,22 @@ import { computed, inject } from 'vue'
 import { Toaster } from 'vue-sonner'
 import { rsConfigKey } from '../composables/useRsConfig'
 import type { RsToastPosition } from './overlay-utils'
-import { RS_TOAST_DEFAULT_POSITION } from './overlay-utils'
+import { RS_TOAST_DEFAULT_GAP, RS_TOAST_DEFAULT_POSITION } from './overlay-utils'
 
 withDefaults(
   defineProps<{
     position?: RsToastPosition
     closeButton?: boolean
     richColors?: boolean
+    expand?: boolean
+    gap?: number
   }>(),
   {
     position: RS_TOAST_DEFAULT_POSITION,
     closeButton: true,
     richColors: false,
+    expand: true,
+    gap: RS_TOAST_DEFAULT_GAP,
   },
 )
 
@@ -38,6 +42,9 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
       :theme="sonnerTheme"
       :position="position"
       :close-button="closeButton"
+      :expand="expand"
+      :gap="gap"
+      close-button-position="top-right"
       :rich-colors="richColors"
       class="rs-toaster"
       :toast-options="{
@@ -81,67 +88,75 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
   --rs-toast-highlight: rgb(255 255 255 / 0.72);
 }
 
+[data-sonner-toaster].rs-toaster [data-sonner-toast].rs-toast {
+  position: absolute;
+}
+
+[data-sonner-toaster].rs-toaster [data-sonner-toast].rs-toast[data-y-position='top'] {
+  top: 0;
+}
+
+[data-sonner-toaster].rs-toaster [data-sonner-toast].rs-toast[data-y-position='bottom'] {
+  top: auto;
+  bottom: 0;
+}
+
+[data-sonner-toaster].rs-toaster [data-sonner-toast].rs-toast[data-x-position='left'] {
+  left: 0;
+}
+
+[data-sonner-toaster].rs-toaster [data-sonner-toast].rs-toast[data-x-position='right'] {
+  right: 0;
+}
+
+[data-sonner-toaster].rs-toaster [data-sonner-toast].rs-toast[data-x-position='center'] {
+  left: 0;
+  right: 0;
+}
+
 .rs-toast {
-  position: relative;
+  --rs-toast-accent: color-mix(in srgb, var(--rs-info) 68%, transparent);
   overflow: hidden;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   column-gap: 0.75rem;
   row-gap: 0.25rem;
+  width: var(--width, auto);
   min-width: 19rem;
   max-width: min(29rem, calc(100vw - 1.5rem));
   padding: 0.875rem 0.9375rem 0.9375rem;
   border: 1px solid var(--rs-toast-border);
   border-radius: var(--rs-toast-radius);
   background:
+    linear-gradient(
+      180deg,
+      transparent 0.625rem,
+      var(--rs-toast-accent) 0.625rem calc(100% - 0.625rem),
+      transparent calc(100% - 0.625rem)
+    )
+    0.5rem 0 / 2px 100% no-repeat,
     linear-gradient(180deg, var(--rs-toast-highlight), transparent 38%),
     linear-gradient(135deg, var(--rs-toast-tint), transparent 34%),
     var(--rs-toast-bg);
   color: var(--rs-text);
-  box-shadow: var(--rs-toast-shadow);
+  box-shadow:
+    var(--rs-toast-shadow),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   transition:
-    transform var(--rs-transition-normal),
     box-shadow var(--rs-transition-normal),
     border-color var(--rs-transition-fast),
     background var(--rs-transition-fast);
 }
 
-.rs-toast[data-mounted='true'] {
-  animation: rs-toast-enter 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.rs-toast[data-removed='true'] {
-  animation: rs-toast-exit 180ms cubic-bezier(0.4, 0, 1, 1);
-}
-
-.rs-toast::before {
-  content: '';
-  position: absolute;
-  inset: 0.625rem auto 0.625rem 0.5rem;
-  width: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--rs-info) 68%, transparent);
-  opacity: 0.82;
-}
-
-.rs-toast::after {
-  content: '';
-  position: absolute;
-  inset: 0.75px;
-  border-radius: calc(var(--rs-toast-radius) - 1px);
-  border-top: 1px solid rgb(255 255 255 / 0.08);
-  pointer-events: none;
-}
-
 .rs-toast:hover {
-  transform: translateY(-1px);
   box-shadow:
     0 18px 42px -20px rgb(0 0 0 / 0.34),
     0 10px 24px -16px rgb(0 0 0 / 0.22),
-    0 0 0 0.5px rgb(255 255 255 / 0.1);
+    0 0 0 0.5px rgb(255 255 255 / 0.1),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
 }
 
 .rs-toast[data-styled='true'] {
@@ -195,17 +210,15 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
   line-height: 1.4;
 }
 
-.rs-toast__close {
+.rs-toast [data-close-button].rs-toast__close {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  left: auto;
+  inset: 0.75rem 0.75rem auto auto;
   z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.375rem;
-  height: 1.375rem;
+  width: 1.25rem;
+  height: 1.25rem;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -223,7 +236,13 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
     box-shadow var(--rs-transition-fast);
 }
 
-.rs-toast__close:hover {
+.rs-toast [data-close-button].rs-toast__close svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+}
+
+.rs-toast [data-close-button].rs-toast__close:hover {
   opacity: 0.96;
   color: var(--rs-text);
   border-color: color-mix(in srgb, var(--rs-border) 68%, transparent);
@@ -233,7 +252,7 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
     0 1px 4px rgb(0 0 0 / 0.08);
 }
 
-.rs-toast__close:focus-visible {
+.rs-toast [data-close-button].rs-toast__close:focus-visible {
   outline: none;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.08),
@@ -306,82 +325,46 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
     0 3px 8px rgb(0 0 0 / 0.08);
 }
 
-.rs-toast[data-type='success']::before {
-  background: color-mix(in srgb, var(--rs-success) 68%, transparent);
+.rs-toast[data-type='success'] {
+  --rs-toast-accent: color-mix(in srgb, var(--rs-success) 68%, transparent);
+  --rs-toast-tint: color-mix(in srgb, var(--rs-success) 7%, transparent);
 }
 
 .rs-toast[data-type='success'] [data-icon] {
   color: var(--rs-success);
 }
 
-.rs-toast[data-type='success'] {
-  --rs-toast-tint: color-mix(in srgb, var(--rs-success) 7%, transparent);
-}
-
-.rs-toast[data-type='error']::before {
-  background: color-mix(in srgb, var(--rs-danger) 68%, transparent);
+.rs-toast[data-type='error'] {
+  --rs-toast-accent: color-mix(in srgb, var(--rs-danger) 68%, transparent);
+  --rs-toast-tint: color-mix(in srgb, var(--rs-danger) 7%, transparent);
 }
 
 .rs-toast[data-type='error'] [data-icon] {
   color: var(--rs-danger);
 }
 
-.rs-toast[data-type='error'] {
-  --rs-toast-tint: color-mix(in srgb, var(--rs-danger) 7%, transparent);
-}
-
-.rs-toast[data-type='warning']::before {
-  background: color-mix(in srgb, var(--rs-warning) 72%, transparent);
+.rs-toast[data-type='warning'] {
+  --rs-toast-accent: color-mix(in srgb, var(--rs-warning) 72%, transparent);
+  --rs-toast-tint: color-mix(in srgb, var(--rs-warning) 8%, transparent);
 }
 
 .rs-toast[data-type='warning'] [data-icon] {
   color: var(--rs-warning);
 }
 
-.rs-toast[data-type='warning'] {
-  --rs-toast-tint: color-mix(in srgb, var(--rs-warning) 8%, transparent);
-}
-
-.rs-toast[data-type='info']::before,
-.rs-toast[data-type='default']::before {
-  background: color-mix(in srgb, var(--rs-info) 68%, transparent);
-}
-
 .rs-toast[data-type='info'],
 .rs-toast[data-type='default'] {
+  --rs-toast-accent: color-mix(in srgb, var(--rs-info) 68%, transparent);
   --rs-toast-tint: color-mix(in srgb, var(--rs-info) 7%, transparent);
+}
+
+.rs-toast[data-type='loading'] {
+  --rs-toast-accent: color-mix(in srgb, var(--rs-primary) 68%, transparent);
+  --rs-toast-tint: color-mix(in srgb, var(--rs-primary) 7%, transparent);
 }
 
 .rs-toast[data-type='loading'] [data-icon] {
   color: var(--rs-primary);
-}
-
-.rs-toast[data-type='loading'] {
-  --rs-toast-tint: color-mix(in srgb, var(--rs-primary) 7%, transparent);
-}
-
-@keyframes rs-toast-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes rs-toast-exit {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-
-  to {
-    opacity: 0;
-    transform: translateY(4px) scale(0.99);
-  }
 }
 
 @media (max-width: 640px) {
@@ -392,9 +375,10 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
     border-radius: 0.9375rem;
   }
 
-  .rs-toast__close {
-    top: 0.4375rem;
-    right: 0.4375rem;
+  .rs-toast [data-close-button].rs-toast__close {
+    inset: 0.625rem 0.625rem auto auto;
+    width: 1.25rem;
+    height: 1.25rem;
   }
 
   .rs-toast__action {
@@ -407,11 +391,6 @@ const sonnerTheme = computed<'light' | 'dark'>(() => {
   .rs-toast,
   .rs-toast__action {
     transition: none;
-  }
-
-  .rs-toast[data-mounted='true'],
-  .rs-toast[data-removed='true'] {
-    animation: none;
   }
 }
 </style>
