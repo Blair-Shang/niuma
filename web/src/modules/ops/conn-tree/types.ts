@@ -23,7 +23,25 @@ export interface ConnOpenContext {
   initialSql?: string
   /** Vastbase：带 initialSql 时是否自动执行（生成 SELECT/COUNT）。 */
   autoRunInitialSql?: boolean
-  /** Vastbase 表设计：create 打开可视化新建表。 */
+  /**
+   * 查询执行模式（Kingbase 等）：
+   * - paged：默认，逐条 query.exec + 游标续取
+   * - batch：同连接 query.execBatch（临时表 / SET 跨语句可见）
+   * 其它协议可忽略。
+   */
+  queryExecMode?: 'paged' | 'batch'
+  /** 表设计 / 对象脚本：create 打开新建；alter 打开编辑。 */
   designMode?: 'create' | 'alter'
+  /** 对象脚本种类（各协议扩展；达梦含 package/trigger/synonym/sequence） */
+  objectKind?:
+    | 'view'
+    | 'procedure'
+    | 'function'
+    | 'materializedView'
+    | 'dictionary'
+    | 'package'
+    | 'trigger'
+    | 'synonym'
+    | 'sequence'
 }
 

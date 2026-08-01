@@ -1,20 +1,16 @@
 <script setup lang="ts">
 import {
   RsButton,
-  RsCheckbox,
   RsEmpty,
   RsIcon,
   RsInput,
   RsLoading,
   RsMonacoEditor,
-  RsSplitPane,
   RsTable,
   RsTabs,
-  RsToolbar,
-  RsTooltip,
   useRsToast,
 } from '@niuma/ui'
-import type { RsContextMenuItem, RsSplitPaneItem, RsTabItem, RsTableColumn } from '@niuma/ui'
+import type { RsContextMenuItem, RsTabItem, RsTableColumn } from '@niuma/ui'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { subscribeBridgeEventByPrefix, vastbaseApi } from '@/api'
@@ -26,6 +22,7 @@ import type {
   VastDebugStackFrame,
   VastDebugVariable,
 } from '@/api/types/vastbase'
+import { DebugShell, type DebugShellLabels } from '@/modules/database'
 import { useVastSqlEditor } from '@/modules/vastbase/composables/useVastSqlEditor'
 import { defaultVastbaseProfile } from '@/modules/sql-editor/capabilities'
 import { qualifiedName } from '@/modules/vastbase/sql-seed'
@@ -137,19 +134,9 @@ async function scrollCurrentLineIntoView(): Promise<void> {
   editorRef.value?.revealLine?.(currentLine.value)
 }
 
-const mainSplitPanes: RsSplitPaneItem[] = [
-  { key: 'source', size: 68, min: 36, resizerHandle: true },
-  { key: 'inspect', size: 32, min: 20 },
-]
-
 const target = computed(() =>
   props.schema && props.routine ? qualifiedName(props.schema, props.routine) : '',
 )
-
-const targetTitle = computed(() => {
-  if (!target.value) return t('modules.vastbase.debug.readyDescGeneric')
-  return props.args ? `${target.value}(${props.args})` : target.value
-})
 
 const stateLabel = computed(() => {
   const key = `modules.vastbase.debug.state.${state.value}`
@@ -460,6 +447,46 @@ function clearOutputPanel(): void {
 
 const callArgsPreview = computed(() => serializeCallParams(callParams.value))
 
+const shellLabels = computed(
+  (): DebugShellLabels => ({
+    toolbarLabel: t('modules.vastbase.debug.toolbarLabel'),
+    noTarget: t('modules.vastbase.debug.noTarget'),
+    start: t('modules.vastbase.debug.start'),
+    continue: t('modules.vastbase.debug.continue'),
+    next: t('modules.vastbase.debug.next'),
+    step: t('modules.vastbase.debug.step'),
+    finish: t('modules.vastbase.debug.finish'),
+    abort: t('modules.vastbase.debug.abort'),
+    paramsTitle: t('modules.vastbase.debug.paramsTitle'),
+    noParams: t('modules.vastbase.debug.noParams'),
+    paramsPreview: t('modules.vastbase.debug.paramsPreview'),
+    colParamName: t('modules.vastbase.debug.colParamName'),
+    colParamType: t('modules.vastbase.debug.colParamType'),
+    colParamValue: t('modules.vastbase.debug.colParamValue'),
+    paramValuePh: t('modules.vastbase.debug.paramValuePh'),
+    sourceTitle: t('modules.vastbase.debug.sourceTitle'),
+    bpHint: t('modules.vastbase.debug.bpHint'),
+    unavailable: t('modules.vastbase.debug.unavailable'),
+  }),
+)
+
+const canStart = computed(
+  () => !sessionActive.value && !!props.routine && !busy.value && available.value,
+)
+
+const statusMeta = computed(() => {
+  if (
+    currentLine.value &&
+    (sessionActive.value ||
+      state.value === 'finished' ||
+      state.value === 'error' ||
+      state.value === 'aborted')
+  ) {
+    return `L${currentLine.value}`
+  }
+  return ''
+})
+
 function onParamNullChange(param: RoutineCallParam, checked: boolean): void {
   param.isNull = checked
   if (param.isNull) param.value = ''
@@ -468,6 +495,16 @@ function onParamNullChange(param: RoutineCallParam, checked: boolean): void {
 function onParamValueInput(param: RoutineCallParam, value: string): void {
   param.value = value
   if (param.value.trim()) param.isNull = false
+}
+
+function onShellParamNull(index: number, isNull: boolean): void {
+  const param = callParams.value.find((p) => p.index === index)
+  if (param) onParamNullChange(param, isNull)
+}
+
+function onShellParamValue(index: number, value: string): void {
+  const param = callParams.value.find((p) => p.index === index)
+  if (param) onParamValueInput(param, value)
 }
 
 let offEvent: (() => void) | null = null
@@ -832,223 +869,76 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="nm-vast-debug">
-    <RsLoading v-if="probing" class="nm-vast-debug__loading" />
-    <RsEmpty
-      v-else-if="!available"
-      fill
-      icon="bug"
-      :description="reason || t('modules.vastbase.debug.unavailable')"
-    />
-    <template v-else>
-      <RsToolbar
-        size="md"
-        elevated
-        compact
-        class="nm-vast-debug__toolbar"
-        :label="t('modules.vastbase.debug.toolbarLabel')"
-      >
-        <template #left>
-          <div class="nm-vast-debug__identity" :title="targetTitle">
-            <RsIcon name="bug" :size="14" class="nm-vast-debug__brand" />
-            <span class="nm-vast-debug__target">{{ target || t('modules.vastbase.debug.noTarget') }}</span>
-            <span
-              class="nm-vast-debug__badge"
-              :class="`nm-vast-debug__badge--${stateTone}`"
-            >
-              {{ stateLabel }}
-            </span>
-          </div>
-        </template>
-        <template #right>
-          <RsTooltip :content="t('modules.vastbase.debug.start')" side="bottom" nowrap>
-            <RsButton
-              variant="primary"
-              size="sm"
-              :loading="busy && !sessionActive"
-              :disabled="sessionActive || !routine || busy"
-              @click="startDebug"
-            >
-              <RsIcon name="play" :size="13" />
-              {{ t('modules.vastbase.debug.start') }}
-            </RsButton>
-          </RsTooltip>
-          <RsTooltip :content="t('modules.vastbase.debug.continue')" side="bottom" nowrap>
-            <RsButton
-              variant="ghost"
-              size="sm"
-              :disabled="!controlsEnabled"
-              @click="control(vastbaseApi.debugContinue)"
-            >
-              <RsIcon name="chevrons-right" :size="13" />
-            </RsButton>
-          </RsTooltip>
-          <RsTooltip :content="t('modules.vastbase.debug.next')" side="bottom" nowrap>
-            <RsButton
-              variant="ghost"
-              size="sm"
-              :disabled="!controlsEnabled"
-              @click="control(vastbaseApi.debugNext)"
-            >
-              <RsIcon name="arrow-right-to-line" :size="13" />
-            </RsButton>
-          </RsTooltip>
-          <RsTooltip :content="t('modules.vastbase.debug.step')" side="bottom" nowrap>
-            <RsButton
-              variant="ghost"
-              size="sm"
-              :disabled="!controlsEnabled"
-              @click="control(vastbaseApi.debugStep)"
-            >
-              <RsIcon name="arrow-down-to-line" :size="13" />
-            </RsButton>
-          </RsTooltip>
-          <RsTooltip :content="t('modules.vastbase.debug.finish')" side="bottom" nowrap>
-            <RsButton
-              variant="ghost"
-              size="sm"
-              :disabled="!controlsEnabled"
-              @click="control(vastbaseApi.debugFinish)"
-            >
-              <RsIcon name="corner-down-right" :size="13" />
-            </RsButton>
-          </RsTooltip>
-          <RsTooltip :content="t('modules.vastbase.debug.abort')" side="bottom" nowrap>
-            <RsButton
-              variant="danger"
-              size="sm"
-              :disabled="!sessionActive || busy"
-              @click="abortDebug"
-            >
-              <RsIcon name="square" :size="12" />
-            </RsButton>
-          </RsTooltip>
-        </template>
-      </RsToolbar>
-
-      <div class="nm-vast-debug__params">
-        <div class="nm-vast-debug__params-head">
-          <span class="nm-vast-debug__params-title">
-            <RsIcon name="list" :size="12" />
-            {{ t('modules.vastbase.debug.paramsTitle') }}
-          </span>
-          <span v-if="callParams.length === 0" class="nm-vast-debug__params-empty">
-            {{ t('modules.vastbase.debug.noParams') }}
-          </span>
-          <span v-else class="nm-vast-debug__params-preview" :title="callArgsPreview">
-            {{ t('modules.vastbase.debug.paramsPreview') }}:
-            {{ callArgsPreview || '—' }}
-          </span>
-        </div>
-        <div v-if="callParams.length > 0" class="nm-vast-debug__params-table-wrap">
-          <table class="nm-vast-debug__params-table">
-            <thead>
-              <tr>
-                <th class="nm-vast-debug__params-col-idx">#</th>
-                <th class="nm-vast-debug__params-col-name">
-                  {{ t('modules.vastbase.debug.colParamName') }}
-                </th>
-                <th class="nm-vast-debug__params-col-type">
-                  {{ t('modules.vastbase.debug.colParamType') }}
-                </th>
-                <th class="nm-vast-debug__params-col-null">NULL</th>
-                <th class="nm-vast-debug__params-col-value">
-                  {{ t('modules.vastbase.debug.colParamValue') }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="param in callParams" :key="param.index">
-                <td class="nm-vast-debug__params-col-idx">{{ param.index }}</td>
-                <td class="nm-vast-debug__params-col-name" :title="param.name">
-                  {{ param.name }}
-                </td>
-                <td class="nm-vast-debug__params-col-type" :title="param.type">
-                  {{ param.type }}
-                </td>
-                <td class="nm-vast-debug__params-col-null">
-                  <RsCheckbox
-                    :model-value="param.isNull"
-                    :disabled="sessionActive || busy"
-                    @update:model-value="(v) => onParamNullChange(param, v)"
-                  />
-                </td>
-                <td class="nm-vast-debug__params-col-value">
-                  <RsInput
-                    size="sm"
-                    :model-value="param.value"
-                    :placeholder="
-                      param.isNull
-                        ? 'NULL'
-                        : t('modules.vastbase.debug.paramValuePh')
-                    "
-                    :disabled="sessionActive || busy || param.isNull"
-                    @update:model-value="(v) => onParamValueInput(param, v)"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+  <DebugShell
+    class="nm-vast-debug"
+    :labels="shellLabels"
+    :target-label="target"
+    :state-label="stateLabel"
+    :state-tone="stateTone"
+    :probing="probing"
+    :available="available"
+    :unavailable-reason="reason"
+    :busy="busy"
+    :session-active="sessionActive"
+    :controls-enabled="controlsEnabled"
+    :can-start="canStart"
+    :params="callParams"
+    :params-preview="callArgsPreview"
+    :params-disabled="sessionActive || busy"
+    :status-text="statusText"
+    :status-meta="statusMeta"
+    @start="startDebug"
+    @continue="control(vastbaseApi.debugContinue)"
+    @next="control(vastbaseApi.debugNext)"
+    @step="control(vastbaseApi.debugStep)"
+    @finish="control(vastbaseApi.debugFinish)"
+    @abort="abortDebug"
+    @update:param-null="onShellParamNull"
+    @update:param-value="onShellParamValue"
+  >
+    <template #source>
+      <RsEmpty
+        v-if="sourceLines.length === 0"
+        fill
+        icon="bug"
+        :description="
+          sessionActive
+            ? t('modules.vastbase.debug.noSource')
+            : t('modules.vastbase.debug.sourcePreviewHint')
+        "
+      />
+      <div v-else class="nm-vast-debug__source">
+        <RsMonacoEditor
+          v-if="languageReady"
+          ref="editorRef"
+          v-model="sourceText"
+          :language="sqlLanguage"
+          height="100%"
+          readonly
+          embedded
+          glyph-margin
+          :debug-current-line="currentLine"
+          :debug-breakpoints="breakpointLines"
+          @glyph-margin-click="onGlyphMarginClick"
+        />
+        <div v-else class="nm-vast-debug__source-boot">
+          <RsLoading size="sm" />
         </div>
       </div>
+    </template>
 
-      <RsSplitPane
-        :panes="mainSplitPanes"
-        orientation="horizontal"
-        with-handle
-        class="nm-vast-debug__split"
-      >
-        <template #source>
-          <div class="nm-vast-debug__source-pane">
-            <div class="nm-vast-debug__pane-header">
-              <RsIcon name="file-code" :size="12" />
-              <span>{{ t('modules.vastbase.debug.sourceTitle') }}</span>
-              <span class="nm-vast-debug__pane-hint">{{ t('modules.vastbase.debug.bpHint') }}</span>
-            </div>
-            <RsEmpty
-              v-if="sourceLines.length === 0"
-              fill
-              icon="bug"
-              :description="
-                sessionActive
-                  ? t('modules.vastbase.debug.noSource')
-                  : t('modules.vastbase.debug.sourcePreviewHint')
-              "
-            />
-            <div v-else class="nm-vast-debug__source">
-              <RsMonacoEditor
-                v-if="languageReady"
-                ref="editorRef"
-                v-model="sourceText"
-                :language="sqlLanguage"
-                height="100%"
-                readonly
-                embedded
-                glyph-margin
-                :debug-current-line="currentLine"
-                :debug-breakpoints="breakpointLines"
-                @glyph-margin-click="onGlyphMarginClick"
-              />
-              <div v-else class="nm-vast-debug__source-boot">
-                <RsLoading size="sm" />
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <template #inspect>
-          <div class="nm-vast-debug__inspect">
-            <div class="nm-vast-debug__pane-header nm-vast-debug__inspect-header">
-              <RsTabs
-                v-model="inspectTab"
-                class="nm-vast-debug__inspect-tabs"
-                :items="inspectTabs"
-                size="sm"
-                variant="line"
-                panelless
-              />
-            </div>
-            <div class="nm-vast-debug__inspect-body">
+    <template #inspect>
+      <div class="nm-vast-debug__inspect-header">
+        <RsTabs
+          v-model="inspectTab"
+          class="nm-vast-debug__inspect-tabs"
+          :items="inspectTabs"
+          size="sm"
+          variant="line"
+          panelless
+        />
+      </div>
+      <div class="nm-vast-debug__inspect-body">
               <RsEmpty
                 v-if="inspectTab === 'variables' && varRows.length === 0"
                 fill
@@ -1205,252 +1095,28 @@ onBeforeUnmount(() => {
                   }}</pre>
                 </div>
               </div>
-            </div>
-          </div>
-        </template>
-      </RsSplitPane>
-
-      <footer class="nm-vast-debug__status" :title="statusText">
-        <span class="nm-vast-debug__status-text">{{ statusText }}</span>
-        <span
-          v-if="currentLine && (sessionActive || state === 'finished' || state === 'error' || state === 'aborted')"
-          class="nm-vast-debug__status-meta"
-        >
-          L{{ currentLine }}
-        </span>
-      </footer>
+      </div>
     </template>
-  </div>
+  </DebugShell>
 </template>
 
 <style scoped>
+/* 外壳布局见 DebugShell；此处仅保留巡视区方言样式 */
 .nm-vast-debug {
-  --nm-vast-debug-pane-header-h: 2rem;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
   width: 100%;
   height: 100%;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  align-self: stretch;
-  background: var(--rs-bg);
-  overflow: hidden;
-}
-
-.nm-vast-debug__loading {
-  flex: 1;
-}
-
-.nm-vast-debug__toolbar {
-  flex-shrink: 0;
-}
-
-.nm-vast-debug__identity {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  min-width: 0;
-}
-
-.nm-vast-debug__brand {
-  flex-shrink: 0;
-  color: var(--rs-muted);
-}
-
-.nm-vast-debug__target {
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 28rem;
-}
-
-.nm-vast-debug__badge {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding: 0.1rem 0.4rem;
-  border-radius: var(--rs-radius-sm);
-  border: 1px solid var(--rs-border-subtle);
-  color: var(--rs-muted);
-  background: var(--rs-surface);
-}
-
-.nm-vast-debug__badge--paused {
-  color: var(--rs-warning, #b45309);
-  border-color: color-mix(in srgb, var(--rs-warning, #b45309) 35%, transparent);
-  background: color-mix(in srgb, var(--rs-warning, #b45309) 12%, transparent);
-}
-
-.nm-vast-debug__badge--running {
-  color: var(--rs-success, #15803d);
-  border-color: color-mix(in srgb, var(--rs-success, #15803d) 35%, transparent);
-  background: color-mix(in srgb, var(--rs-success, #15803d) 12%, transparent);
-}
-
-.nm-vast-debug__badge--ended {
-  color: var(--rs-danger, #b91c1c);
-  border-color: color-mix(in srgb, var(--rs-danger, #b91c1c) 30%, transparent);
-  background: color-mix(in srgb, var(--rs-danger, #b91c1c) 10%, transparent);
-}
-
-.nm-vast-debug__params {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--rs-border-subtle);
-  background: var(--rs-surface);
-}
-
-.nm-vast-debug__params-head {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  padding: 0.3rem var(--rs-space-sm);
-  min-width: 0;
-}
-
-.nm-vast-debug__params-title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
-  font-size: var(--rs-font-size-xs);
-  font-weight: 600;
-  color: var(--rs-muted);
-}
-
-.nm-vast-debug__params-empty,
-.nm-vast-debug__params-preview {
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.nm-vast-debug__params-preview {
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
-}
-
-.nm-vast-debug__params-table-wrap {
-  max-height: 9.5rem;
-  overflow: auto;
-  border-top: 1px solid var(--rs-border-subtle);
-}
-
-.nm-vast-debug__params-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--rs-font-size-xs);
-}
-
-.nm-vast-debug__params-table th,
-.nm-vast-debug__params-table td {
-  padding: 0.25rem 0.5rem;
-  border-bottom: 1px solid var(--rs-border-subtle);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.nm-vast-debug__params-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--rs-surface);
-  color: var(--rs-muted);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.nm-vast-debug__params-col-idx {
-  width: 2.25rem;
-  text-align: right;
-  color: var(--rs-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.nm-vast-debug__params-col-name {
-  width: 8rem;
-  max-width: 10rem;
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-vast-debug__params-col-type {
-  width: 8rem;
-  max-width: 12rem;
-  color: var(--rs-muted);
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-vast-debug__params-col-null {
-  width: 3.25rem;
-  text-align: center;
-}
-
-.nm-vast-debug__params-col-value {
-  min-width: 10rem;
-}
-
-.nm-vast-debug__params-table tbody tr:hover {
-  background: color-mix(in srgb, var(--rs-accent, #2563eb) 5%, transparent);
-}
-
-.nm-vast-debug__split {
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.nm-vast-debug__source-pane,
-.nm-vast-debug__inspect {
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.nm-vast-debug__pane-header {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
-  box-sizing: border-box;
-  height: var(--nm-vast-debug-pane-header-h, 2rem);
-  padding: 0 var(--rs-space-sm);
-  font-size: var(--rs-font-size-xs);
-  font-weight: 600;
-  color: var(--rs-muted);
-  border-bottom: 1px solid var(--rs-border-subtle);
-  background: var(--rs-surface);
-}
-
-.nm-vast-debug__pane-hint {
-  margin-left: auto;
-  font-weight: 400;
-  opacity: 0.85;
 }
 
 .nm-vast-debug__inspect-header {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: 2rem;
   padding: 0;
   overflow: hidden;
+  border-bottom: 1px solid var(--rs-border-subtle);
+  background: var(--rs-surface);
 }
 
 .nm-vast-debug__source {
@@ -1629,32 +1295,5 @@ onBeforeUnmount(() => {
 
 .nm-vast-debug__watch-err {
   color: var(--rs-danger, #b91c1c);
-}
-
-.nm-vast-debug__status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-sm);
-  flex-shrink: 0;
-  padding: 0.2rem var(--rs-space-sm);
-  border-top: 1px solid var(--rs-border-subtle);
-  background: var(--rs-surface);
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
-  min-height: 1.5rem;
-}
-
-.nm-vast-debug__status-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
-}
-
-.nm-vast-debug__status-meta {
-  flex-shrink: 0;
-  font-weight: 600;
 }
 </style>

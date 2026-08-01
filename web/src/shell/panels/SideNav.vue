@@ -1,26 +1,17 @@
 <script setup lang="ts">
 /**
  * SideNav — Shell 布局侧栏：按 Activity 领域切换视图，不含连接 CRUD 业务。
+ * 默认资源管理器（全量连接）；分类仅随 Activity Bar 点击切换，不跟路由抢焦点。
  */
-import { watch } from 'vue'
-import { useRoute } from 'vue-router'
 import OpsConnectionPanel from '@/modules/ops/components/OpsConnectionPanel.vue'
 import { useShellStore } from '@/stores/shell'
 
-const route = useRoute()
 const shellStore = useShellStore()
-
-// 路由变化时同步 ActivityBar 高亮状态
-watch(
-  () => route.path,
-  (path) => shellStore.syncFromRoute(path),
-  { immediate: true },
-)
 </script>
 
 <template>
   <div class="nm-sidenav">
-    <OpsConnectionPanel />
+    <OpsConnectionPanel :category="shellStore.activeCategory" />
   </div>
 </template>
 

@@ -5,11 +5,8 @@ import { useRsToast } from '@niuma/ui'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import type { ConnOpenContext, ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import type { ConnItem } from '@/modules/ops/types'
-import {
-  callRoutineSeed,
-  qualifiedName,
-  quoteIdent,
-} from '@/modules/mysql/sql-seed'
+import { callRoutineSeed, qualifiedName, quoteIdent } from '@/modules/mysql/sql-seed'
+import { buildMysqlRoutineCallSql } from '@/modules/mysql/utils/routine-call'
 import {
   analyzeTableSql,
   checkTableSql,
@@ -20,6 +17,7 @@ import {
   optimizeTableSql,
   repairTableSql,
   selectAllSql,
+  showCreateDatabaseSql,
   updateTemplateSql,
   type ScriptColumn,
 } from '@/modules/mysql/utils/script-templates'
@@ -30,20 +28,38 @@ import {
   lastSegment,
   segmentName,
   t,
-  type CategoryId,
 } from '@/modules/mysql/conn-tree-shared'
 import { useMysqlDdlActionStore, type MysqlDdlAction } from '@/modules/mysql/stores/ddl-actions'
+import {
+  MYSQL_CREATE_OBJECT_PLACEHOLDERS,
+  categoryToObjectKind,
+  type MysqlObjectCategory,
+  type MysqlObjectKind,
+} from '@/modules/mysql/types/object-script'
 
 const toast = useRsToast()
 
-const CONN_MENU_KEYS = new Set(['createDatabase', 'query', 'monitor'])
+const CONN_MENU_KEYS = new Set(['createDatabase', 'query', 'monitor', 'tools'])
 
 function openFeature(
   conn: ConnItem,
   path: ConnResourcePath | undefined,
-  initialTab: 'query' | 'browse' | 'ddl' | 'source' | 'monitor' | 'design',
+  initialTab:
+    | 'query'
+    | 'browse'
+    | 'ddl'
+    | 'source'
+    | 'objectScript'
+    | 'monitor'
+    | 'design'
+    | 'tools'
+    | 'debug',
   initialSql?: string,
-  options?: { autoRun?: boolean; designMode?: 'create' | 'alter' },
+  options?: {
+    autoRun?: boolean
+    designMode?: 'create' | 'alter'
+    objectKind?: MysqlObjectKind
+  },
 ): void {
   const ctx: ConnOpenContext = {
     resourcePath: path,
@@ -58,6 +74,9 @@ function openFeature(
   if (options?.designMode) {
     ctx.designMode = options.designMode
   }
+  if (options?.objectKind) {
+    ctx.objectKind = options.objectKind
+  }
   useConnectionNavigation().connect(conn, ctx)
 }
 
@@ -68,6 +87,56 @@ function openQuery(
   options?: { autoRun?: boolean },
 ): void {
   openFeature(conn, path, 'query', initialSql, options)
+}
+
+function objectScriptPath(
+  database: string,
+  category: MysqlObjectCategory,
+  objectName: string,
+): ConnResourcePath {
+  if (category === 'views') {
+    return {
+      segments: [
+        { kind: 'database', name: database },
+        { kind: 'category', name: 'views' },
+        { kind: 'table', name: objectName },
+      ],
+    }
+  }
+  return {
+    segments: [
+      { kind: 'database', name: database },
+      { kind: 'category', name: category },
+      { kind: 'routine', name: objectName },
+    ],
+  }
+}
+
+/** 新建 / 编辑视图·过程·函数：统一对象脚本面板。 */
+function openObjectScript(
+  conn: ConnItem,
+  database: string,
+  category: MysqlObjectCategory,
+  objectName: string,
+  designMode: 'create' | 'alter',
+  initialSql?: string,
+): void {
+  const objectKind = categoryToObjectKind(category)
+  const path = objectScriptPath(database, category, objectName)
+  const sql =
+    designMode === 'create'
+      ? (initialSql ?? createObjectTemplate(database, category))
+      : initialSql
+  openFeature(conn, path, 'objectScript', sql, { designMode, objectKind })
+}
+
+function openCreateObjectScript(
+  conn: ConnItem,
+  database: string,
+  category: MysqlObjectCategory,
+): void {
+  const name = MYSQL_CREATE_OBJECT_PLACEHOLDERS[category]
+  openObjectScript(conn, database, category, name, 'create')
 }
 
 async function copyText(text: string, successKey = 'modules.mysql.tree.copyOk'): Promise<boolean> {
@@ -92,25 +161,71 @@ async function withMysqlSession<T>(
 function openMysqlIoTask(
   conn: ConnItem,
   kind: 'export_csv' | 'import_csv' | 'dump_sql' | 'exec_sql_file',
-  titleKey: string,
-  database?: string,
-  table?: string,
+  opts: {
+    database?: string
+    table?: string
+    dumpScope?:
+      | 'database'
+      | 'tables'
+      | 'views'
+      | 'procedures'
+      | 'functions'
+      | 'table'
+      | 'procedure'
+      | 'function'
+  },
 ): void {
-  import('@/stores/session-registry').then(({ useSessionRegistry }) => {
-    const sessionId = useSessionRegistry().getSessionIdForProfile(conn.profileId, 'mysql')
-    return import('@/modules/mysql/data-tasks').then(({ openMysqlDataTask }) => {
-      openMysqlDataTask({
-        kind,
-        title: t(titleKey),
-        description: table ? `${database}.${table}` : database,
-        context: {
-          conn,
-          profileId: conn.profileId,
-          sessionId: sessionId ?? null,
-          database,
-          table,
-        },
-      })
+  const { database, table, dumpScope } = opts
+  const objectLabel = database && table ? `${database}.${table}` : (table ?? database ?? conn.profileName)
+  const useObjectScope =
+    kind === 'export_csv' ||
+    kind === 'import_csv' ||
+    (kind === 'dump_sql' &&
+      (dumpScope === 'table' || dumpScope === 'procedure' || dumpScope === 'function' || !!table))
+  const scopeLabel = useObjectScope ? objectLabel : (database ?? conn.profileName)
+
+  const titleKey: Record<typeof kind, string> = {
+    export_csv: 'modules.mysql.io.exportTitle',
+    import_csv: 'modules.mysql.io.importTitle',
+    dump_sql: 'modules.mysql.io.dumpTitle',
+    exec_sql_file: 'modules.mysql.io.execTitle',
+  }
+  const descKey: Record<typeof kind, string> = {
+    export_csv: 'modules.mysql.io.exportDesc',
+    import_csv: 'modules.mysql.io.importDesc',
+    dump_sql: 'modules.mysql.io.dumpDesc',
+    exec_sql_file: 'modules.mysql.io.execDesc',
+  }
+
+  let descName = database ?? ''
+  if (kind === 'dump_sql') {
+    if (dumpScope === 'tables') {
+      descName = t('modules.mysql.io.dumpScopeTables', { name: database ?? '' })
+    } else if (dumpScope === 'views') {
+      descName = t('modules.mysql.io.dumpScopeViews', { name: database ?? '' })
+    } else if (dumpScope === 'procedures') {
+      descName = t('modules.mysql.io.dumpScopeProcedures', { name: database ?? '' })
+    } else if (dumpScope === 'functions') {
+      descName = t('modules.mysql.io.dumpScopeFunctions', { name: database ?? '' })
+    } else if (table) {
+      descName = `${database}.${table}`
+    }
+  }
+
+  // 不传入查询 Tab 的 sessionId：IO 用 profileId 自开连接，避免卷入未提交事务
+  void import('@/modules/mysql/data-tasks').then(({ openMysqlDataTask }) => {
+    openMysqlDataTask({
+      kind,
+      title: `${scopeLabel} · ${t(titleKey[kind])}`,
+      description: t(descKey[kind], { name: descName }),
+      context: {
+        conn,
+        profileId: conn.profileId,
+        sessionId: null,
+        database,
+        table,
+        dumpScope,
+      },
     })
   })
 }
@@ -151,6 +266,39 @@ async function fetchRoutineSource(
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t('modules.mysql.tree.ddlFailed'))
     return null
+  }
+}
+
+/** 拉取形参元数据并打开 Query：OUT/INOUT 用用户变量 + SELECT 读回。 */
+async function openRoutineCall(
+  conn: ConnItem,
+  path: ConnResourcePath,
+  database: string,
+  routine: string,
+  isFunction: boolean,
+): Promise<void> {
+  const kind = isFunction ? 'function' : 'procedure'
+  try {
+    const sql = await withMysqlSession(conn.profileId, async (sessionId) => {
+      const { mysqlApi } = await import('@/api')
+      const meta = await mysqlApi.metaRoutineParameters({
+        sessionId,
+        database,
+        name: routine,
+        kind,
+      })
+      return buildMysqlRoutineCallSql({
+        database,
+        name: routine,
+        kind,
+        parameters: meta.parameters ?? [],
+        returnType: meta.returnType,
+      })
+    })
+    openQuery(conn, path, sql)
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.mysql.tree.callFailed'))
+    openQuery(conn, path, callRoutineSeed(database, routine, isFunction))
   }
 }
 
@@ -246,13 +394,16 @@ export function activate(conn: ConnItem, path: ConnResourcePath): void {
   const database = segmentName(path, 'database')
   const table = segmentName(path, 'table')
   const routine = segmentName(path, 'routine')
+  const category = segmentName(path, 'category')
 
   if (database && table) {
     openFeature(conn, path, 'browse')
     return
   }
   if (database && routine) {
-    openFeature(conn, path, 'source')
+    const cat: MysqlObjectCategory =
+      category === 'functions' ? 'functions' : 'procedures'
+    openObjectScript(conn, database, cat, routine, 'alter')
     return
   }
   openQuery(conn, path)
@@ -270,6 +421,10 @@ export function onConnMenuSelect(conn: ConnItem, key: string): boolean {
   }
   if (key === 'monitor') {
     openFeature(conn, undefined, 'monitor')
+    return true
+  }
+  if (key === 'tools') {
+    openFeature(conn, undefined, 'tools')
     return true
   }
   return false
@@ -311,8 +466,11 @@ export async function onResourceMenuSelect(
         openFeature(conn, path, 'design', undefined, { designMode: 'create' })
         return
       }
-      if (database && isCategoryId(category)) {
-        openQuery(conn, path, createObjectTemplate(database, category as CategoryId))
+      if (
+        database &&
+        (category === 'views' || category === 'procedures' || category === 'functions')
+      ) {
+        openCreateObjectScript(conn, database, category)
       }
       return
     case 'createDesign':
@@ -320,25 +478,69 @@ export async function onResourceMenuSelect(
         openFeature(conn, path, 'design', undefined, { designMode: 'create' })
       }
       return
+    case 'createView':
+    case 'createProcedure':
+    case 'createFunction': {
+      if (!database) return
+      const createCategory: Record<string, MysqlObjectCategory> = {
+        createView: 'views',
+        createProcedure: 'procedures',
+        createFunction: 'functions',
+      }
+      openCreateObjectScript(conn, database, createCategory[key]!)
+      return
+    }
     case 'exportCsv':
       if (database && table) {
-        openMysqlIoTask(conn, 'export_csv', 'modules.mysql.io.exportTitle', database, table)
+        openMysqlIoTask(conn, 'export_csv', { database, table, dumpScope: 'table' })
       }
       return
     case 'importCsv':
+      // 视图不可导入（对齐 Navicat / DBeaver：Import 仅基表）
+      if (isView) {
+        toast.error(t('modules.mysql.io.viewImportUnsupported'))
+        return
+      }
       if (database && table) {
-        openMysqlIoTask(conn, 'import_csv', 'modules.mysql.io.importTitle', database, table)
+        openMysqlIoTask(conn, 'import_csv', { database, table, dumpScope: 'table' })
       }
       return
-    case 'dumpSql':
-      if (database) {
-        openMysqlIoTask(conn, 'dump_sql', 'modules.mysql.io.dumpTitle', database, table)
+    case 'dumpSql': {
+      if (!database) return
+      // 分类节点：整类转储；例程/表/视图对象：单个；库节点：整库
+      if (last.kind === 'category' && isCategoryId(category)) {
+        openMysqlIoTask(conn, 'dump_sql', {
+          database,
+          dumpScope: category,
+        })
+        return
       }
+      if (routine) {
+        openMysqlIoTask(conn, 'dump_sql', {
+          database,
+          table: routine,
+          dumpScope: isFunction ? 'function' : 'procedure',
+        })
+        return
+      }
+      if (table) {
+        openMysqlIoTask(conn, 'dump_sql', {
+          database,
+          table,
+          dumpScope: 'table',
+        })
+        return
+      }
+      openMysqlIoTask(conn, 'dump_sql', { database, dumpScope: 'database' })
       return
+    }
     case 'execSqlFile':
       if (database) {
-        openMysqlIoTask(conn, 'exec_sql_file', 'modules.mysql.io.execTitle', database)
+        openMysqlIoTask(conn, 'exec_sql_file', { database, dumpScope: 'database' })
       }
+      return
+    case 'tools':
+      openFeature(conn, path, 'tools')
       return
     case 'genSelect':
       if (database && table) openQuery(conn, path, selectAllSql(database, table))
@@ -378,18 +580,35 @@ export async function onResourceMenuSelect(
       return
     case 'call':
       if (database && routine) {
-        openQuery(conn, path, callRoutineSeed(database, routine, isFunction))
+        void openRoutineCall(conn, path, database, routine, isFunction)
+      }
+      return
+    case 'debug':
+      if (database && routine) {
+        openFeature(conn, path, 'debug', undefined, {
+          objectKind: isFunction ? 'function' : 'procedure',
+        })
       }
       return
     case 'ddl':
-    case 'editView':
       if (database && table) {
         openFeature(conn, path, 'ddl')
       }
       return
+    case 'editView':
+      if (database && table) {
+        openObjectScript(conn, database, 'views', table, 'alter')
+      }
+      return
     case 'source':
       if (database && routine) {
-        openFeature(conn, path, 'source')
+        openObjectScript(
+          conn,
+          database,
+          isFunction ? 'functions' : 'procedures',
+          routine,
+          'alter',
+        )
       }
       return
     case 'copyName': {
@@ -417,6 +636,24 @@ export async function onResourceMenuSelect(
         isFunction ? 'function' : 'procedure',
       )
       if (ddl) void copyText(ddl)
+      return
+    }
+    case 'copyCreateDdl': {
+      if (!database) return
+      try {
+        const { execMysqlSql, extractShowCreateDdl } = await import(
+          '@/modules/mysql/composables/useMysqlSessionSql'
+        )
+        const result = await execMysqlSql(conn.profileId, showCreateDatabaseSql(database))
+        const ddl = extractShowCreateDdl(result)
+        if (!ddl) {
+          toast.error(t('modules.mysql.tree.ddlEmpty'))
+          return
+        }
+        void copyText(ddl)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t('modules.mysql.tree.ddlFailed'))
+      }
       return
     }
     case 'rename':

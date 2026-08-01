@@ -4,21 +4,26 @@
 
 ```
 services/
-├── manifests/           # service.yaml
-│   ├── platform-core.yaml   # Layer 2 注册契约（com.niuma.platform；壳层硬编码镜像）
-│   └── ftp-service.yaml     # platform-core supervisor 懒拉起
-├── bin/                 # 编译产物（打包时复制到 output/.../services/bin/）
-│   ├── platform-core.exe
-│   └── ftp-service.exe
-└── ftp-service/         # FTP 能力服务（Go 独立模块）
+├── manifests/           # service.yaml（platform-core supervisor 懒拉起）
+├── bin/                 # 编译产物
+│   └── runtime/         # 厂商 native 旁载（如 oracle Instant Client）
+├── ftp-service/ …       # Go 能力服务
+├── mysql-service/
+├── sqlite-service/
+├── dameng-service/
+└── oracle-service/      # C++20 + ODPI-C（见 docs/29）
 ```
 
-构建全部 Go 服务：
+构建 Go 服务：
 
 ```powershell
-.\scripts\build-services.ps1
+.\scripts\shared\build\build-services.ps1
+```
+
+构建 Oracle（独立）：
+
+```powershell
+.\scripts\shared\build\build-oracle-service.ps1
 ```
 
 目录与 manifest 规范见 [docs/13-service-layout.md](../docs/13-service-layout.md)、[docs/14-capability-connection-framework.md](../docs/14-capability-connection-framework.md)。
-
-实现阶段按模块新增：`ssh-service/`、`db-mysql/` 等。

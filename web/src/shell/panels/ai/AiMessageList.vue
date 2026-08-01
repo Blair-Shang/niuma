@@ -261,7 +261,7 @@ function focusAttachment(id: string): void {
 </script>
 
 <template>
-  <div ref="listEl" class="nm-ai-messages">
+  <div ref="listEl" class="nm-ai-messages rs-native-scrollbar">
     <div v-if="aiStore.loading && !aiStore.messages.length" class="nm-ai-messages__welcome">
       <span class="nm-ai-messages__spinner" aria-hidden="true" />
       <p class="nm-ai-messages__welcome-desc">{{ t('ai.loading') }}</p>

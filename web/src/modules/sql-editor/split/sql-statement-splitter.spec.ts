@@ -278,6 +278,50 @@ describe('splitSqlTexts · mysql', () => {
     ])
   })
 
+  it('keeps CREATE PROCEDURE without DELIMITER as one statement (Navicat style)', () => {
+    const sql = [
+      'CREATE PROCEDURE p()',
+      'BEGIN',
+      '  DECLARE EXIT HANDLER FOR SQLEXCEPTION',
+      '  BEGIN',
+      '    ROLLBACK;',
+      '  END;',
+      '  IF p_a IS NULL THEN',
+      '    SIGNAL SQLSTATE \'45000\' SET MESSAGE_TEXT = \'x\';',
+      '  END IF;',
+      '  START TRANSACTION;',
+      '  SELECT 1;',
+      'END;',
+    ].join('\n')
+    expect(splitSqlTexts(sql, 'mysql')).toEqual([sql])
+  })
+
+  it('splits DROP then CREATE PROCEDURE without DELIMITER into two', () => {
+    const create = [
+      'CREATE PROCEDURE p()',
+      'BEGIN',
+      '  SELECT 1;',
+      'END;',
+    ].join('\n')
+    const sql = `DROP PROCEDURE IF EXISTS p;\n${create}`
+    expect(splitSqlTexts(sql, 'mysql')).toEqual([
+      'DROP PROCEDURE IF EXISTS p',
+      create,
+    ])
+  })
+
+  it('keeps CREATE DEFINER FUNCTION without DELIMITER as one statement', () => {
+    const sql = [
+      'CREATE DEFINER=`root`@`%` FUNCTION f()',
+      'RETURNS INT',
+      'DETERMINISTIC',
+      'BEGIN',
+      '  RETURN 1;',
+      'END;',
+    ].join('\n')
+    expect(splitSqlTexts(sql, 'mysql')).toEqual([sql])
+  })
+
   it('ignores DELIMITER directives as executable statements', () => {
     expect(splitSqlTexts('DELIMITER $$\nSELECT 1$$\nDELIMITER ;\nSELECT 2;', 'mysql')).toEqual([
       'SELECT 1',
@@ -305,6 +349,74 @@ describe('splitSqlTexts · oracle', () => {
     expect(splitSqlTexts("SELECT q'!a;b!'; SELECT 2", 'oracle')).toEqual([
       "SELECT q'!a;b!'",
       'SELECT 2',
+    ])
+  })
+})
+
+describe('splitSqlTexts · dameng', () => {
+  it('keeps CREATE TRIGGER … BEGIN … END; / as one statement', () => {
+    const sql = [
+      'CREATE OR REPLACE TRIGGER "DATAHUB_TEST"."new_trg"',
+      'BEFORE INSERT ON "DATAHUB_TEST"."target_table"',
+      'FOR EACH ROW',
+      'BEGIN',
+      '  NULL;',
+      'END;',
+      '/',
+    ].join('\n')
+    expect(splitSqlTexts(sql, 'dameng')).toEqual([
+      [
+        'CREATE OR REPLACE TRIGGER "DATAHUB_TEST"."new_trg"',
+        'BEFORE INSERT ON "DATAHUB_TEST"."target_table"',
+        'FOR EACH ROW',
+        'BEGIN',
+        '  NULL;',
+        'END;',
+      ].join('\n'),
+    ])
+  })
+
+  it('keeps CREATE TRIGGER with DECLARE section as one statement', () => {
+    const sql = [
+      'CREATE OR REPLACE TRIGGER "s"."trg"',
+      'BEFORE INSERT ON "s"."t"',
+      'FOR EACH ROW',
+      'DECLARE',
+      '  v_id INT;',
+      'BEGIN',
+      '  v_id := 1;',
+      'END;',
+      '/',
+    ].join('\n')
+    expect(splitSqlTexts(sql, 'dameng')).toEqual([
+      [
+        'CREATE OR REPLACE TRIGGER "s"."trg"',
+        'BEFORE INSERT ON "s"."t"',
+        'FOR EACH ROW',
+        'DECLARE',
+        '  v_id INT;',
+        'BEGIN',
+        '  v_id := 1;',
+        'END;',
+      ].join('\n'),
+    ])
+  })
+
+  it('keeps CREATE PACKAGE header with nested PROCEDURE; before END', () => {
+    const sql = [
+      'CREATE OR REPLACE PACKAGE "s"."new_pkg" AS',
+      '  PROCEDURE hello;',
+      'END "new_pkg";',
+      '/',
+      'SELECT 1;',
+    ].join('\n')
+    expect(splitSqlTexts(sql, 'dameng')).toEqual([
+      [
+        'CREATE OR REPLACE PACKAGE "s"."new_pkg" AS',
+        '  PROCEDURE hello;',
+        'END "new_pkg";',
+      ].join('\n'),
+      'SELECT 1',
     ])
   })
 })

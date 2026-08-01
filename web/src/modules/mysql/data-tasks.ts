@@ -13,6 +13,21 @@ export interface MysqlIoTaskContext {
   sessionId?: string | null
   database?: string
   table?: string
+  /**
+   * 转储对象范围提示（来自树节点）：
+   * - `table` / `procedure` / `function`：单个对象
+   * - `tables` / `views` / `procedures` / `functions`：分类节点（仅该类）
+   * - `database`：整库
+   */
+  dumpScope?:
+    | 'database'
+    | 'tables'
+    | 'views'
+    | 'procedures'
+    | 'functions'
+    | 'table'
+    | 'procedure'
+    | 'function'
 }
 
 export interface OpenMysqlIoTaskInput {
@@ -66,11 +81,23 @@ export function openMysqlDataTask(input: OpenMysqlIoTaskInput): string {
 export function readMysqlIoContext(context: Record<string, unknown>): MysqlIoTaskContext | null {
   const profileId = context.profileId
   if (typeof profileId !== 'string' || !profileId) return null
+  const dumpScope = context.dumpScope
   return {
     conn: context.conn as ConnItem,
     profileId,
     sessionId: (context.sessionId as string | null | undefined) ?? null,
     database: typeof context.database === 'string' ? context.database : undefined,
     table: typeof context.table === 'string' ? context.table : undefined,
+    dumpScope:
+      dumpScope === 'database' ||
+      dumpScope === 'tables' ||
+      dumpScope === 'views' ||
+      dumpScope === 'procedures' ||
+      dumpScope === 'functions' ||
+      dumpScope === 'table' ||
+      dumpScope === 'procedure' ||
+      dumpScope === 'function'
+        ? dumpScope
+        : undefined,
   }
 }

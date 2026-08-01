@@ -40,8 +40,12 @@ import type {
   AiPolicyListPendingResult,
   AiSkillDeleteParams,
   AiSkillDeleteResult,
+  AiSkillExportPackParams,
+  AiSkillExportPackResult,
   AiSkillGetParams,
   AiSkillGetResult,
+  AiSkillInstallPackParams,
+  AiSkillInstallPackResult,
   AiSkillListParams,
   AiSkillListResult,
   AiSkillUpsertParams,
@@ -189,5 +193,13 @@ export const aiApi = {
 
   deleteSkill(params: AiSkillDeleteParams): Promise<AiSkillDeleteResult> {
     return bridgeInvoke<AiSkillDeleteResult>('platform.ai.skill.delete', params)
+  },
+
+  installSkillPack(params: AiSkillInstallPackParams): Promise<AiSkillInstallPackResult> {
+    return bridgeInvoke<AiSkillInstallPackResult>('platform.ai.skill.installPack', params)
+  },
+
+  exportSkillPack(params: AiSkillExportPackParams): Promise<AiSkillExportPackResult> {
+    return bridgeInvoke<AiSkillExportPackResult>('platform.ai.skill.exportPack', params)
   },
 } as const

@@ -96,7 +96,7 @@ watch(
       </RsButton>
     </Teleport>
 
-    <RsLoading v-if="loading && !ddl" class="nm-vast-ddl__loading" />
+    <RsLoading v-if="loading && !ddl" block class="nm-vast-ddl__loading" />
     <RsEmpty
       v-else-if="!schema || !table"
       fill
@@ -139,6 +139,10 @@ watch(
 
 .nm-vast-ddl__loading {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .nm-vast-ddl__editor {

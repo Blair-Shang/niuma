@@ -14,6 +14,7 @@ type queryCancel struct {
 }
 
 // Session 持有一条 MySQL 连接池、在途查询取消句柄与打开的结果游标。
+// 关闭 Auto-commit 时钉住 txConn，保证 BEGIN/COMMIT 落在同一物理连接。
 type Session struct {
 	ID         string
 	DB         *sql.DB
@@ -25,6 +26,12 @@ type Session struct {
 	mu         sync.Mutex
 	inflight   map[string]*queryCancel
 	resultSets map[string]*ResultSet
+
+	autoCommit  bool      // 默认 true
+	inTx        bool      // !autoCommit 下已有未提交语句
+	txConn      *sql.Conn // !autoCommit 时钉住的连接
+	txBusy      bool      // txConn 正被打开的 ResultSet 占用
+	txDatabase  string    // txConn 上当前 DATABASE()（经 USE 同步）
 }
 
 // RegisterQuery 登记可取消查询；返回子 context 与释放函数（查询结束须调用）。
@@ -108,6 +115,9 @@ func (s *Session) CancelQuery(requestID string) int {
 func (s *Session) Close() {
 	s.CloseResultSet("")
 	s.CancelQuery("")
+	s.mu.Lock()
+	s.releaseTxConnLocked()
+	s.mu.Unlock()
 	if s.DB != nil {
 		_ = s.DB.Close()
 		s.DB = nil

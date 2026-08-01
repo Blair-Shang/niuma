@@ -86,8 +86,21 @@ describe('buildCallParams / serializeCallParams', () => {
 describe('buildCallPlaceholders / buildRoutineCallSql', () => {
   it('builds typed NULL placeholders', () => {
     expect(buildCallPlaceholders('a integer, b text')).toBe(
-      'NULL::integer -- a,\n  NULL::text -- b',
+      'NULL::integer /* a */,\n  NULL::text /* b */',
     )
+  })
+
+  it('keeps closing paren after single-arg placeholder (no line-comment swallow)', () => {
+    const qualify = (s: string, n: string) => `"${s}"."${n}"`
+    const sql = buildRoutineCallSql({
+      schema: 'public',
+      name: 'f_pinyin',
+      kind: 'function',
+      args: 'p_name varchar',
+      qualify,
+    })
+    expect(sql).toContain('SELECT "public"."f_pinyin"(NULL::varchar /* p_name */);')
+    expect(sql).not.toMatch(/NULL::varchar\s+--/)
   })
 
   it('builds SELECT / CALL SQL', () => {

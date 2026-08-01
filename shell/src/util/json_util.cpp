@@ -174,7 +174,17 @@ std::string JsonQuoteString(const std::string& value) {
   std::string out;
   out.reserve(value.size() + 2);
   out.push_back('"');
-  for (const unsigned char ch : value) {
+  auto append_hex2 = [&out](unsigned char ch) {
+    static const char* hex = "0123456789abcdef";
+    out.push_back('\\');
+    out.push_back('u');
+    out.push_back('0');
+    out.push_back('0');
+    out.push_back(hex[(ch >> 4) & 0xF]);
+    out.push_back(hex[ch & 0xF]);
+  };
+  for (size_t i = 0; i < value.size(); ++i) {
+    const unsigned char ch = static_cast<unsigned char>(value[i]);
     switch (ch) {
       case '"':
         out.append("\\\"");
@@ -199,7 +209,19 @@ std::string JsonQuoteString(const std::string& value) {
         break;
       default:
         if (ch < 0x20) {
+          // 控制字符不可静默丢弃（否则 JSON.parse 会坏）
+          append_hex2(ch);
           break;
+        }
+        // UTF-8 U+2028/U+2029：旧版 JS 字符串字面量中会断行，转义为 \u2028/\u2029
+        if (ch == 0xE2 && i + 2 < value.size()) {
+          const unsigned char c1 = static_cast<unsigned char>(value[i + 1]);
+          const unsigned char c2 = static_cast<unsigned char>(value[i + 2]);
+          if (c1 == 0x80 && (c2 == 0xA8 || c2 == 0xA9)) {
+            out.append(c2 == 0xA8 ? "\\u2028" : "\\u2029");
+            i += 2;
+            break;
+          }
         }
         out.push_back(static_cast<char>(ch));
         break;

@@ -91,41 +91,45 @@ export function repairTableSql(database: string, table: string): string {
   return `REPAIR TABLE ${qualifiedName(database, table)};`
 }
 
+/**
+ * 新建对象 SQL 模板（对象脚本面板预填；保留 catalog 表/列补全）。
+ * 视图：FROM 后空位便于补全表名；
+ * 例程：Navicat 风格直接写 CREATE…BEGIN…END;（无需 DELIMITER；拆句走 mysqlCompoundBlocks）。
+ */
 export function createObjectTemplate(database: string, category: CategoryId): string {
-  const db = quoteIdent(database)
+  const qn = (name: string) => qualifiedName(database, name)
   switch (category) {
     case 'tables':
       return (
-        `CREATE TABLE ${db}.\`new_table\` (\n` +
+        `CREATE TABLE ${qn('new_table')} (\n` +
         `  \`id\` BIGINT NOT NULL AUTO_INCREMENT,\n` +
         `  PRIMARY KEY (\`id\`)\n` +
         `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n`
       )
     case 'views':
       return (
-        `CREATE VIEW ${db}.\`new_view\` AS\n` +
-        `SELECT 1 AS col;\n`
+        `CREATE VIEW ${qn('new_view')} AS\n` +
+        `SELECT\n` +
+        `  *\n` +
+        `FROM \n`
       )
     case 'procedures':
       return (
-        `DELIMITER //\n` +
-        `CREATE PROCEDURE ${db}.\`new_proc\`()\n` +
+        `CREATE PROCEDURE ${qn('new_proc')}()\n` +
         `BEGIN\n` +
         `  -- body\n` +
         `  SELECT 1;\n` +
-        `END //\n` +
-        `DELIMITER ;\n`
+        `END;\n`
       )
     case 'functions':
       return (
-        `DELIMITER //\n` +
-        `CREATE FUNCTION ${db}.\`new_func\`()\n` +
+        `CREATE FUNCTION ${qn('new_func')}()\n` +
         `RETURNS INT\n` +
         `DETERMINISTIC\n` +
         `BEGIN\n` +
+        `  -- body\n` +
         `  RETURN 1;\n` +
-        `END //\n` +
-        `DELIMITER ;\n`
+        `END;\n`
       )
   }
 }
@@ -172,6 +176,10 @@ export function createDatabaseSql(
     parts.push(`COLLATE ${collation}`)
   }
   return `${parts.join(' ')};`
+}
+
+export function showCreateDatabaseSql(database: string): string {
+  return `SHOW CREATE DATABASE ${quoteIdent(database)}`
 }
 
 export function showCreateTableSql(database: string, table: string): string {

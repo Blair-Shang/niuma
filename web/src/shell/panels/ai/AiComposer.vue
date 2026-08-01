@@ -477,7 +477,7 @@ function cancelEditing(): void {
       <p v-if="attachError" class="nm-ai-composer__attach-error">{{ attachError }}</p>
       <div
         v-if="attachments.length || aiStore.selectedSkillCode"
-        class="nm-ai-composer__chips"
+        class="nm-ai-composer__chips rs-native-scrollbar"
         role="list"
       >
         <div
@@ -521,7 +521,7 @@ function cancelEditing(): void {
         <textarea
           id="nm-ai-composer-input"
           v-model="draft"
-          class="nm-ai-composer__input"
+          class="nm-ai-composer__input rs-native-scrollbar"
           rows="2"
           :placeholder="t('ai.inputPlaceholder')"
           :aria-label="t('ai.inputPlaceholder')"
@@ -530,44 +530,50 @@ function cancelEditing(): void {
           @input="onInput"
           @paste="onPaste"
         />
-        <div v-if="mentionVisible" class="nm-ai-mention" role="listbox">
+        <div v-if="mentionVisible" class="nm-ai-mention rs-native-scrollbar">
           <div class="nm-ai-mention__head">{{ t('ai.mentionHint') }}</div>
-          <button
-            v-for="entry in mentionEntries"
-            :key="entry.id"
-            type="button"
-            class="nm-ai-mention__item"
-            :class="{
-              'nm-ai-mention__item--active':
-                entry.type === 'skill' && entry.skillCode === aiStore.selectedSkillCode,
-            }"
-            role="option"
-            @click="pickMention(entry)"
-          >
-            <span class="nm-ai-mention__badge">
-              <RsIcon
-                :name="entry.type === 'skill' ? 'sparkles' : kindIcon(entry.attachment.kind)"
-                :size="12"
-              />
-            </span>
-            <span class="nm-ai-mention__text">
-              <span class="nm-ai-mention__label">
-                {{ entry.type === 'skill' ? entry.label : entry.attachment.label }}
-              </span>
-              <span class="nm-ai-mention__meta">
-                <template v-if="entry.type === 'skill'">
-                  {{ t('ai.mentionKindSkill')
-                  }}<template v-if="entry.detail"> · {{ entry.detail }}</template>
-                </template>
-                <template v-else>
-                  {{ kindLabel(entry.attachment.kind)
-                  }}<template v-if="entry.attachment.detail">
-                    · {{ entry.attachment.detail }}</template
-                  >
-                </template>
-              </span>
-            </span>
-          </button>
+          <ul class="nm-ai-mention__list">
+            <li v-for="entry in mentionEntries" :key="entry.id">
+              <button
+                type="button"
+                class="nm-ai-mention__item"
+                :class="{
+                  'nm-ai-mention__item--active':
+                    entry.type === 'skill' && entry.skillCode === aiStore.selectedSkillCode,
+                }"
+                :aria-current="
+                  entry.type === 'skill' && entry.skillCode === aiStore.selectedSkillCode
+                    ? 'true'
+                    : undefined
+                "
+                @click="pickMention(entry)"
+              >
+                <span class="nm-ai-mention__badge">
+                  <RsIcon
+                    :name="entry.type === 'skill' ? 'sparkles' : kindIcon(entry.attachment.kind)"
+                    :size="12"
+                  />
+                </span>
+                <span class="nm-ai-mention__text">
+                  <span class="nm-ai-mention__label">
+                    {{ entry.type === 'skill' ? entry.label : entry.attachment.label }}
+                  </span>
+                  <span class="nm-ai-mention__meta">
+                    <template v-if="entry.type === 'skill'">
+                      {{ t('ai.mentionKindSkill')
+                      }}<template v-if="entry.detail"> · {{ entry.detail }}</template>
+                    </template>
+                    <template v-else>
+                      {{ kindLabel(entry.attachment.kind)
+                      }}<template v-if="entry.attachment.detail">
+                        · {{ entry.attachment.detail }}</template
+                      >
+                    </template>
+                  </span>
+                </span>
+              </button>
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -855,6 +861,12 @@ function cancelEditing(): void {
   font-weight: 600;
   color: var(--rs-muted);
   letter-spacing: 0.02em;
+}
+
+.nm-ai-mention__list {
+  margin: 0;
+  padding: 0 0 6px;
+  list-style: none;
 }
 
 .nm-ai-mention__item {

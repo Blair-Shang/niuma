@@ -7,9 +7,38 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"time"
 
 	"niuma/platform/internal/store"
 )
+
+// 连接导入导出包版本（与 Web 约定一致；不含凭据明文）。
+const connectionBundleVersion = 1
+
+// connectionExportProfile 是导出包中的单条连接（exportId 供前端组织层映射）。
+type connectionExportProfile struct {
+	ExportID          string          `json:"exportId"`
+	ProfileName       string          `json:"profileName"`
+	ConnectionKind    string          `json:"connectionKind"`
+	HostAddress       string          `json:"hostAddress"`
+	PortNumber        int             `json:"portNumber"`
+	LoginAccount      string          `json:"loginAccount"`
+	ConnectionOptions json.RawMessage `json:"connectionOptions"`
+}
+
+// connectionExportBundle 是 platform.connection.export / import 的文件格式。
+// organization 为前端文件夹结构（opaque 透传）；platform 只负责 profiles 落地。
+// secrets 为可选的口令加密凭据信封；无此字段则导入后不含密码。
+type connectionExportBundle struct {
+	Version      int                       `json:"version"`
+	ExportedAt   string                    `json:"exportedAt"`
+	Profiles     []connectionExportProfile `json:"profiles"`
+	Organization json.RawMessage           `json:"organization,omitempty"`
+	Secrets      *connectionBundleSecrets  `json:"secrets,omitempty"`
+}
 
 const (
 	// credentialServicePrefix 是凭据在 VaultStore 中的 service 前缀，与 store.credentialServicePrefix 保持一致。
@@ -259,6 +288,373 @@ func (d *Dispatcher) connectionDelete(ctx context.Context, req Request) Response
 		}
 	}
 	return okResponse(req.ID, map[string]any{"deleted": true})
+}
+
+// connectionExport 处理 platform.connection.export：
+// 将指定（或全部）连接配置写入本机 JSON 文件。
+// includeSecrets=true 时用 passphrase 加密凭据写入 secrets 信封（明文不落盘）。
+// organization 由前端传入（文件夹结构），platform 原样写入文件。
+func (d *Dispatcher) connectionExport(ctx context.Context, req Request) Response {
+	var params struct {
+		Path           string          `json:"path"`
+		ProfileIDs     []string        `json:"profileIds"`
+		Organization   json.RawMessage `json:"organization"`
+		IncludeSecrets bool            `json:"includeSecrets"`
+		Passphrase     string          `json:"passphrase"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		slog.Warn("connection.export invalid params", "err", err)
+		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+	}
+	if params.Path == "" {
+		return errorResponse(req.ID, "path required")
+	}
+	if params.IncludeSecrets && strings.TrimSpace(params.Passphrase) == "" {
+		return errorResponse(req.ID, "passphrase required when includeSecrets")
+	}
+
+	slog.Info("connection.export start",
+		"path", params.Path,
+		"requestedIds", len(params.ProfileIDs),
+		"includeSecrets", params.IncludeSecrets,
+	)
+
+	var profiles []store.ConnectionProfile
+	if len(params.ProfileIDs) == 0 {
+		listed, err := d.connections.List(ctx, "", "")
+		if err != nil {
+			slog.Error("connection.export list failed", "err", err)
+			return errorResponse(req.ID, err.Error())
+		}
+		profiles = listed
+	} else {
+		seen := make(map[string]struct{}, len(params.ProfileIDs))
+		for _, id := range params.ProfileIDs {
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			p, err := d.connections.Get(ctx, id)
+			if err != nil {
+				slog.Error("connection.export get failed", "profileId", id, "err", err)
+				return errorResponse(req.ID, err.Error())
+			}
+			if p != nil {
+				profiles = append(profiles, *p)
+			} else {
+				slog.Warn("connection.export profile missing", "profileId", id)
+			}
+		}
+	}
+
+	if len(profiles) == 0 {
+		slog.Warn("connection.export empty", "path", params.Path)
+		return errorResponse(req.ID, "no profiles to export")
+	}
+
+	exportProfiles := make([]connectionExportProfile, 0, len(profiles))
+	for _, p := range profiles {
+		opts, err := sanitizeConnectionOptionsJSON(p.ConnectionOptions)
+		if err != nil {
+			slog.Error("connection.export sanitize failed", "profileId", p.ProfileID, "err", err)
+			return errorResponse(req.ID, fmt.Sprintf("sanitize options: %v", err))
+		}
+		exportProfiles = append(exportProfiles, connectionExportProfile{
+			ExportID:          p.ProfileID,
+			ProfileName:       p.ProfileName,
+			ConnectionKind:    p.ConnectionKind,
+			HostAddress:       p.HostAddress,
+			PortNumber:        p.PortNumber,
+			LoginAccount:      p.LoginAccount,
+			ConnectionOptions: opts,
+		})
+	}
+
+	bundle := connectionExportBundle{
+		Version:      connectionBundleVersion,
+		ExportedAt:   time.Now().UTC().Format(time.RFC3339),
+		Profiles:     exportProfiles,
+		Organization: normalizeOrganizationJSON(params.Organization),
+	}
+
+	secretCount := 0
+	if params.IncludeSecrets {
+		payload := connectionSecretsPayload{ByExportID: map[string]connectionSecretEntry{}}
+		for _, p := range profiles {
+			entry, err := d.loadProfileSecretEntry(ctx, p)
+			if err != nil {
+				slog.Error("connection.export load secret failed", "profileId", p.ProfileID, "err", err)
+				return errorResponse(req.ID, err.Error())
+			}
+			if entry != nil {
+				payload.ByExportID[p.ProfileID] = *entry
+				secretCount++
+			}
+		}
+		env, err := encryptBundleSecrets(params.Passphrase, payload)
+		if err != nil {
+			slog.Error("connection.export encrypt secrets failed", "err", err)
+			return errorResponse(req.ID, err.Error())
+		}
+		bundle.Secrets = env
+	}
+
+	raw, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		slog.Error("connection.export marshal failed", "err", err)
+		return errorResponse(req.ID, err.Error())
+	}
+	raw = append(raw, '\n')
+	if err := os.WriteFile(params.Path, raw, 0o644); err != nil {
+		slog.Error("connection.export write failed", "path", params.Path, "err", err)
+		return errorResponse(req.ID, fmt.Sprintf("write file: %v", err))
+	}
+
+	slog.Info("connection.export done",
+		"path", params.Path,
+		"exported", len(exportProfiles),
+		"includeSecrets", params.IncludeSecrets,
+		"secretCount", secretCount,
+	)
+	return okResponse(req.ID, map[string]any{
+		"exported":       len(exportProfiles),
+		"path":           params.Path,
+		"includeSecrets": params.IncludeSecrets,
+	})
+}
+
+// connectionImport 处理 platform.connection.import：
+// 从本机 JSON 读取连接配置并新建站点（追加，不覆盖已有）。
+// 同名站点自动加后缀，避免 uk_nm_conn_profile_name 冲突导致全部跳过。
+// 若文件含 secrets 信封，须提供正确 passphrase，解密后写入本机 Vault。
+// 返回 idMap（exportId → newProfileId）与 organization，供前端还原文件夹。
+func (d *Dispatcher) connectionImport(ctx context.Context, req Request) Response {
+	var params struct {
+		Path       string `json:"path"`
+		Passphrase string `json:"passphrase"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		slog.Warn("connection.import invalid params", "err", err)
+		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+	}
+	if params.Path == "" {
+		return errorResponse(req.ID, "path required")
+	}
+
+	slog.Info("connection.import start", "path", params.Path, "hasPassphrase", strings.TrimSpace(params.Passphrase) != "")
+
+	raw, err := os.ReadFile(params.Path)
+	if err != nil {
+		slog.Error("connection.import read failed", "path", params.Path, "err", err)
+		return errorResponse(req.ID, fmt.Sprintf("read file: %v", err))
+	}
+
+	var bundle connectionExportBundle
+	if err := json.Unmarshal(raw, &bundle); err != nil {
+		slog.Warn("connection.import invalid json", "path", params.Path, "err", err)
+		return errorResponse(req.ID, "invalid connection bundle json")
+	}
+	if bundle.Version != connectionBundleVersion {
+		slog.Warn("connection.import unsupported version", "version", bundle.Version)
+		return errorResponse(req.ID, "unsupported connection bundle version")
+	}
+	if len(bundle.Profiles) == 0 {
+		slog.Warn("connection.import empty bundle", "path", params.Path)
+		return errorResponse(req.ID, "no profiles in bundle")
+	}
+
+	var secretsMap map[string]connectionSecretEntry
+	if bundle.Secrets != nil {
+		payload, decErr := decryptBundleSecrets(params.Passphrase, bundle.Secrets)
+		if decErr != nil {
+			slog.Warn("connection.import decrypt secrets failed", "err", decErr)
+			return errorResponse(req.ID, decErr.Error())
+		}
+		secretsMap = payload.ByExportID
+		slog.Info("connection.import secrets decrypted", "secretCount", len(secretsMap))
+	}
+
+	idMap := make(map[string]string, len(bundle.Profiles))
+	imported := 0
+	skipped := 0
+	withSecrets := 0
+	renamed := 0
+
+	for _, item := range bundle.Profiles {
+		name := strings.TrimSpace(item.ProfileName)
+		kind := strings.TrimSpace(item.ConnectionKind)
+		if name == "" || kind == "" {
+			skipped++
+			slog.Warn("connection.import skip invalid profile", "exportId", item.ExportID, "name", name, "kind", kind)
+			continue
+		}
+		opts, err := sanitizeConnectionOptionsJSON(string(item.ConnectionOptions))
+		if err != nil {
+			skipped++
+			slog.Warn("connection.import skip sanitize", "name", name, "err", err)
+			continue
+		}
+
+		finalName, renameErr := d.resolveUniqueProfileName(ctx, defaultWorkspaceID, name)
+		if renameErr != nil {
+			slog.Error("connection.import resolve name failed", "name", name, "err", renameErr)
+			return errorResponse(req.ID, renameErr.Error())
+		}
+		if finalName != name {
+			renamed++
+			slog.Info("connection.import renamed for uniqueness", "from", name, "to", finalName)
+		}
+
+		profileID, err := d.ids.NextString()
+		if err != nil {
+			return errorResponse(req.ID, err.Error())
+		}
+		if err := d.connections.Create(ctx, store.ConnectionProfile{
+			ProfileID:         profileID,
+			WorkspaceID:       defaultWorkspaceID,
+			ProfileName:       finalName,
+			ConnectionKind:    kind,
+			HostAddress:       item.HostAddress,
+			PortNumber:        item.PortNumber,
+			LoginAccount:      item.LoginAccount,
+			ConnectionOptions: string(opts),
+		}); err != nil {
+			skipped++
+			slog.Warn("connection.import create failed", "name", finalName, "kind", kind, "err", err)
+			continue
+		}
+
+		if entry, ok := secretsMap[item.ExportID]; ok && strings.TrimSpace(entry.Secret) != "" {
+			credKind := strings.TrimSpace(entry.Kind)
+			if credKind == "" {
+				credKind = credentialKindPassword
+			}
+			// 凭据标签全局唯一：留空由 storeCredential 生成 credential-{id}，避免与已有标签冲突。
+			credID, credErr := d.storeCredential(ctx, credentialInput{
+				Label:  "",
+				Kind:   credKind,
+				Secret: entry.Secret,
+			})
+			if credErr != nil {
+				slog.Error("connection.import store credential failed", "profileId", profileID, "err", credErr)
+				return errorResponse(req.ID, credErr.Error())
+			}
+			if linkErr := d.connections.LinkCredential(ctx, profileID, credID); linkErr != nil {
+				slog.Error("connection.import link credential failed", "profileId", profileID, "err", linkErr)
+				return errorResponse(req.ID, linkErr.Error())
+			}
+			withSecrets++
+		}
+
+		if item.ExportID != "" {
+			idMap[item.ExportID] = profileID
+		}
+		imported++
+	}
+
+	if imported == 0 {
+		slog.Warn("connection.import none imported",
+			"path", params.Path,
+			"bundleCount", len(bundle.Profiles),
+			"skipped", skipped,
+		)
+		return errorResponse(req.ID, "no profiles imported")
+	}
+
+	slog.Info("connection.import done",
+		"path", params.Path,
+		"imported", imported,
+		"skipped", skipped,
+		"renamed", renamed,
+		"withSecrets", withSecrets,
+		"hasSecrets", bundle.Secrets != nil,
+	)
+	return okResponse(req.ID, map[string]any{
+		"imported":     imported,
+		"skipped":      skipped,
+		"renamed":      renamed,
+		"withSecrets":  withSecrets,
+		"idMap":        idMap,
+		"organization": normalizeOrganizationJSON(bundle.Organization),
+		"hasSecrets":   bundle.Secrets != nil,
+	})
+}
+
+// resolveUniqueProfileName 在工作区内生成不冲突的站点名（同名追加 " (2)"…）。
+func (d *Dispatcher) resolveUniqueProfileName(ctx context.Context, workspaceID, base string) (string, error) {
+	candidate := base
+	for i := 2; i <= 999; i++ {
+		exists, err := d.connections.ExistsByName(ctx, workspaceID, candidate)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+		candidate = fmt.Sprintf("%s (%d)", base, i)
+	}
+	return "", fmt.Errorf("too many name conflicts for profile %q", base)
+}
+
+// loadProfileSecretEntry 从本机 Vault 读取站点首个凭据明文（仅导出加密用，短暂驻留内存）。
+func (d *Dispatcher) loadProfileSecretEntry(ctx context.Context, p store.ConnectionProfile) (*connectionSecretEntry, error) {
+	if len(p.CredentialIDs) == 0 {
+		return nil, nil
+	}
+	ref, err := d.credentials.Get(ctx, p.CredentialIDs[0])
+	if err != nil {
+		return nil, err
+	}
+	if ref == nil {
+		return nil, nil
+	}
+	secret, ok, err := d.secrets.GetSecret(credentialServicePrefix+ref.CredentialID, credentialSecretAccount)
+	if err != nil {
+		return nil, fmt.Errorf("vault: %v", err)
+	}
+	if !ok || secret == "" {
+		return nil, nil
+	}
+	kind := ref.CredentialKind
+	if kind == "" {
+		kind = credentialKindPassword
+	}
+	return &connectionSecretEntry{Kind: kind, Secret: secret}, nil
+}
+
+// sanitizeConnectionOptionsJSON 去掉 options 中可能残留的明文敏感字段。
+func sanitizeConnectionOptionsJSON(raw string) (json.RawMessage, error) {
+	if raw == "" {
+		return json.RawMessage("{}"), nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		// 非法 JSON 回退为空对象，避免阻断导出
+		return json.RawMessage("{}"), nil
+	}
+	if proxy, ok := obj["proxy"].(map[string]any); ok {
+		delete(proxy, "password")
+		obj["proxy"] = proxy
+	}
+	if tunnel, ok := obj["tunnel"].(map[string]any); ok {
+		delete(tunnel, "sshProfile")
+		obj["tunnel"] = tunnel
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(out), nil
+}
+
+func normalizeOrganizationJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return raw
 }
 
 // credentialGet 处理 platform.credential.get：按 profileId 找到关联的首个凭据并解密，

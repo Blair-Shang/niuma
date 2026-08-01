@@ -1,11 +1,8 @@
-// Package ddl 提供受控 DDL 脚本生成与执行（表设计 ALTER / CREATE TABLE）。
-//
-// 所有标识符通过 QuoteIdent 安全反引号包裹，防止 SQL 注入；
-// 仅白名单操作可通过 ApplyDesign / CreateTable 执行。
 package ddl
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -29,6 +26,40 @@ func qualified(database, table string) string { return Qualified(database, table
 func quoteStringLiteral(s string) string {
 	// MySQL 标准：单引号内用 '' 转义单引号
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+var (
+	defaultBareExprRe = regexp.MustCompile(
+		`(?i)^(NULL|TRUE|FALSE|CURRENT_(?:TIMESTAMP|DATE|TIME|USER)(?:\(\d*\))?|LOCALTIME(?:\(\d*\))?|LOCALTIMESTAMP(?:\(\d*\))?|UTC_TIMESTAMP(?:\(\d*\))?|NOW\(\))$`,
+	)
+	defaultNumberRe = regexp.MustCompile(`^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$`)
+	defaultHexBitRe = regexp.MustCompile(`(?i)^(0x[0-9a-f]+|x'[0-9a-f]*'|b'[01]*')$`)
+)
+
+// FormatDefaultExpr 将 UI / information_schema 中的默认值整理为 DEFAULT 子句片段。
+// 裸字符串（如 ss）会加单引号，避免 ALTER 生成 DEFAULT ss 触发 1064。
+func FormatDefaultExpr(expr string) string {
+	e := strings.TrimSpace(expr)
+	if e == "" {
+		return ""
+	}
+	if (strings.HasPrefix(e, "'") && strings.HasSuffix(e, "'") && len(e) >= 2) ||
+		(strings.HasPrefix(e, `"`) && strings.HasSuffix(e, `"`) && len(e) >= 2) {
+		return e
+	}
+	if defaultBareExprRe.MatchString(e) {
+		return e
+	}
+	if defaultNumberRe.MatchString(e) {
+		return e
+	}
+	if defaultHexBitRe.MatchString(e) {
+		return e
+	}
+	if strings.HasPrefix(e, "(") && strings.HasSuffix(e, ")") {
+		return e
+	}
+	return quoteStringLiteral(e)
 }
 
 // requireDatabaseName 校验 database 与 table 均非空。

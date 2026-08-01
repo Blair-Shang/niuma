@@ -1,20 +1,18 @@
 <script setup lang="ts">
-import {
-  RsButton,
-  RsEmpty,
-  RsIcon,
-  RsLoading,
-  RsMonacoEditor,
-  useRsToast,
-} from '@niuma/ui'
-import { computed, ref, watch } from 'vue'
+import { RsLoading, RsMonacoEditor, useRsToast } from '@niuma/ui'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mysqlApi } from '@/api'
+import { DdlShell, type DdlShellLabels } from '@/modules/database'
 import {
   defaultMySQLProfile,
   resolveMonacoLanguageFromProfile,
 } from '@/modules/sql-editor/capabilities'
 import { formatSql } from '@/modules/sql-editor/format'
+import {
+  bootstrapMysqlMonaco,
+  MYSQL_MONACO_LANGUAGE_ID,
+} from '@/modules/mysql/monaco-bootstrap'
 import { useSessionRegistry } from '@/stores/session-registry'
 
 const props = defineProps<{
@@ -33,13 +31,40 @@ const sessionRegistry = useSessionRegistry()
 const loading = ref(false)
 const ddl = ref('')
 const objectType = ref('')
+const languageReady = ref(false)
+
+const labels = computed(
+  (): DdlShellLabels => ({
+    copy: t('modules.mysql.ddl.copy'),
+    refresh: t('modules.mysql.browse.refresh'),
+    needScope: t('modules.mysql.browse.needTable'),
+    empty: t('modules.mysql.ddl.empty'),
+  }),
+)
 
 const monacoLanguage = computed(() => {
   if (!props.sessionId) {
     return resolveMonacoLanguageFromProfile(defaultMySQLProfile()).monacoLanguageId
   }
   const profile = sessionRegistry.getDialectForSession(props.sessionId) ?? defaultMySQLProfile()
-  return resolveMonacoLanguageFromProfile(profile).monacoLanguageId
+  return resolveMonacoLanguageFromProfile(profile).monacoLanguageId || MYSQL_MONACO_LANGUAGE_ID
+})
+
+const scopeLabel = computed(() => {
+  if (props.database && props.table) return `${props.database}.${props.table}`
+  return props.table || ''
+})
+
+const hasScope = computed(() => Boolean(props.database && props.table))
+
+onMounted(async () => {
+  try {
+    await bootstrapMysqlMonaco()
+  } catch {
+    // 语言包失败时仍允许只读展示
+  } finally {
+    languageReady.value = true
+  }
 })
 
 async function loadDDL(): Promise<void> {
@@ -95,113 +120,40 @@ watch(
 </script>
 
 <template>
-  <div class="nm-mysql-ddl">
-    <header class="nm-mysql-ddl__chrome">
-      <div class="nm-mysql-ddl__identity" :title="sessionLabel">
-        <RsIcon name="file-code" :size="16" />
-        <span class="nm-mysql-ddl__session">{{ sessionLabel || 'MySQL' }}</span>
-        <span v-if="database && table" class="nm-mysql-ddl__scope">{{ database }}.{{ table }}</span>
-        <span v-if="objectType" class="nm-mysql-ddl__type">{{ objectType }}</span>
-      </div>
-      <div class="nm-mysql-ddl__actions">
-        <RsButton variant="ghost" size="sm" icon="copy" :disabled="!ddl" @click="copyDDL">
-          {{ t('modules.mysql.ddl.copy') }}
-        </RsButton>
-        <RsButton
-          variant="ghost"
-          size="sm"
-          icon="refresh-cw"
-          :loading="loading"
-          @click="loadDDL"
-        >
-          {{ t('modules.mysql.browse.refresh') }}
-        </RsButton>
-      </div>
-    </header>
-
-    <RsLoading v-if="loading && !ddl" class="nm-mysql-ddl__loading" />
-    <RsEmpty
-      v-else-if="!database || !table"
-      icon="file-code"
-      :description="t('modules.mysql.browse.needTable')"
+  <DdlShell
+    :labels="labels"
+    :session-label="sessionLabel || 'MySQL'"
+    :scope-label="scopeLabel"
+    :type-label="objectType"
+    :loading="loading"
+    :has-scope="hasScope"
+    :has-ddl="Boolean(ddl)"
+    :can-copy="Boolean(ddl)"
+    @copy="copyDDL"
+    @refresh="loadDDL"
+  >
+    <RsLoading v-if="!languageReady" size="sm" block class="nm-mysql-ddl__boot" />
+    <RsMonacoEditor
+      v-else
+      :model-value="ddl"
+      :language="monacoLanguage"
+      embedded
+      height="100%"
+      :options="{
+        readOnly: true,
+        automaticLayout: active !== false,
+        minimap: { enabled: false },
+      }"
     />
-    <RsEmpty
-      v-else-if="!ddl"
-      icon="file-code"
-      :description="t('modules.mysql.ddl.empty')"
-    />
-    <div v-else class="nm-mysql-ddl__editor">
-      <RsMonacoEditor
-        :model-value="ddl"
-        :language="monacoLanguage"
-        :options="{
-          readOnly: true,
-          automaticLayout: active !== false,
-          minimap: { enabled: false },
-        }"
-      />
-    </div>
-  </div>
+  </DdlShell>
 </template>
 
 <style scoped>
-.nm-mysql-ddl {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.nm-mysql-ddl__chrome {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-sm);
-  padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid var(--rs-border-subtle);
-  flex-shrink: 0;
-}
-
-.nm-mysql-ddl__identity {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  min-width: 0;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-mysql-ddl__session {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-mysql-ddl__scope,
-.nm-mysql-ddl__type {
-  color: var(--rs-fg-muted);
-  font-weight: 400;
-}
-
-.nm-mysql-ddl__type {
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: var(--rs-font-size-xs);
-}
-
-.nm-mysql-ddl__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
-}
-
-.nm-mysql-ddl__loading {
-  flex: 1;
-}
-
-.nm-mysql-ddl__editor {
+.nm-mysql-ddl__boot {
   flex: 1;
   min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>

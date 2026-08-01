@@ -29,7 +29,7 @@
  */
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { isBridgeAvailable, settingsApi } from '@/api'
+import { isBridgeAvailable, isPlatformUnavailable, settingsApi, withPlatformRetry } from '@/api'
 import {
   getExtensionRoot,
   getExtensionUiEntry,
@@ -212,39 +212,41 @@ function normalizeState(raw: unknown): PersistedState {
 /**
  * 从 Platform（SQLite）读取工作区状态。桌面端 Platform 始终可用；无桥接的纯浏览器
  * dev 环境返回空状态（单个空编辑组）。
+ *
+ * Platform 管道偶发未就绪（dev:hot / 刚 spawn）时短暂重试，避免误用空状态覆盖已存 Tab。
  */
 async function readPersistedState(): Promise<PersistedState> {
   if (!isBridgeAvailable()) {
     return normalizeState(null)
   }
+
   try {
-    const res = await settingsApi.get(SETTING_KEY)
-    return normalizeState(res.value ? JSON.parse(res.value) : null)
+    const res = await withPlatformRetry(() => settingsApi.get(SETTING_KEY))
+    if (res.value == null || res.value === '') {
+      return normalizeState(null)
+    }
+    try {
+      return normalizeState(JSON.parse(res.value) as unknown)
+    } catch (parseErr) {
+      console.warn('[tab] workspace.tabs JSON invalid, using empty state', parseErr)
+      return normalizeState(null)
+    }
   } catch (err) {
-    // Platform 服务尚未就绪（dev:hot 启动时序或未运行），静默回退空状态
-    if (isServiceUnavailable(err)) {
+    if (isPlatformUnavailable(err)) {
+      console.warn('[tab] platform settings unavailable after retries', err)
       return normalizeState(null)
     }
     throw err
   }
 }
 
-/**
- * 写入 Platform（SQLite）。壳层仅透传 gRPC，不落盘、不解析业务。
- *
- * @param state - 当前状态
- */
-/** 判断是否为 Platform 服务不可用错误（壳层 bridge 返回 "service unavailable: …"）。 */
-function isServiceUnavailable(err: unknown): boolean {
-  return err instanceof Error && err.message.startsWith('service unavailable')
-}
-
+/** 写入 Platform（SQLite）。壳层仅透传，不落盘、不解析业务。 */
 function writePersistedState(state: PersistedState): void {
   if (!isBridgeAvailable()) {
     return
   }
   settingsApi.set(SETTING_KEY, JSON.stringify(state)).catch((error: unknown) => {
-    if (isServiceUnavailable(error)) {
+    if (isPlatformUnavailable(error)) {
       return
     }
     console.warn('[tab] platform settings save failed', error)

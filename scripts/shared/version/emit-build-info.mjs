@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 单一版本源：读取根 package.json，生成 build/version.json，
- * 同步 web / packages/ui / ssh-service Cargo.toml 版本字段。
+ * 同步 web / 同级 niuma-ui / ssh-service Cargo.toml 版本字段。
  */
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -79,7 +79,8 @@ writeFileSync(
 )
 
 syncPackageVersion('web/package.json', version)
-syncPackageVersion('packages/ui/package.json', version)
+// @niuma/ui 已迁至同级仓库 niuma-ui；存在时同步版本字段便于联调对齐
+syncPackageVersion('../niuma-ui/package.json', version)
 syncCargoVersion(version)
 
 process.stdout.write(`${JSON.stringify(info)}\n`)

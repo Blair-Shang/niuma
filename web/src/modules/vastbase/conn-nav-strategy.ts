@@ -1,8 +1,12 @@
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnOpenContext } from '@/modules/ops/conn-tree/types'
-import { buildConnectionTabTooltip } from '@/modules/ops/connection-nav/utils'
+import {
+  buildConnectionTabTooltip,
+  nextQueryTabIndex,
+} from '@/modules/ops/connection-nav/utils'
 import type { ConnectionNavStrategy, ConnectionNavTabSpec } from '@/modules/ops/connection-nav/types'
 import type { WorkspaceTab } from '@/stores/tab'
+import { useTabStore } from '@/stores/tab'
 import { kindIcon } from '@/modules/ops/types'
 import { i18n } from '@/locale'
 import {
@@ -70,10 +74,20 @@ function buildQueryTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
   } else if (database) {
     baseTitle = database
   }
+
+  const queryIndex = nextQueryTabIndex(
+    useTabStore().allTabs,
+    'vastbase',
+    item.profileId,
+    (initialTab) =>
+      normalizeVastFeature(typeof initialTab === 'string' ? initialTab : undefined) === 'query',
+  )
+  const queryTitle = i18n.global.t('modules.vastbase.session.tabQueryIndexed', { n: queryIndex })
+
   return {
     moduleId: 'vastbase',
-    title: `${baseTitle} · ${featureLabel('query')}`,
-    tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress),
+    title: `${baseTitle} · ${queryTitle}`,
+    tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress, undefined, queryTitle),
     icon: kindIcon('vastbase'),
     props,
   }

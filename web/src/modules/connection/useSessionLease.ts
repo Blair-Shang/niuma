@@ -13,6 +13,7 @@
  *   profileId: () => props.profileId,
  *   tabId: () => props.tabId,           // ModuleWorkspace 注入，必填
  *   database: () => scopeDatabase.value, // Redis scoped key
+ *   // MySQL / Kingbase：connectDatabase: () => props.database
  *   onAcquired: async (sid) => { ... },
  *   buildOnRelease: () => [() => transferHub.unregisterSession(sid)],
  * })
@@ -35,6 +36,8 @@ export interface UseSessionLeaseOptions {
   profileId: () => string
   tabId: () => string | undefined
   database?: () => number | undefined
+  /** MySQL / Kingbase：按 Tab 目标库建连（见 AcquireOpts.connectDatabase） */
+  connectDatabase?: () => string | undefined
   /** acquire / forceReconnect 成功后 */
   onAcquired?: (sessionId: string, isNew: boolean) => void | Promise<void>
   /** 每次 release 时除子组件注册外的额外清理 */
@@ -62,11 +65,13 @@ export function useSessionLease(options: UseSessionLeaseOptions): {
     if (!tabId) {
       throw new Error('tabId is required for session lease')
     }
+    const connectDatabase = options.connectDatabase?.()?.trim() || undefined
     return {
       kind: options.kind,
       profileId: options.profileId(),
       tabId,
       database: options.database?.(),
+      connectDatabase,
     }
   }
 

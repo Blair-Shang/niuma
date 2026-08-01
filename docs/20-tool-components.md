@@ -45,6 +45,8 @@ Web SettingsView → componentsApi → platform.components.*
 components/
 ├── mongodb-tools/
 │   └── manifest.yaml
+├── mysql-tools/
+│   └── manifest.yaml
 ├── vastbase-tools/
 │   └── manifest.yaml
 └── postgresql-client/
@@ -73,8 +75,10 @@ tools:
 | 组件包 | 工具 | 安装 |
 |--------|------|------|
 | `mongodb-tools` | mongosh / mongodump / … | `optional_download`（官方 zip/tgz） |
+| `mysql-tools` | mysqldump / mysql | `optional_download`（MySQL Community Server 官方 ZIP/TGZ，含客户端 bin） |
 | `vastbase-tools` | vb_dump / vb_restore / vsql（兼认 gs_* / gsql） | `detect_only`（官方无公开便携直链；浏览指定路径或 PATH） |
 | `postgresql-client` | pg_dump / pg_restore / psql | `optional_download`（通用 PG 备选；Vastbase 备份请用 vastbase-tools） |
+| `clickhouse-tools` | clickhouse-client | `detect_only`（PATH / 设置指定路径；官方下载页） |
 
 新增组件包：在 `components/<name>/manifest.yaml` 声明即可；Web 侧可在 `components-settings/bundles/` 追加展示 handler（图标 / i18n）。
 
@@ -202,7 +206,7 @@ MongoDB / Vastbase Tools 面板通过 `load*ToolPaths()` 读取合并后的有�
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | **4a** | list / detect / setPath / getDownload + 设置页 UI | **已落地** |
-| **4b** | `platform.components.install` 下载解压至 `data/components/` | **已落地**（mongodb-tools、postgresql-client） |
+| **4b** | `platform.components.install` 下载解压至 `data/components/` | **已落地**（mongodb-tools、postgresql-client、mysql-tools） |
 | **4c** | `vastbase-tools`（vb_dump / vb_restore / vsql）detect_only + 浏览路径 | **已落地** |
 | **5** | 版本更新提醒、校验和；postgresql-client macOS 直链包；vastbase-tools 便携直链（若官方提供） | 未开始 |
 
@@ -224,3 +228,4 @@ MongoDB / Vastbase Tools 面板通过 `load*ToolPaths()` 读取合并后的有�
 | v0.2 | 2026-07-09 | Phase 4a 落地：platform.components.*、设置页、mongodb-tools manifest |
 | v0.3 | 2026-07-17 | Phase 4b：postgresql-client 改为 optional_download；设置页可一键安装 |
 | v0.4 | 2026-07-17 | Phase 4c：vastbase-tools（vb_dump / vb_restore / vsql）；Vastbase 备份默认走官方工具 |
+| v0.5 | 2026-07-22 | mysql-tools 补齐官方直链包，设置页可一键下载/重装（同 mongodb-tools） |

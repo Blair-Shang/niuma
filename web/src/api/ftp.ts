@@ -4,8 +4,12 @@ import type {
   ConnectionCreateResult,
   ConnectionDeleteParams,
   ConnectionDeleteResult,
+  ConnectionExportParams,
+  ConnectionExportResult,
   ConnectionGetParams,
   ConnectionGetResult,
+  ConnectionImportParams,
+  ConnectionImportResult,
   ConnectionListParams,
   ConnectionListResult,
   ConnectionUpdateParams,
@@ -64,6 +68,16 @@ export const connectionApi = {
 
   delete(params: ConnectionDeleteParams): Promise<ConnectionDeleteResult> {
     return bridgeInvoke<ConnectionDeleteResult>('platform.connection.delete', params)
+  },
+
+  /** 导出连接配置到本机 JSON（platform 读写文件，不含凭据明文） */
+  export(params: ConnectionExportParams): Promise<ConnectionExportResult> {
+    return bridgeInvoke<ConnectionExportResult>('platform.connection.export', params)
+  },
+
+  /** 从本机 JSON 导入连接配置（platform 创建站点，不含凭据） */
+  import(params: ConnectionImportParams): Promise<ConnectionImportResult> {
+    return bridgeInvoke<ConnectionImportResult>('platform.connection.import', params)
   },
 } as const
 

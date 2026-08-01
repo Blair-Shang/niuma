@@ -1,10 +1,11 @@
 # 23 — SQL 方言自动补全 / 智能提示（统一基调）
 
-> 版本：v0.5 · 日期：2026-07-20  
-> 状态：**基调已定**；编排层跨方言共用；**各库 catalog / 树 / Cap 实现见各自模块文档**  
-> 参考：DBeaver、Navicat（客户端语法分析 + 元数据缓存 + 按需查库）  
+> 版本：v0.8 · 日期：2026-07-27  
+> 状态：**基调已定**；**标准实现为 Bridge 隧道 LSP**（嵌在方言 `*-service`）  
+> **迁移**：MySQL 已上 LSP；其余方言 **静默内置 `sql`**（不高亮 Worker、不报错），待各库 LSP 落地  
+> 参考：DBeaver、Navicat（解析槽位 + 元数据）；协议形态对齐 Language Server Protocol  
 > 关联：[14 — 能力连接](./14-capability-connection-framework.md) · [21 — 会话注册表](./21-session-registry.md) · [20 — 工具组件](./20-tool-components.md)  
-> 各库实现：[22 — Vastbase](./22-vastbase-module.md) · [25 — MySQL](./25-mysql-module.md) · [26 — MariaDB](./26-mariadb-module.md) ·（未来 Oracle 等单独立项）
+> 各库实现：[22 — Vastbase](./22-vastbase-module.md) · [25 — MySQL](./25-mysql-module.md) · [26 — MariaDB](./26-mariadb-module.md) · [27 — SQLite](./27-sqlite-module.md) · [28 — Dameng](./28-dameng-module.md) · [29 — Oracle](./29-oracle-module.md) · [30 — ClickHouse](./30-clickhouse-module.md) · [31 — Kingbase](./31-kingbase-module.md)
 
 ---
 
@@ -12,8 +13,8 @@
 
 | 本文（共享基调） | 各库模块文档 |
 |------------------|--------------|
-| `catalog.*` **方法名**、prefix/limit/truncated 约定 | 该库 catalog SQL、database/schema 语义映射 |
-| Web：completionService、CatalogCache、编排流程 | 该库 Monaco 语言包、默认 Cap、Probe |
+| `catalog.*` / `lsp.*` **方法名**、prefix/limit/truncated 约定 | 该库 catalog SQL、database/schema 语义映射、嵌入解析器 |
+| Web：薄 LSP 客户端、Monaco 绑定、遗留 Worker 编排 | 该库默认 Cap、Probe |
 | 反模式与验收（方言无关） | 该库树 ResourceId、ConnectParams、分期 |
 
 **禁止**：在本文展开某库的过程语法、调试、对象树细节；换库时只增该库服务 + 模块文档，**不重写本文编排**。
@@ -25,15 +26,26 @@
 | 决策项 | 选择 |
 |--------|------|
 | 产品对标 | **DBeaver / Navicat** 的 SQL 对象补全模式 |
-| 语法上下文 | **Web 客户端**（Monaco + 方言 parser） |
-| 对象目录 | **各方言能力服务**提供同名 `catalog.*`；**会话级缓存**在 Web |
-| 连接树 `tree.*` | **仅懒加载导航**；可喂缓存，禁止当全量目录预拉 |
-| 多库扩展 | **同名 RPC + 共用编排**；语义差异写在模块文档，不写进本文 |
-| 非整段 suggest | **默认不做**服务端「整段 SQL + 光标」suggest（MongoDB 除外，见 [19](./19-mongodb-module.md)） |
+| 语法 / 关键字 / 槽位 | **方言 Language Server**（嵌在对应 `*-service`）：**启发式定槽位** + **表别名绑定** + catalog；语法诊断用方言 parser |
+| 传输 | **Bridge 隧道 LSP**（`{ns}.lsp.open|rpc|close` + `{ns}.lsp` 事件）；**不上 WebSocket** |
+| 对象目录 | LS **进程内**调用同服务 `catalog` 实现；权威仍在库侧会话 |
+| 连接树 `tree.*` | **仅懒加载导航**；禁止当全量目录预拉 |
+| 前端 Worker | **标准路径不使用** monaco-sql-languages dialect Worker（内存高、方言有限） |
+| 非整段 suggest RPC | **不做**「整段 SQL + 光标」独立 suggest 方法（能力走 LSP `textDocument/completion`）；MongoDB 除外见 [19](./19-mongodb-module.md) |
 
 一句话：
 
-> **前端解析槽位，后端按前缀检索对象；客户端缓存缺则补；DDL 后可刷新。各库只换 catalog 实现与语言包。**
+> **Monaco Language Client（薄实现）↔ Bridge ↔ 方言 service 内 LSP；解析与关键字在服务端，catalog 进程内注入；前端只做高亮与协议适配。**
+
+**迁移状态（v0.8）**
+
+| 方言 | 语法路径 |
+|------|----------|
+| **MySQL** | Bridge LSP + TiDB parser（`editor.sql_lsp`） |
+| Dameng | Bridge LSP + `dmparser`（分类/DML/例程诊断 + 工作 AST；`editor.sql_lsp`） |
+| **Kingbase** | Bridge LSP + `kingbaseparser`（工作 AST + 兼容模式隔离；`editor.sql_lsp`） |
+| **ClickHouse** | Bridge LSP + `clickhouseparser`（启发式 + 反引号；`editor.sql_lsp`） |
+| 其余（Vastbase / PG / SQLite / Oracle…） | **静默**内置 Monaco `sql`（无 sql-languages Worker）；对象补全等 LSP 落地后再开 |
 
 ---
 
@@ -41,13 +53,13 @@
 
 专业 SQL IDE 的共性：
 
-1. **本地解析**语句与光标 → 判定要补 schema/database / 表 / 列 / 关键字。  
-2. **元数据 + 缓存**：未命中再查系统目录。  
+1. **解析**语句与光标 → 判定要补 schema/database / 表 / 列 / 关键字（现落在 **LS**，非浏览器 Worker）。  
+2. **元数据**：按前缀查系统目录（LS 调进程内 catalog）。  
 3. **懒加载**：大库靠过滤、当前范围、limit。  
 4. **结构变更要 Refresh**。  
 5. **大对象库可降级**自动弹出（产品开关预留）。
 
-不对齐 MongoDB `*.suggest`：NoSQL 壳语言依赖服务端目录；关系型走客户端 parser。
+不对齐 MongoDB `*.suggest`：NoSQL 壳语言依赖服务端目录；关系型走 LSP completion。
 
 ---
 
@@ -55,27 +67,64 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Web：sql-editor（跨方言编排，无单库业务 SQL）            │
-│  · completionService + CatalogCache                     │
-│  · 各模块提供 getSuggestScope() / 方言 Monaco 注册       │
+│  Web：sql-editor/lsp + 方言 monaco-bootstrap            │
+│  · Bridge 隧道 JSON-RPC；Monaco completion / markers    │
+│  · Monarch 高亮；格式化可仍用 sql-formatter               │
 └───────────────────────────┬─────────────────────────────┘
-                            │ catalog.schemas / tables / columns
+                            │ {ns}.lsp.*  + 事件 {ns}.lsp
 ┌───────────────────────────▼─────────────────────────────┐
-│  Layer-1：各库独立进程（namespace 不同，方法名相同）       │
-│  · 实现细节见 22 / 25 / …                                │
+│  Layer-1：各库独立进程（namespace 不同）                  │
+│  · packages/go/sqllsp + 方言 DialectParser               │
+│  · 进程内 Catalog → 原 catalog 查询实现                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
 | 层 | 做 | 不做 |
 |----|----|------|
-| Web 编排 | 槽位、别名、调 catalog、写缓存 | 猜全库表、无 prefix 预拉 |
-| CatalogCache | 按 scope 短 TTL 去重 | P0 持久化磁盘 |
-| `*.catalog.*` | 权威、可截断检索 | 解析用户 SQL 全文 |
+| Web LSP 客户端 | 文档同步、补全请求、markers | 方言 AST、猜全库表 |
+| `*.lsp.*` | JSON-RPC Language Server | 自建第二套 DB 连接 |
+| 进程内 Catalog | 权威、可截断检索 | 解析用户 SQL 全文（由 parser） |
 | `*.tree.*` | UX 懒加载 | 补全唯一数据源 |
+| 遗留 `completionService` | 仅未迁方言 | 新方言标准路径 |
 
 ---
 
-## 4. Bridge 契约（跨方言方法名）
+## 4. Bridge 契约
+
+### 4.1 LSP（跨方言同名）
+
+| 方法 | 入参 | 返回 |
+|------|------|------|
+| `lsp.open` | `sessionId`, `clientId` | `{ connectionId }` |
+| `lsp.rpc` | `connectionId`, `sessionId`, `message`（JSON-RPC） | `{ message? }` 或 `{ ok: true }` |
+| `lsp.close` | `connectionId`, `sessionId?` | `{ closed }` |
+
+下行事件：`type: "{ns}.lsp"`，`connectionId` + `message`（如 `textDocument/publishDiagnostics`）。
+
+Document URI：`niuma-sql://{ns}/{sessionId}/{editorId}`。
+
+支持的 LSP 方法（MySQL / Dameng）：`initialize` / `initialized` / `textDocument/didOpen|didChange|didClose` / `textDocument/completion` / `textDocument/hover` / `textDocument/documentSymbol` / `textDocument/definition` / `textDocument/formatting`；诊断经 `publishDiagnostics`（MySQL：TiDB 语法 + catalog；Dameng：StmtClassify + DML/例程启发式语法 + catalog 语义 Warning）。
+
+分层（MySQL / Dameng）：
+
+| 层 | 职责 |
+|----|------|
+| 启发式 | 定 Expect 槽位（半成品友好） |
+| TableRef 绑定 | 扫描 FROM/JOIN/UPDATE/INTO 的表+别名；`alias.` 解开为真实表；CTE/派生表为 Virtual，并提取 SELECT 投影列供补全 |
+| Catalog | 填候选；语义诊断与 hover；`truncated` → `isIncomplete`；截断时不报未知对象 |
+| 后置 | 过程/触发器体内完整语义、definition/rename |
+| Dameng parser | `internal/dmparser`：分类 + DML/例程诊断 + 工作 AST（TableRef/DECLARE）+ **按会话兼容模式隔离**（native/oracle/mysql **禁止 Auto 并集混推**）+ 内置函数/例程补全；**无**完整 Oracle AST |
+
+Dameng 兼容模式约定：
+
+- 未探测到兼容模式（native/`CompatAuto`）：仅达梦基线关键字与原生内置函数。
+- `oracle` / `mysql`：各自追加专属关键字与函数；互不并入对方。
+- `niuma/setSuggestDatabase` 可带 `uri`，按文档隔离默认 schema。
+- 标识符插入经 `IdentifierQuoter`（达梦 `"`，MySQL `` ` ``）。
+- 例程壳层额外检查 DECLARE 区平衡与 IF/WHILE/LOOP/CASE 成对；catalog 表/例程/序列前缀检索使用 `UPPER(...) LIKE UPPER(?)`。
+- 前端 attach：先 `onNotification`，再 `setSuggestDatabase(uri)`，再 `didOpen`，避免首诊丢失。
+
+### 4.2 Catalog（仍保留；LS 内部与遗留前端共用形状）
 
 命名空间随连接 kind：`vastbase` / `mysql` / …。**方法名与返回形状保持一致**：
 
@@ -90,94 +139,55 @@
 - `prefix` 为空：返回范围内前 N 条，**不代表全集**。  
 - 默认 `limit` 建议 50～100；上限单独封顶（如 500）。  
 - `truncated: true` 合法。  
-- **字段名 `schema` 在协议层统一**；无 schema 的产品（如 MySQL）在**该模块文档**定义映射（例如 schema ≈ database），**不在本文写死某一库的 SQL**。
+- **字段名 `schema` 在协议层统一**；无 schema 的产品（如 MySQL）在**该模块文档**定义映射（例如 schema ≈ database），**不在本文写死某一库的 SQL**。  
+- **SQLite**（[27](./27-sqlite-module.md)）：`schema` = `main` 或 ATTACH 别名；`catalog.schemas` 来自 `PRAGMA database_list`；无独立 database 层，Web 补全把 `defaultSchema` 默认为 `main`。
+- **Dameng**（[28](./28-dameng-module.md)）：`schema` 对应达梦用户 / schema；目录由独立 `dameng.catalog.*` 提供，遵循同一 prefix、limit 与 truncated 契约。LSP：`dameng.lsp.*` + 事件 `dameng.lsp`；补全默认 schema 经协议字段 `database` 传递。
+- **ClickHouse**（[30](./30-clickhouse-module.md)）：`schema` ≈ **database**（无独立 schema 层）；`catalog.schemas` ← `system.databases`；tables/columns ← `system.tables` / `system.columns`。
+- **Kingbase**（[31](./31-kingbase-module.md)）：与 Vastbase 同形（database → schema → 对象）；目录由独立 `kingbase.catalog.*` 提供；**禁止**用 vastbase catalog 冒充。LSP：`kingbase.lsp.*` + 事件 `kingbase.lsp`；解析器为进程内 `kingbaseparser`（工作 AST + `sqlCompatibility` 隔离）；补全默认 schema 经协议字段 `database` 传递。
 
 可选后期：`catalog.invalidate` / UI「刷新元数据」。
 
 ---
 
-## 5. 前端编排（共用）
+## 5. 前端编排
 
-落位：`web/src/modules/sql-editor/` + 各模块 `getSuggestScope()`。
+落位：`web/src/modules/sql-editor/lsp/` + 各模块 `monaco-bootstrap` / `getSuggestScope()`。
+
+**LSP 路径（MySQL 等已迁）：**
+
+```
+编辑器挂载 + sessionId
+  → lsp.open → initialize
+  → didOpen / 防抖 didChange
+  → completion / hover → Bridge lsp.rpc
+  → publishDiagnostics 事件 → setModelMarkers
+```
+
+**遗留 Worker 路径（未迁方言）：**
 
 ```
 光标触发
-  → parser 给出 syntax 与 entities
-  → active 面板 scope = { sessionId, database, defaultSchema?, table? }
-  → 组装 catalog 请求（带 prefix）
-  → CatalogCache → 未命中则 RPC → 合并关键字/snippets
+  → monaco-sql-languages Worker 槽位
+  → CatalogCache → catalog.* RPC
 ```
 
-槽位 → RPC（协议层通用；**具体 defaultSchema / database 含义由当前 kind 模块解释**）：
+---
 
-| 语法上下文 | 请求 |
-|------------|------|
-| schema / database 槽 | `catalog.schemas({ prefix })` |
-| 表槽、无限定前缀 | schemas（可选）+ `tables({ schema: default, prefix })` |
-| 表槽、已有 `x.` | `tables({ schema: x, prefix })` |
-| 列槽 | 解析关系 → `columns({ schema, table, prefix? })` |
+## 6. 反模式
 
-**prefix 解析**（方言无关，`completion/prefix.ts`）：
-
-1. 优先 parser `wordRanges`。  
-2. 否则 Monaco `getWordUntilPosition`（SQL `wordPattern` 含 `_`）。  
-3. **必须**把 prefix 传给 `catalog.*`。  
-4. `catalogLimitForPrefix(prefix)` 自适应；截断时提示继续输入。  
-5. 已做前缀过滤的方言可关 `filterGraceful`。
-
-多查询 Tab：仅当前激活面板注册 suggest scope。
+- 为 LSP 新开 WebSocket / 改壳层路由（与能力框架冲突）。  
+- LS 自建第二套连接池。  
+- 新方言继续加 monaco-sql-languages Worker。  
+- 用 `tree.*` 当补全唯一数据源。  
+- 无 prefix 预拉全库对象。
 
 ---
 
-## 6. 与既有能力的边界
+## 7. 验收（摘要）
 
-| 能力 | 关系 |
-|------|------|
-| `tree.*` | 导航；可喂 CatalogCache；补全以 catalog 为准 |
-| `meta.columns` | 结构面板；catalog 可委托更轻形状 |
-| MongoDB suggest | **例外**，见 [19](./19-mongodb-module.md) |
-| 关键字 / snippets | 语言包默认，与 catalog 合并 |
-
-DialectFamily + CapabilitySet（编辑器 / 拆句 / 格式化 / AI）由**各库 Probe** 填充；共享层只读 Cap，规则见各模块文档。
-
----
-
-## 7. 落地顺序（按模块，不混进度）
-
-| 阶段 | 内容 | 文档 |
-|------|------|------|
-| 编排 P0 | CatalogCache + completionService + 首个方言 catalog | [22](./22-vastbase-module.md) |
-| 编排增强 | 树展开写缓存、刷新元数据、truncated 提示 | 本文 |
-| 下一库 | 该库 `*.catalog.*` + 语言包；**不改编排基调** | [25](./25-mysql-module.md) 等 |
-
----
-
-## 8. 反模式
-
-1. 打开查询 Tab 即无 prefix 狂拉 `tree.*`。  
-2. 用 tree 高 limit 假装目录完整。  
-3. 每个方言各写互不相通的补全协议（必须同名 `catalog.*`）。  
-4. 半成品 SQL 一律丢服务端 suggest（除非单独立项）。  
-5. 在本文或共享编排里堆叠多库特有 SQL / Cap 实现细节。
-
----
-
-## 9. 验收标准（方言无关）
-
-- 槽位能出合理对象候选（权限与 limit 内）。  
-- 大库不拖死 UI / 打爆实例。  
-- 新建对象后：刷新或再拉 prefix 后可见。  
-- 新增一种库：只增 Layer-1 + 模块文档 + 语言注册，不重写编排。
-
----
-
-## 修订记录
-
-| 版本 | 日期 | 说明 |
-|------|------|------|
-| v0.1 | 2026-07-15 | 初稿 |
-| v0.2 | 2026-07-16 | 短前缀自适应 limit；pgsql filterGraceful |
-| v0.2 | 2026-07-15 | Vastbase P0 catalog 落地 |
-| v0.3 | 2026-07-15 | prefix 标准 |
-| v0.4 | 2026-07-16 | 跨方言拆句词法能力表 |
-| v0.5 | 2026-07-20 | **边界**：本文只保留共享契约；各库实现改指向 22/25，去掉混写落地清单 |
+- MySQL：无 `mysql.worker`；补全能出关键字 + 库/表/列；`alias.` / JOIN 后 WHERE 列并集合理。  
+- Dameng：Bridge LSP + `dmparser`；关键字/schema/表/列补全；过程片段无 `DELIMITER`/反引号；半成品结构问题为 Hint；常见笔误（如 FORM）为 Error。  
+- 语法错误有 markers（MySQL TiDB；Dameng 启发式）；未知表/列有 Warning（半成品与过程局部名降噪）。  
+- Hover / DocumentSymbol / Definition（局部变量与表标识）可用。 
+- 关 tab / `session.close` 后 `lsp.close`，无泄漏。  
+- 未迁方言行为不回归。

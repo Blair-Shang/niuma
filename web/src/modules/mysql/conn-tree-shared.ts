@@ -75,13 +75,52 @@ export function categoryRefreshPath(path: ConnResourcePath): ConnResourcePath | 
 
 const TREE_CHILDREN_LIMIT = 5000
 
-export function databaseCategoryNodes(database: string): ConnResourceDescriptor[] {
-  return DATABASE_CATEGORIES.map((cat) => ({
-    path: categoryPath(database, cat.id),
-    label: t(cat.labelKey),
-    icon: cat.icon,
-    collapsible: true,
-  }))
+function countForCategory(
+  counts: {
+    tables: number
+    views: number
+    functions: number
+    procedures: number
+  } | null,
+  id: CategoryId,
+): number | undefined {
+  if (!counts) return undefined
+  if (id === 'tables') return counts.tables
+  if (id === 'views') return counts.views
+  if (id === 'functions') return counts.functions
+  return counts.procedures
+}
+
+/** 加载库下 Tables / Views / Procedures / Functions 分类节点（含对象数量后缀）。 */
+export async function loadDatabaseCategories(
+  conn: ConnItem,
+  database: string,
+): Promise<ConnResourceDescriptor[]> {
+  let counts: Awaited<ReturnType<typeof mysqlApi.treeCategoryCounts>> | null = null
+  try {
+    counts = await mysqlApi.treeCategoryCounts({
+      profileId: conn.profileId,
+      database,
+    })
+  } catch (err) {
+    // 服务未重建 / method 不存在时仍可展开分类，只是没有数量
+    console.warn('[mysql] tree.categoryCounts failed', err)
+    counts = null
+  }
+
+  return DATABASE_CATEGORIES.map((cat) => {
+    const n = countForCategory(counts, cat.id)
+    const baseLabel = t(cat.labelKey)
+    // 数量写进 label 后缀 + badge，避免仅依赖 badge 时被缓存/样式漏掉
+    const label = n !== undefined ? `${baseLabel} (${n})` : baseLabel
+    return {
+      path: categoryPath(database, cat.id),
+      label,
+      icon: cat.icon,
+      badge: n !== undefined ? String(n) : undefined,
+      collapsible: true,
+    }
+  })
 }
 
 export async function loadCategoryChildren(

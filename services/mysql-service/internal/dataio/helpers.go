@@ -1,6 +1,7 @@
 package dataio
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"fmt"
@@ -33,6 +34,19 @@ func defaultCsvOptions(opts CsvOptions) CsvOptions {
 		opts.Delimiter = ","
 	}
 	return opts
+}
+
+// skipUTF8BOM 若流以 UTF-8 BOM 开头则跳过，否则把已读字节还回去。
+func skipUTF8BOM(r io.Reader) (io.Reader, error) {
+	br := bufio.NewReader(r)
+	bom, err := br.Peek(3)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	if len(bom) >= 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF {
+		_, _ = br.Discard(3)
+	}
+	return br, nil
 }
 
 // openDB 使用 session.Connect 建立短连 *sql.DB，连接到指定 database。

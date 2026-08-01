@@ -85,7 +85,8 @@ describe('renderAiMarkdown', () => {
   it('forces safe external links', () => {
     const html = renderAiMarkdown('[x](https://example.com)')
     expect(html).toContain('rel="noopener noreferrer"')
-    expect(html).toContain('target="_blank"')
+    // 不设 target=_blank，避免 CEF Popup 黑屏；点击由 AiMarkdown 转 openExternal
+    expect(html).not.toContain('target="_blank"')
     expect(html).toContain('https://example.com')
   })
 

@@ -30,12 +30,16 @@ const (
 	CapBackslashEscape = "mysql.backslash_escape"
 	// CapFormatMySQL 格式化走 mysql 方言。
 	CapFormatMySQL = "format.mysql"
-	// CapEditorBuiltinSQL Monaco 使用内置 sql（P0 默认）。
+	// CapEditorBuiltinSQL Monaco 使用内置 sql（遗留回退）。
 	CapEditorBuiltinSQL = "editor.builtin_sql"
-	// CapEditorMySQLMonaco Monaco 使用 mysql + sql-languages（语言包就绪后）。
+	// CapEditorMySQLMonaco 遗留：原 monaco-sql-languages Worker；现与 CapEditorSqlLsp 等价触发。
 	CapEditorMySQLMonaco = "editor.mysql_monaco"
+	// CapEditorSqlLsp Monaco 经 Bridge 隧道对接本服务嵌入的 SQL Language Server。
+	CapEditorSqlLsp = "editor.sql_lsp"
 	// CapSplitDelimiterBlocks 拆句识别 MySQL 客户端 DELIMITER 指令。
 	CapSplitDelimiterBlocks = "split.delimiter_blocks"
+	// CapSplitMysqlCompound 拆句识别 CREATE PROCEDURE/FUNCTION BEGIN…END（无需 DELIMITER）。
+	CapSplitMysqlCompound = "split.mysql_compound"
 	// CapRoutineCreateProcedure 支持 CREATE PROCEDURE 模板。
 	CapRoutineCreateProcedure = "routine.create_procedure"
 	// CapRoutineCreateFunction 支持 CREATE FUNCTION 模板。
@@ -86,11 +90,13 @@ func DefaultMySQL57() ServerProfile {
 			CapHashComment,
 			CapBackslashEscape,
 			CapFormatMySQL,
-			CapEditorBuiltinSQL,
+			CapEditorSqlLsp,
+			CapEditorMySQLMonaco,
 			CapRoutineCreateProcedure,
 			CapRoutineCreateFunction,
 			CapDDLIfNotExists,
 			CapSplitDelimiterBlocks,
+			CapSplitMysqlCompound,
 		},
 	}
 }
@@ -104,11 +110,13 @@ func DefaultMySQL8() ServerProfile {
 			CapHashComment,
 			CapBackslashEscape,
 			CapFormatMySQL,
-			CapEditorBuiltinSQL,
+			CapEditorSqlLsp,
+			CapEditorMySQLMonaco,
 			CapRoutineCreateProcedure,
 			CapRoutineCreateFunction,
 			CapDDLIfNotExists,
 			CapSplitDelimiterBlocks,
+			CapSplitMysqlCompound,
 			CapJSONNativeType,
 			CapCTEWindow,
 			CapRoleGrant,

@@ -9,27 +9,30 @@ import (
 
 // LockInfo 是锁等待摘要（InnoDB / performance_schema）。
 type LockInfo struct {
-	WaitingPID      int64  `json:"waitingPid"`
-	BlockingPID     int64  `json:"blockingPid,omitempty"`
-	WaitingUser     string `json:"waitingUser,omitempty"`
-	BlockingUser    string `json:"blockingUser,omitempty"`
-	WaitingQuery    string `json:"waitingQuery,omitempty"`
-	LockType        string `json:"lockType,omitempty"`
-	LockMode        string `json:"lockMode,omitempty"`
-	ObjectName      string `json:"objectName,omitempty"`
-	WaitAgeSeconds  int64  `json:"waitAgeSeconds,omitempty"`
+	WaitingPID     int64  `json:"waitingPid"`
+	BlockingPID    int64  `json:"blockingPid,omitempty"`
+	WaitingUser    string `json:"waitingUser,omitempty"`
+	BlockingUser   string `json:"blockingUser,omitempty"`
+	WaitingQuery   string `json:"waitingQuery,omitempty"`
+	LockType       string `json:"lockType,omitempty"`
+	LockMode       string `json:"lockMode,omitempty"`
+	ObjectName     string `json:"objectName,omitempty"`
+	WaitAgeSeconds int64  `json:"waitAgeSeconds,omitempty"`
 }
 
 // LocksResult 是 meta.locks 返回。
 type LocksResult struct {
-	Locks     []LockInfo `json:"locks"`
-	Truncated bool       `json:"truncated,omitempty"`
-	Limit     int        `json:"limit,omitempty"`
+	Locks       []LockInfo `json:"locks"`
+	Truncated   bool       `json:"truncated,omitempty"`
+	Limit       int        `json:"limit,omitempty"`
+	Unavailable bool       `json:"unavailable,omitempty"`
+	Message     string     `json:"message,omitempty"`
 }
 
 const locksFetchLimit = 200
 
 // ListLocks 列出锁等待；优先 performance_schema（8.0+），回退 information_schema（5.7）。
+// 两路均失败时返回 Unavailable（非硬错误），便于 UI 区分「无锁」与「无权限/未开启」。
 func ListLocks(ctx context.Context, db *sql.DB) (*LocksResult, error) {
 	if db == nil {
 		return nil, fmt.Errorf("mysql: locks: nil db")
@@ -39,8 +42,12 @@ func ListLocks(ctx context.Context, db *sql.DB) (*LocksResult, error) {
 		out, err = listLocksInnoDB57(ctx, db)
 	}
 	if err != nil {
-		// 无权限或引擎未开：返回空列表而非硬失败
-		return &LocksResult{Locks: []LockInfo{}, Limit: locksFetchLimit}, nil
+		return &LocksResult{
+			Locks:       []LockInfo{},
+			Limit:       locksFetchLimit,
+			Unavailable: true,
+			Message:     err.Error(),
+		}, nil
 	}
 	out.Limit = locksFetchLimit
 	if len(out.Locks) > locksFetchLimit {
@@ -51,6 +58,7 @@ func ListLocks(ctx context.Context, db *sql.DB) (*LocksResult, error) {
 }
 
 func listLocksPerfSchema(ctx context.Context, db *sql.DB) (*LocksResult, error) {
+	// PROCESSLIST_TIME：等待线程处于当前状态的秒数，近似等待时长。
 	const q = `
 SELECT
   COALESCE(r.PROCESSLIST_ID, 0),
@@ -61,7 +69,7 @@ SELECT
   COALESCE(dl.LOCK_TYPE, ''),
   COALESCE(dl.LOCK_MODE, ''),
   CONCAT(COALESCE(dl.OBJECT_SCHEMA,''), '.', COALESCE(dl.OBJECT_NAME,'')),
-  0
+  COALESCE(r.PROCESSLIST_TIME, 0)
 FROM performance_schema.data_lock_waits w
 JOIN performance_schema.data_locks dl
   ON dl.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
@@ -89,7 +97,10 @@ SELECT
   COALESCE(l.lock_type, ''),
   COALESCE(l.lock_mode, ''),
   CONCAT(COALESCE(l.lock_table,''), ''),
-  0
+  CASE
+    WHEN r.trx_wait_started IS NULL THEN 0
+    ELSE TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW())
+  END
 FROM information_schema.INNODB_LOCK_WAITS w
 JOIN information_schema.INNODB_TRX r ON r.trx_id = w.requesting_trx_id
 JOIN information_schema.INNODB_TRX b ON b.trx_id = w.blocking_trx_id

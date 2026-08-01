@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -229,6 +231,264 @@ func TestCredentialSetAndDelete(t *testing.T) {
 	}
 	if secrets.size() != 0 {
 		t.Fatalf("expected keychain emptied, got %d", secrets.size())
+	}
+}
+
+func TestConnectionExportImport(t *testing.T) {
+	d, _ := newTestDispatcher(t)
+
+	createResp := invokeMap(t, d, handler.MethodConnectionCreate, map[string]any{
+		"profile": map[string]any{
+			"profileName":    "导出站点",
+			"connectionKind": "mysql",
+			"hostAddress":    "127.0.0.1",
+			"portNumber":     3306,
+			"loginAccount":   "root",
+			"connectionOptions": map[string]any{
+				"proxy":  map[string]any{"type": "socks5", "host": "1.1.1.1", "port": 1080, "password": "secret-proxy"},
+				"tunnel": map[string]any{"type": "ssh", "sshProfileId": "ssh-1", "sshProfile": map[string]any{"secret": "x"}},
+			},
+		},
+		"credential": map[string]any{"label": "pwd", "kind": "password", "secret": "db-pass"},
+	})
+	if !createResp.OK {
+		t.Fatalf("create failed: %s", createResp.Error)
+	}
+	var created struct {
+		ProfileID string `json:"profileId"`
+	}
+	mustUnmarshalResult(t, createResp.Result, &created)
+
+	outPath := filepath.Join(t.TempDir(), "connections.json")
+	exportResp := invokeMap(t, d, handler.MethodConnectionExport, map[string]any{
+		"path":       outPath,
+		"profileIds": []string{created.ProfileID},
+		"organization": map[string]any{
+			"folders":   []map[string]any{{"id": "f1", "name": "组", "parentId": nil, "profileIds": []string{created.ProfileID}}},
+			"rootOrder": []string{"folder:f1"},
+		},
+	})
+	if !exportResp.OK {
+		t.Fatalf("export failed: %s", exportResp.Error)
+	}
+
+	raw, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read export: %v", err)
+	}
+	var file map[string]any
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("parse export: %v", err)
+	}
+	profiles, _ := file["profiles"].([]any)
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 profile in file, got %d", len(profiles))
+	}
+	p0, _ := profiles[0].(map[string]any)
+	opts, _ := p0["connectionOptions"].(map[string]any)
+	proxy, _ := opts["proxy"].(map[string]any)
+	if _, ok := proxy["password"]; ok {
+		t.Fatal("proxy.password must not be exported")
+	}
+	tunnel, _ := opts["tunnel"].(map[string]any)
+	if _, ok := tunnel["sshProfile"]; ok {
+		t.Fatal("tunnel.sshProfile must not be exported")
+	}
+
+	// 清空后再导入
+	delResp := invokeMap(t, d, handler.MethodConnectionDelete, map[string]any{"profileId": created.ProfileID})
+	if !delResp.OK {
+		t.Fatalf("delete failed: %s", delResp.Error)
+	}
+
+	importResp := invokeMap(t, d, handler.MethodConnectionImport, map[string]any{"path": outPath})
+	if !importResp.OK {
+		t.Fatalf("import failed: %s", importResp.Error)
+	}
+	var imported struct {
+		Imported     int               `json:"imported"`
+		IDMap        map[string]string `json:"idMap"`
+		Organization json.RawMessage   `json:"organization"`
+	}
+	mustUnmarshalResult(t, importResp.Result, &imported)
+	if imported.Imported != 1 {
+		t.Fatalf("expected imported=1, got %d", imported.Imported)
+	}
+	if imported.IDMap[created.ProfileID] == "" {
+		t.Fatal("expected idMap entry for exportId")
+	}
+	if len(imported.Organization) == 0 {
+		t.Fatal("expected organization echoed back")
+	}
+
+	listResp := invokeMap(t, d, handler.MethodConnectionList, map[string]any{})
+	var list struct {
+		Profiles []struct {
+			ProfileName string `json:"profileName"`
+			CredentialIDs []string `json:"credentialIds"`
+		} `json:"profiles"`
+	}
+	mustUnmarshalResult(t, listResp.Result, &list)
+	if len(list.Profiles) != 1 || list.Profiles[0].ProfileName != "导出站点" {
+		t.Fatalf("unexpected profiles after import: %+v", list.Profiles)
+	}
+	if len(list.Profiles[0].CredentialIDs) != 0 {
+		t.Fatal("import must not restore credentials")
+	}
+}
+
+func TestConnectionExportImportWithSecrets(t *testing.T) {
+	d, secrets := newTestDispatcher(t)
+
+	createResp := invokeMap(t, d, handler.MethodConnectionCreate, map[string]any{
+		"profile": map[string]any{
+			"profileName":       "带密导出",
+			"connectionKind":    "mysql",
+			"hostAddress":       "10.0.0.9",
+			"portNumber":        3306,
+			"loginAccount":      "root",
+			"connectionOptions": map[string]any{},
+		},
+		"credential": map[string]any{"label": "pwd", "kind": "password", "secret": "s3cret-db"},
+	})
+	if !createResp.OK {
+		t.Fatalf("create failed: %s", createResp.Error)
+	}
+	var created struct {
+		ProfileID string `json:"profileId"`
+	}
+	mustUnmarshalResult(t, createResp.Result, &created)
+
+	outPath := filepath.Join(t.TempDir(), "secure.json")
+	exportResp := invokeMap(t, d, handler.MethodConnectionExport, map[string]any{
+		"path":           outPath,
+		"profileIds":     []string{created.ProfileID},
+		"includeSecrets": true,
+		"passphrase":     "Share-Me-2026!",
+	})
+	if !exportResp.OK {
+		t.Fatalf("export failed: %s", exportResp.Error)
+	}
+
+	raw, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(raw), "s3cret-db") {
+		t.Fatal("plaintext secret must not appear in export file")
+	}
+
+	delResp := invokeMap(t, d, handler.MethodConnectionDelete, map[string]any{"profileId": created.ProfileID})
+	if !delResp.OK {
+		t.Fatalf("delete: %s", delResp.Error)
+	}
+	if secrets.size() != 0 {
+		t.Fatalf("expected empty vault after delete, got %d", secrets.size())
+	}
+
+	noPass := invokeMap(t, d, handler.MethodConnectionImport, map[string]any{"path": outPath})
+	if noPass.OK {
+		t.Fatal("expected passphrase required")
+	}
+	if !strings.Contains(noPass.Error, "passphrase required") {
+		t.Fatalf("unexpected error: %s", noPass.Error)
+	}
+
+	badPass := invokeMap(t, d, handler.MethodConnectionImport, map[string]any{
+		"path": outPath, "passphrase": "wrong",
+	})
+	if badPass.OK {
+		t.Fatal("expected invalid passphrase")
+	}
+
+	okImport := invokeMap(t, d, handler.MethodConnectionImport, map[string]any{
+		"path": outPath, "passphrase": "Share-Me-2026!",
+	})
+	if !okImport.OK {
+		t.Fatalf("import failed: %s", okImport.Error)
+	}
+	var imported struct {
+		Imported    int               `json:"imported"`
+		WithSecrets int               `json:"withSecrets"`
+		IDMap       map[string]string `json:"idMap"`
+	}
+	mustUnmarshalResult(t, okImport.Result, &imported)
+	if imported.Imported != 1 || imported.WithSecrets != 1 {
+		t.Fatalf("unexpected import result: %+v", imported)
+	}
+	newID := imported.IDMap[created.ProfileID]
+	if newID == "" {
+		t.Fatal("missing idMap")
+	}
+
+	credResp := invokeMap(t, d, handler.MethodCredentialGet, map[string]any{"profileId": newID})
+	if !credResp.OK {
+		t.Fatalf("credential.get: %s", credResp.Error)
+	}
+	var cred struct {
+		Secret string `json:"secret"`
+		Found  bool   `json:"found"`
+	}
+	mustUnmarshalResult(t, credResp.Result, &cred)
+	if !cred.Found || cred.Secret != "s3cret-db" {
+		t.Fatalf("expected restored secret, got %+v", cred)
+	}
+}
+
+func TestConnectionImportRenamesOnConflict(t *testing.T) {
+	d, _ := newTestDispatcher(t)
+
+	createResp := invokeMap(t, d, handler.MethodConnectionCreate, map[string]any{
+		"profile": map[string]any{
+			"profileName":    "同名站点",
+			"connectionKind": "mysql",
+			"hostAddress":    "127.0.0.1",
+			"portNumber":     3306,
+			"loginAccount":   "root",
+		},
+	})
+	if !createResp.OK {
+		t.Fatalf("create: %s", createResp.Error)
+	}
+	var created struct {
+		ProfileID string `json:"profileId"`
+	}
+	mustUnmarshalResult(t, createResp.Result, &created)
+
+	outPath := filepath.Join(t.TempDir(), "dup.json")
+	exportResp := invokeMap(t, d, handler.MethodConnectionExport, map[string]any{
+		"path": outPath, "profileIds": []string{created.ProfileID},
+	})
+	if !exportResp.OK {
+		t.Fatalf("export: %s", exportResp.Error)
+	}
+
+	importResp := invokeMap(t, d, handler.MethodConnectionImport, map[string]any{"path": outPath})
+	if !importResp.OK {
+		t.Fatalf("import: %s", importResp.Error)
+	}
+	var imported struct {
+		Imported int `json:"imported"`
+		Renamed  int `json:"renamed"`
+	}
+	mustUnmarshalResult(t, importResp.Result, &imported)
+	if imported.Imported != 1 || imported.Renamed != 1 {
+		t.Fatalf("want imported=1 renamed=1, got %+v", imported)
+	}
+
+	listResp := invokeMap(t, d, handler.MethodConnectionList, map[string]any{})
+	var list struct {
+		Profiles []struct {
+			ProfileName string `json:"profileName"`
+		} `json:"profiles"`
+	}
+	mustUnmarshalResult(t, listResp.Result, &list)
+	names := map[string]bool{}
+	for _, p := range list.Profiles {
+		names[p.ProfileName] = true
+	}
+	if !names["同名站点"] || !names["同名站点 (2)"] {
+		t.Fatalf("expected original + renamed, got %+v", names)
 	}
 }
 

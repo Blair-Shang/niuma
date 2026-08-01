@@ -1,6 +1,7 @@
 import type { ToolComponentBundle } from '@/api/types/components'
 import { createDefaultHandler } from './default'
 import { mongodbToolsHandler } from './mongodb-tools'
+import { mysqlToolsHandler } from './mysql-tools'
 import { postgresqlClientHandler } from './postgresql-client'
 import { vastbaseToolsHandler } from './vastbase-tools'
 import type { ComponentBundleHandler } from './types'
@@ -10,6 +11,7 @@ const HANDLERS: ComponentBundleHandler[] = [
   mongodbToolsHandler,
   vastbaseToolsHandler,
   postgresqlClientHandler,
+  mysqlToolsHandler,
 ]
 
 const HANDLER_BY_ID = new Map(HANDLERS.map((handler) => [handler.bundleId, handler]))

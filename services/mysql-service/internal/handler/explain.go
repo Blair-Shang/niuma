@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"niuma/pkg/common/id"
 	"niuma/services/mysql-service/internal/session"
 )
 
@@ -34,7 +35,7 @@ func (d *Dispatcher) queryExplain(ctx context.Context, req Request) Response {
 		return errorResponse(req.ID, "sql required")
 	}
 
-	db, sess, release, err := d.resolveDBForDatabase(ctx, req.Params, params.Database)
+	db, sess, release, err := d.resolveDBForSessionQuery(ctx, req.Params, params.Database)
 	if err != nil {
 		return errorResponse(req.ID, err.Error())
 	}
@@ -44,10 +45,7 @@ func (d *Dispatcher) queryExplain(ctx context.Context, req Request) Response {
 		explainSQL = "EXPLAIN ANALYZE\n" + sqlText
 	}
 
-	requestID := strings.TrimSpace(params.RequestID)
-	if requestID == "" {
-		requestID = fmt.Sprintf("explain-%d", time.Now().UnixNano())
-	}
+	requestID := id.CoalesceID(params.RequestID, "explain")
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 5000
@@ -72,6 +70,12 @@ func (d *Dispatcher) queryExplain(ctx context.Context, req Request) Response {
 	}
 
 	ownDB := db != sess.DB
+	if err := ensureSessionAllowsQueryDB(sess, ownDB); err != nil {
+		if ownDB {
+			release()
+		}
+		return errorResponse(req.ID, err.Error())
+	}
 	var releaseOwned func()
 	if ownDB {
 		releaseOwned = release

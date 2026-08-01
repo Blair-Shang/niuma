@@ -13,7 +13,7 @@
  *
  * | 标识 | 来源 | 本 Store 角色 |
  * |------|------|---------------|
- * | `profileId` | Platform SQLite 连接配置 | `session.open({ profileId })` 入参 |
+ * | `profileId` | Platform SQLite 连接配置 | `session.open({ profileId, database? })` 入参 |
  * | `tabId` | L1 Tab Store 页签实例 | 借用方；`release(tabId)` 的查找键 |
  * | `sessionId` | Layer-1 能力服务 | lease 持有；多 Tab 可共享同一条 |
  *
@@ -44,7 +44,19 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { ftpApi, mongodbApi, mysqlApi, redisApi, sshApi, vastbaseApi } from '@/api'
+import {
+  clickhouseApi,
+  damengApi,
+  ftpApi,
+  kingbaseApi,
+  mongodbApi,
+  mysqlApi,
+  oracleApi,
+  redisApi,
+  sqliteApi,
+  sshApi,
+  vastbaseApi,
+} from '@/api'
 import type { ConnKind } from '@/modules/ops/types'
 import {
   SESSION_POLICY,
@@ -53,7 +65,15 @@ import {
 } from '@/modules/connection/session-policy'
 import type { SessionReleaseCleanup } from '@/modules/connection/session-release'
 import type { SqlServerProfile } from '@/modules/sql-editor/capabilities'
-import { defaultMySQLProfile, defaultVastbaseProfile } from '@/modules/sql-editor/capabilities'
+import {
+  defaultClickHouseProfile,
+  defaultDamengProfile,
+  defaultKingbaseProfile,
+  defaultMySQLProfile,
+  defaultOracleProfile,
+  defaultSqliteProfile,
+  defaultVastbaseProfile,
+} from '@/modules/sql-editor/capabilities'
 
 /** Bridge dialect 原始形状（Vastbase / MySQL 同构） */
 interface BridgeDialectProfile {
@@ -145,7 +165,9 @@ export const useSessionRegistry = defineStore('session-registry', () => {
   async function openRemoteSession(
     kind: ConnKind,
     profileId: string,
+    connectDatabase?: string,
   ): Promise<{ sessionId: string; dialect?: SqlServerProfile }> {
+    const db = connectDatabase?.trim() || undefined
     switch (kind) {
       case 'ssh':
         return { sessionId: (await sshApi.sessionOpen({ profileId })).sessionId }
@@ -163,10 +185,45 @@ export const useSessionRegistry = defineStore('session-registry', () => {
         }
       }
       case 'mysql': {
-        const r = await mysqlApi.sessionOpen({ profileId })
+        const r = await mysqlApi.sessionOpen({ profileId, database: db })
         return {
           sessionId: r.sessionId,
           dialect: toSqlServerProfile(r.dialect) ?? defaultMySQLProfile(),
+        }
+      }
+      case 'sqlite': {
+        const r = await sqliteApi.sessionOpen({ profileId })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultSqliteProfile(),
+        }
+      }
+      case 'dameng': {
+        const r = await damengApi.sessionOpen({ profileId })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultDamengProfile(),
+        }
+      }
+      case 'oracle': {
+        const r = await oracleApi.sessionOpen({ profileId })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultOracleProfile(),
+        }
+      }
+      case 'clickhouse': {
+        const r = await clickhouseApi.sessionOpen({ profileId })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultClickHouseProfile(),
+        }
+      }
+      case 'kingbase': {
+        const r = await kingbaseApi.sessionOpen({ profileId, database: db })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultKingbaseProfile(),
         }
       }
     }
@@ -193,6 +250,21 @@ export const useSessionRegistry = defineStore('session-registry', () => {
           break
         case 'mysql':
           await mysqlApi.sessionClose({ sessionId })
+          break
+        case 'sqlite':
+          await sqliteApi.sessionClose({ sessionId })
+          break
+        case 'dameng':
+          await damengApi.sessionClose({ sessionId })
+          break
+        case 'oracle':
+          await oracleApi.sessionClose({ sessionId })
+          break
+        case 'clickhouse':
+          await clickhouseApi.sessionClose({ sessionId })
+          break
+        case 'kingbase':
+          await kingbaseApi.sessionClose({ sessionId })
           break
       }
     } catch {
@@ -271,7 +343,7 @@ export const useSessionRegistry = defineStore('session-registry', () => {
 
     let inflight = inflightOpens.get(key)
     if (!inflight) {
-      inflight = openRemoteSession(opts.kind, opts.profileId)
+      inflight = openRemoteSession(opts.kind, opts.profileId, opts.connectDatabase)
       inflightOpens.set(key, inflight)
       try {
         return await inflight
@@ -288,7 +360,7 @@ export const useSessionRegistry = defineStore('session-registry', () => {
    * 1. 按 key 查找已有 lease → 追加 tabBinding，取消 idle 计时
    * 2. 否则 `session.open` 后新建 lease
    *
-   * @param opts - kind / profileId / tabId / database(Redis)
+   * @param opts - kind / profileId / tabId / database(Redis) / connectDatabase(MySQL·Kingbase)
    * @param hooks.onRelease - 该 Tab 被 release 时执行的清理（停流、unregister transferHub）
    */
   async function acquire(opts: AcquireOpts, hooks?: AcquireHooks): Promise<AcquireResult> {

@@ -12,6 +12,7 @@ import type { Component } from 'vue'
  * │ options             │ 协议专属选项（追加在「基础信息」凭据区之后）。    │
  * │ ssl                 │ 独立「SSL」Tab 内容（对齐 Navicat / DBeaver）。   │
  * │ advanced            │ 独立「高级」Tab 内容（编码、超时等）。            │
+ * │ supportsProxy       │ false → 隐藏「代理」Tab。                         │
  * │ passwordOptional    │ true → 默认凭据区密码字段不标 required。          │
  * │ supportsTunnel      │ true → 连接表单展示「隧道」Tab。                  │
  * └─────────────────────┴───────────────────────────────────────────────────┘
@@ -24,8 +25,14 @@ export interface ConnectionKindSlotDef {
   ssl?: Component
   /** 高级选项独立 Tab（props: { form }） */
   advanced?: Component
+  /** false → 不展示代理 Tab */
+  supportsProxy?: boolean
   passwordOptional?: boolean
   supportsTunnel?: boolean
+  /** 文件型连接：不展示主机/端口行（如 SQLite） */
+  hideHostPort?: boolean
+  /** 不展示默认用户名/密码区 */
+  hideCredentials?: boolean
 }
 
 /**

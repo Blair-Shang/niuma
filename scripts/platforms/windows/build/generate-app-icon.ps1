@@ -4,7 +4,8 @@ param(
     [string]$ShellIco = "$PSScriptRoot\..\..\..\..\shell\resources\app.ico",
     [string]$WebPng = "$PSScriptRoot\..\..\..\..\web\public\app-icon-256.png",
     [string]$WebFavicon = "$PSScriptRoot\..\..\..\..\web\public\favicon.svg",
-    [string]$UiFavicon = "$PSScriptRoot\..\..\..\..\packages\ui\playground\public\favicon.svg"
+    # @niuma/ui 已迁至同级仓库 niuma-ui；未检出时跳过
+    [string]$UiFavicon = "$PSScriptRoot\..\..\..\..\..\niuma-ui\playground\public\favicon.svg"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -227,7 +228,14 @@ $smallSvg = @'
 </svg>
 '@
 Set-Content -Path $WebFavicon -Value $smallSvg -Encoding UTF8
-Set-Content -Path $UiFavicon -Value $smallSvg -Encoding UTF8
+
+$uiFaviconDir = Split-Path -Parent $UiFavicon
+if (Test-Path $uiFaviconDir) {
+    Set-Content -Path $UiFavicon -Value $smallSvg -Encoding UTF8
+    Write-Host "Updated UI playground favicon: $UiFavicon"
+} else {
+    Write-Host "Skip UI favicon (directory missing): $uiFaviconDir"
+}
 
 $RcPath = Join-Path (Split-Path $ShellIco) 'niuma.rc'
 if (Test-Path $RcPath) {
@@ -235,4 +243,4 @@ if (Test-Path $RcPath) {
 }
 
 Write-Host "Generated sword icon: $ShellIco"
-Write-Host "Updated: $WebPng, favicon.svg"
+Write-Host "Updated: $WebPng, $WebFavicon"

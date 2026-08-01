@@ -39,6 +39,7 @@ import {
   mapPasteToColumnRecords,
   parseClipboardMatrix,
 } from '@/modules/vastbase/utils/browse-clipboard'
+import { formatBrowseCellValue, isBrowseFilterCompletionOpen } from '@/modules/database'
 import {
   alignForValueType,
   resolveSqlValueType,
@@ -91,6 +92,8 @@ let flushingNewRow = false
 let newRowSeq = 0
 
 const pageSizeOptions = [50, 100, 200, 500, 1000] as const
+/** 过滤 SQL 行号与表格提交/行号列对齐 */
+const BROWSE_GUTTER_WIDTH = 40
 
 type ResultRow = Record<string, unknown> & {
   __rowKey: string
@@ -129,11 +132,6 @@ function formatIcon(format: BrowseDataFormat): string {
   return 'file-spreadsheet'
 }
 
-function formatBrowseCell(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
-}
 
 const columnMetaByName = computed(() => {
   const map = new Map<string, VastColumnInfo>()
@@ -193,8 +191,11 @@ const resultColumns = computed((): RsTableColumn<ResultRow>[] => {
       },
       nullable: nullable !== false,
       emptyAsNull: true,
-      // boolean 交给 RsTable 勾选展示；其余保留 NULL / JSON 格式化
-      formatter: valueType === 'boolean' ? undefined : formatBrowseCell,
+      // boolean 交给 RsTable 勾选；date/datetime 规范展示；其余 NULL / JSON
+      formatter:
+        valueType === 'boolean'
+          ? undefined
+          : (value) => formatBrowseCellValue(value, valueType),
     }
   })
 })
@@ -237,6 +238,21 @@ const filterSqlConfig = computed((): RsCodeEditorSqlConfig | undefined => {
   }
 })
 
+/** 有主键时用 PK 作稳定 rowKey，删行时其它行不整表重挂载。 */
+function stableRowKey(row: unknown[], rowIdx: number): string {
+  const res = lastResult.value
+  if (!res || pkColumns.value.length === 0) return String(rowIdx)
+  const parts: string[] = []
+  for (const pk of pkColumns.value) {
+    const i = res.columns.findIndex((c) => c.name === pk)
+    if (i < 0) return String(rowIdx)
+    const cell = row[i]
+    if (cell === null || cell === undefined || cell === '') return String(rowIdx)
+    parts.push(String(cell))
+  }
+  return `pk:${parts.join('\0')}`
+}
+
 function rebuildDisplayRows(): void {
   const res = lastResult.value
   const draft = resultRows.value.find((r) => r.__isNew)
@@ -245,7 +261,10 @@ function rebuildDisplayRows(): void {
     return
   }
   const rows = rawRows.value.map((row, rowIdx) => {
-    const obj: ResultRow = { __rowKey: String(rowIdx), __rowIndex: rowIdx }
+    const obj: ResultRow = {
+      __rowKey: stableRowKey(row, rowIdx),
+      __rowIndex: rowIdx,
+    }
     res.columns.forEach((col, colIdx) => {
       obj[col.name] = row[colIdx]
     })
@@ -380,11 +399,20 @@ function applyFilters(): void {
   void loadData()
 }
 
+/** 工具栏刷新：过滤面板有未应用草稿时一并带上最新条件。 */
+function refresh(): void {
+  const next = normalizeWhere(filterDraft.value)
+  if (next !== appliedWhereSql.value) {
+    appliedWhereSql.value = next
+    page.value = 1
+  }
+  void loadData()
+}
+
 /** Enter 应用过滤；Shift+Enter 换行交给编辑器。 */
 function onFilterKeydown(ev: KeyboardEvent): void {
   if (ev.key !== 'Enter' || ev.shiftKey || ev.isComposing) return
-  // 补全列表打开时让 CodeMirror 用 Enter 选中项
-  if (document.querySelector('.cm-tooltip-autocomplete')) return
+  if (isBrowseFilterCompletionOpen(ev)) return
   ev.preventDefault()
   ev.stopPropagation()
   applyFilters()
@@ -576,7 +604,8 @@ function promoteInsertedRow(draft: ResultRow, insertResult: VastQueryExecResult)
   rawRows.value = nextRaw.length > limit ? nextRaw.slice(0, limit) : nextRaw
   totalRows.value += 1
   rebuildDisplayRows()
-  selectedRowKeys.value = rawRows.value.length > 0 ? ['0'] : []
+  selectedRowKeys.value =
+    rawRows.value.length > 0 ? [stableRowKey(rawRows.value[0]!, 0)] : []
   void nextTick(() => {
     flushingNewRow = false
   })
@@ -721,9 +750,13 @@ async function confirmDelete(): Promise<void> {
   const draftKeys = selectedRowKeys.value.filter((k) => String(k).startsWith('new-'))
   for (const key of draftKeys) discardNewRow(key)
 
-  const indexes = selectedRowKeys.value
-    .map(Number)
-    .filter((n) => Number.isFinite(n) && n >= 0 && n < rawRows.value.length)
+  // 选中可能是稳定 PK key（pk:…）或旧版数字下标
+  const selected = new Set(selectedRowKeys.value.map(String))
+  const indexes: number[] = []
+  for (let i = 0; i < rawRows.value.length; i++) {
+    const key = stableRowKey(rawRows.value[i]!, i)
+    if (selected.has(key) || selected.has(String(i))) indexes.push(i)
+  }
   if (indexes.length === 0) {
     deleteConfirm.value = false
     return
@@ -1451,7 +1484,7 @@ watch(ddlMenuOpen, (open) => {
           icon="refresh-cw"
           :loading="loading || saving"
           :tooltip="t('modules.vastbase.structure.refresh')"
-          @click="loadData"
+          @click="refresh"
         >
           {{ t('modules.vastbase.structure.refresh') }}
         </RsButton>
@@ -1465,8 +1498,11 @@ watch(ddlMenuOpen, (open) => {
     >
       <RsCodeEditor
         v-model="filterDraft"
-        class="nm-vast-browse__filter-editor"
         language="sql"
+        embedded
+        :rounded="false"
+        :fold-gutter="false"
+        :gutter-width="BROWSE_GUTTER_WIDTH"
         :show-toolbar="false"
         height="100%"
         :sql-config="filterSqlConfig"
@@ -1499,7 +1535,10 @@ watch(ddlMenuOpen, (open) => {
           fill
           bordered
           column-bordered
+          :rounded="false"
           show-index
+          :index-width="BROWSE_GUTTER_WIDTH"
+          :edit-gutter-width="BROWSE_GUTTER_WIDTH"
           resizable
           column-layout="fixed"
           cell-tooltip
@@ -1570,7 +1609,6 @@ watch(ddlMenuOpen, (open) => {
       "
       tone="danger"
       confirm-variant="danger"
-      show-overlay
       @confirm="confirmDelete"
     />
   </div>
@@ -1665,41 +1703,6 @@ watch(ddlMenuOpen, (open) => {
   border-bottom: 1px solid var(--rs-border-subtle);
   background: var(--rs-surface);
   overflow: hidden;
-}
-
-.nm-vast-browse__filter-editor {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  border-radius: 0;
-  overflow: hidden;
-  background: var(--rs-input-bg, var(--rs-surface));
-}
-
-.nm-vast-browse__filter-editor :deep(.rs-code-editor) {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100% !important;
-  min-height: 100%;
-  border: 0;
-  border-radius: 0;
-}
-
-.nm-vast-browse__filter-editor :deep(.rs-code-editor__body),
-.nm-vast-browse__filter-editor :deep(.rs-code-editor__surface) {
-  height: 100%;
-  min-height: 0;
-}
-
-.nm-vast-browse__filter-editor :deep(.cm-editor) {
-  font-size: 12px;
-  width: 100%;
-  height: 100%;
-}
-
-.nm-vast-browse__filter-editor :deep(.cm-scroller) {
-  overflow: auto !important;
 }
 
 .nm-vast-browse__ddl-pop {

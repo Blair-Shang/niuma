@@ -172,6 +172,22 @@ func (s *ConnectionStore) Create(ctx context.Context, p ConnectionProfile) error
 	return nil
 }
 
+// ExistsByName 判断工作区内是否已存在同名站点。
+func (s *ConnectionStore) ExistsByName(ctx context.Context, workspaceID, profileName string) (bool, error) {
+	if workspaceID == "" {
+		workspaceID = "default"
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM nm_connection_profile WHERE workspace_id = ? AND profile_name = ?`,
+		workspaceID, profileName,
+	).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("store: exists profile by name: %w", err)
+	}
+	return n > 0, nil
+}
+
 // Update 以乐观锁更新连接站点：仅当 row_version 匹配时生效，成功后版本 +1。
 //
 // 返回新的 row_version 与是否命中（ok=false 表示站点不存在或版本冲突）。

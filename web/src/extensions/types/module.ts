@@ -19,8 +19,8 @@ export type ModuleCategory =
 /** SideNav 分组展示顺序 */
 export const MODULE_CATEGORY_ORDER: readonly ModuleCategory[] = [
   'explorer',
-  'ops',
   'data',
+  'ops',
   'devtools',
   'ai',
   'media',

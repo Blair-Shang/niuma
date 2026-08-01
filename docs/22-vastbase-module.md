@@ -55,7 +55,7 @@
 | **Probe** | 事务内 `SAVEPOINT` + 试探 `CREATE PROCEDURE … LANGUAGE plpgsql`；成功则追加 `proc.plpgsql_dollar`，无论成败 `ROLLBACK` |
 | **过程** | 默认 PL/SQL：`AS\|IS … BEGIN … END;`（可选 `/`）。探测到 `proc.plpgsql_dollar` 后模板/AI 规则可放宽 |
 | **函数** | 默认 `LANGUAGE plpgsql AS $$…$$`（调试友好） |
-| 编辑器 | 有 `editor.suppress_pg_diagnostics` → Monaco 内置 `sql`（不挂 pgsql Worker）；否则 `pgsql` + sql-languages |
+| 编辑器 | 默认 `pgsql` + sql-languages Worker（补全/高亮）；`editor.suppress_pg_diagnostics` 仅清误报 markers，**不**退回内置 `sql`；真正不要 Worker 时用 `editor.builtin_sql` |
 | AI | Context Pack 携带 `capabilities` / `dialectRules`（由能力生成；`dialect_vastbase.txt` 仅无能力时回退） |
 | 调试扩展 | **`DBE_PLDEBUGGER`**；未安装则 UI 降级 |
 | 后续其它库 | **不在本文范围**；共享契约见 [23](./23-sql-dialect-completion.md)，各库自建 Probe / Cap / 服务 |
@@ -140,7 +140,7 @@ web/src/modules/vastbase/
 │   ├── VastQueryPane.vue
 │   ├── VastTablePane.vue          # P2
 │   ├── VastProcEditorPane.vue     # P3
-│   └── VastDebugPane.vue          # P3
+│   └── VastDebugPane.vue          # P3（布局复用 modules/database DebugShell）
 ├── composables/
 │   ├── useVastQuery.ts
 │   └── useVastDebug.ts

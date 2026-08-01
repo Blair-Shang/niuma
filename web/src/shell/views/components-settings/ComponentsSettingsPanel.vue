@@ -109,28 +109,35 @@ defineExpose({ reload: loadBundles })
 <style scoped>
 .nm-components.nm-settings__panel {
   display: flex;
+  flex: 1;
   flex-direction: column;
   max-width: none;
   width: 100%;
   min-height: 0;
+  height: 100%;
   padding: 0;
+  border-radius: 0;
 }
 
 .nm-components__body {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   padding: 0;
 }
 
 .nm-components__state {
-  min-height: 18rem;
+  flex: 1;
+  min-height: 0;
   margin: var(--rs-space-lg) var(--rs-space-xl) var(--rs-space-xl);
 }
 
 .nm-components__workspace {
   position: relative;
   display: flex;
-  min-height: 22rem;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   background: var(--rs-surface-elevated);
 }
@@ -138,7 +145,6 @@ defineExpose({ reload: loadBundles })
 @media (max-width: 48rem) {
   .nm-components__workspace {
     flex-direction: column;
-    min-height: auto;
   }
 }
 </style>

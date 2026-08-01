@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"niuma/pkg/common/id"
 )
 
 const (
@@ -32,6 +34,9 @@ type ResultSet struct {
 	closed       bool
 	cancel       context.CancelFunc
 	releaseOwned func()
+	// sessionOwned 为 true 时游标借用会话钉住的 txConn，关闭时不得 Close 该 Conn。
+	sessionOwned bool
+	onReleaseTx  func() // 释放 txBusy
 }
 
 // QueryFetchParams 是 query.fetch 入参。
@@ -88,10 +93,7 @@ func OpenPagedQuery(
 		return nil, fmt.Errorf("mysql: sql required")
 	}
 	pageSize := clampPageSize(params.Limit)
-	requestID := strings.TrimSpace(params.RequestID)
-	if requestID == "" {
-		requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-	}
+	requestID := id.CoalesceID(params.RequestID, "q")
 
 	rsCtx, cancelRS := context.WithCancel(context.WithoutCancel(ctx))
 	entry := &queryCancel{cancel: cancelRS}
@@ -124,43 +126,85 @@ func OpenPagedQuery(
 	}
 
 	start := time.Now()
-	conn, err := db.Conn(rsCtx)
+	conn, sessionOwned, releaseTx, err := sess.acquireExecConn(rsCtx, db)
 	if err != nil {
 		cleanupFailed()
-		return nil, fmt.Errorf("mysql: acquire: %w", err)
+		return nil, err
+	}
+
+	releaseConn := func() {
+		if !sessionOwned {
+			_ = conn.Close()
+		} else if releaseTx != nil {
+			releaseTx()
+		}
+	}
+
+	// 短连（releaseOwned!=nil）DSN 已带目标库；会话池 / 事务连接需显式 USE。
+	if releaseOwned == nil {
+		if err := sess.ensureConnDatabase(rsCtx, conn, sessionOwned, params.Database); err != nil {
+			releaseConn()
+			cleanupFailed()
+			return nil, err
+		}
+	}
+
+	finishDML := func(affected int64) (*QueryExecResult, error) {
+		releaseConn()
+		cleanupFailed()
+		if firstPageTimer != nil {
+			firstPageTimer.Stop()
+		}
+		sess.markInTxAfterStatement()
+		return &QueryExecResult{
+			RequestID:    requestID,
+			DurationMS:   time.Since(start).Milliseconds(),
+			CommandTag:   commandTagForSQL(sqlText),
+			RowsAffected: int64Ptr(affected),
+		}, nil
+	}
+
+	if !returnsResultSet(sqlText) {
+		res, eerr := conn.ExecContext(rsCtx, sqlText)
+		if eerr != nil {
+			releaseConn()
+			cleanupFailed()
+			return nil, fmt.Errorf("mysql: exec: %w", eerr)
+		}
+		affected, _ := res.RowsAffected()
+		return finishDML(affected)
 	}
 
 	rows, err := conn.QueryContext(rsCtx, sqlText)
 	if err != nil {
-		// 非结果集语句。
+		// 误判为结果集时回退 Exec。
 		res, eerr := conn.ExecContext(rsCtx, sqlText)
-		_ = conn.Close()
-		cleanupFailed()
 		if eerr != nil {
+			releaseConn()
+			cleanupFailed()
 			return nil, fmt.Errorf("mysql: query: %w", err)
 		}
 		affected, _ := res.RowsAffected()
-		if firstPageTimer != nil {
-			firstPageTimer.Stop()
-		}
-		return &QueryExecResult{
-			RequestID:    requestID,
-			DurationMS:   time.Since(start).Milliseconds(),
-			CommandTag:   "OK",
-			RowsAffected: affected,
-		}, nil
+		return finishDML(affected)
 	}
 
 	columns, cerr := columnMetasFromRows(rows)
 	if cerr != nil {
 		_ = rows.Close()
-		_ = conn.Close()
+		releaseConn()
 		cleanupFailed()
 		return nil, cerr
 	}
+	// Query 碰到 OK 包时驱动返回 0 列；用 ROW_COUNT() 补影响行数。
+	if len(columns) == 0 {
+		_ = rows.Close()
+		var affected int64
+		_ = conn.QueryRowContext(rsCtx, "SELECT ROW_COUNT()").Scan(&affected)
+		return finishDML(affected)
+	}
 
 	rs := &ResultSet{
-		ID:           fmt.Sprintf("rs-%d", time.Now().UnixNano()),
+		ID:           id.UniqueID("rs"),
 		RequestID:    requestID,
 		SessionID:    sess.ID,
 		conn:         conn,
@@ -168,7 +212,9 @@ func OpenPagedQuery(
 		columns:      columns,
 		cancel:       cancelRS,
 		releaseOwned: releaseOwned,
-		commandTag:   "SELECT",
+		commandTag:   commandTagForSQL(sqlText),
+		sessionOwned: sessionOwned,
+		onReleaseTx:  releaseTx,
 	}
 
 	page, hasMore, truncated, rerr := rs.readPage(pageSize)
@@ -187,6 +233,7 @@ func OpenPagedQuery(
 	}
 
 	duration := time.Since(start).Milliseconds()
+	sess.markInTxAfterStatement()
 	if !hasMore {
 		rs.forceClose()
 		sess.mu.Lock()
@@ -203,7 +250,7 @@ func OpenPagedQuery(
 			HasMore:      false,
 			Truncated:    truncated,
 			DurationMS:   duration,
-			CommandTag:   "SELECT",
+			CommandTag:   commandTagForSQL(sqlText),
 		}, nil
 	}
 
@@ -218,7 +265,7 @@ func OpenPagedQuery(
 		HasMore:      true,
 		Truncated:    truncated,
 		DurationMS:   duration,
-		CommandTag:   "SELECT",
+		CommandTag:   commandTagForSQL(sqlText),
 	}, nil
 }
 
@@ -375,7 +422,7 @@ func (rs *ResultSet) readPage(limit int) (page [][]any, hasMore bool, truncated 
 		if !rs.rows.Next() {
 			break
 		}
-		encoded, serr := scanEncodedRow(rs.rows, len(rs.columns))
+		encoded, serr := scanEncodedRow(rs.rows, rs.columns)
 		if serr != nil {
 			return nil, false, false, serr
 		}
@@ -397,7 +444,7 @@ func (rs *ResultSet) readPage(limit int) (page [][]any, hasMore bool, truncated 
 	}
 
 	if rs.rows.Next() {
-		encoded, serr := scanEncodedRow(rs.rows, len(rs.columns))
+		encoded, serr := scanEncodedRow(rs.rows, rs.columns)
 		if serr != nil {
 			return nil, false, false, serr
 		}
@@ -417,8 +464,14 @@ func (rs *ResultSet) finishLocked() {
 		rs.rows = nil
 	}
 	if rs.conn != nil {
-		_ = rs.conn.Close()
+		if !rs.sessionOwned {
+			_ = rs.conn.Close()
+		}
 		rs.conn = nil
+	}
+	if rs.onReleaseTx != nil {
+		rs.onReleaseTx()
+		rs.onReleaseTx = nil
 	}
 	if rs.releaseOwned != nil {
 		rs.releaseOwned()

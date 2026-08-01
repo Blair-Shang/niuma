@@ -1,0 +1,56 @@
+id: com.niuma.dameng
+name: Dameng Service
+version: 0.1.0
+bridge:
+  namespace: dameng
+  connection_kind: dameng
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+    - tree.schemas
+    - tree.tables
+    - tree.routines
+    - tree.sequences
+    - tree.categoryCounts
+    - meta.columns
+    - meta.indexes
+    - meta.ddl
+    - meta.primaryKey
+    - meta.foreignKeys
+    - meta.checks
+    - meta.routineSource
+    - meta.routineParameters
+    - meta.processlist
+    - meta.kill
+    - meta.instanceOverview
+    - meta.locks
+    - catalog.schemas
+    - catalog.tables
+    - catalog.columns
+    - ddl.designPreview
+    - ddl.designApply
+    - ddl.createTablePreview
+    - ddl.createTable
+    - io.exportCsv
+    - io.importCsv
+    - io.dumpSql
+    - io.execSqlFile
+    - io.cancel
+runtime:
+  executable: bin/niuma-dameng-service.exe
+  executable_windows: bin/niuma-dameng-service.exe
+  executable_unix: bin/niuma-dameng-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.dameng'
+  address_windows: '\\.\pipe\niuma.dameng'
+  address_unix: '/tmp/niuma.dameng.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

@@ -14,6 +14,7 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #else
 #include <spawn.h>
 extern char** environ;
@@ -304,13 +305,33 @@ bool LocalFs::ShowInFolder(const std::string& path, std::string& error) {
   if (!IsAccessiblePath(path, error)) {
     return false;
   }
+  // 统一成绝对 + 本地分隔符（Windows 下 / 会被 make_preferred 转为 \）。
+  // dameng 等服务曾对 outputPath 做 ToSlash，explorer /select 遇正斜杠常落到桌面。
+  std::error_code ec;
+  fs::path target = fs::weakly_canonical(fs::u8path(path), ec);
+  if (ec || target.empty()) {
+    target = fs::absolute(fs::u8path(path), ec);
+    if (ec || target.empty()) {
+      target = fs::u8path(path);
+    }
+  }
+  target = target.lexically_normal().make_preferred();
 #if defined(OS_WIN)
-  const std::wstring wide = Utf8ToWide(path);
+  const std::wstring wide = target.wstring();
   if (wide.empty()) {
     error = "invalid path encoding";
     return false;
   }
-  const std::wstring args = L"/select," + wide;
+  PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(wide.c_str());
+  if (pidl) {
+    const HRESULT hr = SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
+    ILFree(pidl);
+    if (SUCCEEDED(hr)) {
+      return true;
+    }
+  }
+  // 回退：带引号的 /select，兼容空格路径与旧环境
+  const std::wstring args = L"/select,\"" + wide + L"\"";
   const HINSTANCE result =
       ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
   if (reinterpret_cast<intptr_t>(result) <= 32) {
@@ -319,8 +340,6 @@ bool LocalFs::ShowInFolder(const std::string& path, std::string& error) {
   }
   return true;
 #else
-  (void)path;
-  const fs::path target = fs::u8path(path);
   const fs::path folder = fs::is_directory(target) ? target : target.parent_path();
   if (folder.empty()) {
     error = "folder not found";
@@ -331,7 +350,8 @@ bool LocalFs::ShowInFolder(const std::string& path, std::string& error) {
 #else
   const char* opener = "xdg-open";
 #endif
-  std::vector<char> folder_arg(folder.string().begin(), folder.string().end());
+  const std::string folder_utf8 = U8StringToUtf8(folder.u8string());
+  std::vector<char> folder_arg(folder_utf8.begin(), folder_utf8.end());
   folder_arg.push_back('\0');
   char* argv[] = {const_cast<char*>(opener), folder_arg.data(), nullptr};
   pid_t pid = 0;

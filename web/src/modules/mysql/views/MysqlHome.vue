@@ -12,14 +12,23 @@ import MysqlConnectionFields from '@/modules/mysql/components/MysqlConnectionFie
 import MysqlSslFields from '@/modules/mysql/components/MysqlSslFields.vue'
 import MysqlAdvancedFields from '@/modules/mysql/components/MysqlAdvancedFields.vue'
 import type { MysqlSessionTab } from '@/modules/mysql/pane-registry'
+import type { MysqlObjectKind } from '@/modules/mysql/types/object-script'
 import MysqlSession from '@/modules/mysql/views/MysqlSession.vue'
 
 const props = defineProps<{
   profileId?: string
   database?: string
+  table?: string
+  routine?: string
+  routineKind?: 'procedure' | 'function'
+  objectKind?: MysqlObjectKind
+  objectName?: string
   initialTab?: MysqlSessionTab
   initialSql?: string
+  /** 对象脚本草稿（重启恢复） */
+  draftSql?: string
   autoRunInitialSql?: boolean
+  designMode?: 'create' | 'alter'
   tabId?: string
 }>()
 
@@ -89,9 +98,16 @@ onMounted(() => {
     v-if="props.profileId"
     :profile-id="props.profileId"
     :database="props.database"
+    :table="props.table"
+    :routine="props.routine"
+    :routine-kind="props.routineKind"
+    :object-kind="props.objectKind"
+    :object-name="props.objectName"
     :initial-tab="props.initialTab"
     :initial-sql="props.initialSql"
+    :draft-sql="props.draftSql"
     :auto-run-initial-sql="props.autoRunInitialSql"
+    :design-mode="props.designMode"
     :tab-id="props.tabId"
     class="nm-mysql-tab"
   />

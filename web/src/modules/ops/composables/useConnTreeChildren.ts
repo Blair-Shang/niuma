@@ -161,7 +161,7 @@ const PATH_LEAF_KINDS = new Set([
 ])
 
 function syntheticResourceNode(conn: ConnItem, path: ConnResourcePath): ConnResourceNode {
-  const last = path.segments[path.segments.length - 1]
+  const last = path.segments.at(-1)
   return {
     key: resourceTreeKey(conn.profileId, path),
     label: last?.name ?? '',
@@ -304,6 +304,14 @@ async function refreshNode(key: string, node: RsTreeNode): Promise<void> {
   }
 
   await loadChildrenForKey(key, node)
+
+  // 分类夹右键刷新只重拉 children，不会重拉 categoryCounts；用子节点数同步「字典 (n)」徽章
+  if (n._type === 'resource') {
+    const last = n._path.segments.at(-1)
+    if (last?.kind === 'category') {
+      patchCategoryObjectCount(n._conn, n._path)
+    }
+  }
 }
 
 /**
@@ -398,4 +406,100 @@ export async function refreshResourceIfLoaded(
     key,
     descriptors.map((d) => descriptorToNode(conn, d)),
   )
+  // 与 refreshNode 一致：分类列表刷新后同步父级徽章
+  const last = path.segments.at(-1)
+  if (last?.kind === 'category') {
+    patchCategoryObjectCount(conn, path)
+  }
+}
+
+function parseCategoryCount(node: ConnResourceNode): number | undefined {
+  if (node._badge && /^\d+$/.test(node._badge)) {
+    return Number(node._badge)
+  }
+  const matched = /\((\d+)\)$/.exec((node.label ?? '').trimEnd())
+  return matched ? Number(matched[1]) : undefined
+}
+
+/** 去掉 label 末尾的「 (n)」计数后缀；用可选单空格，避免 `\s*` 双侧量词回溯。 */
+function stripCategoryCountSuffix(label: string): string {
+  return label.replace(/ ?\(\d+\)$/, '').trimEnd()
+}
+
+function isHintResourceNode(node: ConnResourceNode): boolean {
+  const last = node._path.segments.at(-1)
+  return last?.kind === 'hint'
+}
+
+/** 未截断时返回子节点数；含 hint 截断则返回 undefined。 */
+function countCategoryChildren(children: ConnResourceNode[]): number | undefined {
+  let count = 0
+  for (const child of children) {
+    if (isHintResourceNode(child)) return undefined
+    count += 1
+  }
+  return count
+}
+
+function resolveCategoryCount(
+  node: ConnResourceNode,
+  children: ConnResourceNode[] | undefined,
+  delta?: number,
+): number | undefined {
+  if (children) {
+    const fromList = countCategoryChildren(children)
+    if (fromList !== undefined) return fromList
+  }
+  if (delta === undefined || delta === 0) return undefined
+  const current = parseCategoryCount(node)
+  if (current === undefined) return undefined
+  return Math.max(0, current + delta)
+}
+
+/**
+ * 就地更新分类夹「表 (n)」计数徽章，不重拉 schema/database（避免 categoryCounts 全量查询）。
+ * - 分类列表已加载且未截断：用子节点数同步
+ * - 否则：用 delta 调整现有数字（新建 +1 / 删除 -1）
+ */
+export function patchCategoryObjectCount(
+  conn: ConnItem,
+  categoryPath: ConnResourcePath,
+  options?: { delta?: number },
+): void {
+  const segments = categoryPath.segments
+  if (segments.length < 2) return
+  const last = segments.at(-1)
+  if (last?.kind !== 'category') return
+
+  const parentPath: ConnResourcePath = { segments: segments.slice(0, -1) }
+  const parentKey = resourceTreeKey(conn.profileId, parentPath)
+  const categoryKey = resourceTreeKey(conn.profileId, categoryPath)
+  const siblings = childCache.value.get(parentKey)
+  if (!siblings?.length) return
+
+  const index = siblings.findIndex((node) => node.key === categoryKey)
+  if (index < 0) return
+  const node = siblings[index]
+  if (!node) return
+
+  const nextCount = resolveCategoryCount(
+    node,
+    childCache.value.get(categoryKey),
+    options?.delta,
+  )
+  if (nextCount === undefined) return
+  // 已是目标值则跳过，避免无意义触发树重渲染
+  if (parseCategoryCount(node) === nextCount) return
+
+  const baseLabel = stripCategoryCountSuffix(node.label ?? '') || node.label || ''
+  const label = `${baseLabel} (${nextCount})`
+  const patched: ConnResourceNode = {
+    ...node,
+    label,
+    _badge: String(nextCount),
+    _searchText: `${label} ${nextCount}`.trim().toLowerCase(),
+  }
+  const nextSiblings = siblings.slice()
+  nextSiblings[index] = patched
+  childCache.value = new Map(childCache.value).set(parentKey, nextSiblings)
 }

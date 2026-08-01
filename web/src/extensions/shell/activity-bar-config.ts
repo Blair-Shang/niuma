@@ -8,19 +8,19 @@ export interface ActivityBarItem {
   category: ModuleCategory
   icon: string
   labelKey: string
+  /** 线框图标着色，选中态仍保留本色 */
+  color: string
 }
 
 /**
- * 领域 → Activity Bar 图标（Lucide kebab-case）。
- * 与 VS Code 的 Explorer / Search / SCM 类比，此处为 NiuMa 领域切换。
+ * 领域 → Activity Bar 图标（Lucide kebab-case / 自定义字标）。
+ * 顺序：资源管理 → 数据库 → 运维工具 → API；彩色线框与领域语义对应。
  */
-// Activity Bar 固定四项大分类，仅驱动 SideNav 视图切换（资源管理 / 运维 / 数据库 / API）。
-// 领域图标须与模块内工具图标区分，避免在活动栏、侧栏、Tab 三处重复。
 export const ACTIVITY_BAR_ITEMS: readonly ActivityBarItem[] = [
-  { category: 'explorer', icon: 'files', labelKey: 'nav.category.explorer' },
-  { category: 'ops', icon: 'wrench', labelKey: 'nav.category.ops' },
-  { category: 'data', icon: 'database', labelKey: 'nav.category.data' },
-  { category: 'devtools', icon: 'webhook', labelKey: 'nav.category.api' },
+  { category: 'explorer', icon: 'folder', labelKey: 'nav.category.explorer', color: '#3B82F6' },
+  { category: 'data', icon: 'database', labelKey: 'nav.category.data', color: '#8B5CF6' },
+  { category: 'ops', icon: 'server', labelKey: 'nav.category.ops', color: '#F59E0B' },
+  { category: 'devtools', icon: 'api', labelKey: 'nav.category.api', color: '#22C55E' },
 ] as const
 
 /**
@@ -50,11 +50,19 @@ export function filterNavItemsByCategory(
 
 const CONN_KIND_SET = new Set<ConnKind>(CONN_KIND_DEFS.map((k) => k.kind))
 
-const OPS_CONN_KINDS: ConnKind[] = CONN_KIND_DEFS
-  .map((k) => k.kind)
-  .filter((k) => k !== 'vastbase' && k !== 'mysql')
+const DB_CONN_KINDS = new Set<ConnKind>([
+  'vastbase',
+  'mysql',
+  'sqlite',
+  'dameng',
+  'oracle',
+  'clickhouse',
+  'kingbase',
+])
 
-const DATA_CONN_KINDS: ConnKind[] = ['vastbase', 'mysql']
+const OPS_CONN_KINDS: ConnKind[] = CONN_KIND_DEFS.map((k) => k.kind).filter((k) => !DB_CONN_KINDS.has(k))
+
+const DATA_CONN_KINDS: ConnKind[] = CONN_KIND_DEFS.map((k) => k.kind).filter((k) => DB_CONN_KINDS.has(k))
 
 /**
  * Activity 分类对应的连接 kind 过滤；`null` 表示资源管理全量展示。
@@ -104,6 +112,11 @@ export function categoryModuleActions(category: ModuleCategory): CategoryModuleA
     return [
       { key: 'open-module:mysql', labelKey: 'nav.mysql', icon: 'mysql', moduleId: 'mysql' },
       { key: 'open-module:vastbase', labelKey: 'nav.vastbase', icon: 'vastbase', moduleId: 'vastbase' },
+      { key: 'open-module:sqlite', labelKey: 'nav.sqlite', icon: 'sqlite', moduleId: 'sqlite' },
+      { key: 'open-module:dameng', labelKey: 'nav.dameng', icon: 'dameng', moduleId: 'dameng' },
+      { key: 'open-module:oracle', labelKey: 'nav.oracle', icon: 'oracle', moduleId: 'oracle' },
+      { key: 'open-module:clickhouse', labelKey: 'nav.clickhouse', icon: 'database', moduleId: 'clickhouse' },
+      { key: 'open-module:kingbase', labelKey: 'nav.kingbase', icon: 'kingbase', moduleId: 'kingbase' },
       { key: 'open-module:database', labelKey: 'opsNav.addDatabase', icon: 'database', moduleId: 'database' },
     ]
   }

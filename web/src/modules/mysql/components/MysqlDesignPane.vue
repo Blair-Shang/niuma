@@ -1,33 +1,65 @@
 <script setup lang="ts">
+/**
+ * MySQL 表设计器：挂载公共 TableDesignShell，方言负责草稿 / RPC / 类型目录。
+ * 对齐 Navicat / DBeaver：默认 id 列、真 CREATE 预览、外键、网格编辑、列拖拽、索引多选。
+ */
 import {
   RsButton,
   RsEmpty,
-  RsIcon,
   RsInput,
-  RsLoading,
   RsSelect,
   RsTable,
+  reorderTableRows,
   useRsToast,
   type RsSelectOptions,
   type RsTableColumn,
+  type RsTableRowDropPosition,
 } from '@niuma/ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mysqlApi } from '@/api'
-import type { DesignColumnDraft, DesignIndexDraft } from '@/modules/mysql/utils/table-design'
 import {
-  MYSQL_BASE_TYPES,
-  buildDataType,
+  TableDesignPreviewPopover,
+  TableDesignShell,
+  type TableDesignSection,
+  type TableDesignSectionItem,
+  type TableDesignShellLabels,
+} from '@/modules/database'
+import { categoryPath } from '@/modules/mysql/conn-tree-shared'
+import {
+  patchCategoryObjectCount,
+  refreshResourceIfLoaded,
+} from '@/modules/ops/composables/useConnTreeChildren'
+import type { ConnItem } from '@/modules/ops/types'
+import { useTabStore } from '@/stores/tab'
+import { collationsForCharset } from '@/modules/mysql/mysql-charset'
+import {
+  MYSQL_BASE_TYPE_OPTIONS,
+  MYSQL_FK_ACTIONS,
+  allowsUnsigned,
+  dataTypeParamKind,
+  defaultCreateTableColumns,
+  isDefaultIndexName,
+  joinColumnList,
   newEmptyColumn,
+  newEmptyForeignKey,
   newEmptyIndex,
-  splitDataTypeFields,
+  suggestIndexName,
+  syncColumnDataType,
+  type DesignColumnDraft,
+  type DesignForeignKeyDraft,
+  type DesignIndexDraft,
 } from '@/modules/mysql/utils/table-design'
+import { formatSql } from '@/modules/sql-editor/format'
 import {
+  applyPrimaryIndexToColumns,
   buildAlterDesignOps,
   buildCreateColumns,
   buildCreateForeignKeys,
   buildCreateIndexes,
+  syncPrimaryIndexFromColumns,
   toDesignRows,
+  toForeignKeyDrafts,
   toIndexDrafts,
 } from '@/modules/mysql/utils/table-design-ops'
 
@@ -44,28 +76,86 @@ const props = defineProps<{
 const { t } = useI18n()
 const toast = useRsToast()
 
-type DesignTab = 'columns' | 'indexes'
-const activeTab = ref<DesignTab>('columns')
+type DesignTab = 'columns' | 'indexes' | 'foreignKeys'
+type ColRow = DesignColumnDraft & Record<string, unknown>
+type IdxRow = DesignIndexDraft & Record<string, unknown>
+type FkRow = DesignForeignKeyDraft & Record<string, unknown>
 
+const activeSection = ref<TableDesignSection>('columns')
 const loading = ref(false)
 const saving = ref(false)
 const previewSqls = ref<string[]>([])
 const showPreview = ref(false)
+const previewLoading = ref(false)
+/** 创建成功后本地切到 alter，不依赖 Tab props 同步时机 */
+const localDesignMode = ref<'create' | 'alter' | null>(null)
+const localTable = ref<string | null>(null)
 const tableName = ref(props.table ?? '')
 const tableComment = ref('')
 const tableEngine = ref('InnoDB')
 const tableCharset = ref('utf8mb4')
+const tableCollation = ref('')
 
 const columns = ref<DesignColumnDraft[]>([])
 const indexes = ref<DesignIndexDraft[]>([])
-
+const foreignKeys = ref<DesignForeignKeyDraft[]>([])
 const origColumns = ref<DesignColumnDraft[]>([])
 const origIndexes = ref<DesignIndexDraft[]>([])
+const origForeignKeys = ref<DesignForeignKeyDraft[]>([])
 
-// ─── Options ──────────────────────────────────────────────────────────────
-const typeOptions = computed<RsSelectOptions>(() =>
-  MYSQL_BASE_TYPES.map((t) => ({ value: t, label: t })),
+const refTableOptions = ref<RsSelectOptions>([])
+const refColumnOptions = ref<RsSelectOptions>([])
+
+const editingColKey = ref<string | null>(null)
+const editingIdxKey = ref<string | null>(null)
+const editingFkKey = ref<string | null>(null)
+
+const modeCreate = computed(() => (localDesignMode.value ?? props.designMode) === 'create')
+const effectiveTable = computed(() => localTable.value ?? props.table)
+const designMode = computed<'create' | 'alter'>(() => (modeCreate.value ? 'create' : 'alter'))
+
+const shellLabels = computed<TableDesignShellLabels>(() => ({
+  reload: t('modules.mysql.design.reload'),
+  preview: t('modules.mysql.design.preview'),
+  create: t('modules.mysql.design.create'),
+  apply: t('modules.mysql.design.apply'),
+  previewTitle: t('modules.mysql.design.previewTitle'),
+  selectRow: t('modules.mysql.design.selectRow'),
+  copyPreview: t('modules.mysql.design.copyPreview'),
+  moveUp: t('modules.mysql.design.moveUp'),
+  moveDown: t('modules.mysql.design.moveDown'),
+  add: t('modules.mysql.design.addColumn'),
+}))
+
+const addButtonLabel = computed(() => {
+  if (activeSection.value === 'indexes') return t('modules.mysql.design.addIndex')
+  if (activeSection.value === 'foreignKeys') return t('modules.mysql.design.addForeignKey')
+  return t('modules.mysql.design.addColumn')
+})
+
+const title = computed(() =>
+  modeCreate.value
+    ? t('modules.mysql.design.createTitle')
+    : t('modules.mysql.design.alterTitle', { name: effectiveTable.value ?? '' }),
 )
+
+const sections = computed<TableDesignSectionItem[]>(() => [
+  {
+    id: 'columns',
+    label: t('modules.mysql.design.tabColumns'),
+    count: columns.value.filter((c) => !c.removed).length,
+  },
+  {
+    id: 'indexes',
+    label: t('modules.mysql.design.tabIndexes'),
+    count: indexes.value.filter((i) => !i.removed).length,
+  },
+  {
+    id: 'foreignKeys',
+    label: t('modules.mysql.design.tabForeignKeys'),
+    count: foreignKeys.value.filter((f) => !f.removed).length,
+  },
+])
 
 const engineOptions: RsSelectOptions = [
   { value: 'InnoDB', label: 'InnoDB' },
@@ -80,84 +170,482 @@ const charsetOptions: RsSelectOptions = [
   { value: 'ascii', label: 'ascii' },
 ]
 
-// ─── Column table ─────────────────────────────────────────────────────────
-const colColumns = computed<RsTableColumn[]>(() => [
-  { key: 'name', title: t('modules.mysql.design.colName'), minWidth: 120 },
-  { key: 'dataType', title: t('modules.mysql.design.colType'), minWidth: 140 },
-  { key: 'nullable', title: t('modules.mysql.design.colNullable'), width: 72 },
-  { key: 'primaryKey', title: t('modules.mysql.design.colPk'), width: 48 },
-  { key: 'autoIncrement', title: t('modules.mysql.design.colAi'), width: 48 },
-  { key: 'defaultExpr', title: t('modules.mysql.design.colDefault'), minWidth: 100 },
-  { key: 'comment', title: t('modules.mysql.design.colComment'), minWidth: 100 },
-  { key: '_actions', title: '', width: 36 },
-])
+const collationOptions = computed<RsSelectOptions>(() => {
+  const list = collationsForCharset(tableCharset.value)
+  return [
+    { value: '', label: t('modules.mysql.design.collationDefault') },
+    ...list.map((v) => ({ value: v, label: v })),
+  ]
+})
 
-const colRows = computed(() =>
+const indexMethodOptions: RsSelectOptions = [
+  { value: 'BTREE', label: 'BTREE' },
+  { value: 'HASH', label: 'HASH' },
+]
+
+const typeBaseSelectOptions = MYSQL_BASE_TYPE_OPTIONS.map((o) => ({
+  value: o.base,
+  label: o.base,
+}))
+
+const fkActionOptions = MYSQL_FK_ACTIONS.map((v) => ({ value: v, label: v }))
+
+const draftColumnSelectOptions = computed(() =>
+  columns.value
+    .filter((c) => !c.removed && c.name.trim())
+    .map((c) => ({ value: c.name, label: c.name })),
+)
+
+const displayColumns = computed((): ColRow[] =>
   columns.value
     .filter((c) => !c.removed)
-    .map((c) => ({
-      __rowKey: c.__rowKey,
-      name: c.name,
-      dataType: c.dataType,
-      nullable: c.nullable ? '✓' : '',
-      primaryKey: c.primaryKey ? '✓' : '',
-      autoIncrement: c.autoIncrement ? '✓' : '',
-      defaultExpr: c.defaultExpr,
-      comment: c.comment,
-    })),
+    .map((c) => {
+      let status = t('modules.mysql.design.statusOk')
+      if (!c.originalName) status = t('modules.mysql.design.statusNew')
+      else {
+        const orig = origColumns.value.find((o) => o.originalName === c.originalName)
+        if (
+          orig &&
+          (c.name !== orig.name ||
+            c.dataType !== orig.dataType ||
+            c.nullable !== orig.nullable ||
+            c.defaultExpr !== orig.defaultExpr ||
+            c.comment !== orig.comment ||
+            c.primaryKey !== orig.primaryKey ||
+            c.autoIncrement !== orig.autoIncrement ||
+            c.unsigned !== orig.unsigned)
+        ) {
+          status = t('modules.mysql.design.statusEdit')
+        }
+      }
+      return { ...c, status }
+    }) as ColRow[],
+)
+const displayIndexes = computed(
+  (): IdxRow[] =>
+    indexes.value
+      .filter((i) => !i.removed)
+      .map((i) => ({
+        ...i,
+        kindLabel: i.primary
+          ? t('modules.mysql.design.idxKindPrimary')
+          : i.unique
+            ? t('modules.mysql.design.idxKindUnique')
+            : t('modules.mysql.design.idxKindNormal'),
+      })) as IdxRow[],
+)
+const displayForeignKeys = computed(
+  (): FkRow[] => foreignKeys.value.filter((f) => !f.removed) as FkRow[],
 )
 
-// ─── Index table ──────────────────────────────────────────────────────────
-const idxColumns = computed<RsTableColumn[]>(() => [
-  { key: 'name', title: t('modules.mysql.design.idxName'), minWidth: 120 },
-  { key: 'columnsText', title: t('modules.mysql.design.idxColumns'), minWidth: 150 },
-  { key: 'unique', title: t('modules.mysql.design.idxUnique'), width: 72 },
-  { key: '_actions', title: '', width: 36 },
+const editingCol = computed(
+  () => columns.value.find((c) => c.__rowKey === editingColKey.value) ?? null,
+)
+const editingIdx = computed(
+  () => indexes.value.find((i) => i.__rowKey === editingIdxKey.value) ?? null,
+)
+const editingFk = computed(
+  () => foreignKeys.value.find((f) => f.__rowKey === editingFkKey.value) ?? null,
+)
+
+const columnColumns = computed((): RsTableColumn<ColRow>[] => {
+  const cols: RsTableColumn<ColRow>[] = [
+  { key: 'name', title: t('modules.mysql.design.colName'), minWidth: 110, editable: true },
+  {
+    key: 'typeBase',
+    title: t('modules.mysql.design.colType'),
+    minWidth: 120,
+    editable: true,
+    valueType: 'select',
+    editorOptions: { options: typeBaseSelectOptions, searchable: true, creatable: true },
+  },
+  {
+    key: 'typeLength',
+    title: t('modules.mysql.design.colLength'),
+    width: 72,
+    align: 'center',
+    valueType: 'number',
+    editable: (row) => {
+      const kind = dataTypeParamKind(row.typeBase)
+      return kind === 'length' || kind === 'precision'
+    },
+  },
+  {
+    key: 'typeScale',
+    title: t('modules.mysql.design.colScale'),
+    width: 64,
+    align: 'center',
+    valueType: 'number',
+    editable: (row) => dataTypeParamKind(row.typeBase) === 'precision',
+  },
+  {
+    key: 'unsigned',
+    title: t('modules.mysql.design.colUnsigned'),
+    width: 72,
+    align: 'center',
+    editable: (row) => allowsUnsigned(row.typeBase),
+    valueType: 'boolean',
+  },
+  {
+    key: 'primaryKey',
+    title: t('modules.mysql.design.colPk'),
+    width: 52,
+    align: 'center',
+    editable: true,
+    valueType: 'boolean',
+  },
+  {
+    key: 'nullable',
+    title: t('modules.mysql.design.colNullable'),
+    width: 52,
+    align: 'center',
+    editable: true,
+    valueType: 'boolean',
+  },
+  {
+    key: 'autoIncrement',
+    title: t('modules.mysql.design.colAi'),
+    width: 52,
+    align: 'center',
+    editable: true,
+    valueType: 'boolean',
+  },
+  {
+    key: 'defaultExpr',
+    title: t('modules.mysql.design.colDefault'),
+    minWidth: 100,
+    editable: true,
+    ellipsis: true,
+  },
+  {
+    key: 'comment',
+    title: t('modules.mysql.design.colComment'),
+    minWidth: 100,
+    editable: true,
+    ellipsis: true,
+  },
+  ]
+  if (!modeCreate.value) {
+    cols.push({
+      key: 'status',
+      title: t('modules.mysql.design.colStatus'),
+      width: 72,
+      align: 'center',
+    })
+  }
+  return cols
+})
+
+const indexColumns = computed((): RsTableColumn<IdxRow>[] => [
+  { key: 'name', title: t('modules.mysql.design.idxName'), minWidth: 110, editable: true },
+  {
+    key: 'kindLabel',
+    title: t('modules.mysql.design.idxKind'),
+    width: 88,
+    editable: false,
+  },
+  {
+    key: 'columnsText',
+    title: t('modules.mysql.design.idxColumns'),
+    minWidth: 160,
+    editable: true,
+    valueType: 'select',
+    headerTip: t('modules.mysql.design.idxColumnsTip'),
+    editorOptions: {
+      options: draftColumnSelectOptions.value,
+      multiple: true,
+      searchable: true,
+      clearable: true,
+    },
+  },
+  {
+    key: 'method',
+    title: t('modules.mysql.design.idxMethod'),
+    width: 88,
+    editable: true,
+    valueType: 'select',
+    editorOptions: { options: indexMethodOptions },
+  },
+  {
+    key: 'unique',
+    title: t('modules.mysql.design.idxUnique'),
+    width: 64,
+    align: 'center',
+    editable: true,
+    valueType: 'boolean',
+  },
 ])
 
-const idxRows = computed(() =>
-  indexes.value
-    .filter((i) => !i.removed)
-    .map((i) => ({
-      __rowKey: i.__rowKey,
-      name: i.name,
-      columnsText: i.columnsText,
-      unique: i.unique ? '✓' : '',
-    })),
-)
+const fkColumns = computed((): RsTableColumn<FkRow>[] => [
+  { key: 'name', title: t('modules.mysql.design.fkName'), minWidth: 100, editable: true },
+  {
+    key: 'columnsText',
+    title: t('modules.mysql.design.fkColumns'),
+    minWidth: 140,
+    editable: true,
+    valueType: 'select',
+    editorOptions: {
+      options: draftColumnSelectOptions.value,
+      multiple: true,
+      searchable: true,
+      clearable: true,
+    },
+  },
+  {
+    key: 'refTable',
+    title: t('modules.mysql.design.fkRefTable'),
+    minWidth: 120,
+    editable: true,
+    valueType: 'select',
+    editorOptions: {
+      options: refTableOptions.value,
+      searchable: true,
+      clearable: true,
+    },
+  },
+  {
+    key: 'refColumnsText',
+    title: t('modules.mysql.design.fkRefColumns'),
+    minWidth: 140,
+    editable: true,
+    valueType: 'select',
+    editorOptions: {
+      options: refColumnOptions.value,
+      multiple: true,
+      searchable: true,
+      clearable: true,
+    },
+  },
+  {
+    key: 'onDelete',
+    title: t('modules.mysql.design.fkOnDelete'),
+    width: 110,
+    editable: true,
+    valueType: 'select',
+    editorOptions: { options: fkActionOptions },
+  },
+  {
+    key: 'onUpdate',
+    title: t('modules.mysql.design.fkOnUpdate'),
+    width: 110,
+    editable: true,
+    valueType: 'select',
+    editorOptions: { options: fkActionOptions },
+  },
+])
 
-// ─── Edit state ───────────────────────────────────────────────────────────
-const editingColKey = ref<string | null>(null)
-const editingIdxKey = ref<string | null>(null)
-
-const editingCol = computed(() =>
-  columns.value.find((c) => c.__rowKey === editingColKey.value) ?? null,
-)
-const editingIdx = computed(() =>
-  indexes.value.find((i) => i.__rowKey === editingIdxKey.value) ?? null,
-)
-
-function onColRowClick(row: Record<string, unknown>): void {
-  editingColKey.value = String(row.__rowKey ?? '')
-  editingIdxKey.value = null
+function asBool(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') return value
+  if (value === 'true' || value === 1 || value === '1') return true
+  if (value === 'false' || value === 0 || value === '0') return false
+  return fallback
 }
 
-function onIdxRowClick(row: Record<string, unknown>): void {
-  editingIdxKey.value = String(row.__rowKey ?? '')
-  editingColKey.value = null
+function multiSelectText(value: unknown): string {
+  if (Array.isArray(value)) return joinColumnList(value.map(String))
+  return String(value ?? '').trim()
+}
+
+function patchColumn(
+  key: string,
+  patch: (col: DesignColumnDraft) => DesignColumnDraft,
+): void {
+  columns.value = columns.value.map((c) => (c.__rowKey === key ? patch(c) : c))
+}
+
+function onColCommit(row: ColRow, column: RsTableColumn<ColRow>, _i: number, value: unknown): void {
+  const key = String(column.key)
+  const draft = String(value ?? '').trim()
+  patchColumn(row.__rowKey, (r) => {
+    if (key === 'name') return { ...r, name: draft || r.name }
+    if (key === 'typeBase') {
+      const nextBase = (draft || r.typeBase).toUpperCase()
+      const kind = dataTypeParamKind(nextBase)
+      const opt = MYSQL_BASE_TYPE_OPTIONS.find((o) => o.base === nextBase)
+      let typeLength = r.typeLength
+      let typeScale = r.typeScale
+      let enumValues = r.enumValues
+      let unsigned = r.unsigned && allowsUnsigned(nextBase)
+      if (kind === 'none') {
+        typeLength = undefined
+        typeScale = undefined
+        enumValues = ''
+      } else if (kind === 'length') {
+        typeScale = undefined
+        enumValues = ''
+        if (typeLength == null && opt?.defaultLength != null) typeLength = opt.defaultLength
+      } else if (kind === 'precision') {
+        enumValues = ''
+        if (typeLength == null) typeLength = opt?.defaultPrecision ?? 10
+        if (typeScale == null) typeScale = opt?.defaultScale ?? 2
+      } else if (kind === 'enum') {
+        typeLength = undefined
+        typeScale = undefined
+        unsigned = false
+        if (!enumValues.trim()) enumValues = "'a','b'"
+      }
+      const next = { ...r, typeBase: nextBase, typeLength, typeScale, enumValues, unsigned }
+      return { ...next, dataType: syncColumnDataType(next) }
+    }
+    if (key === 'typeLength') {
+      const n = draft === '' ? undefined : Number(draft)
+      const next = { ...r, typeLength: Number.isFinite(n) ? n : undefined }
+      return { ...next, dataType: syncColumnDataType(next) }
+    }
+    if (key === 'typeScale') {
+      const n = draft === '' ? undefined : Number(draft)
+      const next = { ...r, typeScale: Number.isFinite(n) ? n : undefined }
+      return { ...next, dataType: syncColumnDataType(next) }
+    }
+    if (key === 'unsigned') {
+      const unsigned = asBool(value, r.unsigned) && allowsUnsigned(r.typeBase)
+      const next = { ...r, unsigned }
+      return { ...next, dataType: syncColumnDataType(next) }
+    }
+    if (key === 'defaultExpr') return { ...r, defaultExpr: draft }
+    if (key === 'comment') return { ...r, comment: draft }
+    if (key === 'nullable') return { ...r, nullable: asBool(value, r.nullable) }
+    if (key === 'autoIncrement') return { ...r, autoIncrement: asBool(value, r.autoIncrement) }
+    if (key === 'primaryKey') {
+      const pk = asBool(value, r.primaryKey)
+      return { ...r, primaryKey: pk, nullable: pk ? false : r.nullable }
+    }
+    return r
+  })
+  // 栏位主键 ↔ 索引 PRIMARY（对齐 Navicat）
+  if (key === 'primaryKey' || key === 'name') {
+    indexes.value = syncPrimaryIndexFromColumns(indexes.value, columns.value)
+  }
+}
+
+function onIdxCommit(row: IdxRow, column: RsTableColumn<IdxRow>, _i: number, value: unknown): void {
+  const key = String(column.key)
+  const current = indexes.value.find((r) => r.__rowKey === row.__rowKey)
+  if (!current) return
+
+  // PRIMARY：名称/唯一不可改；改列清单回写栏位主键勾选
+  if (current.primary) {
+    if (key === 'name' || key === 'unique' || key === 'method') return
+    if (key === 'columnsText') {
+      const columnsText = multiSelectText(value)
+      indexes.value = indexes.value.map((r) =>
+        r.__rowKey === row.__rowKey
+          ? { ...r, name: 'PRIMARY', columnsText, unique: true, primary: true }
+          : r,
+      )
+      columns.value = applyPrimaryIndexToColumns(columns.value, columnsText)
+    }
+    return
+  }
+
+  indexes.value = indexes.value.map((r) => {
+    if (r.__rowKey !== row.__rowKey) return r
+    if (key === 'name') return { ...r, name: String(value ?? '').trim() }
+    if (key === 'columnsText') {
+      const columnsText = multiSelectText(value)
+      const name = isDefaultIndexName(r.name) ? suggestIndexName(columnsText, r.name || 'idx') : r.name
+      return { ...r, name, columnsText }
+    }
+    if (key === 'method') {
+      const method = String(value ?? 'BTREE').toUpperCase()
+      return { ...r, method: method === 'HASH' ? 'HASH' : 'BTREE' }
+    }
+    if (key === 'unique') return { ...r, unique: asBool(value, r.unique) }
+    return r
+  })
+}
+
+async function ensureRefTables(): Promise<void> {
+  if (!props.profileId && !props.sessionId) return
+  try {
+    const result = await mysqlApi.treeTables({
+      profileId: props.profileId,
+      sessionId: props.sessionId ?? undefined,
+      database: props.database,
+      types: ['table'],
+    })
+    refTableOptions.value = (result.tables ?? []).map((tb) => ({
+      value: tb.name,
+      label: tb.name,
+    }))
+  } catch {
+    refTableOptions.value = []
+  }
+}
+
+async function ensureRefColumns(table: string): Promise<void> {
+  if (!table.trim() || (!props.profileId && !props.sessionId)) {
+    refColumnOptions.value = []
+    return
+  }
+  try {
+    const base = props.sessionId
+      ? { sessionId: props.sessionId, database: props.database, table }
+      : { profileId: props.profileId!, database: props.database, table }
+    const result = await mysqlApi.metaColumns(base)
+    refColumnOptions.value = (result.columns ?? []).map((c) => ({
+      value: c.name,
+      label: c.name,
+    }))
+  } catch {
+    refColumnOptions.value = []
+  }
+}
+
+function onFkEditStart(row: FkRow, column: RsTableColumn<FkRow>): void {
+  const key = String(column.key)
+  if (key === 'refTable') void ensureRefTables()
+  if (key === 'refColumnsText' && row.refTable) void ensureRefColumns(row.refTable)
+}
+
+function onFkCommit(row: FkRow, column: RsTableColumn<FkRow>, _i: number, value: unknown): void {
+  const key = String(column.key)
+  const draft = String(value ?? '').trim()
+  foreignKeys.value = foreignKeys.value.map((r) => {
+    if (r.__rowKey !== row.__rowKey) return r
+    if (key === 'name') return { ...r, name: draft }
+    if (key === 'columnsText') return { ...r, columnsText: multiSelectText(value) }
+    if (key === 'refTable') {
+      if (draft !== r.refTable) {
+        void ensureRefColumns(draft)
+        return { ...r, refTable: draft, refColumnsText: '' }
+      }
+      return { ...r, refTable: draft }
+    }
+    if (key === 'refColumnsText') return { ...r, refColumnsText: multiSelectText(value) }
+    if (key === 'onDelete') {
+      const upper = draft.toUpperCase()
+      return {
+        ...r,
+        onDelete: (MYSQL_FK_ACTIONS as readonly string[]).includes(upper) ? upper : r.onDelete,
+      }
+    }
+    if (key === 'onUpdate') {
+      const upper = draft.toUpperCase()
+      return {
+        ...r,
+        onUpdate: (MYSQL_FK_ACTIONS as readonly string[]).includes(upper) ? upper : r.onUpdate,
+      }
+    }
+    return r
+  })
 }
 
 function addColumn(): void {
   const col = newEmptyColumn()
+  col.name = `col_${columns.value.filter((c) => !c.removed).length + 1}`
   columns.value = [...columns.value, col]
   editingColKey.value = col.__rowKey
   editingIdxKey.value = null
+  editingFkKey.value = null
+  activeSection.value = 'columns'
 }
 
 function removeCol(key: string): void {
   columns.value = columns.value.map((c) =>
     c.__rowKey === key ? { ...c, removed: true } : c,
   )
+  indexes.value = syncPrimaryIndexFromColumns(indexes.value, columns.value)
   if (editingColKey.value === key) editingColKey.value = null
 }
 
@@ -166,72 +654,150 @@ function addIndex(): void {
   indexes.value = [...indexes.value, idx]
   editingIdxKey.value = idx.__rowKey
   editingColKey.value = null
+  editingFkKey.value = null
+  activeSection.value = 'indexes'
 }
 
 function removeIdx(key: string): void {
-  indexes.value = indexes.value.map((i) =>
-    i.__rowKey === key ? { ...i, removed: true } : i,
-  )
+  const target = indexes.value.find((i) => i.__rowKey === key)
+  if (target?.primary) {
+    // 删除 PRIMARY = 清除所有栏位主键勾选（对齐 Navicat）
+    columns.value = columns.value.map((c) =>
+      c.primaryKey ? { ...c, primaryKey: false } : c,
+    )
+    indexes.value = syncPrimaryIndexFromColumns(indexes.value, columns.value)
+  } else {
+    indexes.value = indexes.value.map((i) =>
+      i.__rowKey === key ? { ...i, removed: true } : i,
+    )
+  }
   if (editingIdxKey.value === key) editingIdxKey.value = null
 }
 
-function updateColField<K extends keyof DesignColumnDraft>(
+function addForeignKey(): void {
+  const fk = newEmptyForeignKey()
+  foreignKeys.value = [...foreignKeys.value, fk]
+  editingFkKey.value = fk.__rowKey
+  editingColKey.value = null
+  editingIdxKey.value = null
+  activeSection.value = 'foreignKeys'
+  void ensureRefTables()
+}
+
+function removeFk(key: string): void {
+  foreignKeys.value = foreignKeys.value.map((f) =>
+    f.__rowKey === key ? { ...f, removed: true } : f,
+  )
+  if (editingFkKey.value === key) editingFkKey.value = null
+}
+
+function onAddCurrent(): void {
+  if (activeSection.value === 'indexes') addIndex()
+  else if (activeSection.value === 'foreignKeys') addForeignKey()
+  else addColumn()
+}
+
+function moveSelectedColumn(delta: -1 | 1): void {
+  if (activeSection.value !== 'columns' || !editingColKey.value) return
+  const visible = columns.value.filter((c) => !c.removed)
+  const idx = visible.findIndex((c) => c.__rowKey === editingColKey.value)
+  const target = idx + delta
+  if (idx < 0 || target < 0 || target >= visible.length) return
+  const reordered = [...visible]
+  const [moved] = reordered.splice(idx, 1)
+  if (!moved) return
+  reordered.splice(target, 0, moved)
+  const removed = columns.value.filter((c) => c.removed)
+  columns.value = [...reordered, ...removed]
+}
+
+async function copyPreviewSql(): Promise<void> {
+  if (!previewSqls.value.length) {
+    const ok = await loadPreviewSql()
+    if (!ok) return
+  }
+  const body = previewSqls.value.join(';\n\n')
+  if (!body.trim()) return
+  try {
+    await navigator.clipboard.writeText(body.endsWith(';') ? body : `${body};`)
+    toast.success(t('modules.mysql.design.copyPreviewOk'))
+  } catch {
+    toast.error(t('modules.mysql.design.copyPreviewFailed'))
+  }
+}
+
+function onColumnRowDrop(
+  dragKeys: string[],
+  dropKey: string,
+  position: RsTableRowDropPosition,
+): void {
+  const dragKey = dragKeys[0]
+  if (!dragKey || dragKey === dropKey) return
+  const visible = columns.value.filter((c) => !c.removed)
+  const dragIndex = visible.findIndex((c) => c.__rowKey === dragKey)
+  const dropIndex = visible.findIndex((c) => c.__rowKey === dropKey)
+  if (dragIndex < 0 || dropIndex < 0) return
+  const reordered = reorderTableRows(visible, dragIndex, dropIndex, position)
+  const removed = columns.value.filter((c) => c.removed)
+  columns.value = [...reordered, ...removed]
+}
+
+function updateColSideField<K extends keyof DesignColumnDraft>(
   key: string,
   field: K,
   value: DesignColumnDraft[K],
 ): void {
-  columns.value = columns.value.map((c) => {
-    if (c.__rowKey !== key) return c
+  patchColumn(key, (c) => {
     const updated = { ...c, [field]: value }
-    // 同步完整 dataType
-    if (field === 'typeBase' || field === 'typeLength' || field === 'typeScale') {
-      updated.dataType = buildDataType(
-        updated.typeBase,
-        updated.typeLength,
-        updated.typeScale,
-      )
+    if (
+      field === 'typeBase' ||
+      field === 'typeLength' ||
+      field === 'typeScale' ||
+      field === 'unsigned' ||
+      field === 'enumValues'
+    ) {
+      if (field === 'typeBase') {
+        updated.unsigned = Boolean(updated.unsigned && allowsUnsigned(String(value)))
+      }
+      updated.dataType = syncColumnDataType(updated)
     }
-    if (field === 'dataType') {
-      const parts = splitDataTypeFields(String(value))
-      updated.typeBase = parts.typeBase
-      updated.typeLength = parts.typeLength
-      updated.typeScale = parts.typeScale
+    if (field === 'primaryKey' && value) {
+      updated.nullable = false
     }
     return updated
   })
+  if (field === 'primaryKey' || field === 'name') {
+    indexes.value = syncPrimaryIndexFromColumns(indexes.value, columns.value)
+  }
 }
 
-function updateIdxField<K extends keyof DesignIndexDraft>(
-  key: string,
-  field: K,
-  value: DesignIndexDraft[K],
-): void {
-  indexes.value = indexes.value.map((i) =>
-    i.__rowKey === key ? { ...i, [field]: value } : i,
-  )
-}
-
-// ─── Load ─────────────────────────────────────────────────────────────────
 async function load(): Promise<void> {
-  if (props.designMode !== 'alter' || !props.database || !props.table) return
+  if (modeCreate.value) return
+  const table = effectiveTable.value
+  if (!props.database || !table) return
   if (!props.sessionId && !props.profileId) return
   loading.value = true
   try {
     const base = props.sessionId
-      ? { sessionId: props.sessionId, database: props.database, table: props.table }
-      : { profileId: props.profileId!, database: props.database, table: props.table }
-    const [colsResult, idxsResult, pkResult] = await Promise.all([
+      ? { sessionId: props.sessionId, database: props.database, table }
+      : { profileId: props.profileId!, database: props.database, table }
+    const [colsResult, idxsResult, pkResult, fkResult] = await Promise.all([
       mysqlApi.metaColumns(base),
       mysqlApi.metaIndexes(base),
       mysqlApi.metaPrimaryKey(base),
+      mysqlApi.metaForeignKeys(base).catch(() => ({ foreignKeys: [] })),
     ])
-    const rows = toDesignRows(colsResult.columns, pkResult.columns)
-    const idxDrafts = toIndexDrafts(idxsResult.indexes, pkResult.columns)
+    const rows = toDesignRows(colsResult.columns, pkResult.columns ?? [])
+    const idxDrafts = toIndexDrafts(idxsResult.indexes, pkResult.columns ?? [])
+    const fkDrafts = toForeignKeyDrafts(fkResult.foreignKeys ?? [])
     columns.value = rows
     indexes.value = idxDrafts
+    foreignKeys.value = fkDrafts
     origColumns.value = rows.map((c) => ({ ...c }))
     origIndexes.value = idxDrafts.map((i) => ({ ...i }))
+    origForeignKeys.value = fkDrafts.map((f) => ({ ...f }))
     tableComment.value = colsResult.tableComment ?? ''
+    tableName.value = table
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e))
   } finally {
@@ -239,58 +805,138 @@ async function load(): Promise<void> {
   }
 }
 
-// ─── Preview + Apply ──────────────────────────────────────────────────────
-async function buildOps() {
-  if (props.designMode === 'create') {
-    return null
+function buildCreatePayload() {
+  return {
+    sessionId: props.sessionId ?? undefined,
+    database: props.database,
+    name: tableName.value.trim(),
+    columns: buildCreateColumns(columns.value),
+    indexes: (() => {
+      const idxs = buildCreateIndexes(indexes.value)
+      return idxs.length ? idxs : undefined
+    })(),
+    foreignKeys: (() => {
+      const fks = buildCreateForeignKeys(foreignKeys.value)
+      return fks.length ? fks : undefined
+    })(),
+    comment: tableComment.value || undefined,
+    engine: tableEngine.value || undefined,
+    charset: tableCharset.value || undefined,
+    collation: tableCollation.value || undefined,
   }
-  return buildAlterDesignOps(
-    origColumns.value,
-    columns.value,
-    origIndexes.value,
-    indexes.value,
-    [],
-    [],
-  )
 }
 
-async function onPreview(): Promise<void> {
-  if (!props.sessionId) return
+/** 拉取并格式化预览 SQL；校验失败返回 false（不抛错）。 */
+async function loadPreviewSql(): Promise<boolean> {
+  if (!props.sessionId) return false
   try {
-    if (props.designMode === 'create') {
-      const cols = buildCreateColumns(columns.value)
-      const idxs = buildCreateIndexes(indexes.value)
+    if (modeCreate.value) {
       if (!tableName.value.trim()) {
         toast.error(t('modules.mysql.design.needTableName'))
-        return
+        return false
       }
-      const result = await mysqlApi.ddlDesignPreview({
-        sessionId: props.sessionId,
-        database: props.database,
-        name: tableName.value.trim(),
-        ops: [
-          ...cols.map((col) => ({ op: 'add_column' as const, column: col })),
-          ...idxs.map((idx) => ({ op: 'add_index' as const, index: idx })),
-        ],
-      })
-      previewSqls.value = result.sql
+      const cols = buildCreateColumns(columns.value)
+      if (cols.length === 0) {
+        toast.info(t('modules.mysql.design.needColumns'))
+        return false
+      }
+      const result = await mysqlApi.ddlCreateTablePreview(buildCreatePayload())
+      previewSqls.value = formatPreviewSqls(result.sql ?? [])
     } else {
-      const ops = await buildOps()
-      if (!ops || ops.length === 0) {
-        toast.info(t('modules.mysql.design.noChanges'))
-        return
+      const ops = buildAlterDesignOps(
+        origColumns.value,
+        columns.value,
+        origIndexes.value,
+        indexes.value,
+        origForeignKeys.value,
+        foreignKeys.value,
+      )
+      if (ops.length === 0) {
+        // 无变更也打开预览，用 SQL 注释说明，避免 Popover 一闪即关
+        previewSqls.value = [`-- ${t('modules.mysql.design.noChanges')}`]
+        return true
       }
       const result = await mysqlApi.ddlDesignPreview({
         sessionId: props.sessionId,
         database: props.database,
-        name: props.table!,
+        name: effectiveTable.value!,
         ops,
       })
-      previewSqls.value = result.sql
+      previewSqls.value = formatPreviewSqls(result.sql)
     }
-    showPreview.value = true
+    return previewSqls.value.length > 0
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e))
+    return false
+  }
+}
+
+async function onPreviewOpenChange(open: boolean): Promise<void> {
+  if (!open) {
+    showPreview.value = false
+    previewLoading.value = false
+    return
+  }
+  showPreview.value = true
+  previewLoading.value = true
+  previewSqls.value = []
+  try {
+    const ok = await loadPreviewSql()
+    if (!ok) showPreview.value = false
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function formatPreviewSqls(sqls: string[]): string[] {
+  return sqls.map((s) => {
+    const raw = s.trim()
+    if (!raw) return raw
+    try {
+      return formatSql(raw, { dialect: 'mysql' })
+    } catch {
+      return raw
+    }
+  })
+}
+
+async function refreshTreeAfterCreate(): Promise<void> {
+  if (!props.profileId || !props.database) return
+  const conn = { profileId: props.profileId, kind: 'mysql' } as ConnItem
+  const tablesPath = categoryPath(props.database, 'tables')
+  try {
+    await refreshResourceIfLoaded(conn, tablesPath, { deep: true })
+    patchCategoryObjectCount(conn, tablesPath, { delta: 1 })
+  } catch {
+    // 刷树失败不影响创建成功提示
+  }
+}
+
+/** 创建成功后切换为编辑态：主按钮变为「保存」，并按已建表加载元数据。 */
+function switchToAlterAfterCreate(name: string): void {
+  localDesignMode.value = 'alter'
+  localTable.value = name
+  tableName.value = name
+  const tabs = useTabStore()
+  const tabId = tabs.activeTabId
+  if (tabId) {
+    tabs.updateTabProps(tabId, { designMode: 'alter', table: name })
+    const designLabel = t('modules.mysql.session.tabDesign')
+    const base = props.database ? `${props.database}.${name}` : name
+    tabs.updateTitle(tabId, name)
+    const tab = tabs.allTabs.find((t) => t.tabId === tabId)
+    if (tab) {
+      const resourcePrefix = `${t('workspace.tabTipResource')}:`
+      const featurePrefix = `${t('workspace.tabTipFeature')}:`
+      const head = (tab.tooltip ?? '')
+        .split('\n')
+        .filter(Boolean)
+        .filter((line) => !line.startsWith(resourcePrefix) && !line.startsWith(featurePrefix))
+      const next = [...head]
+      if (base) next.push(`${resourcePrefix} ${base}`)
+      next.push(`${featurePrefix} ${designLabel}`)
+      tab.tooltip = next.join('\n')
+    }
   }
 }
 
@@ -298,38 +944,45 @@ async function onApply(): Promise<void> {
   if (!props.sessionId) return
   saving.value = true
   try {
-    if (props.designMode === 'create') {
+    if (modeCreate.value) {
       const name = tableName.value.trim()
       if (!name) {
         toast.error(t('modules.mysql.design.needTableName'))
         return
       }
       const cols = buildCreateColumns(columns.value)
-      const idxs = buildCreateIndexes(indexes.value)
-      const fks = buildCreateForeignKeys([])
-      await mysqlApi.ddlCreateTable({
-        sessionId: props.sessionId,
-        database: props.database,
-        name,
-        columns: cols,
-        indexes: idxs.length ? idxs : undefined,
-        foreignKeys: fks.length ? fks : undefined,
-        comment: tableComment.value || undefined,
-        engine: tableEngine.value || undefined,
-        charset: tableCharset.value || undefined,
-      })
+      if (cols.length === 0) {
+        toast.info(t('modules.mysql.design.needColumns'))
+        return
+      }
+      await mysqlApi.ddlCreateTable(buildCreatePayload())
       toast.success(t('modules.mysql.design.createOk', { name }))
       showPreview.value = false
+      await refreshTreeAfterCreate()
+      switchToAlterAfterCreate(name)
+      await load()
     } else {
-      const ops = await buildOps()
-      if (!ops || ops.length === 0) {
+      const ops = buildAlterDesignOps(
+        origColumns.value,
+        columns.value,
+        origIndexes.value,
+        indexes.value,
+        origForeignKeys.value,
+        foreignKeys.value,
+      )
+      if (ops.length === 0) {
         toast.info(t('modules.mysql.design.noChanges'))
+        return
+      }
+      const table = effectiveTable.value
+      if (!table) {
+        toast.error(t('modules.mysql.design.needTableName'))
         return
       }
       await mysqlApi.ddlDesignApply({
         sessionId: props.sessionId,
         database: props.database,
-        name: props.table!,
+        name: table,
         ops,
       })
       toast.success(t('modules.mysql.design.applyOk'))
@@ -343,344 +996,460 @@ async function onApply(): Promise<void> {
   }
 }
 
-watch(
-  () => [props.sessionId, props.database, props.table, props.active] as const,
-  ([sid, , , active]) => {
-    if (active && (sid || props.profileId)) {
-      void load()
+function designScopeKey(): string {
+  return [
+    props.sessionId ?? '',
+    props.profileId ?? '',
+    props.database ?? '',
+    props.table ?? '',
+    props.designMode ?? 'alter',
+  ].join('\0')
+}
+
+let loadedDesignScope = ''
+
+function ensureDesignLoaded(): void {
+  if (!(props.sessionId || props.profileId)) return
+  if (modeCreate.value) {
+    if (columns.value.length === 0) {
+      columns.value = defaultCreateTableColumns()
+      indexes.value = syncPrimaryIndexFromColumns([], columns.value)
     }
+    loadedDesignScope = designScopeKey()
+    return
+  }
+  void load().then(() => {
+    if (columns.value.length > 0) {
+      loadedDesignScope = designScopeKey()
+    }
+  })
+}
+
+/** 仅作用域变化时重拉；keep-alive 切回 Shell Tab 不重复请求。 */
+watch(
+  () => [props.sessionId, props.database, props.table, props.designMode] as const,
+  () => {
+    if (designScopeKey() !== loadedDesignScope) {
+      // 失活期间作用域已变：清掉旧草稿，切回时由 active watch 再拉
+      if (!modeCreate.value) {
+        columns.value = []
+        indexes.value = []
+        foreignKeys.value = []
+      }
+      loadedDesignScope = ''
+    }
+    if (!props.active) return
+    ensureDesignLoaded()
   },
   { immediate: true },
 )
 
+watch(
+  () => props.active,
+  (active) => {
+    if (!active) return
+    if (loadedDesignScope === designScopeKey()) {
+      if (modeCreate.value || columns.value.length > 0) return
+    }
+    ensureDesignLoaded()
+  },
+)
+
 onMounted(() => {
-  if (props.designMode === 'create' && columns.value.length === 0) {
-    addColumn()
+  if (modeCreate.value && columns.value.length === 0) {
+    columns.value = defaultCreateTableColumns()
+    indexes.value = syncPrimaryIndexFromColumns([], columns.value)
   }
+})
+
+watch(tableCharset, (cs) => {
+  const allowed = collationsForCharset(cs)
+  if (tableCollation.value && !allowed.includes(tableCollation.value)) {
+    tableCollation.value = ''
+  }
+})
+
+watch(activeSection, (sec) => {
+  if (sec === 'foreignKeys') void ensureRefTables()
 })
 </script>
 
 <template>
-  <div class="nm-mysql-design">
-    <!-- Header -->
-    <header class="nm-mysql-design__header">
-      <div class="nm-mysql-design__header-left">
-        <RsIcon name="layout-list" :size="15" />
-        <span class="nm-mysql-design__title">
-          {{ designMode === 'create' ? t('modules.mysql.design.createTitle') : t('modules.mysql.design.alterTitle', { name: table }) }}
-        </span>
-        <span v-if="sessionLabel" class="nm-mysql-design__label">{{ sessionLabel }}</span>
-      </div>
-      <div class="nm-mysql-design__header-right">
-        <RsButton size="sm" variant="ghost" :loading="loading" icon="refresh-cw" @click="load">
-          {{ t('modules.mysql.design.reload') }}
+  <TableDesignShell
+    class="nm-mysql-design"
+    :labels="shellLabels"
+    :title="title"
+    :mode="designMode"
+    :scope-label="sessionLabel"
+    :loading="loading"
+    :saving="saving"
+    :show-reload="!modeCreate"
+    :sections="sections"
+    :active-section="activeSection"
+    @reload="load"
+    @apply="onApply"
+    @update:active-section="activeSection = $event"
+  >
+    <template #preview>
+      <TableDesignPreviewPopover
+        :open="showPreview"
+        :title="shellLabels.previewTitle"
+        :sql="previewSqls"
+        :loading="previewLoading"
+        :copy-label="shellLabels.copyPreview"
+        :empty-label="t('modules.mysql.design.noChanges')"
+        @update:open="onPreviewOpenChange"
+        @copy="copyPreviewSql"
+      >
+        <RsButton size="sm" variant="ghost" :disabled="loading">
+          {{ shellLabels.preview }}
         </RsButton>
-        <RsButton size="sm" variant="ghost" @click="onPreview">
-          {{ t('modules.mysql.design.preview') }}
-        </RsButton>
-        <RsButton size="sm" variant="primary" :loading="saving" @click="onApply">
-          {{ designMode === 'create' ? t('modules.mysql.design.create') : t('modules.mysql.design.apply') }}
-        </RsButton>
+      </TableDesignPreviewPopover>
+    </template>
+    <template #toolbar-extra>
+      <RsButton size="sm" variant="ghost" icon="plus" @click="onAddCurrent">
+        {{ addButtonLabel }}
+      </RsButton>
+      <RsButton
+        size="sm"
+        variant="ghost"
+        icon="arrow-up"
+        :disabled="activeSection !== 'columns' || !editingColKey"
+        :title="shellLabels.moveUp"
+        @click="moveSelectedColumn(-1)"
+      />
+      <RsButton
+        size="sm"
+        variant="ghost"
+        icon="arrow-down"
+        :disabled="activeSection !== 'columns' || !editingColKey"
+        :title="shellLabels.moveDown"
+        @click="moveSelectedColumn(1)"
+      />
+    </template>
+
+    <template #meta>
+      <div class="nm-mysql-design__meta-row">
+        <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableName') }}</label>
+        <RsInput
+          v-if="modeCreate"
+          v-model="tableName"
+          size="sm"
+          :placeholder="t('modules.mysql.design.tableNamePh')"
+        />
+        <span v-else class="nm-mysql-design__meta-readonly">{{ table || tableName }}</span>
       </div>
-    </header>
-
-    <RsLoading v-if="loading" class="nm-mysql-design__loading" />
-
-    <div v-else class="nm-mysql-design__content">
-      <!-- Create mode: table meta -->
-      <div v-if="designMode === 'create'" class="nm-mysql-design__meta">
-        <div class="nm-mysql-design__meta-row">
-          <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableName') }}</label>
-          <RsInput v-model="tableName" size="sm" :placeholder="t('modules.mysql.design.tableNamePh')" />
-        </div>
-        <div class="nm-mysql-design__meta-row">
-          <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableEngine') }}</label>
-          <RsSelect v-model="tableEngine" size="sm" :options="engineOptions" />
-        </div>
-        <div class="nm-mysql-design__meta-row">
-          <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableCharset') }}</label>
-          <RsSelect v-model="tableCharset" size="sm" :options="charsetOptions" />
-        </div>
-        <div class="nm-mysql-design__meta-row nm-mysql-design__meta-row--full">
-          <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableComment') }}</label>
-          <RsInput v-model="tableComment" size="sm" :placeholder="t('modules.mysql.design.tableCommentPh')" />
-        </div>
+      <div class="nm-mysql-design__meta-row">
+        <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableEngine') }}</label>
+        <RsSelect v-model="tableEngine" size="sm" :options="engineOptions" :disabled="!modeCreate" />
       </div>
-
-      <!-- Tabs -->
-      <div class="nm-mysql-design__tabs">
-        <button
-          type="button"
-          class="nm-mysql-design__tab"
-          :class="{ 'nm-mysql-design__tab--active': activeTab === 'columns' }"
-          @click="activeTab = 'columns'"
-        >
-          {{ t('modules.mysql.design.tabColumns') }}
-          <span class="nm-mysql-design__tab-count">{{ columns.filter(c => !c.removed).length }}</span>
-        </button>
-        <button
-          type="button"
-          class="nm-mysql-design__tab"
-          :class="{ 'nm-mysql-design__tab--active': activeTab === 'indexes' }"
-          @click="activeTab = 'indexes'"
-        >
-          {{ t('modules.mysql.design.tabIndexes') }}
-          <span class="nm-mysql-design__tab-count">{{ indexes.filter(i => !i.removed).length }}</span>
-        </button>
+      <div class="nm-mysql-design__meta-row">
+        <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableCharset') }}</label>
+        <RsSelect v-model="tableCharset" size="sm" :options="charsetOptions" :disabled="!modeCreate" />
       </div>
+      <div class="nm-mysql-design__meta-row">
+        <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableCollation') }}</label>
+        <RsSelect
+          v-model="tableCollation"
+          size="sm"
+          :options="collationOptions"
+          :disabled="!modeCreate"
+        />
+      </div>
+      <div class="nm-mysql-design__meta-row nm-mysql-design__meta-row--full">
+        <label class="nm-mysql-design__meta-label">{{ t('modules.mysql.design.tableComment') }}</label>
+        <RsInput
+          v-model="tableComment"
+          size="sm"
+          :placeholder="t('modules.mysql.design.tableCommentPh')"
+        />
+      </div>
+    </template>
 
-      <div class="nm-mysql-design__main">
-        <!-- Left: table -->
-        <div class="nm-mysql-design__table-area">
-          <template v-if="activeTab === 'columns'">
-            <RsTable
-              :columns="colColumns"
-              :data="colRows"
+    <template #list>
+      <template v-if="activeSection === 'columns'">
+        <RsTable
+          class="nm-mysql-design__grid"
+          :columns="columnColumns"
+          :data="displayColumns"
+          row-key="__rowKey"
+          size="sm"
+          striped
+          fill
+          bordered
+          column-bordered
+          show-index
+          editable
+          :edit-gutter="false"
+          edit-trigger="dblclick"
+          row-draggable
+          row-drop-mode="reorder"
+          row-drag-trigger="handle"
+          :highlighted-row-key="editingColKey ?? undefined"
+          :context-menu-items="
+            (row) =>
+              row
+                ? [
+                    {
+                      key: 'remove',
+                      label: t('modules.mysql.design.remove'),
+                      icon: 'trash-2',
+                      danger: true,
+                    },
+                  ]
+                : []
+          "
+          @row-click="(row) => { editingColKey = String(row.__rowKey); editingIdxKey = null; editingFkKey = null }"
+          @cell-edit-commit="onColCommit"
+          @row-drop="onColumnRowDrop"
+          @context-menu-select="(key, row) => key === 'remove' && row && removeCol(String(row.__rowKey))"
+        />
+      </template>
+
+      <template v-else-if="activeSection === 'indexes'">
+        <RsTable
+          class="nm-mysql-design__grid"
+          :columns="indexColumns"
+          :data="displayIndexes"
+          row-key="__rowKey"
+          size="sm"
+          striped
+          fill
+          bordered
+          column-bordered
+          editable
+          :edit-gutter="false"
+          edit-trigger="dblclick"
+          :highlighted-row-key="editingIdxKey ?? undefined"
+          :context-menu-items="
+            (row) =>
+              row
+                ? [
+                    {
+                      key: 'remove',
+                      label: t('modules.mysql.design.remove'),
+                      icon: 'trash-2',
+                      danger: true,
+                    },
+                  ]
+                : []
+          "
+          @row-click="(row) => { editingIdxKey = String(row.__rowKey); editingColKey = null; editingFkKey = null }"
+          @cell-edit-commit="onIdxCommit"
+          @context-menu-select="(key, row) => key === 'remove' && row && removeIdx(String(row.__rowKey))"
+        />
+      </template>
+
+      <template v-else>
+        <RsTable
+          class="nm-mysql-design__grid"
+          :columns="fkColumns"
+          :data="displayForeignKeys"
+          row-key="__rowKey"
+          size="sm"
+          striped
+          fill
+          bordered
+          column-bordered
+          editable
+          :edit-gutter="false"
+          edit-trigger="dblclick"
+          :highlighted-row-key="editingFkKey ?? undefined"
+          :context-menu-items="
+            (row) =>
+              row
+                ? [
+                    {
+                      key: 'remove',
+                      label: t('modules.mysql.design.remove'),
+                      icon: 'trash-2',
+                      danger: true,
+                    },
+                  ]
+                : []
+          "
+          @row-click="(row) => { editingFkKey = String(row.__rowKey); editingColKey = null; editingIdxKey = null }"
+          @cell-edit-start="onFkEditStart"
+          @cell-edit-commit="onFkCommit"
+          @context-menu-select="(key, row) => key === 'remove' && row && removeFk(String(row.__rowKey))"
+        />
+      </template>
+    </template>
+
+    <template #editor>
+      <template v-if="activeSection === 'columns' && editingCol">
+        <div class="nm-mysql-design__editor-title">{{ t('modules.mysql.design.editColumn') }}</div>
+        <div class="nm-mysql-design__form">
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.colName') }}</label>
+            <RsInput
+              :model-value="editingCol.name"
               size="sm"
-              fill
-              row-key="__rowKey"
-              :highlighted-row-key="editingColKey ?? undefined"
-              @row-click="onColRowClick"
-            >
-              <template #cell-_actions="{ row }">
-                <button
-                  type="button"
-                  class="nm-mysql-design__del-btn"
-                  :title="t('modules.mysql.design.remove')"
-                  @click.stop="removeCol(String(row.__rowKey))"
-                >
-                  <RsIcon name="x" :size="13" />
-                </button>
-              </template>
-            </RsTable>
-            <div class="nm-mysql-design__add-row">
-              <RsButton size="sm" variant="ghost" icon="plus" @click="addColumn">
-                {{ t('modules.mysql.design.addColumn') }}
-              </RsButton>
-            </div>
-          </template>
-
-          <template v-else>
-            <RsEmpty
-              v-if="indexes.filter(i => !i.removed).length === 0"
-              :description="t('modules.mysql.design.noIndexes')"
+              @update:model-value="updateColSideField(editingCol!.__rowKey, 'name', String($event ?? ''))"
             />
-            <RsTable
-              v-else
-              :columns="idxColumns"
-              :data="idxRows"
+          </div>
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.colType') }}</label>
+            <RsSelect
+              :model-value="editingCol.typeBase"
               size="sm"
-              fill
-              row-key="__rowKey"
-              :highlighted-row-key="editingIdxKey ?? undefined"
-              @row-click="onIdxRowClick"
-            >
-              <template #cell-_actions="{ row }">
-                <button
-                  type="button"
-                  class="nm-mysql-design__del-btn"
-                  :title="t('modules.mysql.design.remove')"
-                  @click.stop="removeIdx(String(row.__rowKey))"
-                >
-                  <RsIcon name="x" :size="13" />
-                </button>
-              </template>
-            </RsTable>
-            <div class="nm-mysql-design__add-row">
-              <RsButton size="sm" variant="ghost" icon="plus" @click="addIndex">
-                {{ t('modules.mysql.design.addIndex') }}
-              </RsButton>
-            </div>
-          </template>
+              :options="typeBaseSelectOptions"
+              @update:model-value="updateColSideField(editingCol!.__rowKey, 'typeBase', String($event))"
+            />
+          </div>
+          <div
+            v-if="dataTypeParamKind(editingCol.typeBase) === 'enum'"
+            class="nm-mysql-design__field"
+          >
+            <label>{{ t('modules.mysql.design.colEnumValues') }}</label>
+            <RsInput
+              :model-value="editingCol.enumValues"
+              size="sm"
+              :placeholder="t('modules.mysql.design.colEnumValuesPh')"
+              @update:model-value="
+                updateColSideField(editingCol!.__rowKey, 'enumValues', String($event ?? ''))
+              "
+            />
+          </div>
+          <div class="nm-mysql-design__field nm-mysql-design__field--check">
+            <label>{{ t('modules.mysql.design.colUnsigned') }}</label>
+            <input
+              type="checkbox"
+              :checked="editingCol.unsigned"
+              :disabled="!allowsUnsigned(editingCol.typeBase)"
+              @change="
+                updateColSideField(
+                  editingCol!.__rowKey,
+                  'unsigned',
+                  ($event.target as HTMLInputElement).checked,
+                )
+              "
+            />
+          </div>
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.colDefault') }}</label>
+            <RsInput
+              :model-value="editingCol.defaultExpr"
+              size="sm"
+              :placeholder="t('modules.mysql.design.colDefaultPh')"
+              @update:model-value="
+                updateColSideField(editingCol!.__rowKey, 'defaultExpr', String($event ?? ''))
+              "
+            />
+          </div>
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.colComment') }}</label>
+            <RsInput
+              :model-value="editingCol.comment"
+              size="sm"
+              :placeholder="t('modules.mysql.design.colCommentPh')"
+              @update:model-value="
+                updateColSideField(editingCol!.__rowKey, 'comment', String($event ?? ''))
+              "
+            />
+          </div>
+          <p class="nm-mysql-design__hint">{{ t('modules.mysql.design.gridEditHint') }}</p>
         </div>
-
-        <!-- Right: editor panel -->
-        <div class="nm-mysql-design__editor">
-          <!-- Column editor -->
-          <template v-if="activeTab === 'columns' && editingCol">
-            <div class="nm-mysql-design__editor-title">{{ t('modules.mysql.design.editColumn') }}</div>
-            <div class="nm-mysql-design__form">
-              <div class="nm-mysql-design__field">
-                <label>{{ t('modules.mysql.design.colName') }}</label>
-                <RsInput
-                  :model-value="editingCol.name"
-                  size="sm"
-                  :placeholder="t('modules.mysql.design.colNamePh')"
-                  @update:model-value="updateColField(editingCol.__rowKey, 'name', String($event))"
-                />
-              </div>
-              <div class="nm-mysql-design__field">
-                <label>{{ t('modules.mysql.design.colType') }}</label>
-                <RsSelect
-                  :model-value="editingCol.typeBase"
-                  size="sm"
-                  :options="typeOptions"
-                  @update:model-value="updateColField(editingCol.__rowKey, 'typeBase', String($event))"
-                />
-              </div>
-              <div v-if="['VARCHAR','CHAR','DECIMAL','FLOAT','DOUBLE'].includes(editingCol.typeBase)" class="nm-mysql-design__field">
-                <label>{{ t('modules.mysql.design.colLength') }}</label>
-                <RsInput
-                  :model-value="String(editingCol.typeLength ?? '')"
-                  size="sm"
-                  type="number"
-                  @update:model-value="updateColField(editingCol.__rowKey, 'typeLength', $event ? Number($event) : undefined)"
-                />
-              </div>
-              <div class="nm-mysql-design__field nm-mysql-design__field--check">
-                <label>{{ t('modules.mysql.design.colNullable') }}</label>
-                <input
-                  type="checkbox"
-                  :checked="editingCol.nullable"
-                  @change="updateColField(editingCol.__rowKey, 'nullable', ($event.target as HTMLInputElement).checked)"
-                />
-              </div>
-              <div class="nm-mysql-design__field nm-mysql-design__field--check">
-                <label>{{ t('modules.mysql.design.colPk') }}</label>
-                <input
-                  type="checkbox"
-                  :checked="editingCol.primaryKey"
-                  @change="updateColField(editingCol.__rowKey, 'primaryKey', ($event.target as HTMLInputElement).checked)"
-                />
-              </div>
-              <div class="nm-mysql-design__field nm-mysql-design__field--check">
-                <label>{{ t('modules.mysql.design.colAi') }}</label>
-                <input
-                  type="checkbox"
-                  :checked="editingCol.autoIncrement"
-                  @change="updateColField(editingCol.__rowKey, 'autoIncrement', ($event.target as HTMLInputElement).checked)"
-                />
-              </div>
-              <div class="nm-mysql-design__field">
-                <label>{{ t('modules.mysql.design.colDefault') }}</label>
-                <RsInput
-                  :model-value="editingCol.defaultExpr"
-                  size="sm"
-                  :placeholder="t('modules.mysql.design.colDefaultPh')"
-                  @update:model-value="updateColField(editingCol.__rowKey, 'defaultExpr', String($event ?? ''))"
-                />
-              </div>
-              <div class="nm-mysql-design__field">
-                <label>{{ t('modules.mysql.design.colComment') }}</label>
-                <RsInput
-                  :model-value="editingCol.comment"
-                  size="sm"
-                  :placeholder="t('modules.mysql.design.colCommentPh')"
-                  @update:model-value="updateColField(editingCol.__rowKey, 'comment', String($event ?? ''))"
-                />
-              </div>
-            </div>
-          </template>
-
-          <!-- Index editor -->
-          <template v-else-if="activeTab === 'indexes' && editingIdx">
-            <div class="nm-mysql-design__editor-title">{{ t('modules.mysql.design.editIndex') }}</div>
-            <div class="nm-mysql-design__form">
-              <div class="nm-mysql-design__field">
-                <label>{{ t('modules.mysql.design.idxName') }}</label>
-                <RsInput
-                  :model-value="editingIdx.name"
-                  size="sm"
-                  :placeholder="t('modules.mysql.design.idxNamePh')"
-                  @update:model-value="updateIdxField(editingIdx.__rowKey, 'name', String($event ?? ''))"
-                />
-              </div>
-              <div class="nm-mysql-design__field">
-                <label>{{ t('modules.mysql.design.idxColumns') }}</label>
-                <RsInput
-                  :model-value="editingIdx.columnsText"
-                  size="sm"
-                  :placeholder="t('modules.mysql.design.idxColumnsPh')"
-                  @update:model-value="updateIdxField(editingIdx.__rowKey, 'columnsText', String($event ?? ''))"
-                />
-              </div>
-              <div class="nm-mysql-design__field nm-mysql-design__field--check">
-                <label>{{ t('modules.mysql.design.idxUnique') }}</label>
-                <input
-                  type="checkbox"
-                  :checked="editingIdx.unique"
-                  @change="updateIdxField(editingIdx.__rowKey, 'unique', ($event.target as HTMLInputElement).checked)"
-                />
-              </div>
-            </div>
-          </template>
-
-          <div v-else class="nm-mysql-design__editor-empty">
-            <RsEmpty :description="t('modules.mysql.design.selectRow')" icon="mouse-pointer-2" />
+      </template>
+      <template v-else-if="activeSection === 'indexes' && editingIdx">
+        <div class="nm-mysql-design__editor-title">{{ t('modules.mysql.design.editIndex') }}</div>
+        <div class="nm-mysql-design__form">
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.idxName') }}</label>
+            <RsInput
+              :model-value="editingIdx.name"
+              size="sm"
+              :disabled="editingIdx.primary"
+              :placeholder="t('modules.mysql.design.idxNamePh')"
+              @update:model-value="
+                indexes = indexes.map((i) =>
+                  i.__rowKey === editingIdx!.__rowKey && !i.primary
+                    ? { ...i, name: String($event ?? '') }
+                    : i,
+                )
+              "
+            />
+          </div>
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.idxKind') }}</label>
+            <RsInput
+              :model-value="
+                editingIdx.primary
+                  ? t('modules.mysql.design.idxKindPrimary')
+                  : editingIdx.unique
+                    ? t('modules.mysql.design.idxKindUnique')
+                    : t('modules.mysql.design.idxKindNormal')
+              "
+              size="sm"
+              disabled
+            />
+          </div>
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.idxMethod') }}</label>
+            <RsSelect
+              :model-value="editingIdx.method || 'BTREE'"
+              size="sm"
+              :disabled="editingIdx.primary"
+              :options="indexMethodOptions"
+              @update:model-value="
+                indexes = indexes.map((i) =>
+                  i.__rowKey === editingIdx!.__rowKey && !i.primary
+                    ? { ...i, method: String($event || 'BTREE') }
+                    : i,
+                )
+              "
+            />
           </div>
         </div>
-      </div>
-
-      <!-- Preview panel -->
-      <div v-if="showPreview" class="nm-mysql-design__preview">
-        <div class="nm-mysql-design__preview-header">
-          <span>{{ t('modules.mysql.design.previewTitle') }}</span>
-          <button type="button" class="nm-mysql-design__preview-close" @click="showPreview = false">
-            <RsIcon name="x" :size="14" />
-          </button>
+      </template>
+      <template v-else-if="activeSection === 'foreignKeys' && editingFk">
+        <div class="nm-mysql-design__editor-title">{{ t('modules.mysql.design.editForeignKey') }}</div>
+        <div class="nm-mysql-design__form">
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.fkOnDelete') }}</label>
+            <RsSelect
+              :model-value="editingFk.onDelete"
+              size="sm"
+              :options="fkActionOptions"
+              @update:model-value="
+                foreignKeys = foreignKeys.map((f) =>
+                  f.__rowKey === editingFk!.__rowKey
+                    ? { ...f, onDelete: String($event) }
+                    : f,
+                )
+              "
+            />
+          </div>
+          <div class="nm-mysql-design__field">
+            <label>{{ t('modules.mysql.design.fkOnUpdate') }}</label>
+            <RsSelect
+              :model-value="editingFk.onUpdate"
+              size="sm"
+              :options="fkActionOptions"
+              @update:model-value="
+                foreignKeys = foreignKeys.map((f) =>
+                  f.__rowKey === editingFk!.__rowKey
+                    ? { ...f, onUpdate: String($event) }
+                    : f,
+                )
+              "
+            />
+          </div>
         </div>
-        <pre class="nm-mysql-design__preview-sql">{{ previewSqls.join(';\n\n') }}</pre>
+      </template>
+      <div v-else class="nm-mysql-design__editor-empty">
+        <RsEmpty
+          fill
+          radius="none"
+          icon-radius="none"
+          :description="t('modules.mysql.design.selectRow')"
+        />
       </div>
-    </div>
-  </div>
+    </template>
+  </TableDesignShell>
 </template>
 
 <style scoped>
-.nm-mysql-design {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-.nm-mysql-design__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--rs-border-subtle, #e5e7eb);
-  flex-shrink: 0;
-}
-.nm-mysql-design__header-left {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-.nm-mysql-design__title {
-  font-weight: 600;
-  font-size: 13px;
-}
-.nm-mysql-design__label {
-  font-size: 12px;
-  color: var(--rs-fg-muted);
-}
-.nm-mysql-design__header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.nm-mysql-design__loading {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.nm-mysql-design__content {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.nm-mysql-design__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--rs-border-subtle, #e5e7eb);
-  flex-shrink: 0;
-}
 .nm-mysql-design__meta-row {
   display: flex;
   align-items: center;
@@ -696,79 +1465,14 @@ onMounted(() => {
   white-space: nowrap;
   min-width: 60px;
 }
-.nm-mysql-design__tabs {
-  display: flex;
-  gap: 0;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--rs-border-subtle, #e5e7eb);
-  flex-shrink: 0;
-}
-.nm-mysql-design__tab {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
+.nm-mysql-design__meta-readonly {
   font-size: 12px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  background: transparent;
-  color: var(--rs-fg-muted, #6b7280);
-}
-.nm-mysql-design__tab--active {
-  color: var(--rs-accent, #2563eb);
-  border-bottom-color: var(--rs-accent, #2563eb);
   font-weight: 500;
+  min-width: 80px;
 }
-.nm-mysql-design__tab-count {
-  background: var(--rs-bg-elevated, #f3f4f6);
-  color: var(--rs-fg-muted);
-  border-radius: 10px;
-  padding: 0 6px;
-  font-size: 11px;
-}
-.nm-mysql-design__main {
+.nm-mysql-design__grid {
   flex: 1;
   min-height: 0;
-  display: flex;
-}
-.nm-mysql-design__table-area {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--rs-border-subtle, #e5e7eb);
-}
-.nm-mysql-design__add-row {
-  padding: 6px 8px;
-  border-top: 1px solid var(--rs-border-subtle, #e5e7eb);
-  flex-shrink: 0;
-}
-.nm-mysql-design__del-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: var(--rs-fg-danger, #ef4444);
-  border-radius: 3px;
-  opacity: 0.6;
-}
-.nm-mysql-design__del-btn:hover {
-  opacity: 1;
-  background: var(--rs-bg-danger-subtle, #fee2e2);
-}
-.nm-mysql-design__editor {
-  width: 240px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: 10px;
-  gap: 4px;
 }
 .nm-mysql-design__editor-title {
   font-size: 11px;
@@ -803,41 +1507,10 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
 }
-.nm-mysql-design__preview {
-  flex-shrink: 0;
-  border-top: 1px solid var(--rs-border-subtle, #e5e7eb);
-  max-height: 240px;
-  display: flex;
-  flex-direction: column;
-}
-.nm-mysql-design__preview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  border-bottom: 1px solid var(--rs-border-subtle, #e5e7eb);
-  flex-shrink: 0;
-}
-.nm-mysql-design__preview-close {
-  background: none;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
+.nm-mysql-design__hint {
+  margin: 8px 0 0;
+  font-size: 11px;
   color: var(--rs-fg-muted);
-}
-.nm-mysql-design__preview-sql {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 10px;
-  margin: 0;
-  font-size: 12px;
-  font-family: var(--rs-font-mono, monospace);
-  white-space: pre-wrap;
-  word-break: break-all;
-  background: var(--rs-bg, #fff);
-  color: var(--rs-fg);
+  line-height: 1.4;
 }
 </style>

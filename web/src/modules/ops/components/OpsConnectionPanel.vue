@@ -15,6 +15,8 @@ import { getModuleById } from '@/extensions/registry/extension-registry'
 import type { ModuleCategory } from '@/extensions/types/module'
 import { useRoute, useRouter } from 'vue-router'
 import ConnectionFormDialog from '@/modules/ops/components/ConnectionFormDialog.vue'
+import ConnImportExportDialog from '@/modules/ops/components/ConnImportExportDialog.vue'
+import type { ConnIoDialogMode } from '@/modules/ops/components/ConnImportExportDialog.vue'
 import FolderFormDialog from '@/modules/ops/components/FolderFormDialog.vue'
 import { getConnectionKindDef } from '@/modules/connection'
 import { connKindHasTree, ensureConnKind, isConnKindLoaded } from '@/modules/ops/conn-kind-loaders'
@@ -42,6 +44,7 @@ import {
   type ConnTreeNode,
 } from '@/modules/ops/composables/useConnTree'
 import { useConnFolders, type ConnFolder } from '@/modules/ops/composables/useConnFolders'
+import { useConnImportExport, type ConnExportScope } from '@/modules/ops/composables/useConnImportExport'
 import { useConnTreeSyncStore } from '@/stores/conn-tree-sync'
 import { useSessionRegistry } from '@/stores/session-registry'
 import { useTabStore } from '@/stores/tab'
@@ -139,6 +142,50 @@ const tunnelSshProfiles = computed(() =>
 
 /* ── 文件夹管理 ── */
 const cf = useConnFolders()
+
+/* ── 连接导入 / 导出 ── */
+const { exportConnections, importConnections } = useConnImportExport({
+  getProfiles: () => allProfiles.value,
+  folders: cf,
+  reloadProfiles: () => cx.loadAll(),
+  t,
+})
+
+const ioDlgOpen = ref(false)
+const ioDlgMode = ref<ConnIoDialogMode>('export')
+const ioPendingScope = ref<ConnExportScope>({ type: 'all' })
+const ioPendingFolderId = ref<string | null>(null)
+
+function openExportDialog(scope: ConnExportScope): void {
+  ioDlgMode.value = 'export'
+  ioPendingScope.value = scope
+  ioPendingFolderId.value = null
+  ioDlgOpen.value = true
+}
+
+function openImportDialog(nestUnderFolderId: string | null = null): void {
+  ioDlgMode.value = 'import'
+  ioPendingFolderId.value = nestUnderFolderId
+  ioDlgOpen.value = true
+}
+
+async function onIoDialogConfirm(payload: {
+  includeSecrets: boolean
+  passphrase: string
+}): Promise<void> {
+  ioDlgOpen.value = false
+  if (ioDlgMode.value === 'export') {
+    await runImportExport(
+      () => exportConnections(ioPendingScope.value, payload),
+      'export',
+    )
+    return
+  }
+  await runImportExport(
+    () => importConnections(ioPendingFolderId.value, payload),
+    'import',
+  )
+}
 
 const categoryRef = toRef(props, 'category')
 
@@ -254,10 +301,14 @@ const rootCtxItems = computed<RsContextMenuItem[]>(() => [
     icon: 'plus',
     children: newConnSubItems(),
   },
-  { key: 'open-module:database', label: t('opsNav.addDatabase'), icon: 'database' },
   { key: 'open-module:api', label: t('opsNav.addApi'), icon: 'send' },
+  { key: 'sep-io', label: '', separator: true },
+  { key: 'import-connections', label: t('opsNav.importConnections'), icon: 'upload' },
+  { key: 'export-connections', label: t('opsNav.exportConnections'), icon: 'download' },
   { key: 'sep-folder', label: '', separator: true },
   { key: 'new-folder', label: t('opsNav.addFolder'), icon: 'folder-plus' },
+  { key: 'sep-refresh', label: '', separator: true },
+  { key: 'refresh-connections', label: t('opsNav.refresh'), icon: 'refresh-cw' },
 ])
 
 function onRootCtx(key: string): void {
@@ -271,7 +322,38 @@ function onRootCtx(key: string): void {
     }
     return
   }
-  if (key === 'new-folder') doCreateFolder()
+  if (key === 'import-connections') {
+    openImportDialog(null)
+    return
+  }
+  if (key === 'export-connections') {
+    openExportDialog({ type: 'all' })
+    return
+  }
+  if (key === 'new-folder') {
+    doCreateFolder()
+    return
+  }
+  if (key === 'refresh-connections') {
+    void cx.loadAll()
+  }
+}
+
+async function runImportExport(
+  action: () => Promise<Awaited<ReturnType<typeof importConnections>>>,
+  mode: 'import' | 'export',
+): Promise<void> {
+  const result = await action()
+  if (!result.ok) {
+    if (result.canceled) return
+    toast.error(result.error ?? t(mode === 'import' ? 'opsNav.importError' : 'opsNav.exportError'))
+    return
+  }
+  if (mode === 'import') {
+    toast.success(t('opsNav.importSuccess', { count: result.imported ?? 0 }))
+  } else {
+    toast.success(t('opsNav.exportSuccess'))
+  }
 }
 
 function doCreateFolder(parentId: string | null = null): void {
@@ -304,6 +386,8 @@ function connCtxItemsFor(item: ConnItem): RsContextMenuItem[] {
       : []),
     { key: 'sep1', label: '', separator: true },
     { key: 'edit', label: t('opsNav.editConn'), icon: 'pencil' },
+    { key: 'clone', label: t('opsNav.cloneConn'), icon: 'copy' },
+    { key: 'export-connection', label: t('opsNav.exportConnections'), icon: 'download' },
     { key: 'delete', label: t('opsNav.deleteConn'), icon: 'trash-2', danger: true },
   ]
   if (cf.folders.value.length > 0) {
@@ -344,6 +428,15 @@ function onConnCtx(key: string, node: ConnLeafNode): void {
     if (key === 'connect') connect(item)
     else if (key === 'disconnect') void sessionRegistry.disconnect(item.profileId, item.kind)
     else if (key === 'edit') void cx.openEdit(item)
+    else if (key === 'clone') {
+      // 克隆后归入原连接所在文件夹（若有）
+      const currentFolder = cf.folders.value.find((f) => f.profileIds.includes(item.profileId))
+      pendingFolderId.value = currentFolder?.id ?? null
+      void cx.openClone(item)
+    }
+    else if (key === 'export-connection') {
+      openExportDialog({ type: 'connection', profileId: item.profileId })
+    }
     else if (key === 'delete') void cx.openDelete(item)
     else if (key.startsWith('move-folder:')) {
       const folderId = key.slice('move-folder:'.length)
@@ -367,6 +460,9 @@ const folderCtxItems = computed<RsContextMenuItem[]>(() => [
   },
   { key: 'sep-new', label: '', separator: true },
   { key: 'new-subfolder', label: t('opsNav.addFolder'), icon: 'folder-plus' },
+  { key: 'sep-io', label: '', separator: true },
+  { key: 'import-connections', label: t('opsNav.importConnections'), icon: 'upload' },
+  { key: 'export-folder', label: t('opsNav.exportConnections'), icon: 'download' },
   { key: 'sep-manage', label: '', separator: true },
   { key: 'edit', label: t('opsNav.edit'), icon: 'pencil' },
   { key: 'delete', label: t('opsNav.deleteFolder'), icon: 'trash-2', danger: true },
@@ -388,6 +484,14 @@ function onFolderCtx(key: string, folder: ConnFolder): void {
   }
   if (key === 'new-subfolder') {
     doCreateFolder(folder.id)
+    return
+  }
+  if (key === 'import-connections') {
+    openImportDialog(folder.id)
+    return
+  }
+  if (key === 'export-folder') {
+    openExportDialog({ type: 'folder', folderId: folder.id })
     return
   }
   if (key === 'edit') openFolderDialog('edit', null, folder)
@@ -707,6 +811,12 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
         :mode="folderDlgMode"
         :form-error="folderDlgError"
         @save="onFolderSave"
+      />
+
+      <ConnImportExportDialog
+        v-model:open="ioDlgOpen"
+        :mode="ioDlgMode"
+        @confirm="onIoDialogConfirm"
       />
 
       <!-- 协议树操作宿主：由 conn-tree 注册表贡献，面板不感知具体协议。 -->

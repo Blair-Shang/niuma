@@ -228,11 +228,15 @@ function onCloseTab(task: DataTask, event: Event): void {
 .nm-data-task-dock__mount {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
 }
+.nm-data-task-dock__mount > :deep(.nm-dt-inline),
 .nm-data-task-dock__mount > :deep(.nm-vast-io-inline) {
-  min-height: 100%;
-  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 </style>

@@ -182,7 +182,7 @@ func buildDesignSQL(database, table string, op DesignOp) (string, error) {
 		}
 		return fmt.Sprintf(
 			"ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s",
-			rel, quoteIdent(name), strings.TrimSpace(*op.Default),
+			rel, quoteIdent(name), FormatDefaultExpr(strings.TrimSpace(*op.Default)),
 		), nil
 
 	case DesignDropDefault:
@@ -275,7 +275,7 @@ func buildAddColumn(rel string, op DesignOp) (string, error) {
 		b.WriteString(" NOT NULL")
 	}
 	if op.Default != nil {
-		if def := strings.TrimSpace(*op.Default); def != "" {
+		if def := FormatDefaultExpr(*op.Default); def != "" {
 			b.WriteString(" DEFAULT ")
 			b.WriteString(def)
 		}

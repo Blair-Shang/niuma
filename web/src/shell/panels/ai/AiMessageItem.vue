@@ -8,6 +8,7 @@ import { useI18n } from 'vue-i18n'
 import type { AiLiveToolInvocation } from '@/api/types/ai'
 import { useAiStore } from '@/stores/ai'
 import AiMarkdown from './AiMarkdown.vue'
+import AiMediaLightbox from './AiMediaLightbox.vue'
 import AiToolCallCard from './AiToolCallCard.vue'
 import type { AiContextAttachment } from './context-pack'
 import type { ExtractedTextFile } from './attachment-utils'
@@ -49,7 +50,14 @@ const aiStore = useAiStore()
 const isUser = computed(() => props.speaker === 'user')
 const isAssistant = computed(() => props.speaker === 'assistant')
 const copied = ref(false)
+const previewOpen = ref(false)
+const previewSrc = ref<string | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+function openImagePreview(src: string): void {
+  previewSrc.value = src
+  previewOpen.value = true
+}
 
 const timeLabel = computed(() => {
   if (!props.createdAt) {
@@ -148,7 +156,7 @@ async function onBranch(): Promise<void> {
         </div>
       </div>
 
-      <div v-if="attachments.length" class="nm-ai-msg__chips" role="list">
+      <div v-if="attachments.length" class="nm-ai-msg__chips rs-native-scrollbar" role="list">
         <button
           v-for="a in attachments"
           :key="a.id"
@@ -217,17 +225,19 @@ async function onBranch(): Promise<void> {
       </div>
 
       <div v-if="images.length" class="nm-ai-msg__images">
-        <a
+        <button
           v-for="(src, i) in images"
           :key="i"
-          :href="src"
-          target="_blank"
-          rel="noopener"
+          type="button"
           class="nm-ai-msg__image-link"
+          :title="t('ai.mediaPreview')"
+          @click="openImagePreview(src)"
         >
           <img :src="src" alt="" class="nm-ai-msg__image" />
-        </a>
+        </button>
       </div>
+
+      <AiMediaLightbox v-model:open="previewOpen" :image-src="previewSrc" />
 
       <div v-if="files.length" class="nm-ai-msg__files">
         <details v-for="(f, i) in files" :key="i" class="nm-ai-msg__file">
@@ -235,7 +245,7 @@ async function onBranch(): Promise<void> {
             <RsIcon name="file-text" :size="12" />
             <span class="nm-ai-msg__file-name">{{ f.name }}</span>
           </summary>
-          <pre class="nm-ai-msg__file-body">{{ f.text }}</pre>
+          <pre class="nm-ai-msg__file-body rs-native-scrollbar">{{ f.text }}</pre>
         </details>
       </div>
 
@@ -462,10 +472,14 @@ async function onBranch(): Promise<void> {
 
 .nm-ai-msg__image-link {
   display: block;
+  padding: 0;
+  margin: 0;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--rs-border-subtle);
   max-width: 220px;
+  background: transparent;
+  cursor: zoom-in;
 }
 
 .nm-ai-msg__image {

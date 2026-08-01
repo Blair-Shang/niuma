@@ -149,7 +149,7 @@ func InferToolRisk(name string) string {
 	}
 	dangerousHints := []string{
 		"shell", "exec_command", "execute_command", "run_command",
-		"drop_database", "drop_schema", "format_disk",
+		"run_skill_script", "drop_database", "drop_schema", "format_disk",
 	}
 	for _, k := range dangerousHints {
 		if strings.Contains(n, k) {

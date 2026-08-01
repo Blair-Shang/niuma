@@ -1,6 +1,8 @@
 /**
  * 产品侧 SQL 方言（可扩展 MySQL / Oracle / 达梦等）。
  * Monaco languageId 与 sql-formatter language 在此集中映射，调用方只认 SqlDialect。
+ *
+ * Monaco：MySQL / Dameng / Kingbase / ClickHouse 走 Bridge LSP（languageId=mysql|dameng|kingbase|clickhouse）；其余静默内置 sql，待各库 LSP。
  */
 
 /** 业务方言（连接 kind / 模块维度） */
@@ -10,6 +12,8 @@ export type SqlDialect =
   | 'mysql'
   | 'oracle'
   | 'dameng'
+  | 'clickhouse'
+  | 'kingbase'
   | 'sqlserver'
   | 'sqlite'
   | 'generic'
@@ -34,73 +38,71 @@ export type SqlFormatterLanguage =
   | 'redshift'
   | 'n1ql'
 
-/** Monaco / monaco-sql-languages 的 languageId */
-export type SqlMonacoLanguageId =
-  | 'pgsql'
-  | 'mysql'
-  | 'flinksql'
-  | 'hivesql'
-  | 'sparksql'
-  | 'trinosql'
-  | 'impalasql'
-  | 'genericsql'
-  | 'sql'
+/** Monaco languageId（LSP mysql/dameng/kingbase 或内置 sql；不再使用 sql-languages Worker ID） */
+export type SqlMonacoLanguageId = 'mysql' | 'dameng' | 'kingbase' | 'sql'
 
 export interface SqlDialectProfile {
   /** sql-formatter */
   formatterLanguage: SqlFormatterLanguage
   /** Monaco editor language prop */
   monacoLanguageId: SqlMonacoLanguageId
-  /** 是否已接 monaco-sql-languages 语法 Worker */
+  /**
+   * @deprecated 恒为 false；原 monaco-sql-languages Worker 已下线。
+   * 语义能力以 Capability `useLsp` / resolveMonacoLanguageFromProfile 为准。
+   */
   monacoSqlLanguages: boolean
 }
 
 const PROFILES: Record<SqlDialect, SqlDialectProfile> = {
-  /**
-   * Vastbase 家族默认映射（无会话时）。
-   * 有会话时以 CapabilitySet 为准：见 sql-editor/capabilities。
-   */
   vastbase: {
     formatterLanguage: 'plsql',
-    monacoLanguageId: 'pgsql',
-    monacoSqlLanguages: true,
+    monacoLanguageId: 'sql',
+    monacoSqlLanguages: false,
   },
   postgresql: {
     formatterLanguage: 'postgresql',
-    monacoLanguageId: 'pgsql',
-    monacoSqlLanguages: true,
+    monacoLanguageId: 'sql',
+    monacoSqlLanguages: false,
   },
   mysql: {
     formatterLanguage: 'mysql',
     monacoLanguageId: 'mysql',
-    monacoSqlLanguages: true,
+    monacoSqlLanguages: false,
   },
-  /** Oracle：格式化走 plsql；Monaco 暂用 genericsql，后续可换专用方言 */
   oracle: {
     formatterLanguage: 'plsql',
-    monacoLanguageId: 'genericsql',
-    monacoSqlLanguages: true,
+    monacoLanguageId: 'sql',
+    monacoSqlLanguages: false,
   },
-  /** 达梦：语法近 Oracle/PG，格式化先用通用 sql，后续可加专用规则 */
   dameng: {
     formatterLanguage: 'sql',
-    monacoLanguageId: 'genericsql',
-    monacoSqlLanguages: true,
+    monacoLanguageId: 'dameng',
+    monacoSqlLanguages: false,
+  },
+  clickhouse: {
+    formatterLanguage: 'sql',
+    monacoLanguageId: 'sql',
+    monacoSqlLanguages: false,
+  },
+  kingbase: {
+    formatterLanguage: 'plsql',
+    monacoLanguageId: 'kingbase',
+    monacoSqlLanguages: false,
   },
   sqlserver: {
     formatterLanguage: 'transactsql',
-    monacoLanguageId: 'genericsql',
+    monacoLanguageId: 'sql',
     monacoSqlLanguages: false,
   },
   sqlite: {
     formatterLanguage: 'sqlite',
-    monacoLanguageId: 'genericsql',
+    monacoLanguageId: 'sql',
     monacoSqlLanguages: false,
   },
   generic: {
     formatterLanguage: 'sql',
-    monacoLanguageId: 'genericsql',
-    monacoSqlLanguages: true,
+    monacoLanguageId: 'sql',
+    monacoSqlLanguages: false,
   },
 }
 

@@ -89,7 +89,9 @@ const formTabs = computed(() => {
   if (kindDef?.advanced) {
     tabs.push({ value: 'advanced', label: t('connection.form.tabAdvanced') })
   }
-  tabs.push({ value: 'proxy', label: t('connection.form.tabProxy') })
+  if (kindDef?.supportsProxy !== false) {
+    tabs.push({ value: 'proxy', label: t('connection.form.tabProxy') })
+  }
   if (kindDef?.supportsTunnel) {
     tabs.push({ value: 'tunnel', label: t('connection.form.tabTunnel') })
   }
@@ -100,8 +102,18 @@ const passwordRequired = computed(
   () => props.mode === 'create' && !props.passwordOptional,
 )
 
+const connectionKindDef = computed(() => getConnectionKindDef(props.kind))
+const hideHostPort = computed(() => connectionKindDef.value?.hideHostPort === true)
+const hideCredentials = computed(() => connectionKindDef.value?.hideCredentials === true)
+
 watch(open, (isOpen) => {
   if (isOpen) {
+    formTab.value = 'basic'
+  }
+})
+
+watch(formTabs, (tabs) => {
+  if (!tabs.some((tab) => tab.value === formTab.value)) {
     formTab.value = 'basic'
   }
 })
@@ -152,8 +164,8 @@ function close(): void {
           </div>
         </section>
 
-        <!-- 主机 + 端口 -->
-        <section class="nm-conn-form__section">
+        <!-- 主机 + 端口（文件型协议如 SQLite 可隐藏） -->
+        <section v-if="!hideHostPort" class="nm-conn-form__section">
           <div class="nm-conn-form__row">
             <div class="nm-conn-form__field nm-conn-form__field--grow">
               <RsLabel required>{{ t('opsNav.form.host') }}</RsLabel>
@@ -170,7 +182,7 @@ function close(): void {
           凭据区：SSH 通过 #credential-section 完整替换此区域，其他协议使用默认内容。
           #credential-hint 插槽供 Redis 等需要追加提示的协议使用。
         -->
-        <slot name="credential-section">
+        <slot v-if="!hideCredentials" name="credential-section">
           <section class="nm-conn-form__section">
             <div class="nm-conn-form__row">
               <div class="nm-conn-form__field nm-conn-form__field--grow">
@@ -186,7 +198,7 @@ function close(): void {
           </section>
         </slot>
 
-        <!-- 协议专属选项区：FTP / Redis / MongoDB 等各自在此插槽注入 -->
+        <!-- 协议专属选项区：FTP / Redis / MongoDB / SQLite 等各自在此插槽注入 -->
         <slot name="options" />
       </div>
 

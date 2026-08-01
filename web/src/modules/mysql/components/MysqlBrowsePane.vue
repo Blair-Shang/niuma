@@ -1,18 +1,23 @@
 <script setup lang="ts">
+/**
+ * MySQL 表 / 视图数据浏览：挂载公共 BrowseDataShell。
+ * 「浏览数据」共用本面板（表/视图；视图只读）。
+ */
 import {
   RsButton,
+  RsCodeEditor,
+  RsConfirmDialog,
   RsEmpty,
-  RsIcon,
   RsLoading,
+  RsPopover,
   RsTable,
-  useRsToast,
-  type RsTableColumn,
 } from '@niuma/ui'
-import { computed, onUnmounted, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { mysqlApi } from '@/api'
-import type { MysqlColumnInfo, MysqlIndexInfo } from '@/api/types/mysql'
-import { selectSeed } from '@/modules/mysql/sql-seed'
+import { computed } from 'vue'
+import { BrowseDataShell, BrowseIoMenu } from '@/modules/database'
+import { useMysqlBrowsePane } from '@/modules/mysql/composables/useMysqlBrowsePane'
+
+/** 过滤 SQL 行号与表格提交/行号列对齐 */
+const BROWSE_GUTTER_WIDTH = 40
 
 const props = defineProps<{
   sessionId: string | null
@@ -23,396 +28,354 @@ const props = defineProps<{
   active: boolean
 }>()
 
-const { t } = useI18n()
-const toast = useRsToast()
+const {
+  t,
+  page,
+  pageSize,
+  pageSizeOptions,
+  totalRows,
+  filterOpen,
+  filterDraft,
+  appliedWhereSql,
+  lastDataSql,
+  loading,
+  saving,
+  lastResult,
+  selectedRowKeys,
+  resultRows,
+  resultColumns,
+  deleteConfirm,
+  importMenuOpen,
+  exportMenuOpen,
+  importMenuItems,
+  exportMenuItems,
+  shellLabels,
+  scopeLabel,
+  scopeOk,
+  canInsert,
+  canEdit,
+  canDeleteSelection,
+  tableEditable,
+  statusMeta,
+  statusHint,
+  isView,
+  filterSqlConfig,
+  refresh,
+  onFilterKeydown,
+  openInsert,
+  requestDelete,
+  confirmDelete,
+  onBrowseKeydown,
+  onCellEditCommit,
+  isBrowseRowPending,
+  onBrowseRowEditCommit,
+  onBrowseRowEditRollback,
+  contextMenuItems,
+  onContextMenuSelect,
+  onImportMenuSelect,
+  onExportMenuSelect,
+  openBrowseIo,
+  ddlMenuOpen,
+  ddlLoading,
+  ddlText,
+  objectType,
+  canOpenDesign,
+  copyBrowseDdl,
+  openDesignTable,
+  openDdlTab,
+} = useMysqlBrowsePane(props)
 
-type BrowseSection = 'data' | 'columns' | 'indexes'
-
-const section = ref<BrowseSection>('data')
-const loading = ref(false)
-const statusText = ref('')
-const resultSetId = ref<string | null>(null)
-const dataColumns = ref<RsTableColumn[]>([])
-const dataRows = ref<Record<string, unknown>[]>([])
-const hasMore = ref(false)
-const pageLimit = 100
-
-const metaColumns = ref<MysqlColumnInfo[]>([])
-const metaIndexes = ref<MysqlIndexInfo[]>([])
-const tableComment = ref('')
-const metaLoaded = ref(false)
-
-const scopeReady = computed(() => Boolean(props.sessionId && props.database && props.table))
-
-const columnTableColumns = computed<RsTableColumn[]>(() => [
-  { key: 'ordinal', title: '#', width: 48 },
-  { key: 'name', title: t('modules.mysql.browse.colName'), minWidth: 120, ellipsis: true },
-  { key: 'dataType', title: t('modules.mysql.browse.colType'), minWidth: 120, ellipsis: true },
-  { key: 'nullable', title: t('modules.mysql.browse.colNullable'), width: 80 },
-  { key: 'default', title: t('modules.mysql.browse.colDefault'), minWidth: 100, ellipsis: true },
-  { key: 'comment', title: t('modules.mysql.browse.colComment'), minWidth: 120, ellipsis: true },
-])
-
-const columnTableRows = computed(() =>
-  metaColumns.value.map((c) => ({
-    ordinal: c.ordinal,
-    name: c.name,
-    dataType: c.dataType,
-    nullable: c.nullable ? 'YES' : 'NO',
-    default: c.default ?? '',
-    comment: c.comment ?? '',
-  })),
+const showMutate = computed(() => !isView.value)
+const importDisabled = computed(() => !canInsert.value || saving.value)
+const exportDisabled = computed(
+  () => !props.profileId && (!lastResult.value || resultRows.value.length === 0),
 )
-
-const indexTableColumns = computed<RsTableColumn[]>(() => [
-  { key: 'name', title: t('modules.mysql.browse.idxName'), minWidth: 120, ellipsis: true },
-  { key: 'kind', title: t('modules.mysql.browse.idxKind'), width: 100 },
-  { key: 'columns', title: t('modules.mysql.browse.idxColumns'), minWidth: 140, ellipsis: true },
-  { key: 'definition', title: t('modules.mysql.browse.idxDef'), minWidth: 180, ellipsis: true },
-])
-
-const indexTableRows = computed(() =>
-  metaIndexes.value.map((idx) => ({
-    name: idx.name,
-    kind: idx.primary ? 'PRIMARY' : idx.unique ? 'UNIQUE' : 'INDEX',
-    columns: (idx.columns ?? []).join(', '),
-    definition: idx.definition,
-  })),
+const statusWarn = computed(
+  () => Boolean(lastResult.value) && !isView.value && !canEdit.value && !resultRows.value.some((r) => r.__isNew),
 )
-
-function cellKey(i: number): string {
-  return `c${i}`
-}
-
-async function closeResultSet(): Promise<void> {
-  if (!props.sessionId || !resultSetId.value) return
-  const id = resultSetId.value
-  resultSetId.value = null
-  await mysqlApi.queryClose({ sessionId: props.sessionId, resultSetId: id }).catch(() => undefined)
-}
-
-async function loadMeta(): Promise<void> {
-  if (!props.sessionId || !props.database || !props.table) return
-  try {
-    const [cols, idxs] = await Promise.all([
-      mysqlApi.metaColumns({
-        sessionId: props.sessionId,
-        database: props.database,
-        table: props.table,
-      }),
-      mysqlApi.metaIndexes({
-        sessionId: props.sessionId,
-        database: props.database,
-        table: props.table,
-      }),
-    ])
-    metaColumns.value = cols.columns ?? []
-    tableComment.value = cols.tableComment ?? ''
-    metaIndexes.value = idxs.indexes ?? []
-    metaLoaded.value = true
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : t('modules.mysql.browse.metaError'))
-  }
-}
-
-async function loadData(reset = true): Promise<void> {
-  if (!props.sessionId || !props.database || !props.table) return
-  loading.value = true
-  try {
-    if (reset) {
-      await closeResultSet()
-      const sql = selectSeed(props.database, props.table, pageLimit).trim().replace(/;$/, '')
-      const result = await mysqlApi.queryExec({
-        sessionId: props.sessionId,
-        database: props.database,
-        sql,
-        limit: pageLimit,
-      })
-      resultSetId.value = result.resultSetId ?? null
-      hasMore.value = Boolean(result.hasMore)
-      dataColumns.value = (result.columns ?? []).map((c, i) => ({
-        key: cellKey(i),
-        title: c.name || `col${i + 1}`,
-        ellipsis: true,
-        minWidth: 96,
-      }))
-      dataRows.value = (result.rows ?? []).map((r, idx) => {
-        const obj: Record<string, unknown> = { __i: idx }
-        r.forEach((v, i) => {
-          obj[cellKey(i)] = v
-        })
-        return obj
-      })
-      statusText.value = [
-        t('modules.mysql.query.rows', { n: result.rowCount }),
-        `${result.durationMs} ms`,
-        result.hasMore ? t('modules.mysql.query.hasMore') : '',
-      ]
-        .filter(Boolean)
-        .join(' · ')
-    } else if (resultSetId.value) {
-      const result = await mysqlApi.queryFetch({
-        sessionId: props.sessionId,
-        resultSetId: resultSetId.value,
-        limit: pageLimit,
-      })
-      hasMore.value = Boolean(result.hasMore)
-      const base = dataRows.value.length
-      const more = (result.rows ?? []).map((r, idx) => {
-        const obj: Record<string, unknown> = { __i: base + idx }
-        r.forEach((v, i) => {
-          obj[cellKey(i)] = v
-        })
-        return obj
-      })
-      dataRows.value = [...dataRows.value, ...more]
-      statusText.value = [
-        t('modules.mysql.query.fetched', { n: dataRows.value.length, ms: result.durationMs }),
-        result.hasMore ? t('modules.mysql.query.hasMore') : '',
-      ]
-        .filter(Boolean)
-        .join(' · ')
-    }
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : t('modules.mysql.browse.dataError'))
-  } finally {
-    loading.value = false
-  }
-}
-
-async function refresh(): Promise<void> {
-  metaLoaded.value = false
-  await Promise.all([loadMeta(), loadData(true)])
-}
-
-watch(
-  () => [props.sessionId, props.database, props.table] as const,
-  () => {
-    dataColumns.value = []
-    dataRows.value = []
-    metaColumns.value = []
-    metaIndexes.value = []
-    tableComment.value = ''
-    metaLoaded.value = false
-    statusText.value = ''
-    void closeResultSet()
-    if (props.active && scopeReady.value) {
-      void refresh()
-    }
-  },
-  { immediate: true },
+const deleteCount = computed(
+  () => selectedRowKeys.value.filter((k) => !String(k).startsWith('new-')).length || 1,
 )
-
-watch(
-  () => props.active,
-  (active) => {
-    if (active && scopeReady.value && dataColumns.value.length === 0 && !loading.value) {
-      void refresh()
-    }
-  },
-)
-
-onUnmounted(() => {
-  void closeResultSet()
-})
 </script>
 
 <template>
-  <div class="nm-mysql-browse">
-    <header class="nm-mysql-browse__chrome">
-      <div class="nm-mysql-browse__identity" :title="sessionLabel">
-        <RsIcon name="table" :size="16" />
-        <span class="nm-mysql-browse__session">{{ sessionLabel || 'MySQL' }}</span>
-        <span v-if="database && table" class="nm-mysql-browse__scope">{{ database }}.{{ table }}</span>
-      </div>
-      <div class="nm-mysql-browse__actions">
-        <div class="nm-mysql-browse__tabs">
-          <button
-            type="button"
-            class="nm-mysql-browse__tab"
-            :class="{ 'nm-mysql-browse__tab--active': section === 'data' }"
-            @click="section = 'data'"
-          >
-            {{ t('modules.mysql.browse.tabData') }}
-          </button>
-          <button
-            type="button"
-            class="nm-mysql-browse__tab"
-            :class="{ 'nm-mysql-browse__tab--active': section === 'columns' }"
-            @click="section = 'columns'"
-          >
-            {{ t('modules.mysql.browse.tabColumns') }}
-          </button>
-          <button
-            type="button"
-            class="nm-mysql-browse__tab"
-            :class="{ 'nm-mysql-browse__tab--active': section === 'indexes' }"
-            @click="section = 'indexes'"
-          >
-            {{ t('modules.mysql.browse.tabIndexes') }}
-          </button>
-        </div>
-        <RsButton
-          v-if="section === 'data' && hasMore"
-          size="sm"
-          variant="ghost"
-          :disabled="loading"
-          @click="loadData(false)"
+  <BrowseDataShell
+    v-model:page="page"
+    v-model:page-size="pageSize"
+    v-model:filter-open="filterOpen"
+    v-model:import-menu-open="importMenuOpen"
+    v-model:export-menu-open="exportMenuOpen"
+    :labels="shellLabels"
+    brand-icon="mysql"
+    :session-label="sessionLabel || 'MySQL'"
+    :scope-label="scopeLabel"
+    :loading="loading"
+    :saving="saving"
+    :show-mutate="showMutate"
+    :can-insert="canInsert"
+    :can-delete="canDeleteSelection"
+    :show-import="showMutate"
+    :import-disabled="importDisabled"
+    :export-disabled="exportDisabled"
+    :has-active-filter="Boolean(appliedWhereSql)"
+    :has-scope="scopeOk"
+    :has-result="Boolean(lastResult)"
+    :page-size-options="pageSizeOptions"
+    :total-rows="totalRows"
+    :last-data-sql="lastDataSql"
+    :status-meta="statusMeta"
+    :status-hint="statusHint"
+    :status-warn="statusWarn"
+    @insert="openInsert"
+    @delete="requestDelete"
+    @refresh="refresh"
+    @keydown="onBrowseKeydown"
+  >
+    <template #import-menu>
+      <BrowseIoMenu :items="importMenuItems" @select="onImportMenuSelect">
+        <button
+          type="button"
+          class="nm-mysql-browse__io-extra"
+          :disabled="!profileId || saving"
+          @pointerdown.stop.prevent="openBrowseIo('import_csv')"
         >
-          {{ t('modules.mysql.query.loadMore') }}
+          {{ t('modules.mysql.tree.importCsv') }}
+        </button>
+      </BrowseIoMenu>
+    </template>
+    <template #export-menu>
+      <BrowseIoMenu :items="exportMenuItems" @select="onExportMenuSelect" />
+    </template>
+
+    <template #toolbar-extra>
+      <RsPopover
+        v-model:open="ddlMenuOpen"
+        side="bottom"
+        align="end"
+        :side-offset="4"
+        width="auto"
+      >
+        <RsButton
+          variant="ghost"
+          size="sm"
+          icon="file-code"
+          :disabled="!database || !table || !sessionId"
+          :tooltip="t('modules.mysql.browse.ddlTooltip')"
+        >
+          {{ t('modules.mysql.browse.ddl') }}
         </RsButton>
-        <RsButton size="sm" variant="ghost" icon="refresh-cw" :loading="loading" @click="refresh">
-          {{ t('modules.mysql.browse.refresh') }}
-        </RsButton>
+        <template #content>
+          <div class="nm-mysql-browse__ddl-pop">
+            <div class="nm-mysql-browse__ddl-head">
+              <div class="nm-mysql-browse__ddl-title">
+                <span>{{ t('modules.mysql.session.tabDdl') }}</span>
+                <span v-if="objectType" class="nm-mysql-browse__ddl-type">{{ objectType }}</span>
+              </div>
+              <div class="nm-mysql-browse__ddl-actions">
+                <RsButton
+                  variant="ghost"
+                  size="sm"
+                  icon="copy"
+                  :disabled="!ddlText || ddlLoading"
+                  :tooltip="t('modules.mysql.ddl.copy')"
+                  @click="copyBrowseDdl"
+                >
+                  {{ t('modules.mysql.ddl.copy') }}
+                </RsButton>
+                <RsButton
+                  v-if="canOpenDesign"
+                  variant="ghost"
+                  size="sm"
+                  icon="pencil"
+                  :disabled="!database || !table || !profileId"
+                  :tooltip="t('modules.mysql.browse.openDesignTooltip')"
+                  @click="openDesignTable"
+                >
+                  {{ t('modules.mysql.browse.openDesign') }}
+                </RsButton>
+                <RsButton
+                  variant="ghost"
+                  size="sm"
+                  icon="external-link"
+                  :disabled="!database || !table || !profileId"
+                  :tooltip="t('modules.mysql.browse.openDdlTooltip')"
+                  @click="openDdlTab"
+                >
+                  {{ t('modules.mysql.browse.openDdl') }}
+                </RsButton>
+              </div>
+            </div>
+            <RsLoading v-if="ddlLoading && !ddlText" block class="nm-mysql-browse__ddl-loading" />
+            <RsEmpty
+              v-else-if="!ddlText"
+              class="nm-mysql-browse__ddl-empty"
+              icon="file-code"
+              :description="t('modules.mysql.ddl.empty')"
+            />
+            <RsCodeEditor
+              v-else
+              v-model="ddlText"
+              class="nm-mysql-browse__ddl-editor"
+              language="sql"
+              readonly
+              embedded
+              :rounded="false"
+              :show-toolbar="false"
+              height="100%"
+            />
+          </div>
+        </template>
+      </RsPopover>
+    </template>
+
+    <template #filter>
+      <div class="nm-mysql-browse__filter" @keydown.capture="onFilterKeydown">
+        <RsCodeEditor
+          v-model="filterDraft"
+          language="sql"
+          embedded
+          :rounded="false"
+          :fold-gutter="false"
+          :gutter-width="BROWSE_GUTTER_WIDTH"
+          :show-toolbar="false"
+          height="100%"
+          :sql-config="filterSqlConfig"
+          :placeholder="t('modules.mysql.browse.filterEditorPlaceholder')"
+        />
       </div>
-    </header>
+    </template>
 
-    <p v-if="tableComment && section !== 'data'" class="nm-mysql-browse__comment">
-      {{ tableComment }}
-    </p>
-    <div v-if="section === 'data' && statusText" class="nm-mysql-browse__status">
-      {{ statusText }}
-    </div>
+    <RsTable
+      v-model:selected-row-keys="selectedRowKeys"
+      :columns="resultColumns"
+      :data="resultRows"
+      row-key="__rowKey"
+      size="sm"
+      striped
+      fill
+      bordered
+      column-bordered
+      :rounded="false"
+      show-index
+      :index-width="BROWSE_GUTTER_WIDTH"
+      :edit-gutter-width="BROWSE_GUTTER_WIDTH"
+      resizable
+      column-layout="fixed"
+      cell-tooltip
+      highlight-row
+      selectable
+      selection-type="row"
+      :editable="tableEditable"
+      :allow-null="tableEditable"
+      edit-trigger="dblclick"
+      :row-pending="isBrowseRowPending"
+      :context-menu-items="contextMenuItems"
+      :loading="loading"
+      :virtual="true"
+      :virtual-auto-threshold="40"
+      :virtual-columns-auto-threshold="40"
+      :layout-active="active"
+      @cell-edit-commit="onCellEditCommit"
+      @row-edit-commit="onBrowseRowEditCommit"
+      @row-edit-rollback="onBrowseRowEditRollback"
+      @context-menu-select="onContextMenuSelect"
+    >
+      <template #empty>
+        {{ t('modules.mysql.browse.empty') }}
+      </template>
+    </RsTable>
 
-    <div class="nm-mysql-browse__body">
-      <RsLoading v-if="loading && dataColumns.length === 0 && !metaLoaded" class="nm-mysql-browse__loading" />
-      <RsEmpty
-        v-else-if="!database || !table"
-        icon="table"
-        :description="t('modules.mysql.browse.needTable')"
+    <template #dialogs>
+      <RsConfirmDialog
+        v-model:open="deleteConfirm"
+        :title="t('modules.mysql.browse.deleteTitle')"
+        :description="t('modules.mysql.browse.deleteDesc', { count: deleteCount })"
+        tone="danger"
+        confirm-variant="danger"
+        @confirm="confirmDelete"
       />
-      <template v-else-if="section === 'data'">
-        <RsEmpty
-          v-if="dataColumns.length === 0 && !loading"
-          :description="t('modules.mysql.query.emptyResult')"
-        />
-        <RsTable
-          v-else
-          :columns="dataColumns"
-          :data="dataRows"
-          size="sm"
-          fill
-          row-key="__i"
-        />
-      </template>
-      <template v-else-if="section === 'columns'">
-        <RsEmpty
-          v-if="columnTableRows.length === 0 && !loading"
-          :description="t('modules.mysql.browse.emptyColumns')"
-        />
-        <RsTable
-          v-else
-          :columns="columnTableColumns"
-          :data="columnTableRows"
-          size="sm"
-          fill
-          row-key="ordinal"
-        />
-      </template>
-      <template v-else>
-        <RsEmpty
-          v-if="indexTableRows.length === 0 && !loading"
-          :description="t('modules.mysql.browse.emptyIndexes')"
-        />
-        <RsTable
-          v-else
-          :columns="indexTableColumns"
-          :data="indexTableRows"
-          size="sm"
-          fill
-          row-key="name"
-        />
-      </template>
-    </div>
-  </div>
+    </template>
+  </BrowseDataShell>
 </template>
 
 <style scoped>
-.nm-mysql-browse {
-  display: flex;
-  flex-direction: column;
+.nm-mysql-browse__filter {
+  display: block;
+  width: 100%;
   height: 100%;
-  min-height: 0;
 }
 
-.nm-mysql-browse__chrome {
+.nm-mysql-browse__ddl-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(42rem, 80vw);
+  height: min(26rem, 65vh);
+  min-height: 16rem;
+}
+
+.nm-mysql-browse__ddl-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--rs-space-sm);
-  padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid var(--rs-border-subtle);
+  gap: 0.5rem;
   flex-shrink: 0;
+  min-width: 0;
 }
 
-.nm-mysql-browse__identity {
+.nm-mysql-browse__ddl-title {
   display: flex;
   align-items: center;
-  gap: var(--rs-space-sm);
+  gap: 0.4rem;
   min-width: 0;
   font-size: var(--rs-font-size-sm);
   font-weight: 600;
+  color: var(--rs-text);
 }
 
-.nm-mysql-browse__session {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.nm-mysql-browse__ddl-type {
+  font-weight: 500;
+  color: var(--rs-muted);
+  font-family: var(--rs-font-mono);
+  font-size: 11px;
+}
+
+.nm-mysql-browse__ddl-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.nm-mysql-browse__ddl-loading,
+.nm-mysql-browse__ddl-empty,
+.nm-mysql-browse__ddl-editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.nm-mysql-browse__io-extra {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 0;
+  border-radius: var(--rs-radius-sm);
+  background: transparent;
+  color: var(--rs-text);
+  font-size: var(--rs-font-size-sm);
+  text-align: left;
+  cursor: pointer;
   white-space: nowrap;
 }
 
-.nm-mysql-browse__scope {
-  color: var(--rs-fg-muted);
-  font-weight: 400;
+.nm-mysql-browse__io-extra:hover:not(:disabled) {
+  background: var(--rs-bg-muted, rgba(127, 127, 127, 0.12));
 }
 
-.nm-mysql-browse__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
-}
-
-.nm-mysql-browse__tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-right: var(--rs-space-xs);
-}
-
-.nm-mysql-browse__tab {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--rs-fg-muted);
-  border-radius: var(--rs-radius-sm);
-  padding: 0.2rem 0.55rem;
-  font-size: var(--rs-font-size-xs);
-  cursor: pointer;
-}
-
-.nm-mysql-browse__tab--active {
-  color: var(--rs-fg);
-  background: var(--rs-bg-elevated, var(--rs-bg));
-  border-color: var(--rs-border-subtle);
-}
-
-.nm-mysql-browse__comment,
-.nm-mysql-browse__status {
-  margin: 0;
-  padding: 0.25rem 0.75rem;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-fg-muted);
-  border-bottom: 1px solid var(--rs-border-subtle);
-  flex-shrink: 0;
-}
-
-.nm-mysql-browse__body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.nm-mysql-browse__loading {
-  flex: 1;
+.nm-mysql-browse__io-extra:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 </style>

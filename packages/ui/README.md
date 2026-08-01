@@ -1,12 +1,21 @@
-﻿# @niuma/ui
+﻿# @niuma/ui 已迁出
 
-NiuMa 设计系统组件库（`Rs*` 组件 + `--rs-*` token）。
+公共 UI 组件库已独立为仓库：
 
-从公共 UI 库迁入，供 `web/` 与插件 UI 共用。
+- 本地：`E:\shangijan\niuma-ui`（与本仓库同级）
+- 远程：https://github.com/Blair-Shang/niuma-ui（Private）
+- 版本 tag：`v0.1.0`
 
-```bash
-pnpm --filter @niuma/ui dev    # Playground :5180
-pnpm --filter @niuma/ui test
+桌面端通过 `web/package.json` 依赖接入：
+
+```json
+"@niuma/ui": "link:../../niuma-ui"
 ```
 
-业务层：`import { RsButton } from '@niuma/ui'`，禁止 `import 'reka-ui'`。
+本地联调请直接修改 `../niuma-ui` 源码。Playground：
+
+```bash
+pnpm --dir ../niuma-ui dev
+```
+
+本目录仅保留迁移说明，不再作为 pnpm workspace 包。

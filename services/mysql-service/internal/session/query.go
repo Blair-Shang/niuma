@@ -3,12 +3,11 @@ package session
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"fmt"
-	"math"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"niuma/pkg/common/id"
 )
 
 const (
@@ -21,7 +20,7 @@ const (
 // QueryExecParams 是 query.exec 入参。
 type QueryExecParams struct {
 	SessionID string `json:"sessionId"`
-	// Database 可选：与会话默认库不同时，在目标库短连上执行。
+	// Database 可选：目标库。Auto-commit 下可短连；非 Auto-commit 时在事务连接上 USE。
 	Database  string `json:"database,omitempty"`
 	SQL       string `json:"sql"`
 	Limit     int    `json:"limit"`
@@ -29,10 +28,14 @@ type QueryExecParams struct {
 	RequestID string `json:"requestId"`
 }
 
-// ColumnMeta 描述结果集列。
+// ColumnMeta 描述结果集列（对齐客户端按类型展示所需元数据）。
 type ColumnMeta struct {
-	Name     string `json:"name"`
-	DataType string `json:"dataType,omitempty"`
+	Name      string `json:"name"`
+	DataType  string `json:"dataType,omitempty"`
+	Nullable  *bool  `json:"nullable,omitempty"`
+	Length    *int64 `json:"length,omitempty"`
+	Precision *int64 `json:"precision,omitempty"`
+	Scale     *int64 `json:"scale,omitempty"`
 }
 
 // QueryExecResult 是 query.exec 返回。
@@ -47,7 +50,8 @@ type QueryExecResult struct {
 	Truncated    bool         `json:"truncated,omitempty"`
 	DurationMS   int64        `json:"durationMs"`
 	CommandTag   string       `json:"commandTag,omitempty"`
-	RowsAffected int64        `json:"rowsAffected,omitempty"`
+	// RowsAffected 仅 DML/DDL 等非结果集语句设置；用指针以便 0 也能序列化给前端。
+	RowsAffected *int64 `json:"rowsAffected,omitempty"`
 }
 
 // ExecOnDB 在给定 *sql.DB 上执行查询（短连 / 无会话取消注册）；SELECT 一页截断且不保留游标。
@@ -62,14 +66,26 @@ func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, reques
 	if limit > MaxQueryLimit {
 		limit = MaxQueryLimit
 	}
-	if strings.TrimSpace(requestID) == "" {
-		requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-	}
+	requestID = id.CoalesceID(requestID, "q")
 
 	start := time.Now()
+	if !returnsResultSet(sqlText) {
+		res, err := db.ExecContext(ctx, sqlText)
+		if err != nil {
+			return nil, fmt.Errorf("mysql: exec: %w", err)
+		}
+		affected, _ := res.RowsAffected()
+		return &QueryExecResult{
+			RequestID:    requestID,
+			DurationMS:   time.Since(start).Milliseconds(),
+			CommandTag:   commandTagForSQL(sqlText),
+			RowsAffected: int64Ptr(affected),
+		}, nil
+	}
+
 	rows, err := db.QueryContext(ctx, sqlText)
 	if err != nil {
-		// 非查询语句（INSERT/UPDATE/DDL）走 Exec。
+		// 误判为结果集时回退 Exec。
 		res, eerr := db.ExecContext(ctx, sqlText)
 		if eerr != nil {
 			return nil, fmt.Errorf("mysql: query: %w", err)
@@ -77,12 +93,9 @@ func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, reques
 		affected, _ := res.RowsAffected()
 		return &QueryExecResult{
 			RequestID:    requestID,
-			Columns:      nil,
-			Rows:         nil,
-			RowCount:     0,
 			DurationMS:   time.Since(start).Milliseconds(),
-			CommandTag:   "OK",
-			RowsAffected: affected,
+			CommandTag:   commandTagForSQL(sqlText),
+			RowsAffected: int64Ptr(affected),
 		}, nil
 	}
 	defer rows.Close()
@@ -91,10 +104,21 @@ func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, reques
 	if err != nil {
 		return nil, err
 	}
+	// Query 碰到 OK 包时驱动返回 0 列；用 ROW_COUNT() 补影响行数。
+	if len(columns) == 0 {
+		var affected int64
+		_ = db.QueryRowContext(ctx, "SELECT ROW_COUNT()").Scan(&affected)
+		return &QueryExecResult{
+			RequestID:    requestID,
+			DurationMS:   time.Since(start).Milliseconds(),
+			CommandTag:   commandTagForSQL(sqlText),
+			RowsAffected: int64Ptr(affected),
+		}, nil
+	}
 
 	outRows := make([][]any, 0, limit)
 	for len(outRows) < limit && rows.Next() {
-		encoded, serr := scanEncodedRow(rows, len(columns))
+		encoded, serr := scanEncodedRow(rows, columns)
 		if serr != nil {
 			return nil, serr
 		}
@@ -120,7 +144,7 @@ func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, reques
 		HasMore:      false,
 		Truncated:    truncated,
 		DurationMS:   time.Since(start).Milliseconds(),
-		CommandTag:   "SELECT",
+		CommandTag:   commandTagForSQL(sqlText),
 	}, nil
 }
 
@@ -142,14 +166,30 @@ func columnMetasFromRows(rows *sql.Rows) ([]ColumnMeta, error) {
 	out := make([]ColumnMeta, len(names))
 	for i, name := range names {
 		out[i] = ColumnMeta{Name: name}
-		if types != nil && i < len(types) && types[i] != nil {
-			out[i].DataType = types[i].DatabaseTypeName()
+		if types == nil || i >= len(types) || types[i] == nil {
+			continue
+		}
+		ct := types[i]
+		out[i].DataType = ct.DatabaseTypeName()
+		if nullable, ok := ct.Nullable(); ok {
+			v := nullable
+			out[i].Nullable = &v
+		}
+		if length, ok := ct.Length(); ok && length >= 0 {
+			v := length
+			out[i].Length = &v
+		}
+		if precision, scale, ok := ct.DecimalSize(); ok {
+			p, s := precision, scale
+			out[i].Precision = &p
+			out[i].Scale = &s
 		}
 	}
 	return out, nil
 }
 
-func scanEncodedRow(rows *sql.Rows, n int) ([]any, error) {
+func scanEncodedRow(rows *sql.Rows, columns []ColumnMeta) ([]any, error) {
+	n := len(columns)
 	raw := make([]any, n)
 	dest := make([]any, n)
 	for i := range raw {
@@ -160,56 +200,11 @@ func scanEncodedRow(rows *sql.Rows, n int) ([]any, error) {
 	}
 	encoded := make([]any, n)
 	for i, v := range raw {
-		encoded[i] = encodeCell(v)
+		col := ColumnMeta{}
+		if i < len(columns) {
+			col = columns[i]
+		}
+		encoded[i] = encodeCell(v, col)
 	}
 	return encoded, nil
-}
-
-func encodeCell(v any) any {
-	if v == nil {
-		return nil
-	}
-	switch t := v.(type) {
-	case bool, string:
-		return t
-	case int64:
-		return t
-	case int32:
-		return t
-	case float64:
-		if math.IsNaN(t) || math.IsInf(t, 0) {
-			return fmt.Sprintf("%v", t)
-		}
-		return t
-	case float32:
-		f := float64(t)
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return fmt.Sprintf("%v", t)
-		}
-		return t
-	case []byte:
-		if utf8.Valid(t) && isMostlyPrintable(t) {
-			return string(t)
-		}
-		return map[string]any{
-			"$binary": base64.StdEncoding.EncodeToString(t),
-		}
-	case time.Time:
-		return t.UTC().Format(time.RFC3339Nano)
-	default:
-		return fmt.Sprintf("%v", t)
-	}
-}
-
-func isMostlyPrintable(b []byte) bool {
-	if len(b) == 0 {
-		return true
-	}
-	printable := 0
-	for _, c := range b {
-		if c == '\t' || c == '\n' || c == '\r' || (c >= 32 && c < 127) {
-			printable++
-		}
-	}
-	return printable*10 >= len(b)*8
 }

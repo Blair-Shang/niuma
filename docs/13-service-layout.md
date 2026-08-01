@@ -16,32 +16,61 @@ services/
 │   ├── go.mod
 │   ├── cmd/ftp-service/
 │   └── internal/
-└── vastbase-service/       # Vastbase（Go + pgx，见 docs/22）
-    ├── go.mod
-    ├── cmd/vastbase-service/
-    └── internal/             # handler · session · tree · meta · debug · eventpub · idgen
+├── vastbase-service/       # Vastbase（Go + pgx，见 docs/22）
+│   ├── go.mod
+│   ├── cmd/vastbase-service/
+│   └── internal/             # handler · session · tree · meta · debug · eventpub · idgen
+├── mysql-service/          # MySQL（见 docs/25）
+├── sqlite-service/         # SQLite（modernc，见 docs/27）
+│   ├── go.mod
+│   ├── cmd/sqlite-service/
+│   └── internal/             # dialect · session · tree · catalog · meta · ddl · dataio · backup
+├── dameng-service/         # 达梦 DM8（官方纯 Go dm，见 docs/28）
+│   ├── go.mod
+│   ├── cmd/dameng-service/
+│   └── internal/             # dialect · session · tree · catalog · meta · handler
+├── oracle-service/         # Oracle（C++20 + ODPI-C，见 docs/29）
+│   ├── CMakeLists.txt
+│   ├── src/                  # ipc · dialect · session · handler
+│   └── third_party/          # odpi · nlohmann/json
+├── clickhouse-service/     # ClickHouse（clickhouse-go/v2，见 docs/30；P0–P1）
+│   ├── go.mod
+│   ├── cmd/clickhouse-service/
+│   └── internal/             # dialect · session · tree · catalog · handler（meta 后续）
+├── kingbase-service/       # 人大金仓（pgx/v5，见 docs/31；P0 session/query）
+│   ├── go.mod
+│   ├── cmd/kingbase-service/
+│   └── internal/             # dialect · session · handler（tree/catalog/meta 后续）
+└── …                       # 其它库服务：Go 同构独立 go.mod；Native 见各模块文档
 
-packages/go/
-└── serviceipc/             # 共享 IPC 帧协议与服务端（Go 能力服务复用）
-    ├── protocol/
-    └── server/
+packages/
+├── go/serviceipc/          # Go 能力服务 IPC
+├── rust/niuma-serviceipc/  # Rust 能力服务 IPC
+└── cpp/serviceipc/         # C++ 能力服务 IPC（静态库 niuma::serviceipc）
 ```
 
-- **`runtime.executable`**：相对 `services/` 根目录，如 `bin/ftp-service.exe`。
+> Oracle 等 L3 Native 服务**不**进入 `go.work`；C++ 服务通过 `add_subdirectory(packages/cpp/serviceipc)` 链接 `niuma::serviceipc`，**不要**在各服务内复制 frame/server。Instant Client 旁载于 `bin/runtime/oracle/`。
+
+- **`runtime.executable`**：相对 `services/` 根目录，如 `bin/ftp-service.exe` / `bin/niuma-sqlite-service.exe`。
 - **platform-core 位置**：同样位于 `services/bin/platform-core.exe`；`ResolveServicesDir()` 从可执行文件路径推断 services 根（`bin` 的父目录）。
 - **manifest 消费方**：
   - `platform-core.yaml`（`id: com.niuma.platform`）— **保留**为 Layer 2 注册契约；壳层 `ServiceManifestLoader` 当前硬编码同内容，与 Go 管道地址三处对齐；未来可改为直接读此文件。
-  - 其余 `*.yaml`（如 `ftp-service.yaml`）— 由 platform-core `supervisor` 加载并懒拉起。
+  - 其余 `*.yaml`（如 `ftp-service.yaml`、`sqlite-service.yaml`）— 由 platform-core `supervisor` 加载并懒拉起。
 - **本机 IPC 不用 TCP 端口**：均为命名管道 / UDS 固定地址，无动态端口分配。
 
 ## Go 工作区
 
-仓库根 `go.work` 串联：
+仓库根 `go.work` 串联（节选）：
 
 - `platform`
 - `services/ftp-service`
 - `services/mongodb-service`
 - `services/vastbase-service`
+- `services/mysql-service`
+- `services/sqlite-service`
+- `services/dameng-service`
+- `services/clickhouse-service`
+- `services/kingbase-service`
 - `packages/go/serviceipc`
 
 本地开发在任意模块目录执行 `go build` / `go test` 均可解析 replace 依赖。
@@ -60,6 +89,12 @@ go build -o ../services/bin/platform-core.exe ./cmd/platform-core
 
 cd ../services/ftp-service
 go build -o ../bin/ftp-service.exe ./cmd/ftp-service
+```
+
+Oracle（独立，需 VS + ODPI 源码；Instant Client 仅运行时）：
+
+```powershell
+.\scripts\shared\build\build-oracle-service.ps1
 ```
 
 ## IPC 契约
@@ -83,4 +118,10 @@ go build -o ../bin/ftp-service.exe ./cmd/ftp-service
 - [16 — SSH / SFTP 模块](./16-ssh-sftp-module.md)
 - [19 — MongoDB 模块](./19-mongodb-module.md)
 - [22 — Vastbase 模块](./22-vastbase-module.md)
+- [25 — MySQL 模块](./25-mysql-module.md)
+- [27 — SQLite 模块](./27-sqlite-module.md)
+- [28 — 达梦模块](./28-dameng-module.md)
+- [29 — Oracle 模块](./29-oracle-module.md)
+- [30 — ClickHouse 模块](./30-clickhouse-module.md)
+- [31 — 人大金仓模块](./31-kingbase-module.md)
 - [11 — Platform Core](./11-platform-core.md)

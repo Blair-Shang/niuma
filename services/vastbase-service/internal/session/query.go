@@ -2,15 +2,17 @@ package session
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"niuma/pkg/common/id"
+	"niuma/pkg/common/sqlcell"
 )
 
 const (
@@ -53,7 +55,9 @@ type QueryExecResult struct {
 	Truncated    bool         `json:"truncated,omitempty"`
 	DurationMS   int64        `json:"durationMs"`
 	CommandTag   string       `json:"commandTag,omitempty"`
-	Notices      []string     `json:"notices,omitempty"`
+	// RowsAffected 来自 CommandTag（INSERT/UPDATE/DELETE 等）；指针保证影响 0 行也能序列化。
+	RowsAffected *int64   `json:"rowsAffected,omitempty"`
+	Notices      []string `json:"notices,omitempty"`
 }
 
 // ExecQuery 在会话连接上执行单条 SQL，并对 SELECT 类结果应用行数上限。
@@ -70,10 +74,7 @@ func ExecQuery(ctx context.Context, sess *Session, params QueryExecParams) (*Que
 		limit = MaxQueryLimit
 	}
 
-	requestID := strings.TrimSpace(params.RequestID)
-	if requestID == "" {
-		requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-	}
+	requestID := id.CoalesceID(params.RequestID, "q")
 
 	runCtx := ctx
 	var cancelTimeout context.CancelFunc
@@ -100,9 +101,7 @@ func ExecOnPool(ctx context.Context, pool *pgxpool.Pool, sqlText string, limit i
 	if limit > MaxQueryLimit {
 		limit = MaxQueryLimit
 	}
-	if strings.TrimSpace(requestID) == "" {
-		requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-	}
+	requestID = id.CoalesceID(requestID, "q")
 
 	start := time.Now()
 	rows, err := pool.Query(ctx, sqlText)
@@ -147,6 +146,7 @@ func ExecOnPool(ctx context.Context, pool *pgxpool.Pool, sqlText string, limit i
 		RowCount:     len(outRows),
 		FetchedCount: len(outRows),
 		HasMore:      false,
+		RowsAffected: rowsAffectedFromTag(tag, len(columns)),
 		Truncated:    truncated,
 		DurationMS:   time.Since(start).Milliseconds(),
 		CommandTag:   tag.String(),
@@ -186,12 +186,7 @@ func encodeCell(v any) any {
 		}
 		return t
 	case []byte:
-		if isMostlyPrintable(t) {
-			return string(t)
-		}
-		return map[string]any{
-			"$binary": base64.StdEncoding.EncodeToString(t),
-		}
+		return sqlcell.EncodeBytesAsTextOrBinary(t)
 	case time.Time:
 		return t.UTC().Format(time.RFC3339Nano)
 	case pgtype.Numeric:
@@ -211,19 +206,6 @@ func encodeCell(v any) any {
 		// 复杂 PG 类型回退为字符串，避免 JSON 编解码失败。
 		return fmt.Sprintf("%v", t)
 	}
-}
-
-func isMostlyPrintable(b []byte) bool {
-	if len(b) == 0 {
-		return true
-	}
-	printable := 0
-	for _, c := range b {
-		if c == '\n' || c == '\r' || c == '\t' || (c >= 32 && c < 127) {
-			printable++
-		}
-	}
-	return printable*10 >= len(b)*9
 }
 
 func oidTypeName(oid uint32) string {
@@ -264,4 +246,18 @@ func oidTypeName(oid uint32) string {
 	default:
 		return ""
 	}
+}
+
+// rowsAffectedPtr 仅在无结果列时回传（DML/DDL）；SELECT/RETURNING 走 rowCount。
+func rowsAffectedPtr(n int64, columnCount int) *int64 {
+	if columnCount > 0 {
+		return nil
+	}
+	v := n
+	return &v
+}
+
+// rowsAffectedFromTag 从 pgx CommandTag 提取影响行数。
+func rowsAffectedFromTag(tag pgconn.CommandTag, columnCount int) *int64 {
+	return rowsAffectedPtr(tag.RowsAffected(), columnCount)
 }

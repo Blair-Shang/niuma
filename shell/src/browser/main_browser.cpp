@@ -233,6 +233,11 @@ void NiuMaClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
   // OnAfterCreated 的 3 秒兜底只在首次创建浏览器时注册；热重载会 Conceal 窗口，
   // 此处每次主帧加载结束都重新注册兜底，避免 Vite 全量刷新后窗口一直隐藏。
   const WindowRecord* entry = WindowRegistry::Instance().FindByBrowser(browser);
+  // Popup（如历史 target=_blank）无 Vue 应用，不会调用 reveal；加载完成立即显示。
+  if (entry && entry->kind == WindowKind::Popup) {
+    RevealBrowserWindow(browser);
+    return;
+  }
   if (!entry || entry->kind != WindowKind::Auxiliary) {
     CefPostDelayedTask(
         TID_UI,

@@ -45,10 +45,7 @@ watch(floatOpen, (visible) => {
 })
 
 const canTeleportToDock = computed(
-  () =>
-    props.activeInDock &&
-    shell.bottomDockOpen &&
-    shell.bottomDockTab === 'dataTasks',
+  () => props.activeInDock && shell.bottomDockTab === 'dataTasks',
 )
 
 function onFloatOpenUpdate(next: boolean): void {

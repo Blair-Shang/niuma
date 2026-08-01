@@ -29,13 +29,14 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
         :class="{
           'nm-activitybar__item--active': shellStore.activeCategory === item.category,
         }"
+        :style="{ '--nm-activity-icon': item.color }"
         :title="t(item.labelKey)"
         :aria-label="t(item.labelKey)"
         :aria-pressed="shellStore.activeCategory === item.category"
         @click="onCategoryClick(item.category)"
       >
         <span class="nm-activitybar__hit">
-          <RsIcon :name="item.icon" :size="20" />
+          <RsIcon :name="item.icon" :size="20" :stroke-width="2" :color="item.color" />
         </span>
       </button>
     </div>
@@ -72,10 +73,10 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--rs-muted);
+  color: var(--nm-activity-icon, var(--rs-muted));
   cursor: pointer;
   -webkit-app-region: no-drag;
-  transition: color var(--rs-transition-fast);
+  transition: opacity var(--rs-transition-fast);
 }
 
 /*
@@ -93,15 +94,11 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
 }
 
 .nm-activitybar__item:hover {
-  color: var(--rs-text);
+  opacity: 0.88;
 }
 
 .nm-activitybar__item:hover:not(.nm-activitybar__item--active) .nm-activitybar__hit {
-  background: color-mix(in srgb, var(--rs-text) 9%, transparent);
-}
-
-.nm-activitybar__item--active {
-  color: var(--rs-primary);
+  background: color-mix(in srgb, var(--nm-activity-icon, var(--rs-text)) 12%, transparent);
 }
 
 .nm-activitybar__item--active .nm-activitybar__hit {
@@ -111,11 +108,11 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
 .nm-activitybar__item--active::before {
   content: '';
   position: absolute;
-  left: 0;
+  right: 0;
   top: 25%;
   bottom: 25%;
   width: 2px;
-  border-radius: 0 2px 2px 0;
+  border-radius: 2px 0 0 2px;
   background: var(--rs-primary);
 }
 </style>

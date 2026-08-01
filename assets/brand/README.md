@@ -19,7 +19,8 @@
 | `app-icon.svg` | 矢量源（512 坐标系） |
 | `app-icon-512.png` | 脚本输出位图 |
 | `app-icon.ico` | Windows exe / 任务栏 |
-| `web/public/favicon.svg` | Web / Playground favicon |
+| `web/public/favicon.svg` | Web favicon |
+| `../niuma-ui/playground/public/favicon.svg` | UI Playground favicon（同级仓库，可选） |
 
 ## 重新生成
 

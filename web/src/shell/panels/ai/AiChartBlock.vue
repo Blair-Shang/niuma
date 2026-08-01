@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
  * AI 助手 ECharts 块：尺寸就绪后再挂载，避免 clientWidth/Height=0 告警。
+ * 放大预览在应用内 Lightbox，避免 CEF target=_blank 弹出黑屏窗。
  */
 import { use } from 'echarts/core'
 import type { EChartsOption } from 'echarts'
@@ -19,9 +20,11 @@ import {
   TooltipComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { RsIcon } from '@niuma/ui'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { parseAiChartOption } from './echarts-lite'
+import AiMediaLightbox from './AiMediaLightbox.vue'
 
 use([
   BarChart,
@@ -50,6 +53,7 @@ const parseError = ref<string | null>(null)
 const shellEl = ref<HTMLElement | null>(null)
 /** 容器已有非 0 尺寸后再挂 VChart，避免 ECharts init 告警。 */
 const sizeReady = ref(false)
+const previewOpen = ref(false)
 
 let resizeObserver: ResizeObserver | null = null
 
@@ -88,6 +92,7 @@ watch(
     if (!active) {
       option.value = null
       parseError.value = null
+      previewOpen.value = false
       return
     }
     const res = parseAiChartOption(source)
@@ -110,6 +115,13 @@ onBeforeUnmount(() => {
 const showChart = computed(
   () => props.active && option.value != null && !parseError.value && sizeReady.value,
 )
+
+function openPreview(): void {
+  if (!showChart.value || !option.value) {
+    return
+  }
+  previewOpen.value = true
+}
 </script>
 
 <template>
@@ -124,6 +136,16 @@ const showChart = computed(
     <template v-else>
       <!-- 占位保证父级始终有宽高，供 ResizeObserver / ECharts 读取 -->
       <div class="nm-ai-chart__frame">
+        <button
+          v-if="showChart"
+          type="button"
+          class="nm-ai-chart__expand"
+          :title="t('ai.chartExpand')"
+          :aria-label="t('ai.chartExpand')"
+          @click="openPreview"
+        >
+          <RsIcon name="zoom-in" :size="13" />
+        </button>
         <VChart
           v-if="showChart"
           class="nm-ai-chart__canvas"
@@ -132,6 +154,17 @@ const showChart = computed(
         />
       </div>
     </template>
+
+    <AiMediaLightbox v-model:open="previewOpen">
+      <template #chart>
+        <VChart
+          v-if="previewOpen && option"
+          class="nm-ai-chart-lightbox__canvas"
+          :option="option"
+          autoresize
+        />
+      </template>
+    </AiMediaLightbox>
   </div>
 </template>
 
@@ -149,6 +182,28 @@ const showChart = computed(
   height: 280px;
   min-height: 220px;
   position: relative;
+}
+
+.nm-ai-chart__expand {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--rs-border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nm-elevated-bg) 88%, transparent);
+  color: var(--rs-muted);
+  cursor: pointer;
+}
+
+.nm-ai-chart__expand:hover {
+  color: var(--rs-text);
+  background: color-mix(in srgb, var(--rs-text) 8%, var(--nm-elevated-bg));
 }
 
 .nm-ai-chart__canvas {
@@ -178,5 +233,17 @@ const showChart = computed(
   color: var(--rs-muted);
   font-size: 11px;
   white-space: pre-wrap;
+}
+</style>
+
+<style>
+/* Teleport 到 body 的预览画布（不能用 scoped） */
+.nm-ai-chart-lightbox__canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  border-radius: 12px;
+  border: 1px solid var(--rs-border-subtle);
+  background: color-mix(in srgb, var(--nm-elevated-bg) 92%, transparent);
 }
 </style>

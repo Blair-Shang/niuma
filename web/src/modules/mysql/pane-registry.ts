@@ -1,8 +1,19 @@
 /**
  * MySQL Session 功能面板标识。
- * P2–P4：query / browse / ddl / source / monitor / design。
+ * query / browse / ddl / source / objectScript / monitor / design / tools / debug。
  */
-export type MysqlSessionTab = 'query' | 'browse' | 'ddl' | 'source' | 'monitor' | 'design'
+import type { MysqlObjectKind, MysqlObjectScriptMode } from '@/modules/mysql/types/object-script'
+
+export type MysqlSessionTab =
+  | 'query'
+  | 'browse'
+  | 'ddl'
+  | 'source'
+  | 'objectScript'
+  | 'monitor'
+  | 'design'
+  | 'tools'
+  | 'debug'
 
 /** 面板解析所需的静态资源范围。 */
 export interface MysqlPaneScope {
@@ -10,14 +21,21 @@ export interface MysqlPaneScope {
   table?: string
   routine?: string
   routineKind?: 'procedure' | 'function'
-  /** design 模式：create=新建；alter=修改 */
-  designMode?: 'create' | 'alter'
+  /** design / objectScript：create=新建；alter=修改 */
+  designMode?: MysqlObjectScriptMode
+  /** 对象脚本：视图 / 过程 / 函数 */
+  objectKind?: MysqlObjectKind
+  /** 对象脚本目标名（create 可为占位名） */
+  objectName?: string
 }
 
 export interface MysqlPaneContext extends MysqlPaneScope {
   sessionId: string | null
   profileId?: string
   initialSql?: string
+  /** 对象脚本未保存正文（Tab 持久化，应用重启恢复） */
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   sessionLabel?: string
 }
@@ -41,7 +59,6 @@ function queryProps(ctx: MysqlPaneContext): Record<string, unknown> {
     initialSql: ctx.initialSql,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     sessionLabel: ctx.sessionLabel,
-    active: true,
   }
 }
 
@@ -52,11 +69,10 @@ function relationProps(ctx: MysqlPaneContext): Record<string, unknown> {
     database: ctx.database,
     table: ctx.table,
     sessionLabel: ctx.sessionLabel,
-    active: true,
   }
 }
 
-function routineProps(ctx: MysqlPaneContext): Record<string, unknown> {
+function debugProps(ctx: MysqlPaneContext): Record<string, unknown> {
   return {
     sessionId: ctx.sessionId,
     profileId: ctx.profileId,
@@ -64,7 +80,33 @@ function routineProps(ctx: MysqlPaneContext): Record<string, unknown> {
     routine: ctx.routine,
     routineKind: ctx.routineKind,
     sessionLabel: ctx.sessionLabel,
-    active: true,
+  }
+}
+
+function routineProps(ctx: MysqlPaneContext): Record<string, unknown> {
+  // 兼容旧 source 入口：映射到对象脚本面板
+  const objectKind: MysqlObjectKind =
+    ctx.objectKind ?? (ctx.routineKind === 'function' ? 'function' : 'procedure')
+  return objectScriptProps({
+    ...ctx,
+    objectKind,
+    objectName: ctx.objectName ?? ctx.routine,
+    designMode: ctx.designMode ?? 'alter',
+  })
+}
+
+function objectScriptProps(ctx: MysqlPaneContext): Record<string, unknown> {
+  return {
+    sessionId: ctx.sessionId,
+    profileId: ctx.profileId,
+    database: ctx.database,
+    objectKind: ctx.objectKind ?? 'view',
+    objectName: ctx.objectName ?? ctx.table ?? ctx.routine,
+    designMode: ctx.designMode ?? 'alter',
+    initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
+    sessionLabel: ctx.sessionLabel,
   }
 }
 
@@ -72,8 +114,15 @@ function monitorProps(ctx: MysqlPaneContext): Record<string, unknown> {
   return {
     sessionId: ctx.sessionId,
     profileId: ctx.profileId,
+  }
+}
+
+function toolsProps(ctx: MysqlPaneContext): Record<string, unknown> {
+  return {
+    sessionId: ctx.sessionId,
+    profileId: ctx.profileId,
+    database: ctx.database,
     sessionLabel: ctx.sessionLabel,
-    active: true,
   }
 }
 
@@ -85,7 +134,6 @@ function designProps(ctx: MysqlPaneContext): Record<string, unknown> {
     table: ctx.table,
     designMode: ctx.designMode ?? 'create',
     sessionLabel: ctx.sessionLabel,
-    active: true,
   }
 }
 
@@ -118,8 +166,16 @@ export const mysqlPaneRegistry: Record<MysqlSessionTab, MysqlFeatureDef> = {
     icon: 'workflow',
     labelKey: 'modules.mysql.session.tabSource',
     resolvePane: () => ({
-      loader: () => import('@/modules/mysql/components/MysqlSourcePane.vue'),
+      loader: () => import('@/modules/mysql/components/MysqlObjectScriptPane.vue'),
       buildProps: routineProps,
+    }),
+  },
+  objectScript: {
+    icon: 'file-code',
+    labelKey: 'modules.mysql.session.tabObjectScript',
+    resolvePane: () => ({
+      loader: () => import('@/modules/mysql/components/MysqlObjectScriptPane.vue'),
+      buildProps: objectScriptProps,
     }),
   },
   monitor: {
@@ -138,6 +194,22 @@ export const mysqlPaneRegistry: Record<MysqlSessionTab, MysqlFeatureDef> = {
       buildProps: designProps,
     }),
   },
+  tools: {
+    icon: 'wrench',
+    labelKey: 'modules.mysql.session.tabTools',
+    resolvePane: () => ({
+      loader: () => import('@/modules/mysql/components/MysqlToolsPane.vue'),
+      buildProps: toolsProps,
+    }),
+  },
+  debug: {
+    icon: 'bug',
+    labelKey: 'modules.mysql.session.tabDebug',
+    resolvePane: () => ({
+      loader: () => import('@/modules/mysql/components/MysqlDebugPane.vue'),
+      buildProps: debugProps,
+    }),
+  },
 }
 
 export function normalizeMysqlFeature(tab: string | undefined): MysqlSessionTab {
@@ -146,8 +218,11 @@ export function normalizeMysqlFeature(tab: string | undefined): MysqlSessionTab 
     tab === 'ddl' ||
     tab === 'query' ||
     tab === 'source' ||
+    tab === 'objectScript' ||
     tab === 'monitor' ||
-    tab === 'design'
+    tab === 'design' ||
+    tab === 'tools' ||
+    tab === 'debug'
   ) {
     return tab
   }
@@ -161,7 +236,10 @@ export function mysqlFeatureEmbedsChrome(tab: MysqlSessionTab): boolean {
     tab === 'browse' ||
     tab === 'ddl' ||
     tab === 'source' ||
+    tab === 'objectScript' ||
     tab === 'monitor' ||
-    tab === 'design'
+    tab === 'design' ||
+    tab === 'tools' ||
+    tab === 'debug'
   )
 }

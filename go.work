@@ -1,14 +1,21 @@
 go 1.25.0
 
 use (
+	./packages/go/common
 	./packages/go/logutil
 	./packages/go/netproxy
 	./packages/go/serviceipc
+	./packages/go/sqllsp
 	./packages/go/tunnel
 	./platform
+	./services/clickhouse-service
+	./services/dameng-service
 	./services/ftp-service
+	./services/kingbase-service
+	./services/mcp-skill-runner
 	./services/mcp-vastbase-readonly
 	./services/mongodb-service
 	./services/mysql-service
+	./services/sqlite-service
 	./services/vastbase-service
 )

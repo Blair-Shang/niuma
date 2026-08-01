@@ -31,7 +31,16 @@ Web cefQuery
 |------------|-----------|----------------|
 | `ftp.session.open` | `ftp` | `session.open` |
 | `ftp.dir.list` | `ftp` | `dir.list` |
+| `sqlite.session.open` | `sqlite` | `session.open` |
+| `sqlite.query.exec` | `sqlite` | `query.exec` |
+| `mysql.session.open` | `mysql` | `session.open` |
+| `dameng.session.open` | `dameng` | `session.open` |
+| `oracle.session.open` | `oracle` | `session.open` |
+| `clickhouse.session.open` | `clickhouse` | `session.open` |
+| `kingbase.session.open` | `kingbase` | `session.open` |
 | `com.niuma.db-pg.query.exec` | `com.niuma.db-pg` | `query.exec` |
+
+常见 `connection_kind` / `bridge.namespace`：`ftp` · `ssh` · `mongodb` · `vastbase` · `mysql` · `sqlite` · `dameng` · `oracle` · `clickhouse` · `kingbase`（详见各模块文档与 `services/manifests/*.yaml`）。
 
 凭据注入：manifest `session.inject_credentials: true` 时，`session.open` / `session.test`（可配置）由 platform 从 Vault 解密后注入转发。
 

@@ -18,17 +18,87 @@ function formatterLanguage(dialect: SqlDialect): SqlLanguage {
   return resolveSqlDialectProfile(dialect).formatterLanguage as SqlLanguage
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function formatCore(sql: string, options: FormatSqlOptions, dialect: SqlDialect): string {
+  return sqlFormat(sql, {
+    language: formatterLanguage(dialect),
+    keywordCase: options.keywordCase ?? 'upper',
+    tabWidth: options.tabWidth ?? 2,
+  })
+}
+
+/**
+ * MySQL 客户端 DELIMITER 块：先按指令切段，格式化过程体后再拼回，
+ * 避免 sql-formatter 把 `//` 拆成 `/ /`、把 `DELIMITER ;` 粘坏。
+ */
+function formatMysqlWithDelimiter(sql: string, options: FormatSqlOptions): string {
+  const newline = sql.includes('\r\n') ? '\r\n' : '\n'
+  const lines = sql.split(/\r?\n/)
+  let delimiter = ';'
+  const out: string[] = []
+  let buffer: string[] = []
+
+  const flush = (): void => {
+    if (buffer.length === 0) return
+    let chunk = buffer.join(newline)
+    buffer = []
+    const trimmed = chunk.trim()
+    if (!trimmed) {
+      out.push(chunk)
+      return
+    }
+
+    let trailing = ''
+    if (delimiter !== ';') {
+      const re = new RegExp(`\\s*${escapeRegExp(delimiter)}\\s*$`)
+      if (re.test(chunk)) {
+        trailing = delimiter
+        chunk = chunk.replace(re, '')
+      }
+    }
+
+    let formatted: string
+    try {
+      formatted = formatCore(chunk, options, 'mysql')
+    } catch {
+      formatted = chunk
+    }
+
+    if (trailing) {
+      formatted = formatted.replace(/\s*;?\s*$/, '')
+      // 与模板一致：结束符跟在最后一行（如 END //）
+      formatted = `${formatted} ${trailing}`
+    }
+    out.push(formatted)
+  }
+
+  for (const line of lines) {
+    const directive = line.match(/^\s*DELIMITER\s+(\S+)\s*$/i)
+    if (directive) {
+      flush()
+      delimiter = directive[1] ?? ';'
+      out.push(line)
+      continue
+    }
+    buffer.push(line)
+  }
+  flush()
+  return out.join(newline)
+}
+
 /** 专业级美化（sql-formatter）。失败时回退原文，避免打断编辑。 */
 export function formatSql(sql: string, options: FormatSqlOptions = {}): string {
   const text = sql ?? ''
   if (!text.trim()) return text
   const dialect = options.dialect ?? 'generic'
   try {
-    return sqlFormat(text, {
-      language: formatterLanguage(dialect),
-      keywordCase: options.keywordCase ?? 'upper',
-      tabWidth: options.tabWidth ?? 2,
-    })
+    if (dialect === 'mysql' && /^\s*DELIMITER\b/im.test(text)) {
+      return formatMysqlWithDelimiter(text, options)
+    }
+    return formatCore(text, options, dialect)
   } catch {
     return text
   }

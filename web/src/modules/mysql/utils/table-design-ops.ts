@@ -1,5 +1,6 @@
 /**
  * MySQL 表设计器 ops 生成（列 / 索引 / 外键）。
+ * ALTER ops 对齐后端扁平 DesignOp（services/mysql-service/internal/ddl/design.go）。
  */
 import type {
   MysqlColumnInfo,
@@ -11,11 +12,15 @@ import type {
   MysqlIndexInfo,
 } from '@/api/types/mysql'
 import {
+  formatMysqlDefaultExpr,
+  joinColumnList,
   newEmptyColumn,
   newEmptyForeignKey,
   newEmptyIndex,
+  nextDraftKey,
   parseColumnList,
   splitDataTypeFields,
+  suggestIndexName,
   type DesignColumnDraft,
   type DesignForeignKeyDraft,
   type DesignIndexDraft,
@@ -33,10 +38,12 @@ export function toDesignRows(cols: MysqlColumnInfo[], pkCols: string[]): DesignC
       typeBase: parts.typeBase,
       typeLength: parts.typeLength,
       typeScale: parts.typeScale,
+      unsigned: parts.unsigned,
+      enumValues: parts.enumValues,
       nullable: c.nullable,
       defaultExpr: c.default ?? '',
       primaryKey: pk.has(c.name),
-      autoIncrement: false,
+      autoIncrement: Boolean(c.autoIncrement),
       comment: c.comment ?? '',
       removed: false,
     }
@@ -44,23 +51,101 @@ export function toDesignRows(cols: MysqlColumnInfo[], pkCols: string[]): DesignC
 }
 
 export function toIndexDrafts(indexes: MysqlIndexInfo[], pkCols: string[]): DesignIndexDraft[] {
-  return indexes
-    .filter((idx) => !idx.primary)
-    .map((idx) => {
-      const columnsText = (idx.columns ?? []).join(', ')
-      return {
-        __rowKey: `idx-${idx.name}`,
-        originalName: idx.name,
-        name: idx.name,
-        columnsText,
-        unique: idx.unique,
-        primary: false,
+  const drafts = indexes.map((idx) => {
+    const columnsText = (idx.columns ?? []).join(', ')
+    const method = (idx.method || 'BTREE').toUpperCase()
+    const primary = Boolean(idx.primary)
+    return {
+      __rowKey: `idx-${idx.name}`,
+      originalName: idx.name,
+      name: primary ? 'PRIMARY' : idx.name,
+      columnsText,
+      unique: primary ? true : idx.unique,
+      primary,
+      method,
+      removed: false,
+      snapName: primary ? 'PRIMARY' : idx.name,
+      snapColumnsText: columnsText,
+      snapUnique: primary ? true : idx.unique,
+      snapMethod: method,
+    }
+  })
+
+  // 元数据偶发缺 PRIMARY 时，用主键列合成一行（对齐 Navicat 索引页始终可见 PRIMARY）
+  if (!drafts.some((d) => d.primary) && pkCols.length > 0) {
+    drafts.unshift(makePrimaryIndexDraft(pkCols, /* existing */ true))
+  }
+
+  drafts.sort((a, b) => Number(b.primary) - Number(a.primary))
+  return drafts
+}
+
+/** 构造 PRIMARY 索引草稿（新建或由列主键勾选同步）。 */
+export function makePrimaryIndexDraft(
+  pkCols: string[],
+  existing: boolean,
+): DesignIndexDraft {
+  const columnsText = joinColumnList(pkCols)
+  return {
+    __rowKey: existing ? 'idx-PRIMARY' : nextDraftKey('idx-pk'),
+    originalName: existing ? 'PRIMARY' : '',
+    name: 'PRIMARY',
+    columnsText,
+    unique: true,
+    primary: true,
+    method: 'BTREE',
+    removed: false,
+    snapName: existing ? 'PRIMARY' : '',
+    snapColumnsText: existing ? columnsText : '',
+    snapUnique: true,
+    snapMethod: 'BTREE',
+  }
+}
+
+/**
+ * 按列上的 primaryKey 勾选，同步索引页中的 PRIMARY 行（Navicat：栏位主键 ↔ 索引 PRIMARY）。
+ */
+export function syncPrimaryIndexFromColumns(
+  indexes: DesignIndexDraft[],
+  columns: DesignColumnDraft[],
+): DesignIndexDraft[] {
+  const pkCols = columns.filter((c) => !c.removed && c.primaryKey && c.name).map((c) => c.name)
+  const others = indexes.filter((i) => !i.primary)
+  if (pkCols.length === 0) {
+    return others
+  }
+  const existing = indexes.find((i) => i.primary && !i.removed)
+  const primary = existing
+    ? {
+        ...existing,
+        name: 'PRIMARY',
+        columnsText: joinColumnList(pkCols),
+        unique: true,
+        primary: true,
         removed: false,
-        snapName: idx.name,
-        snapColumnsText: columnsText,
-        snapUnique: idx.unique,
       }
-    })
+    : makePrimaryIndexDraft(pkCols, false)
+  return [primary, ...others]
+}
+
+/**
+ * 编辑索引页 PRIMARY 列清单后，回写列上的 primaryKey（并强制 NOT NULL）。
+ */
+export function applyPrimaryIndexToColumns(
+  columns: DesignColumnDraft[],
+  columnsText: string,
+): DesignColumnDraft[] {
+  const pkSet = new Set(parseColumnList(columnsText))
+  return columns.map((c) => {
+    if (c.removed) return c
+    const primaryKey = pkSet.has(c.name)
+    if (c.primaryKey === primaryKey && !(primaryKey && c.nullable)) return c
+    return {
+      ...c,
+      primaryKey,
+      nullable: primaryKey ? false : c.nullable,
+    }
+  })
 }
 
 export function toForeignKeyDrafts(fks: MysqlForeignKeyInfo[]): DesignForeignKeyDraft[] {
@@ -90,22 +175,54 @@ export function addDraftForeignKey(fks: DesignForeignKeyDraft[]): DesignForeignK
 }
 
 function columnSpecFromDraft(col: DesignColumnDraft): MysqlDesignColumnSpec {
+  const def = formatMysqlDefaultExpr(col.defaultExpr)
   return {
     name: col.name,
     dataType: col.dataType,
     nullable: col.nullable,
-    default: col.defaultExpr || null,
+    default: def || null,
     comment: col.comment || undefined,
     autoIncrement: col.autoIncrement || undefined,
+    primaryKey: col.primaryKey || undefined,
+  }
+}
+
+/** CHANGE / MODIFY 用的完整类型片段（含 NULL / AI / DEFAULT / COMMENT）。 */
+function columnModifyTypeClause(col: DesignColumnDraft, opts?: { autoIncrement?: boolean }): string {
+  const wantAi = opts?.autoIncrement ?? col.autoIncrement
+  let s = col.dataType.trim()
+  if (!col.nullable) s += ' NOT NULL'
+  if (wantAi) s += ' AUTO_INCREMENT'
+  const def = formatMysqlDefaultExpr(col.defaultExpr)
+  if (def) s += ` DEFAULT ${def}`
+  if (col.comment.trim()) {
+    const esc = col.comment.replace(/'/g, "''")
+    s += ` COMMENT '${esc}'`
+  }
+  return s
+}
+
+function renameColumnOp(col: DesignColumnDraft, autoIncrement?: boolean): MysqlDesignOp {
+  return {
+    op: 'rename_column',
+    name: col.originalName,
+    newName: col.name,
+    dataType: columnModifyTypeClause(col, {
+      autoIncrement: autoIncrement ?? col.autoIncrement,
+    }),
   }
 }
 
 function indexSpecFromDraft(idx: DesignIndexDraft): MysqlDesignIndexSpec {
+  const columns = parseColumnList(idx.columnsText)
+  const name = idx.name.trim() || suggestIndexName(idx.columnsText, `idx_${columns[0] ?? 'col'}`)
+  const method = (idx.method || 'BTREE').toUpperCase()
   return {
-    name: idx.name || undefined,
-    columns: parseColumnList(idx.columnsText),
+    name,
+    columns,
     unique: idx.unique,
     primary: false,
+    method: method === 'HASH' ? 'HASH' : 'BTREE',
   }
 }
 
@@ -120,9 +237,35 @@ function fkSpecFromDraft(fk: DesignForeignKeyDraft): MysqlDesignForeignKeySpec {
   }
 }
 
+function flatAddIndex(idx: DesignIndexDraft): MysqlDesignOp {
+  const spec = indexSpecFromDraft(idx)
+  return {
+    op: 'add_index',
+    name: spec.name,
+    columns: spec.columns,
+    unique: spec.unique,
+    method: spec.method,
+  }
+}
+
+function flatAddForeignKey(fk: DesignForeignKeyDraft): MysqlDesignOp {
+  const spec = fkSpecFromDraft(fk)
+  return {
+    op: 'add_foreign_key',
+    name: spec.name,
+    columns: spec.columns,
+    refTable: spec.refTable,
+    refColumns: spec.refColumns,
+    onDelete: spec.onDelete,
+    onUpdate: spec.onUpdate,
+  }
+}
+
 /**
- * 从草稿列表生成 ALTER TABLE 的 ops。
- * 用于 designPreview / designApply。
+ * 从草稿列表生成 ALTER TABLE 的扁平 ops（对齐后端 DesignOp）。
+ *
+ * 主键变更时须遵守 MySQL 规则：AUTO_INCREMENT 列必须是 KEY（Error 1075）。
+ * 顺序固定为：列结构变更（不含 AI）→ 剥掉旧 AI → DROP/ADD PK → 再按需加回 AI。
  */
 export function buildAlterDesignOps(
   origCols: DesignColumnDraft[],
@@ -134,88 +277,135 @@ export function buildAlterDesignOps(
 ): MysqlDesignOp[] {
   const ops: MysqlDesignOp[] = []
 
-  // 列变更
   const origColMap = new Map(origCols.map((c) => [c.originalName, c]))
+
+  const origPkCols = origCols.filter((c) => c.primaryKey && !c.removed).map((c) => c.name)
+  const newPkCols = newCols.filter((c) => c.primaryKey && !c.removed).map((c) => c.name)
+  const pkChanged =
+    origPkCols.length !== newPkCols.length || origPkCols.some((c, i) => c !== newPkCols[i])
+
+  // 主键重建期间不能带 AI；非主键变更时 AI 可随列 MODIFY 一起发出
+  const deferAutoIncrement = pkChanged
+
+  // ── 1) 列结构变更（主键重建时强制不写 AUTO_INCREMENT）────────────────
+  const strippedAiKeys = new Set<string>()
   for (const col of newCols) {
     if (col.removed) {
       if (col.originalName) ops.push({ op: 'drop_column', name: col.originalName })
       continue
     }
     if (!col.originalName) {
-      // 新增
-      ops.push({ op: 'add_column', column: columnSpecFromDraft(col) })
-    } else {
-      const orig = origColMap.get(col.originalName)
-      if (!orig) continue
-      const changed =
-        col.name !== orig.name ||
-        col.dataType !== orig.dataType ||
-        col.nullable !== orig.nullable ||
-        col.defaultExpr !== orig.defaultExpr ||
-        col.comment !== orig.comment ||
-        col.autoIncrement !== orig.autoIncrement
-      if (changed) {
-        ops.push({ op: 'alter_column', oldName: col.originalName, column: columnSpecFromDraft(col) })
+      const def = formatMysqlDefaultExpr(col.defaultExpr)
+      // ADD COLUMN 不带 AI：新建 AI 列须等主键就绪
+      ops.push({
+        op: 'add_column',
+        name: col.name,
+        dataType: col.dataType,
+        nullable: col.nullable,
+        default: def || null,
+        comment: col.comment || undefined,
+      })
+      continue
+    }
+
+    const orig = origColMap.get(col.originalName)
+    if (!orig) continue
+    const nonAiChanged =
+      col.name !== orig.name ||
+      col.dataType !== orig.dataType ||
+      col.nullable !== orig.nullable ||
+      col.defaultExpr !== orig.defaultExpr ||
+      col.comment !== orig.comment
+    const aiChanged = col.autoIncrement !== orig.autoIncrement
+
+    if (deferAutoIncrement) {
+      // 主键重建期间列 CHANGE 一律不带 AI；旧 AI 的剥离在 PK 段统一处理
+      if (nonAiChanged) {
+        ops.push(renameColumnOp(col, false))
+        if (orig.autoIncrement) strippedAiKeys.add(col.originalName)
       }
+    } else if (nonAiChanged || aiChanged) {
+      ops.push(renameColumnOp(col, col.autoIncrement))
     }
   }
 
-  // 主键变更（基于列的 primaryKey 标志推断）
-  const origPkCols = origCols.filter((c) => c.primaryKey && !c.removed).map((c) => c.name)
-  const newPkCols = newCols.filter((c) => c.primaryKey && !c.removed).map((c) => c.name)
-  const pkChanged =
-    origPkCols.length !== newPkCols.length ||
-    origPkCols.some((c, i) => c !== newPkCols[i])
+  // ── 2) 主键重建：先确保旧 AI 已剥掉，再 DROP / ADD ───────────────────
   if (pkChanged) {
-    ops.push({ op: 'set_primary_key', columns: newPkCols })
+    for (const col of newCols) {
+      if (col.removed || !col.originalName) continue
+      const orig = origColMap.get(col.originalName)
+      if (!orig?.autoIncrement) continue
+      if (strippedAiKeys.has(col.originalName)) continue
+      ops.push(renameColumnOp(col, false))
+      strippedAiKeys.add(col.originalName)
+    }
+    if (origPkCols.length > 0) ops.push({ op: 'drop_primary_key' })
+    if (newPkCols.length > 0) ops.push({ op: 'add_primary_key', columns: newPkCols })
+
+    // ADD PK 后为仍勾选 AI 且属于新主键的列加回 AUTO_INCREMENT
+    for (const col of newCols) {
+      if (col.removed || !col.autoIncrement || !col.primaryKey) continue
+      if (!col.originalName) {
+        // 新建列：ADD COLUMN 后补 AI（列名即 name）
+        ops.push({
+          op: 'rename_column',
+          name: col.name,
+          newName: col.name,
+          dataType: columnModifyTypeClause(col, { autoIncrement: true }),
+        })
+        continue
+      }
+      ops.push(renameColumnOp(col, true))
+    }
   }
 
-  // 索引变更
   const origIdxMap = new Map(origIndexes.map((i) => [i.originalName, i]))
   for (const idx of newIndexes) {
+    // PRIMARY 走 drop/add_primary_key，禁止 drop_index PRIMARY
+    if (idx.primary) continue
     if (idx.removed) {
       if (idx.originalName) ops.push({ op: 'drop_index', name: idx.originalName })
       continue
     }
     if (!idx.originalName) {
-      ops.push({ op: 'add_index', index: indexSpecFromDraft(idx) })
-    } else {
-      const orig = origIdxMap.get(idx.originalName)
-      if (!orig) continue
-      const changed =
-        idx.name !== orig.snapName ||
-        idx.columnsText !== orig.snapColumnsText ||
-        idx.unique !== orig.snapUnique
-      if (changed) {
-        ops.push({ op: 'drop_index', name: idx.originalName })
-        ops.push({ op: 'add_index', index: indexSpecFromDraft(idx) })
-      }
+      ops.push(flatAddIndex(idx))
+      continue
+    }
+    const orig = origIdxMap.get(idx.originalName)
+    if (!orig || orig.primary) continue
+    const changed =
+      idx.name !== orig.snapName ||
+      idx.columnsText !== orig.snapColumnsText ||
+      idx.unique !== orig.snapUnique ||
+      (idx.method || 'BTREE').toUpperCase() !== (orig.snapMethod || 'BTREE').toUpperCase()
+    if (changed) {
+      ops.push({ op: 'drop_index', name: idx.originalName })
+      ops.push(flatAddIndex(idx))
     }
   }
 
-  // 外键变更
   const origFkMap = new Map(origFks.map((f) => [f.originalName, f]))
   for (const fk of newFks) {
     if (fk.removed) {
-      if (fk.originalName) ops.push({ op: 'drop_foreign_key', name: fk.originalName })
+      if (fk.originalName) ops.push({ op: 'drop_constraint', name: fk.originalName })
       continue
     }
     if (!fk.originalName) {
-      ops.push({ op: 'add_foreign_key', fk: fkSpecFromDraft(fk) })
-    } else {
-      const orig = origFkMap.get(fk.originalName)
-      if (!orig) continue
-      const changed =
-        fk.name !== orig.name ||
-        fk.columnsText !== orig.columnsText ||
-        fk.refTable !== orig.refTable ||
-        fk.refColumnsText !== orig.refColumnsText ||
-        fk.onDelete !== orig.onDelete ||
-        fk.onUpdate !== orig.onUpdate
-      if (changed) {
-        ops.push({ op: 'drop_foreign_key', name: fk.originalName })
-        ops.push({ op: 'add_foreign_key', fk: fkSpecFromDraft(fk) })
-      }
+      ops.push(flatAddForeignKey(fk))
+      continue
+    }
+    const orig = origFkMap.get(fk.originalName)
+    if (!orig) continue
+    const changed =
+      fk.name !== orig.name ||
+      fk.columnsText !== orig.columnsText ||
+      fk.refTable !== orig.refTable ||
+      fk.refColumnsText !== orig.refColumnsText ||
+      fk.onDelete !== orig.onDelete ||
+      fk.onUpdate !== orig.onUpdate
+    if (changed) {
+      ops.push({ op: 'drop_constraint', name: fk.originalName })
+      ops.push(flatAddForeignKey(fk))
     }
   }
 
@@ -228,7 +418,8 @@ export function buildCreateColumns(cols: DesignColumnDraft[]): MysqlDesignColumn
 }
 
 export function buildCreateIndexes(indexes: DesignIndexDraft[]): MysqlDesignIndexSpec[] {
-  return indexes.filter((i) => !i.removed && i.columnsText).map(indexSpecFromDraft)
+  // PRIMARY 由列 primaryKey 生成，不走 add_index
+  return indexes.filter((i) => !i.removed && !i.primary && i.columnsText).map(indexSpecFromDraft)
 }
 
 export function buildCreateForeignKeys(fks: DesignForeignKeyDraft[]): MysqlDesignForeignKeySpec[] {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"niuma/pkg/common/id"
 )
 
 const (
@@ -25,15 +26,16 @@ type ResultSet struct {
 	RequestID string
 	SessionID string
 
-	mu         sync.Mutex
-	conn       *pgxpool.Conn
-	rows       pgx.Rows
-	columns    []ColumnMeta
-	peek       []any // 多读的一行，留给下一页
-	fetched    int
-	commandTag string
-	closed     bool
-	cancel      context.CancelFunc
+	mu           sync.Mutex
+	conn         *pgxpool.Conn
+	rows         pgx.Rows
+	columns      []ColumnMeta
+	peek         []any // 多读的一行，留给下一页
+	fetched      int
+	commandTag   string
+	rowsAffected int64
+	closed       bool
+	cancel       context.CancelFunc
 	releaseOwned func() // 跨库短连：关闭临时池与隧道
 }
 
@@ -92,10 +94,7 @@ func OpenPagedQuery(
 		return nil, fmt.Errorf("vastbase: sql required")
 	}
 	pageSize := clampPageSize(params.Limit)
-	requestID := strings.TrimSpace(params.RequestID)
-	if requestID == "" {
-		requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-	}
+	requestID := id.CoalesceID(params.RequestID, "q")
 
 	// 游标寿命不受调用方短超时取消；仅首屏用 AfterFunc 限制卡住时间。
 	rsCtx, cancelRS := context.WithCancel(context.WithoutCancel(ctx))
@@ -147,7 +146,7 @@ func OpenPagedQuery(
 	columns := buildColumnMetas(rsCtx, pool, fieldDescs)
 
 	rs := &ResultSet{
-		ID:           fmt.Sprintf("rs-%d", time.Now().UnixNano()),
+		ID:           id.UniqueID("rs"),
 		RequestID:    requestID,
 		SessionID:    sess.ID,
 		conn:         conn,
@@ -174,6 +173,7 @@ func OpenPagedQuery(
 
 	tag := rs.commandTag
 	duration := time.Since(start).Milliseconds()
+	affected := rowsAffectedPtr(rs.rowsAffected, len(columns))
 
 	if !hasMore {
 		rs.forceClose()
@@ -192,6 +192,7 @@ func OpenPagedQuery(
 			Truncated:    truncated,
 			DurationMS:   duration,
 			CommandTag:   tag,
+			RowsAffected: affected,
 		}, nil
 	}
 
@@ -208,6 +209,7 @@ func OpenPagedQuery(
 		Truncated:    truncated,
 		DurationMS:   duration,
 		CommandTag:   tag,
+		RowsAffected: affected,
 	}, nil
 }
 
@@ -410,7 +412,9 @@ func (rs *ResultSet) readPage(limit int) (page [][]any, hasMore bool, truncated 
 
 func (rs *ResultSet) finishLocked() {
 	if rs.rows != nil {
-		rs.commandTag = rs.rows.CommandTag().String()
+		tag := rs.rows.CommandTag()
+		rs.commandTag = tag.String()
+		rs.rowsAffected = tag.RowsAffected()
 		rs.rows.Close()
 		rs.rows = nil
 	}

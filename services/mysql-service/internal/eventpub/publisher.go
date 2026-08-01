@@ -45,7 +45,8 @@ func (a *Async) Emit(ev map[string]any) {
 
 func isDroppable(typ string) bool {
 	return strings.HasPrefix(typ, "mysql.query.progress") ||
-		strings.HasPrefix(typ, "mysql.io.progress")
+		strings.HasPrefix(typ, "mysql.io.progress") ||
+		strings.HasPrefix(typ, "mysql.tools.progress")
 }
 
 func (a *Async) loop() {

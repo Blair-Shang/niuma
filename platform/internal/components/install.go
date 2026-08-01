@@ -13,9 +13,12 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/ulikunitz/xz"
 )
 
-const installHTTPTimeout = 10 * time.Minute
+// MySQL Community Server 客户端包约 170–280MB，放宽超时以免慢网失败。
+const installHTTPTimeout = 30 * time.Minute
 
 // progressEmitMinInterval 下载进度上报最小间隔，避免刷爆事件总线。
 const progressEmitMinInterval = 100 * time.Millisecond
@@ -251,6 +254,10 @@ func (r *Registry) installPackage(
 		if err := extractTarGz(tmpPath, extractRoot); err != nil {
 			return err
 		}
+	case "tar.xz", "txz":
+		if err := extractTarXz(tmpPath, extractRoot); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unsupported archive: %s", pkg.Archive)
 	}
@@ -385,7 +392,23 @@ func extractTarGz(src, dest string) error {
 		return err
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
+	return extractTar(tar.NewReader(gz), dest)
+}
+
+func extractTarXz(src, dest string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	xzr, err := xz.NewReader(f)
+	if err != nil {
+		return err
+	}
+	return extractTar(tar.NewReader(xzr), dest)
+}
+
+func extractTar(tr *tar.Reader, dest string) error {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {

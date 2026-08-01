@@ -12,6 +12,7 @@ session:
     - tree.databases
     - tree.tables
     - tree.routines
+    - tree.categoryCounts
     - meta.columns
     - meta.indexes
     - meta.ddl
@@ -20,6 +21,9 @@ session:
     - meta.kill
     - meta.instanceOverview
     - meta.locks
+    - meta.serverVariables
+    - meta.serverStatus
+    - meta.innodbDeadlock
     - meta.primaryKey
     - meta.foreignKeys
     - catalog.schemas
@@ -33,6 +37,9 @@ session:
     - io.dumpSql
     - io.execSqlFile
     - io.cancel
+    # tools.detect / tools.cancel 只探测本机路径或取消任务，无需站点凭据
+    - tools.dump
+    - tools.restore
 runtime:
   executable: bin/niuma-mysql-service.exe
   executable_windows: bin/niuma-mysql-service.exe

@@ -22,7 +22,28 @@ function progressKind(message: string): string | null {
   if (message.startsWith('exported ')) return 'exported'
   if (message.startsWith('imported ')) return 'imported'
   if (message.startsWith('executed ')) return 'executed'
+  if (message.startsWith('dumped ')) return 'dumped'
+  if (message.startsWith('restoring')) return 'restoring'
+  if (message.startsWith('running dump')) return 'dumping-run'
   return null
+}
+
+/** 合并 mysqldump --verbose 同类进度行（如 Retrieving table structure …）。 */
+function mysqldumpProgressKind(message: string): string | null {
+  const m = message.replace(/^--\s*/, '').trim()
+  if (/^Retrieving table structure/i.test(m)) return 'structure'
+  if (/^Sending SELECT query/i.test(m)) return 'select'
+  if (/^Retrieving rows/i.test(m)) return 'rows'
+  if (/^Dumping (data|table|structure)/i.test(m)) return 'dumping'
+  return null
+}
+
+const MAX_LOG_LINES = 400
+const MAX_LOG_MESSAGE_CHARS = 240
+
+function truncateLogMessage(message: string): string {
+  if (message.length <= MAX_LOG_MESSAGE_CHARS) return message
+  return `${message.slice(0, MAX_LOG_MESSAGE_CHARS)}…`
 }
 
 export function useMysqlIoTasks(prefix = 'mysql.io.') {
@@ -37,16 +58,18 @@ export function useMysqlIoTasks(prefix = 'mysql.io.') {
   const earlyDones = new Map<string, MysqlIoDoneEvent>()
 
   function pushLine(line: Omit<MysqlIoTaskLine, 'at'>): void {
+    const message = truncateLogMessage(line.message)
+    line = { ...line, message }
     if (
       line.ok === undefined &&
-      (line.message === 'queued' || line.message === 'running' || line.message === line.phase)
+      (message === 'queued' || message === 'running' || message === line.phase)
     ) {
       return
     }
     const now = Date.now()
     const prev = lines.value[lines.value.length - 1]
     const prevKind = prev ? progressKind(prev.message) : null
-    const nextKind = progressKind(line.message)
+    const nextKind = progressKind(message)
     if (
       prev?.taskId === line.taskId &&
       prevKind &&
@@ -64,14 +87,29 @@ export function useMysqlIoTasks(prefix = 'mysql.io.') {
       prev.ok === undefined &&
       line.ok === undefined &&
       prev.message.startsWith('dumping ') &&
-      line.message.startsWith('dumping ')
+      message.startsWith('dumping ')
     ) {
       const next = lines.value.slice()
       next[next.length - 1] = { ...line, at: now }
       lines.value = next
       return
     }
-    lines.value = [...lines.value.slice(-199), { ...line, at: now }]
+    // mysqldump --verbose：同类进度合并为最新一行，避免刷屏
+    const prevDumpKind = prev ? mysqldumpProgressKind(prev.message) : null
+    const nextDumpKind = mysqldumpProgressKind(message)
+    if (
+      prev?.taskId === line.taskId &&
+      prev.ok === undefined &&
+      line.ok === undefined &&
+      prevDumpKind &&
+      prevDumpKind === nextDumpKind
+    ) {
+      const next = lines.value.slice()
+      next[next.length - 1] = { ...line, at: now }
+      lines.value = next
+      return
+    }
+    lines.value = [...lines.value.slice(-(MAX_LOG_LINES - 1)), { ...line, at: now }]
   }
 
   function applyDone(done: MysqlIoDoneEvent): void {
@@ -105,7 +143,7 @@ export function useMysqlIoTasks(prefix = 'mysql.io.') {
         if (progress.phase === 'queued' || progress.phase === 'running') {
           activeTaskId.value = progress.taskId
         }
-        const message = progress.message ?? progress.phase
+        const message = truncateLogMessage(progress.message ?? progress.phase)
         lastMessage.value = message
         pushLine({ taskId: progress.taskId, phase: progress.phase, message })
         return

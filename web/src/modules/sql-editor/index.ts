@@ -1,5 +1,6 @@
 /**
- * 跨 SQL 方言的编辑器能力（格式化 / Monaco 接入 / 对象补全编排）。
+ * 跨 SQL 方言的编辑器能力（格式化 / Monaco / LSP）。
+ * MySQL：Bridge LSP；其余方言：静默内置 sql（无 sql-languages Worker）。
  * 补全基调见 docs/23-sql-dialect-completion.md。
  */
 export type {
@@ -12,9 +13,12 @@ export { resolveSqlDialectProfile } from './dialect'
 export { compressSql, compressSqlText, formatSql, formatSqlText } from './format'
 export type { FormatSqlOptions } from './format'
 export {
-  ensureVastbasePgsqlLanguage,
-  VASTBASE_MONACO_LANGUAGE_ID,
-} from './monaco/pgsql'
+  attachSqlLsp,
+  buildSqlDocumentUri,
+  ensureMysqlLspLanguage,
+  MYSQL_MONACO_LANGUAGE_ID,
+  SqlLspClient,
+} from './lsp'
 export type {
   CatalogClient,
   CatalogColumnHit,
@@ -41,6 +45,7 @@ export {
   clearSuggestScopeIfOwned,
   createSqlCatalogCompletionService,
   getActiveSuggestScope,
+  quoteMysqlIdent,
   quoteSqlIdent,
 } from './completion/create-completion-service'
 export type {
@@ -64,6 +69,7 @@ export type {
 export {
   Cap,
   buildAiDialectRules,
+  defaultKingbaseProfile,
   defaultPostgreSQLProfile,
   defaultProfileForFamily,
   defaultVastbaseProfile,

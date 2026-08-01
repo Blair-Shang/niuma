@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"niuma/pkg/common/id"
 	"niuma/services/vastbase-service/internal/session"
 )
 
@@ -27,10 +28,7 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 	if sess == nil {
 		defer release()
 		limit := params.Limit
-		requestID := strings.TrimSpace(params.RequestID)
-		if requestID == "" {
-			requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-		}
+		requestID := id.CoalesceID(params.RequestID, "q")
 		runCtx := ctx
 		var cancelTimeout context.CancelFunc
 		if params.TimeoutMS > 0 {

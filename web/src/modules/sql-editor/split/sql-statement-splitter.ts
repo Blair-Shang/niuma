@@ -4,16 +4,17 @@
  * 词法单次扫描分号，跳过字符串 / 注释 / 方言特有引号体。
  * 对标 Neon / DbGate 一类「编辑器拆句」路线，不做完整 AST。
  *
- * Vastbase / Oracle：`plsqlBlocks` 开启时，CREATE PROCEDURE/FUNCTION … AS|IS 裸过程体、
- * DECLARE/BEGIN 匿名块内的 `;` 不拆句；独立行 `/`（gsql / SQL\*Plus）可作结束符。
+ * Vastbase / Oracle / Dameng：`plsqlBlocks` 开启时，CREATE PROCEDURE/FUNCTION/PACKAGE/TRIGGER
+ * … 裸 PL/SQL 体、DECLARE/BEGIN 匿名块内的 `;` 不拆句；独立行 `/`（gsql / SQL\*Plus）可作结束符。
  * 声明段内嵌套 `PROCEDURE`/`FUNCTION` 的 `END;` 不结束外层 CREATE（routineDepth）。
  *
- * MySQL：`delimiterBlocks` 开启时识别行首 `DELIMITER <token>`，按当前分隔符切句；
- * 指令行本身不输出为可执行语句。
+ * MySQL：
+ * - `delimiterBlocks`：识别行首 `DELIMITER <token>`（CLI 粘贴兼容）；指令行不输出。
+ * - `mysqlCompoundBlocks`：`CREATE PROCEDURE|FUNCTION … BEGIN…END;` 体内 `;` 不拆句
+ *   （对齐 Navicat：编辑器可直接写过程，无需手写 DELIMITER）。
  *
  * 已知边界：
  * - T-SQL `GO` 批分隔符不在本扫描器范围
- * - 触发器 / 复杂 PACKAGE 规约若无标准 AS|IS…BEGIN…END 形态，仍可能需 `/` 结束
  */
 import type { SqlDialect } from '../dialect'
 import {
@@ -34,6 +35,8 @@ const CHAR_DQUOTE = 34
 const CHAR_DASH = 45
 const CHAR_SLASH = 47
 const CHAR_SEMI = 59
+const CHAR_EQ = 61
+const CHAR_AT = 64
 const CHAR_BACKSLASH = 92
 const CHAR_BACKTICK = 96
 const CHAR_DOLLAR = 36
@@ -288,6 +291,8 @@ function advancePastSlashLine(sql: string, slashIndex: number): number {
 type PlsqlMode =
   | { kind: 'off' }
   | { kind: 'await_as_is' }
+  /** MySQL：CREATE PROCEDURE/FUNCTION 之后等待 BEGIN */
+  | { kind: 'await_begin' }
   | {
       kind: 'body'
       beginDepth: number
@@ -304,6 +309,10 @@ type PlsqlMode =
        */
       caseDepth: number
     }
+
+function usesCompoundBody(features: SqlSplitFeatures): boolean {
+  return features.plsqlBlocks || features.mysqlCompoundBlocks
+}
 
 function bodyMode(
   beginDepth: number,
@@ -375,8 +384,44 @@ function matchesDelimiterAt(sql: string, i: number, delim: string): boolean {
   return true
 }
 
+/** 跳过 MySQL `DEFINER = user@host`（失败则原样返回 i）。 */
+function skipMysqlDefinerClause(
+  sql: string,
+  i: number,
+  features: SqlSplitFeatures,
+): number {
+  const n = sql.length
+  let p = skipWsAndComments(sql, i, features)
+  const defAt = matchKeyword(sql, p, 'definer')
+  if (defAt < 0) return i
+  p = skipWsAndComments(sql, defAt, features)
+  if (p >= n || codeAt(sql, p) !== CHAR_EQ) return i
+  p = skipWsAndComments(sql, p + 1, features)
+  if (p >= n) return i
+
+  const skipAccountPart = (from: number): number => {
+    const c = codeAt(sql, from)
+    if (c === CHAR_BACKTICK || c === CHAR_SQUOTE || c === CHAR_DQUOTE) {
+      return skipQuotedIdent(sql, from, c)
+    }
+    if (!isIdentStart(c)) return -1
+    let j = from + 1
+    while (j < n && isIdentCont(codeAt(sql, j))) j++
+    return j
+  }
+
+  p = skipAccountPart(p)
+  if (p < 0) return i
+  p = skipWsAndComments(sql, p, features)
+  if (p >= n || codeAt(sql, p) !== CHAR_AT) return i
+  p = skipWsAndComments(sql, p + 1, features)
+  p = skipAccountPart(p)
+  if (p < 0) return i
+  return p
+}
+
 /**
- * 句首探测：CREATE PROCEDURE/FUNCTION/PACKAGE、DECLARE、BEGIN 匿名块。
+ * 句首探测：CREATE PROCEDURE/FUNCTION/PACKAGE/TRIGGER、DECLARE、BEGIN 匿名块。
  * @returns 消费后的下标与模式；非 PL/SQL 句首返回 null
  */
 function tryStartPlsql(
@@ -413,6 +458,39 @@ function tryStartPlsql(
     if (bodyAt >= 0) after = bodyAt
     return { next: after, mode: { kind: 'await_as_is' } }
   }
+  // 触发器：CREATE TRIGGER … [DECLARE] BEGIN … END;（无 AS/IS）
+  const triggerAt = matchKeyword(sql, p, 'trigger')
+  if (triggerAt >= 0) return { next: triggerAt, mode: { kind: 'await_begin' } }
+  return null
+}
+
+/**
+ * MySQL 句首：CREATE [DEFINER=…] PROCEDURE|FUNCTION → 等待 BEGIN。
+ */
+function tryStartMysqlCompound(
+  sql: string,
+  i: number,
+  features: SqlSplitFeatures,
+): { next: number; mode: PlsqlMode } | null {
+  const createAt = matchKeyword(sql, i, 'create')
+  if (createAt < 0) return null
+  let p = skipWsAndComments(sql, createAt, features)
+  p = skipMysqlDefinerClause(sql, p, features)
+  p = skipWsAndComments(sql, p, features)
+  const orAt = matchKeyword(sql, p, 'or')
+  if (orAt >= 0) {
+    p = skipWsAndComments(sql, orAt, features)
+    const replaceAt = matchKeyword(sql, p, 'replace')
+    if (replaceAt < 0) return null
+    p = skipWsAndComments(sql, replaceAt, features)
+  }
+  // DEFINER 也可能写在 OR REPLACE 之后（少见）；再试一次
+  p = skipMysqlDefinerClause(sql, p, features)
+  p = skipWsAndComments(sql, p, features)
+  const procAt = matchKeyword(sql, p, 'procedure')
+  if (procAt >= 0) return { next: procAt, mode: { kind: 'await_begin' } }
+  const funcAt = matchKeyword(sql, p, 'function')
+  if (funcAt >= 0) return { next: funcAt, mode: { kind: 'await_begin' } }
   return null
 }
 
@@ -472,19 +550,23 @@ function findStatementBoundaries(
         atStatementStart = true
         continue
       }
-      // 非 DELIMITER 指令：若无 PL/SQL 句首探测，立刻离开句首态，避免把中间标识符当成指令
-      if (!features.plsqlBlocks) {
+      // 非 DELIMITER 指令：若无复合句首探测，立刻离开句首态，避免把中间标识符当成指令
+      if (!usesCompoundBody(features)) {
         atStatementStart = false
       }
     }
 
-    if (features.plsqlBlocks && atStatementStart) {
+    if (usesCompoundBody(features) && atStatementStart) {
       const skipped = skipWsAndComments(sql, i, features)
       if (skipped !== i) {
         i = skipped
         continue
       }
-      if (codeAt(sql, i) === CHAR_SLASH && isSlashTerminatorAt(sql, i)) {
+      if (
+        features.plsqlBlocks &&
+        codeAt(sql, i) === CHAR_SLASH &&
+        isSlashTerminatorAt(sql, i)
+      ) {
         // 上一句 END; 后残留的 gsql `/`，或空缓冲：记边界，空段随后被丢掉
         positions.push({ end: i, delimiterIndex: i, delimiterLength: 1 })
         i = advancePastSlashLine(sql, i)
@@ -492,12 +574,23 @@ function findStatementBoundaries(
         plsql = { kind: 'off' }
         continue
       }
-      const started = tryStartPlsql(sql, i, features)
-      if (started) {
-        plsql = started.mode
-        i = started.next
-        atStatementStart = false
-        continue
+      if (features.mysqlCompoundBlocks) {
+        const mysqlStarted = tryStartMysqlCompound(sql, i, features)
+        if (mysqlStarted) {
+          plsql = mysqlStarted.mode
+          i = mysqlStarted.next
+          atStatementStart = false
+          continue
+        }
+      }
+      if (features.plsqlBlocks) {
+        const started = tryStartPlsql(sql, i, features)
+        if (started) {
+          plsql = started.mode
+          i = started.next
+          atStatementStart = false
+          continue
+        }
       }
       atStatementStart = false
     }
@@ -578,9 +671,9 @@ function findStatementBoundaries(
       continue
     }
 
-    // PL/SQL 关键字：AS/IS 切入体；BEGIN/END 嵌套
-    if (features.plsqlBlocks && isIdentStart(c)) {
-      if (plsql.kind === 'await_as_is') {
+    // 复合语句关键字：AS/IS 或 BEGIN 切入体；BEGIN/END 嵌套
+    if (usesCompoundBody(features) && isIdentStart(c)) {
+      if (features.plsqlBlocks && plsql.kind === 'await_as_is') {
         let asIsEnd = matchKeyword(sql, i, 'as')
         if (asIsEnd < 0) asIsEnd = matchKeyword(sql, i, 'is')
         if (asIsEnd >= 0) {
@@ -594,6 +687,29 @@ function findStatementBoundaries(
           }
           plsql = bodyMode(0, false, 1)
           i = asIsEnd
+          continue
+        }
+      }
+      if (features.mysqlCompoundBlocks && plsql.kind === 'await_begin') {
+        const beginAt = matchKeyword(sql, i, 'begin')
+        if (beginAt >= 0) {
+          plsql = bodyMode(1, false, 1)
+          i = beginAt
+          continue
+        }
+      }
+      // Oracle/Dameng 触发器等：await_begin，可先 DECLARE 再 BEGIN
+      if (features.plsqlBlocks && plsql.kind === 'await_begin') {
+        const declareAt = matchKeyword(sql, i, 'declare')
+        if (declareAt >= 0) {
+          plsql = bodyMode(0, false, 1)
+          i = declareAt
+          continue
+        }
+        const beginAt = matchKeyword(sql, i, 'begin')
+        if (beginAt >= 0) {
+          plsql = bodyMode(1, false, 1)
+          i = beginAt
           continue
         }
       }
@@ -688,6 +804,7 @@ function findStatementBoundaries(
         delimiterLength: currentDelimiter.length,
       })
       i += currentDelimiter.length
+      plsql = { kind: 'off' }
       atStatementStart = true
       continue
     }
@@ -698,9 +815,9 @@ function findStatementBoundaries(
         i++
         continue
       }
-      if (features.plsqlBlocks && plsql.kind === 'body') {
+      if (usesCompoundBody(features) && plsql.kind === 'body') {
         if (plsql.endPending && plsql.beginDepth === 0) {
-          // END; —— 分号属于 PL/SQL 体，必须保留在切片内
+          // END; —— 分号属于过程体，必须保留在切片内
           pushSemi(i, true)
           plsql = { kind: 'off' }
           atStatementStart = true
@@ -711,7 +828,7 @@ function findStatementBoundaries(
         i++
         continue
       }
-      if (plsql.kind === 'await_as_is') {
+      if (plsql.kind === 'await_as_is' || plsql.kind === 'await_begin') {
         plsql = { kind: 'off' }
       }
       pushSemi(i, false)

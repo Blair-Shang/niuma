@@ -24,6 +24,11 @@ import {
 import { exportQueryResultAsCsv } from '@/modules/vastbase/utils/export-csv'
 import { prepareDialectExecSql } from '@/modules/vastbase/utils/oracle-terminator'
 import { parsePrimaryFromRelation, type ParsedFromRelation } from '@/modules/vastbase/utils/parse-query-from'
+import {
+  buildSqlQueryContextMenuItems,
+  type QueryResultPanelLabels,
+  type SqlQueryToolbarLabels,
+} from '@/modules/database'
 import { useSessionRegistry } from '@/stores/session-registry'
 import {
   MAX_BATCH_STATEMENTS,
@@ -56,12 +61,7 @@ import { useTabStore } from '@/stores/tab'
 
 export type { VastQueryResultRow, VastGridTab, VastResultPaneTabId }
 
-export type VastMessageItem = {
-  key: string
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'warning' | 'error'
-}
+export type VastMessageItem = import('@/modules/database/types/query-result').QueryResultMessageItem
 
 export interface VastQueryPaneProps {
   sessionId: string | null
@@ -86,6 +86,7 @@ type VastExecSummary = {
   durationMs: number
   rowCount: number
   fetchedCount?: number
+  rowsAffected?: number
   commandTag?: string
   notices?: string[]
   columnCount: number
@@ -168,6 +169,18 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
     }
   }
 
+  /** DML 无结果集时用 rowsAffected；SELECT 用已取行数 */
+  function displayRowCount(res: {
+    rowCount?: number
+    fetchedCount?: number
+    rowsAffected?: number
+  }): number {
+    if (res.rowsAffected != null && res.rowsAffected >= 0 && (res.rowCount ?? 0) === 0) {
+      return res.rowsAffected
+    }
+    return res.fetchedCount ?? res.rowCount ?? 0
+  }
+
   const lastResult = computed((): VastQueryExecResult | null => {
     const g = activeGrid.value
     if (!g) return null
@@ -185,6 +198,7 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
       rows: [],
       rowCount: s.rowCount,
       fetchedCount: s.fetchedCount,
+      rowsAffected: s.rowsAffected,
       hasMore: s.hasMore,
       truncated: s.truncated,
       durationMs: s.durationMs,
@@ -332,7 +346,7 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
         {
           key: 'rows',
           label: t('modules.vastbase.session.msgRows'),
-          value: String(res.fetchedCount ?? res.rowCount),
+          value: String(displayRowCount(res)),
         },
       )
       if (res.columns.length > 0) {
@@ -391,7 +405,7 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
       })
     }
     if (!res) return ''
-    const n = res.fetchedCount ?? res.rowCount
+    const n = displayRowCount(res)
     const rows = summaryHasMore.value ? `${n}+` : String(n)
     const base = t('modules.vastbase.session.resultSummary', {
       rows,
@@ -405,88 +419,52 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
     })} · ${base}`
   })
 
-  const contextMenuItems = computed((): RsContextMenuItem[] => [
-    {
-      key: 'run',
-      label: editor.hasSelection.value
-        ? t('modules.vastbase.session.runSelection')
-        : t('modules.vastbase.session.run'),
-      icon: 'play',
-      shortcut: 'Ctrl+Enter',
-      disabled: running.value,
-    },
-    {
-      key: 'cancel',
-      label: t('modules.vastbase.session.cancel'),
-      icon: 'square',
-      disabled: !running.value || cancelling.value,
-    },
-    {
-      key: 'format',
-      label: t('modules.vastbase.session.format'),
-      icon: 'braces',
-      shortcut: 'Shift+Alt+F',
-      disabled: running.value,
-    },
-    {
-      key: 'compress',
-      label: t('modules.vastbase.session.compress'),
-      icon: 'minimize-2',
-      disabled: running.value || !sqlText.value.trim(),
-    },
-    { key: 'sep-edit', label: '', separator: true },
-    {
-      key: 'copy',
-      label: t('modules.vastbase.session.copy'),
-      icon: 'copy',
-      shortcut: 'Ctrl+C',
-    },
-    {
-      key: 'paste',
-      label: t('modules.vastbase.session.paste'),
-      icon: 'clipboard-paste',
-      shortcut: 'Ctrl+V',
-    },
-    { key: 'sep-explain', label: '', separator: true },
-    {
-      key: 'explain',
-      label: t('modules.vastbase.session.explain'),
-      icon: 'git-compare',
-      disabled: running.value,
-    },
-    {
-      key: 'explainAnalyze',
-      label: t('modules.vastbase.session.explainAnalyze'),
-      icon: 'activity',
-      disabled: running.value,
-    },
-    { key: 'sep-ai', label: '', separator: true },
-    {
-      key: 'askAi',
-      label: t('modules.vastbase.session.askAi'),
-      icon: 'bot',
-      disabled: !editor.hasSelection.value && !sqlText.value.trim(),
-    },
-    { key: 'sep-export', label: '', separator: true },
-    {
-      key: 'exportCsv',
-      label: t('modules.vastbase.session.exportCsv'),
-      icon: 'download',
-      disabled: resultRows.value.length === 0,
-    },
-    {
-      key: 'fetchMore',
-      label: t('modules.vastbase.session.fetchMore'),
-      icon: 'arrow-down',
-      disabled: !hasMore.value || loadingMore.value || running.value,
-    },
-    {
-      key: 'fetchAll',
-      label: t('modules.vastbase.session.fetchAll'),
-      icon: 'arrow-down',
-      disabled: !hasMore.value || loadingMore.value || running.value,
-    },
-  ])
+  const contextMenuItems = computed((): RsContextMenuItem[] =>
+    buildSqlQueryContextMenuItems({
+      labels: {
+        run: t('modules.vastbase.session.run'),
+        runSelection: t('modules.vastbase.session.runSelection'),
+        cancel: t('modules.vastbase.session.cancel'),
+        format: t('modules.vastbase.session.format'),
+        compress: t('modules.vastbase.session.compress'),
+        copy: t('modules.vastbase.session.copy'),
+        paste: t('modules.vastbase.session.paste'),
+        explain: t('modules.vastbase.session.explain'),
+        explainAnalyze: t('modules.vastbase.session.explainAnalyze'),
+        askAi: t('modules.vastbase.session.askAi'),
+        exportCsv: t('modules.vastbase.session.exportCsv'),
+        fetchMore: t('modules.vastbase.session.fetchMore'),
+        fetchAll: t('modules.vastbase.session.fetchAll'),
+      },
+      running: running.value,
+      cancelling: cancelling.value,
+      hasSelection: editor.hasSelection.value,
+      sqlEmpty: !sqlText.value.trim(),
+      hasResultRows: resultRows.value.length > 0,
+      hasMore: hasMore.value,
+      loadingMore: loadingMore.value,
+      showAskAi: true,
+      showExplain: true,
+    }),
+  )
+
+  const toolbarLabels = computed((): SqlQueryToolbarLabels => ({
+    toolbarAria: t('modules.vastbase.session.sqlEditor'),
+    format: t('modules.vastbase.session.format'),
+    formatTooltip: t('modules.vastbase.session.formatTooltip'),
+    explain: t('modules.vastbase.session.explain'),
+    explainTooltip: t('modules.vastbase.session.explainTooltip'),
+    explainAnalyze: t('modules.vastbase.session.explainAnalyze'),
+    explainAnalyzeTooltip: t('modules.vastbase.session.explainAnalyzeTooltip'),
+    run: t('modules.vastbase.session.run'),
+    runSelection: t('modules.vastbase.session.runSelection'),
+    runTooltip: t('modules.vastbase.session.runTooltip'),
+    cancel: t('modules.vastbase.session.cancel'),
+    cancelTooltip: t('modules.vastbase.session.cancelTooltip'),
+    history: t('modules.vastbase.session.history'),
+    historyEmpty: t('modules.vastbase.session.historyEmpty'),
+    historyClear: t('modules.vastbase.session.historyClear'),
+  }))
 
   function onContextMenuSelect(key: string): void {
     if (key === 'run') void runQuery()
@@ -792,6 +770,7 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
       durationMs: result.durationMs,
       rowCount: result.rowCount,
       fetchedCount: result.fetchedCount,
+      rowsAffected: result.rowsAffected,
       commandTag: result.commandTag,
       notices: result.notices,
       columnCount: result.columns?.length ?? 0,
@@ -1086,7 +1065,6 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
         count: slices.length,
       })
       activePaneTab.value = 'messages'
-      toast.error(lastError.value)
       return
     }
 
@@ -1240,7 +1218,7 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
               toast.success(
                 tag
                   ? t('modules.vastbase.session.resultMeta', {
-                      rows: result.fetchedCount ?? result.rowCount,
+                      rows: displayRowCount(result),
                       ms: result.durationMs,
                       tag,
                     })
@@ -1285,12 +1263,6 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
             }
             batchItems.value = batchItems.value.slice()
             activePaneTab.value = 'messages'
-            toast.error(
-              t('modules.vastbase.session.batchStopped', {
-                n: i + 1,
-                message: errMsg,
-              }),
-            )
           } else {
             clearResultData()
             activePaneTab.value = 'messages'
@@ -1643,6 +1615,34 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
     { immediate: true },
   )
 
+  const resultPanelLabels = computed((): QueryResultPanelLabels => ({
+    batchResultTab: (n) => t('modules.vastbase.session.batchResultTab', { n }),
+    tabRowCount: (n, hasMore) =>
+      `${t('modules.vastbase.session.tabRows', { n })}${hasMore ? '+' : ''}`,
+    messages: t('modules.vastbase.session.messages'),
+    closeResultTab: t('modules.vastbase.session.closeResultTab'),
+    filterPlaceholder: t('modules.vastbase.session.filterPlaceholder'),
+    loadMore: t('modules.vastbase.session.fetchMore'),
+    fetchAll: t('modules.vastbase.session.fetchAll'),
+    exportCsv: t('modules.vastbase.session.exportCsv'),
+    messagesEmpty: t('modules.vastbase.session.messagesEmpty'),
+    emptyResult: t('modules.vastbase.session.noResult'),
+    resultEmpty: t('modules.vastbase.session.resultEmpty'),
+    batchStmtLabel: (n) => t('modules.vastbase.session.batchStmtLabel', { n }),
+    batchStmtSkipped: t('modules.vastbase.session.batchStmtSkipped'),
+    batchStmtRunning: t('modules.vastbase.session.batchStmtRunning'),
+    batchStmtPending: t('modules.vastbase.session.batchStmtPending'),
+    batchOpenResult: t('modules.vastbase.session.batchOpenResult'),
+    msgOk: t('modules.vastbase.session.msgStatusOk'),
+    msgError: t('modules.vastbase.session.msgStatusError'),
+    cancelled: t('modules.vastbase.session.msgStatusCancelled'),
+    logColStatus: t('modules.vastbase.session.logColStatus'),
+    logColTime: t('modules.vastbase.session.logColTime'),
+    logColRows: t('modules.vastbase.session.logColRows'),
+    copyMessage: t('modules.vastbase.session.copyMessage'),
+    copiedHint: t('modules.vastbase.session.copiedHint'),
+  }))
+
   return {
     t,
     sqlText,
@@ -1665,8 +1665,10 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
     messageItems,
     hasMessages,
     resultSummaryText,
+    resultPanelLabels,
     historyEntries,
     contextMenuItems,
+    toolbarLabels,
     resultColumns,
     resultRows,
     filterKeys,

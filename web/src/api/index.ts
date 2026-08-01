@@ -7,6 +7,7 @@
  */
 
 export { bridgeInvoke, bridgeOnEvent, isBridgeAvailable } from './client'
+export { isPlatformUnavailable, withPlatformRetry } from './platform'
 export { ensureBridgeEventBus, subscribeBridgeEvent, subscribeBridgeEventByPrefix } from './event-bus'
 
 export { shellApi } from './shell'
@@ -24,6 +25,11 @@ export { redisApi } from './redis'
 export { mongodbApi } from './mongodb'
 export { vastbaseApi } from './vastbase'
 export { mysqlApi } from './mysql'
+export { sqliteApi } from './sqlite'
+export { damengApi } from './dameng'
+export { oracleApi } from './oracle'
+export { clickhouseApi } from './clickhouse'
+export { kingbaseApi } from './kingbase'
 export { fileEditorApi } from './file-editor'
 
 export type * from './types'

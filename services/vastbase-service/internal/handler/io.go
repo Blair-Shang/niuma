@@ -16,9 +16,10 @@ type ioCsvParams struct {
 	Database   string            `json:"database"`
 	Schema     string            `json:"schema"`
 	Table      string            `json:"table"`
-	OutputPath string            `json:"outputPath"`
-	InputPath  string            `json:"inputPath"`
-	Options    dataio.CsvOptions `json:"options"`
+	OutputPath string `json:"outputPath"`
+	InputPath  string `json:"inputPath"`
+	// csvOptions 勿用 options：platform 凭据注入会用连接 options 覆盖同名字段。
+	Options dataio.CsvOptions `json:"csvOptions"`
 }
 
 type ioDumpParams struct {

@@ -235,6 +235,10 @@ $redisOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-redis-servi
 $mongoOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-mongodb-service' -PlatformName $Platform)
 $vastbaseOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-vastbase-service' -PlatformName $Platform)
 $mysqlOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-mysql-service' -PlatformName $Platform)
+$sqliteOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-sqlite-service' -PlatformName $Platform)
+$damengOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-dameng-service' -PlatformName $Platform)
+$clickhouseOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-clickhouse-service' -PlatformName $Platform)
+$kingbaseOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-kingbase-service' -PlatformName $Platform)
 $mcpVastOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'mcp-vastbase-readonly' -PlatformName $Platform)
 
 $MigrateDir = Join-Path $Root 'platform/internal/migrate'
@@ -269,6 +273,22 @@ Build-GoService -ModuleDir (Join-Path $Root 'services/mysql-service') `
     -Package './cmd/mysql-service' `
     -Output $mysqlOut
 
+Build-GoService -ModuleDir (Join-Path $Root 'services/sqlite-service') `
+    -Package './cmd/sqlite-service' `
+    -Output $sqliteOut
+
+Build-GoService -ModuleDir (Join-Path $Root 'services/dameng-service') `
+    -Package './cmd/dameng-service' `
+    -Output $damengOut
+
+Build-GoService -ModuleDir (Join-Path $Root 'services/clickhouse-service') `
+    -Package './cmd/clickhouse-service' `
+    -Output $clickhouseOut
+
+Build-GoService -ModuleDir (Join-Path $Root 'services/kingbase-service') `
+    -Package './cmd/kingbase-service' `
+    -Output $kingbaseOut
+
 Build-GoService -ModuleDir (Join-Path $Root 'services/mcp-vastbase-readonly') `
     -Package '.' `
     -Output $mcpVastOut
@@ -289,12 +309,20 @@ if (Should-SyncLegacyBin) {
     $legacyMongoOut = Join-Path $BinDir 'niuma-mongodb-service.exe'
     $legacyVastbaseOut = Join-Path $BinDir 'niuma-vastbase-service.exe'
     $legacyMysqlOut = Join-Path $BinDir 'niuma-mysql-service.exe'
+    $legacySqliteOut = Join-Path $BinDir 'niuma-sqlite-service.exe'
+    $legacyDamengOut = Join-Path $BinDir 'niuma-dameng-service.exe'
+    $legacyClickhouseOut = Join-Path $BinDir 'niuma-clickhouse-service.exe'
+    $legacyKingbaseOut = Join-Path $BinDir 'niuma-kingbase-service.exe'
     $legacyMcpVastOut = Join-Path $BinDir 'mcp-vastbase-readonly.exe'
     Copy-Item -Force $platformOut $legacyPlatformOut
     Copy-Item -Force $ftpOut $legacyFtpOut
     Copy-Item -Force $mongoOut $legacyMongoOut
     Copy-Item -Force $vastbaseOut $legacyVastbaseOut
     Copy-Item -Force $mysqlOut $legacyMysqlOut
+    Copy-Item -Force $sqliteOut $legacySqliteOut
+    Copy-Item -Force $damengOut $legacyDamengOut
+    Copy-Item -Force $clickhouseOut $legacyClickhouseOut
+    Copy-Item -Force $kingbaseOut $legacyKingbaseOut
     Copy-Item -Force $mcpVastOut $legacyMcpVastOut
     if ($sshBuilt -and (Test-Path $sshOut)) {
         Copy-Item -Force $sshOut $legacySshOut
@@ -309,6 +337,11 @@ Write-Host "    $platformOut"
 Write-Host "    $ftpOut"
 Write-Host "    $mongoOut"
 Write-Host "    $vastbaseOut"
+Write-Host "    $mysqlOut"
+Write-Host "    $sqliteOut"
+Write-Host "    $damengOut"
+Write-Host "    $clickhouseOut"
+Write-Host "    $kingbaseOut"
 Write-Host "    $mcpVastOut"
 if ($sshBuilt -and (Test-Path $sshOut)) {
     Write-Host "    $sshOut"

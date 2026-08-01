@@ -127,3 +127,35 @@ func (d *Dispatcher) treeRoutines(ctx context.Context, req Request) Response {
 	)
 	return okResponse(req.ID, result)
 }
+
+func (d *Dispatcher) treeCategoryCounts(ctx context.Context, req Request) Response {
+	var params treeListParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	if params.Database == "" {
+		return errorResponse(req.ID, "database required")
+	}
+
+	db, _, release, err := d.resolveDBForDatabase(ctx, req.Params, params.Database)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := tree.CountCategories(ctx, db, params.Database)
+	if err != nil {
+		logOpWarn(MethodTreeCategoryCounts, err, "session", params.SessionID, "database", params.Database)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(
+		MethodTreeCategoryCounts,
+		"session", params.SessionID,
+		"database", params.Database,
+		"tables", result.Tables,
+		"views", result.Views,
+		"functions", result.Functions,
+		"procedures", result.Procedures,
+	)
+	return okResponse(req.ID, result)
+}

@@ -13,19 +13,21 @@ type toolsPathParams struct {
 }
 
 type toolsDumpParams struct {
-	SessionID  string              `json:"sessionId"`
-	Database   string              `json:"database"`
-	OutputPath string              `json:"outputPath"`
-	Options    tools.DumpOptions   `json:"options"`
-	ToolPaths  tools.PathOverrides `json:"toolPaths"`
+	SessionID  string `json:"sessionId"`
+	Database   string `json:"database"`
+	OutputPath string `json:"outputPath"`
+	// dumpOptions 勿用 options：platform 凭据注入会用连接 options 覆盖同名字段。
+	Options   tools.DumpOptions   `json:"dumpOptions"`
+	ToolPaths tools.PathOverrides `json:"toolPaths"`
 }
 
 type toolsRestoreParams struct {
-	SessionID string                `json:"sessionId"`
-	Database  string                `json:"database"`
-	InputPath string                `json:"inputPath"`
-	Options   tools.RestoreOptions  `json:"options"`
-	ToolPaths tools.PathOverrides   `json:"toolPaths"`
+	SessionID string `json:"sessionId"`
+	Database  string `json:"database"`
+	InputPath string `json:"inputPath"`
+	// restoreOptions 勿用 options：platform 凭据注入会用连接 options 覆盖同名字段。
+	Options   tools.RestoreOptions `json:"restoreOptions"`
+	ToolPaths tools.PathOverrides  `json:"toolPaths"`
 }
 
 func (d *Dispatcher) toolsDetect(_ context.Context, req Request) Response {

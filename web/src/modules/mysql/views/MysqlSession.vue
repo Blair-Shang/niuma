@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { RsEmpty, RsIcon, RsLoading, useRsToast } from '@niuma/ui'
-import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onActivated,
+  onDeactivated,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { connectionApi } from '@/api'
 import type { ConnectionProfile } from '@/api/types/connection'
@@ -11,6 +19,7 @@ import {
   normalizeMysqlFeature,
   type MysqlSessionTab,
 } from '@/modules/mysql/pane-registry'
+import type { MysqlObjectKind } from '@/modules/mysql/types/object-script'
 
 const props = defineProps<{
   profileId: string
@@ -18,10 +27,14 @@ const props = defineProps<{
   table?: string
   routine?: string
   routineKind?: 'procedure' | 'function'
+  objectKind?: MysqlObjectKind
+  objectName?: string
   initialTab?: MysqlSessionTab
   initialSql?: string
+  /** 对象脚本未保存正文（随 workspace.tabs 持久化） */
+  draftSql?: string
   autoRunInitialSql?: boolean
-  /** design 面板模式：create=新建表；alter=修改表（默认） */
+  /** design / objectScript：create=新建；alter=编辑 */
   designMode?: 'create' | 'alter'
   tabId?: string
 }>()
@@ -29,7 +42,8 @@ const props = defineProps<{
 const { t } = useI18n()
 const toast = useRsToast()
 
-const feature = normalizeMysqlFeature(props.initialTab)
+const rawFeature = normalizeMysqlFeature(props.initialTab)
+const feature = rawFeature === 'source' ? 'objectScript' : rawFeature
 const featureDef = mysqlPaneRegistry[feature]
 const embedsChrome = mysqlFeatureEmbedsChrome(feature)
 
@@ -37,18 +51,19 @@ const profile = ref<ConnectionProfile | null>(null)
 const connecting = ref(true)
 const error = ref<string | null>(null)
 
-const { sessionId, acquireSession, reconnectSession } = useSessionLease({
-  kind: 'mysql',
-  profileId: () => props.profileId,
-  tabId: () => props.tabId,
-})
-
 const profileDatabase = computed(() => {
   const raw = profile.value?.connectionOptions?.database
   return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined
 })
 
-const effectiveDatabase = computed(() => props.database || profileDatabase.value)
+const effectiveDatabase = computed(() => props.database?.trim() || profileDatabase.value)
+
+const { sessionId, acquireSession, reconnectSession } = useSessionLease({
+  kind: 'mysql',
+  profileId: () => props.profileId,
+  tabId: () => props.tabId,
+  connectDatabase: () => effectiveDatabase.value,
+})
 
 const sessionLabel = computed(() => {
   const p = profile.value
@@ -61,23 +76,39 @@ const pane = featureDef.resolvePane({
   routine: props.routine,
   routineKind: props.routineKind,
   designMode: props.designMode,
+  objectKind: props.objectKind,
+  objectName: props.objectName,
 })
 const PaneView = defineAsyncComponent(pane.loader)
 
-const paneProps = computed(() =>
-  pane.buildProps({
+/** keep-alive 可见性：切 Shell Tab 时交接 suggest scope / Monaco layout（对齐 VastSession） */
+const paneActive = ref(true)
+onActivated(() => {
+  paneActive.value = true
+})
+onDeactivated(() => {
+  paneActive.value = false
+})
+
+const paneProps = computed(() => ({
+  ...pane.buildProps({
     sessionId: sessionId.value,
     profileId: props.profileId,
     database: effectiveDatabase.value,
     table: props.table,
     routine: props.routine,
     routineKind: props.routineKind,
+    objectKind: props.objectKind,
+    objectName: props.objectName,
     initialSql: props.initialSql,
+    draftSql: props.draftSql,
+    tabId: props.tabId,
     autoRunInitialSql: props.autoRunInitialSql,
     sessionLabel: sessionLabel.value,
     designMode: props.designMode,
   }),
-)
+  active: paneActive.value,
+}))
 
 async function loadProfile(): Promise<void> {
   const result = await connectionApi.get({ profileId: props.profileId })

@@ -43,7 +43,8 @@ type ioExportCsvParams struct {
 	Database   string            `json:"database"`
 	Table      string            `json:"table"`
 	OutputPath string            `json:"outputPath"`
-	Options    dataio.CsvOptions `json:"options"`
+	// csvOptions 勿用 options：platform 凭据注入会用连接 options 覆盖同名字段。
+	CsvOptions dataio.CsvOptions `json:"csvOptions"`
 }
 
 func (d *Dispatcher) ioExportCsv(ctx context.Context, req Request) Response {
@@ -57,7 +58,7 @@ func (d *Dispatcher) ioExportCsv(ctx context.Context, req Request) Response {
 		return errorResponse(req.ID, err.Error())
 	}
 
-	taskID, err := d.io.ExportCsv(ctx, connect, sessionID, params.Database, params.Table, params.OutputPath, params.Options)
+	taskID, err := d.io.ExportCsv(ctx, connect, sessionID, params.Database, params.Table, params.OutputPath, params.CsvOptions)
 	if err != nil {
 		logOpWarn(MethodIOExportCsv, err, "session", sessionID, "database", params.Database, "table", params.Table)
 		return errorResponse(req.ID, err.Error())
@@ -67,12 +68,12 @@ func (d *Dispatcher) ioExportCsv(ctx context.Context, req Request) Response {
 }
 
 type ioImportCsvParams struct {
-	SessionID string            `json:"sessionId"`
-	ProfileID string            `json:"profileId"`
-	Database  string            `json:"database"`
-	Table     string            `json:"table"`
-	InputPath string            `json:"inputPath"`
-	Options   dataio.CsvOptions `json:"options"`
+	SessionID  string            `json:"sessionId"`
+	ProfileID  string            `json:"profileId"`
+	Database   string            `json:"database"`
+	Table      string            `json:"table"`
+	InputPath  string            `json:"inputPath"`
+	CsvOptions dataio.CsvOptions `json:"csvOptions"`
 }
 
 func (d *Dispatcher) ioImportCsv(ctx context.Context, req Request) Response {
@@ -86,7 +87,7 @@ func (d *Dispatcher) ioImportCsv(ctx context.Context, req Request) Response {
 		return errorResponse(req.ID, err.Error())
 	}
 
-	taskID, err := d.io.ImportCsv(ctx, connect, sessionID, params.Database, params.Table, params.InputPath, params.Options)
+	taskID, err := d.io.ImportCsv(ctx, connect, sessionID, params.Database, params.Table, params.InputPath, params.CsvOptions)
 	if err != nil {
 		logOpWarn(MethodIOImportCsv, err, "session", sessionID, "database", params.Database, "table", params.Table)
 		return errorResponse(req.ID, err.Error())
@@ -122,11 +123,12 @@ func (d *Dispatcher) ioDumpSql(ctx context.Context, req Request) Response {
 }
 
 type ioExecSqlFileParams struct {
-	SessionID string                    `json:"sessionId"`
-	ProfileID string                    `json:"profileId"`
-	Database  string                    `json:"database"`
-	InputPath string                    `json:"inputPath"`
-	Options   dataio.ExecSqlFileOptions `json:"options"`
+	SessionID string `json:"sessionId"`
+	ProfileID string `json:"profileId"`
+	Database  string `json:"database"`
+	InputPath string `json:"inputPath"`
+	// execOptions 勿用 options：platform 凭据注入会用连接 options 覆盖同名字段。
+	ExecOptions dataio.ExecSqlFileOptions `json:"execOptions"`
 }
 
 func (d *Dispatcher) ioExecSqlFile(ctx context.Context, req Request) Response {
@@ -140,7 +142,7 @@ func (d *Dispatcher) ioExecSqlFile(ctx context.Context, req Request) Response {
 		return errorResponse(req.ID, err.Error())
 	}
 
-	taskID, err := d.io.ExecSqlFile(ctx, connect, sessionID, params.Database, params.InputPath, params.Options)
+	taskID, err := d.io.ExecSqlFile(ctx, connect, sessionID, params.Database, params.InputPath, params.ExecOptions)
 	if err != nil {
 		logOpWarn(MethodIOExecSqlFile, err, "session", sessionID, "database", params.Database)
 		return errorResponse(req.ID, err.Error())

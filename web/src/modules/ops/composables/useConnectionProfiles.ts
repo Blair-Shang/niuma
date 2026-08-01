@@ -1,8 +1,17 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { connectionApi, credentialApi } from '@/api'
-import { isBridgeAvailable } from '@/api/client'
-import type { ConnectionProfileInput, CredentialInput } from '@/api/types/connection'
+import {
+  connectionApi,
+  credentialApi,
+  isBridgeAvailable,
+  isPlatformUnavailable,
+  withPlatformRetry,
+} from '@/api'
+import type {
+  ConnectionProfile,
+  ConnectionProfileInput,
+  CredentialInput,
+} from '@/api/types/connection'
 import {
   applyProxyToForm,
   applyTunnelToForm,
@@ -98,18 +107,25 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     return flat
   })
 
+  async function listProfilesByKind(): Promise<
+    Array<{ kind: ConnKind; profiles: ConnectionProfile[] }>
+  > {
+    return Promise.all(
+      kinds.map(async (kind) => {
+        const res = await connectionApi.list({ kind })
+        return { kind, profiles: res.profiles ?? [] }
+      }),
+    )
+  }
+
   async function loadAll(): Promise<void> {
     if (!isBridgeAvailable()) {
       return
     }
     loading.value = true
     try {
-      const results = await Promise.all(
-        kinds.map(async (kind) => {
-          const res = await connectionApi.list({ kind })
-          return { kind, profiles: res.profiles ?? [] }
-        }),
-      )
+      // Platform 刚 spawn / dev:hot 偶发未就绪：有界重试真实 list，不单独探测就绪
+      const results = await withPlatformRetry(listProfilesByKind)
       const next = { ...profileMap.value }
       for (const { kind, profiles } of results) {
         next[kind] = profiles.map((p) => ({ ...p, kind }))
@@ -122,8 +138,12 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
           import('@/modules/ops/conn-kind-loaders').then((m) => m.ensureConnKind(kind).catch(() => undefined)),
         ),
       )
-    } catch {
-      /* Platform 未就绪时静默 */
+    } catch (err) {
+      if (isPlatformUnavailable(err)) {
+        console.warn('[connection] list unavailable after retries', err)
+      } else {
+        console.warn('[connection] list failed', err)
+      }
     } finally {
       loading.value = false
     }
@@ -144,13 +164,11 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     dlgOpen.value = true
   }
 
-  async function openEdit(item: ConnItem): Promise<void> {
-    await ensureConnKindForm(item.kind)
-    dlgMode.value = 'edit'
+  /** 将已有连接配置灌入表单（不含 dlgMode / dlgProfile）。 */
+  function applyItemToForm(item: ConnItem, profileName: string): void {
     dlgKind.value = item.kind
-    dlgProfile.value = item
     resetForm(item.kind)
-    form.profileName = item.profileName
+    form.profileName = profileName
     form.hostAddress = item.hostAddress
     form.portNumber = String(item.portNumber || defaultPortForKind(item.kind))
     form.loginAccount = item.loginAccount
@@ -159,26 +177,56 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     getConnectionFormAdapter(item.kind).applyProfile?.(form, item)
     applyProxyToForm(form, item.connectionOptions)
     applyTunnelToForm(form, item.connectionOptions)
+  }
+
+  /** 从 OS Keychain 回填凭据；失败时静默，由用户手动补密。 */
+  async function loadSecretIntoForm(item: ConnItem): Promise<void> {
+    if (!item.credentialIds?.length) return
+    try {
+      const result = await credentialApi.get({ profileId: item.profileId })
+      if (result.found) {
+        const adapter = getConnectionFormAdapter(item.kind)
+        if (adapter.applyLoadedSecret) {
+          adapter.applyLoadedSecret(form, result.secret)
+        } else {
+          form.password = result.secret
+        }
+      }
+    } catch {
+      // Keychain 不可用时用户可手动输入密码
+    }
+  }
+
+  async function openEdit(item: ConnItem): Promise<void> {
+    await ensureConnKindForm(item.kind)
+    dlgMode.value = 'edit'
+    dlgProfile.value = item
+    applyItemToForm(item, item.profileName)
     formError.value = null
     testMessage.value = null
     dlgOpen.value = true
+    // 对话框已先行打开；凭据回填通常在毫秒内完成
+    await loadSecretIntoForm(item)
+  }
 
-    // 从 OS Keychain 回填凭据（本地 IPC，通常在毫秒内完成，对话框已先行打开）
-    if (item.credentialIds?.length) {
-      try {
-        const result = await credentialApi.get({ profileId: item.profileId })
-        if (result.found) {
-          const adapter = getConnectionFormAdapter(item.kind)
-          if (adapter.applyLoadedSecret) {
-            adapter.applyLoadedSecret(form, result.secret)
-          } else {
-            form.password = result.secret
-          }
-        }
-      } catch {
-        // 读取失败静默处理：Keychain 不可用时用户可手动输入密码
-      }
+  /**
+   * 克隆连接：以 create 模式打开表单并预填原配置（含 Keychain 凭据与代理密码）。
+   * 保存后生成新 profileId，不修改原连接。
+   */
+  async function openClone(item: ConnItem): Promise<void> {
+    await ensureConnKindForm(item.kind)
+    dlgMode.value = 'create'
+    dlgProfile.value = null
+    applyItemToForm(item, `${item.profileName}${t('opsNav.cloneNameSuffix')}`)
+    // create 无 dlgProfile，代理密码须写入表单，否则保存会丢失
+    const proxyPassword = item.connectionOptions?.proxy?.password
+    if (typeof proxyPassword === 'string' && proxyPassword) {
+      form.proxyPassword = proxyPassword
     }
+    formError.value = null
+    testMessage.value = null
+    dlgOpen.value = true
+    await loadSecretIntoForm(item)
   }
 
   function openDelete(item: ConnItem): void {
@@ -237,7 +285,8 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
       formError.value = t('opsNav.form.nameRequired')
       return false
     }
-    if (!form.hostAddress.trim()) {
+    const hideHost = getConnectionKindDef(dlgKind.value)?.hideHostPort === true
+    if (!hideHost && !form.hostAddress.trim()) {
       formError.value = t('opsNav.form.hostRequired')
       return false
     }
@@ -287,7 +336,8 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
 
   async function testConnection(): Promise<void> {
     testMessage.value = null
-    if (!form.hostAddress.trim()) {
+    const hideHost = getConnectionKindDef(dlgKind.value)?.hideHostPort === true
+    if (!hideHost && !form.hostAddress.trim()) {
       testMessage.value = { ok: false, text: t('opsNav.form.hostRequired') }
       return
     }
@@ -399,6 +449,7 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     loadAll,
     openCreate,
     openEdit,
+    openClone,
     openDelete,
     saveConnection,
     testConnection,

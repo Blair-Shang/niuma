@@ -15,10 +15,11 @@ export function selectSeed(database: string, table: string, limit = 100): string
   return `SELECT *\nFROM ${qualifiedName(database, table)}\nLIMIT ${limit};\n`
 }
 
+/** @deprecated 无参元数据时的回退；有参请用 buildMysqlRoutineCallSql */
 export function callRoutineSeed(database: string, name: string, isFunction: boolean): string {
   const q = qualifiedName(database, name)
   if (isFunction) {
-    return `SELECT ${q}(/* args */);\n`
+    return `-- Call function ${q}\nSELECT ${q}() AS \`result\`;\n`
   }
-  return `CALL ${q}(/* args */);\n`
+  return `-- Call procedure ${q}\nCALL ${q}();\n`
 }

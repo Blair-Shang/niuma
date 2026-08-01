@@ -151,14 +151,14 @@ export function serializeCallParams(params: RoutineCallParam[]): string {
     .join(', ')
 }
 
-/** 生成 `NULL::type -- name` 列表（查询种子 / 高级模式）。 */
+/** 生成 `NULL::type` + 块注释形参名列表（查询种子 / 高级模式；避免行注释 `--` 吞掉同行 `);`）。 */
 export function buildCallPlaceholders(identityArgs: string | undefined | null): string {
   const parts = splitIdentityArgs(identityArgs ?? '')
   if (parts.length === 0) return ''
   return parts
     .map((part, i) => {
       const { name, type } = parseIdentityArg(part)
-      const comment = name ? ` -- ${name}` : ` -- $${i + 1}`
+      const comment = name ? ` /* ${name} */` : ` /* $${i + 1} */`
       return `NULL::${type}${comment}`
     })
     .join(',\n  ')

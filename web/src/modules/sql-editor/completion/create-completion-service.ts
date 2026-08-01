@@ -7,8 +7,8 @@ import type {
   EntityContext,
   ICompletionItem,
   Suggestions,
-  WordRange,
 } from 'monaco-sql-languages'
+import type { WordRange } from '@/modules/sql-editor/completion/prefix'
 import {
   cachedColumns,
   cachedSchemas,
@@ -20,6 +20,11 @@ import type {
   CatalogClient,
   SqlSuggestScope,
 } from '@/modules/sql-editor/completion/types'
+import {
+  extractUpdateTargetRelation,
+  isUpdateSetColumnSlot,
+  stripSqlIdentQuotes,
+} from '@/modules/sql-editor/completion/update-set-heuristic'
 
 let activeScope: SqlSuggestScope | null = null
 let scopeEpoch = 0
@@ -47,6 +52,12 @@ export function quoteSqlIdent(name: string): string {
   return `"${name.replaceAll('"', '""')}"`
 }
 
+/** MySQL 标识符：优先裸名，否则反引号。 */
+export function quoteMysqlIdent(name: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return name
+  return '`' + name.replaceAll('`', '``') + '`'
+}
+
 function isTableLike(type: string): boolean {
   return type === 'table' || type === 'tableCreate' || type === 'view' || type === 'viewCreate'
 }
@@ -61,12 +72,19 @@ function isSchemaCtx(type: string): boolean {
 
 type Relation = { schema: string; table: string; alias?: string }
 
-function defaultSchema(scope: SqlSuggestScope): string {
-  return (scope.schema ?? 'public').trim() || 'public'
+function defaultSchema(scope: SqlSuggestScope, fallback = 'public'): string {
+  // MySQL：schema 槽 = database；未选库时勿回落 PG 的 public
+  // SQLite：未选库时回落 main（ATTACH 命名空间）
+  const raw = (scope.schema ?? scope.database ?? '').trim()
+  return raw || fallback
 }
 
 function parseRelation(text: string, fallbackSchema: string, database?: string): Relation | null {
-  const raw = text.replaceAll('"', '').trim()
+  const raw = text
+    .split('.')
+    .map((p) => stripSqlIdentQuotes(p))
+    .filter(Boolean)
+    .join('.')
   if (!raw) return null
   const parts = raw.split('.').filter(Boolean)
   if (parts.length >= 3) {
@@ -94,8 +112,9 @@ function entityAlias(ent: EntityContext): string | undefined {
 function collectRelations(
   entities: EntityContext[] | null | undefined,
   scope: SqlSuggestScope,
+  schemaFallback = 'public',
 ): Relation[] {
-  const fb = defaultSchema(scope)
+  const fb = defaultSchema(scope, schemaFallback)
   const out: Relation[] = []
   const seen = new Set<string>()
   const push = (r: Relation) => {
@@ -121,16 +140,29 @@ function resolveColumnRelations(
   scope: SqlSuggestScope,
   qualifier: string | undefined,
   entities: EntityContext[] | null | undefined,
+  sqlBeforeCaret?: string,
+  schemaFallback = 'public',
 ): Relation[] {
-  const relations = collectRelations(entities, scope)
+  const relations = collectRelations(entities, scope, schemaFallback)
   const q = qualifier?.trim()
-  if (!q) return relations
-  const narrowed = relations.filter(
-    (r) =>
-      r.alias === q || r.table === q || `${r.schema}.${r.table}` === q,
-  )
-  if (narrowed.length > 0) return narrowed
-  return [{ schema: defaultSchema(scope), table: q }]
+  if (q) {
+    const narrowed = relations.filter(
+      (r) =>
+        r.alias === q || r.table === q || `${r.schema}.${r.table}` === q,
+    )
+    if (narrowed.length > 0) return narrowed
+    return [{ schema: defaultSchema(scope, schemaFallback), table: stripSqlIdentQuotes(q) }]
+  }
+  if (relations.length > 0) return relations
+  // UPDATE 半成品常无 table entity：从 `UPDATE <table> SET` 启发式抽目标表
+  if (sqlBeforeCaret) {
+    const target = extractUpdateTargetRelation(sqlBeforeCaret)
+    if (target) {
+      const parsed = parseRelation(target, defaultSchema(scope, schemaFallback), scope.database)
+      if (parsed) return [parsed]
+    }
+  }
+  return relations
 }
 
 /**
@@ -144,6 +176,7 @@ async function resolveTableTarget(
   scope: SqlSuggestScope,
   qualifier: string | undefined,
   leaf: string,
+  schemaFallback = 'public',
 ): Promise<{ schema: string; tablePrefix: string; alsoSchemas: boolean }> {
   if (qualifier?.trim()) {
     return {
@@ -154,7 +187,7 @@ async function resolveTableTarget(
   }
   const name = leaf.trim()
   if (!name) {
-    return { schema: defaultSchema(scope), tablePrefix: '', alsoSchemas: true }
+    return { schema: defaultSchema(scope, schemaFallback), tablePrefix: '', alsoSchemas: true }
   }
   try {
     const res = await client.listSchemas(scope, name, catalogLimitForPrefix(name))
@@ -165,7 +198,7 @@ async function resolveTableTarget(
     // fall through
   }
   return {
-    schema: defaultSchema(scope),
+    schema: defaultSchema(scope, schemaFallback),
     tablePrefix: name,
     alsoSchemas: true,
   }
@@ -173,21 +206,43 @@ async function resolveTableTarget(
 
 type KindSet = { Module: number; Class: number; Field: number }
 
+type QuoteIdentFn = (name: string) => string
+
 type TextModel = {
   getWordUntilPosition(position: {
     lineNumber: number
     column: number
   }): { word: string }
+  getValueInRange(range: {
+    startLineNumber: number
+    startColumn: number
+    endLineNumber: number
+    endColumn: number
+  }): string
 }
 
 type TextPosition = { lineNumber: number; column: number }
 
-function catalogItem(label: string, kind: number, detail: string): ICompletionItem {
+function textBeforeCaret(model: TextModel, position: TextPosition): string {
+  return model.getValueInRange({
+    startLineNumber: 1,
+    startColumn: 1,
+    endLineNumber: position.lineNumber,
+    endColumn: position.column,
+  })
+}
+
+function catalogItem(
+  label: string,
+  kind: number,
+  detail: string,
+  quoteIdent: QuoteIdentFn,
+): ICompletionItem {
   return {
     label,
     kind,
     detail,
-    insertText: quoteSqlIdent(label),
+    insertText: quoteIdent(label),
     // 前缀匹配优先：同前缀内按名字；0_ 保证 catalog 排在关键字前
     sortText: `0_${label}`,
     filterText: label,
@@ -215,13 +270,22 @@ async function catalogItems(
   kinds: KindSet,
   model: TextModel,
   position: TextPosition,
+  quoteIdent: QuoteIdentFn,
+  schemaFallback = 'public',
 ): Promise<ICompletionItem[]> {
   const syntax = suggestions.syntax ?? []
-  if (syntax.length === 0) return []
+  const before = textBeforeCaret(model, position)
+  // parser 在 `UPDATE t SET ` 半成品时常误报 table、丢 entity；编排层兜底列槽
+  const updateSetColumn = isUpdateSetColumnSlot(before)
+  if (syntax.length === 0 && !updateSetColumn) return []
 
-  const needSchema = syntax.some((s) => isSchemaCtx(String(s.syntaxContextType)))
-  const tableSyntax = syntax.filter((s) => isTableLike(String(s.syntaxContextType)))
-  const needColumn = syntax.some((s) => isColumnCtx(String(s.syntaxContextType)))
+  const needSchema =
+    !updateSetColumn && syntax.some((s) => isSchemaCtx(String(s.syntaxContextType)))
+  const tableSyntax = updateSetColumn
+    ? []
+    : syntax.filter((s) => isTableLike(String(s.syntaxContextType)))
+  const needColumn =
+    updateSetColumn || syntax.some((s) => isColumnCtx(String(s.syntaxContextType)))
   const items: ICompletionItem[] = []
 
   const pushSchemas = async (prefix: string) => {
@@ -232,7 +296,7 @@ async function catalogItems(
     )
     for (const s of res.schemas) {
       items.push(
-        catalogItem(s.name, kinds.Module, res.truncated ? 'schema · …' : 'schema'),
+        catalogItem(s.name, kinds.Module, res.truncated ? 'schema · …' : 'schema', quoteIdent),
       )
     }
     if (res.truncated) {
@@ -254,6 +318,7 @@ async function catalogItems(
       scope,
       qualifier,
       leaf,
+      schemaFallback,
     )
     if (alsoSchemas && !needSchema) {
       await pushSchemas(leaf)
@@ -270,6 +335,7 @@ async function catalogItems(
           t.name,
           kinds.Class,
           res.truncated ? `${typeLabel} · ${schema} · …` : `${typeLabel} · ${schema}`,
+          quoteIdent,
         ),
       )
     }
@@ -281,7 +347,13 @@ async function catalogItems(
   if (needColumn) {
     const ranges = syntax.find((s) => isColumnCtx(String(s.syntaxContextType)))?.wordRanges
     const { qualifier, prefix } = resolveCatalogPrefix(model, position, ranges)
-    const relations = resolveColumnRelations(scope, qualifier, entities)
+    const relations = resolveColumnRelations(
+      scope,
+      qualifier,
+      entities,
+      before,
+      schemaFallback,
+    )
     await Promise.all(
       relations.map(async (rel) => {
         const key = `col\0${scope.sessionId}\0${scope.database ?? ''}\0${rel.schema}\0${rel.table}\0${prefix}`
@@ -293,7 +365,7 @@ async function catalogItems(
             const detail = [c.dataType, `${rel.schema}.${rel.table}`]
               .filter(Boolean)
               .join(' · ')
-            items.push(catalogItem(c.name, kinds.Field, detail))
+            items.push(catalogItem(c.name, kinds.Field, detail, quoteIdent))
           }
         } catch {
           // ignore per-table failures
@@ -309,7 +381,10 @@ export function createSqlCatalogCompletionService(
   client: CatalogClient,
   defaultCompletionService: CompletionService,
   completionItemKind: KindSet,
+  options?: { quoteIdent?: QuoteIdentFn; defaultSchema?: string },
 ): CompletionService {
+  const quoteIdent = options?.quoteIdent ?? quoteSqlIdent
+  const schemaFallback = options?.defaultSchema?.trim() || 'public'
   return async (model, position, context, suggestions, entities, snippets) => {
     const base = await defaultCompletionService(
       model,
@@ -336,6 +411,8 @@ export function createSqlCatalogCompletionService(
         completionItemKind,
         model,
         position,
+        quoteIdent,
+        schemaFallback,
       )
     } catch {
       extra = []

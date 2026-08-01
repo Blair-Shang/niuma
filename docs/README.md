@@ -27,6 +27,11 @@
 | [24-ai-assistant.md](./24-ai-assistant.md) | **AI 助手（P1 已落地；P2→P3 合规切片见 §15）** |
 | [25-mysql-module.md](./25-mysql-module.md) | **MySQL 管理模块（仅 Oracle MySQL；内部版本用 Cap）** |
 | [26-mariadb-module.md](./26-mariadb-module.md) | **MariaDB 管理模块（独立服务/kind；与 MySQL 互斥）** |
+| [27-sqlite-module.md](./27-sqlite-module.md) | **SQLite 管理模块（P0–P4 闭环；独立服务；设计器/Backup/IO）** |
+| [28-dameng-module.md](./28-dameng-module.md) | **达梦管理模块（独立服务/实现；驱动 Spike；禁 JVM/混用）** |
+| [29-oracle-module.md](./29-oracle-module.md) | **Oracle 管理模块（C++20 + ODPI-C + Instant Client；L3 Native）** |
+| [30-clickhouse-module.md](./30-clickhouse-module.md) | **ClickHouse 管理模块（Go + clickhouse-go/v2；P0–P3 含 ObjectScript/io.*）** |
+| [31-kingbase-module.md](./31-kingbase-module.md) | **人大金仓管理模块（Go + pgx/v5；后端/Web P0 session/query；树待做）** |
 | [20-tool-components.md](./20-tool-components.md) | **工具组件管理（设置页外部 CLI 检测与路径配置）** |
 | [21-session-registry.md](./21-session-registry.md) | **Tab 四层架构 + Session Registry**（时序速查 §0.5、开发者约定 §0.6） |
 | [17-script-platform-layout.md](./17-script-platform-layout.md) | 脚本平台分层与重构方案 |
@@ -82,3 +87,20 @@ Platform Core ──→ 多语言 Capability Services
 | v0.12 | 2026-07-20 | 25 MySQL 模块架构实现稿 |
 | v0.13 | 2026-07-20 | 多库文档边界：25/23/18/22 拆开实现描述，共享契约与单库模块分离 |
 | v0.14 | 2026-07-20 | MariaDB 独立为 26 / `mariadb-service`；25 仅覆盖 Oracle MySQL 版本差异 |
+| v0.15 | 2026-07-26 | 新增 27 SQLite / 28 达梦落地设计稿（服务未实现；方言层已预留） |
+| v0.16 | 2026-07-26 | 27/28 强化：每库独立服务与实现，禁止跨服务混用 / 运行时互调 |
+| v0.17 | 2026-07-26 | 27：`sqlite-service` 后端 P0–P2 落地（session/query/tree/catalog/meta/tx） |
+| v0.18 | 2026-07-26 | 27：Web `modules/sqlite` P0–P2（表单/树/Query/Browse/DDL） |
+| v0.19 | 2026-07-26 | 27：P3 CSV/SQL IO、ATTACH、加密口令字段（任务 Dock） |
+| v0.20 | 2026-07-26 | 27：P4 表设计器（重建表策略）+ Backup API |
+| v0.21 | 2026-07-26 | 27：模块闭环（Cap/AI、BrowseDataShell、文档索引；SQLCipher 明确拒绝） |
+| v0.22 | 2026-07-26 | 新增 29 Oracle：C++20 + ODPI-C 后端 P0 骨架与文档索引 |
+| v0.23 | 2026-07-26 | 新增 30 ClickHouse 落地设计稿（服务未实现；独立 kind / Native 默认） |
+| v0.24 | 2026-07-26 | 30：`clickhouse-service` 后端 P0（session/query/Probe；go.work + build） |
+| v0.25 | 2026-07-26 | 30：后端 P1 tree/catalog + Web 模块（表单/Query/树/Cap） |
+| v0.26 | 2026-07-26 | 30：P2 meta + 只读 Browse/DDL |
+| v0.27 | 2026-07-26 | 30：P3 ObjectScript（视图/MV） |
+| v0.28 | 2026-07-26 | 30：P3 io.* CSV/SQL + Dock |
+| v0.29 | 2026-07-26 | 新增 31 人大金仓落地方案（锁定 pgx；服务未实现；禁 JVM / 禁并入 Vastbase） |
+| v0.30 | 2026-07-26 | 31：`kingbase-service` 后端 P0（session/query/Probe；go.work + build） |
+| v0.31 | 2026-07-27 | 31：Web P0（表单/Query/Cap/注册；无对象树） |

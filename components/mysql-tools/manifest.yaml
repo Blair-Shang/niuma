@@ -2,11 +2,38 @@ id: com.niuma.components.mysql-tools
 name: MySQL 官方客户端工具
 module: mysql
 # 外部化组件：mysqldump / mysql CLI 不编进 platform / mysql-service。
-# 当前 CSV / SQL 导入导出由 mysql-service 纯 Go 实现（io.*）；
-# 本组件供后续可选切换官方 CLI，或用户本机已安装时探测使用。
+# 安装包取自 MySQL Community Server 官方 ZIP/TGZ（含 bin/mysql、bin/mysqldump）。
 install:
   mode: optional_download
-  # 下载源按发行版配置；此处先登记探测与文档入口。
+  packages:
+    - id: mysql-client
+      os: windows
+      arch: amd64
+      url: https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.10-winx64.zip
+      archive: zip
+      binDir: mysql-8.4.10-winx64/bin
+      tools: [mysqldump, mysql]
+    - id: mysql-client
+      os: linux
+      arch: amd64
+      url: https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.10-linux-glibc2.28-x86_64.tar.xz
+      archive: tar.xz
+      binDir: mysql-8.4.10-linux-glibc2.28-x86_64/bin
+      tools: [mysqldump, mysql]
+    - id: mysql-client
+      os: darwin
+      arch: arm64
+      url: https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.10-macos15-arm64.tar.gz
+      archive: tar.gz
+      binDir: mysql-8.4.10-macos15-arm64/bin
+      tools: [mysqldump, mysql]
+    - id: mysql-client
+      os: darwin
+      arch: amd64
+      url: https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.10-macos15-x86_64.tar.gz
+      archive: tar.gz
+      binDir: mysql-8.4.10-macos15-x86_64/bin
+      tools: [mysqldump, mysql]
 tools:
   - id: mysqldump
     displayName: mysqldump

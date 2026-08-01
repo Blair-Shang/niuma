@@ -46,6 +46,31 @@ const BUILTIN_CONN_KIND_LOADERS: Record<
     loadForm: () => import('@/modules/mysql/register-conn-form').then((m) => m.registerForm()),
     load: () => import('@/modules/mysql/register-conn-full').then((m) => m.registerFull()),
   },
+  sqlite: {
+    tree: true,
+    loadForm: () => import('@/modules/sqlite/register-conn-form').then((m) => m.registerForm()),
+    load: () => import('@/modules/sqlite/register-conn-full').then((m) => m.registerFull()),
+  },
+  dameng: {
+    tree: true,
+    loadForm: () => import('@/modules/dameng/register-conn-form').then((m) => m.registerForm()),
+    load: () => import('@/modules/dameng/register-conn-full').then((m) => m.registerFull()),
+  },
+  oracle: {
+    tree: true,
+    loadForm: () => import('@/modules/oracle/register-conn-form').then((m) => m.registerForm()),
+    load: () => import('@/modules/oracle/register-conn-full').then((m) => m.registerFull()),
+  },
+  clickhouse: {
+    tree: true,
+    loadForm: () => import('@/modules/clickhouse/register-conn-form').then((m) => m.registerForm()),
+    load: () => import('@/modules/clickhouse/register-conn-full').then((m) => m.registerFull()),
+  },
+  kingbase: {
+    tree: true,
+    loadForm: () => import('@/modules/kingbase/register-conn-form').then((m) => m.registerForm()),
+    load: () => import('@/modules/kingbase/register-conn-full').then((m) => m.registerFull()),
+  },
 }
 
 /** 登记全部内置协议 loader（不执行模块加载）。 */

@@ -1,0 +1,552 @@
+/**
+ * 表设计器状态与 DDL ops 生成（列 / 索引 / 外键 / CHECK / PK / 注释）。
+ */
+import type {
+  KingbaseColumnInfo,
+  KingbaseConstraintInfo,
+  KingbaseCreateTableCheck,
+  KingbaseCreateTableColumn,
+  KingbaseCreateTableForeignKey,
+  KingbaseCreateTableIndex,
+  KingbaseDesignOp,
+  KingbaseForeignKeyInfo,
+  KingbaseIndexInfo,
+} from '@/api/types/kingbase'
+import {
+  columnsEqual,
+  joinColumnList,
+  newEmptyCheck,
+  newEmptyColumn,
+  newEmptyForeignKey,
+  newEmptyIndex,
+  normalizeFkAction,
+  normalizeIndexMethod,
+  parseColumnList,
+  splitDataTypeFields,
+  syncColumnDataType,
+  type DesignCheckDraft,
+  type DesignColumnDraft,
+  type DesignForeignKeyDraft,
+  type DesignIndexDraft,
+} from '@/modules/kingbase/utils/table-design'
+
+export function toDesignRows(cols: KingbaseColumnInfo[], pkCols: string[]): DesignColumnDraft[] {
+  const pk = new Set(pkCols)
+  return cols.map((c) => {
+    const parts = splitDataTypeFields(c.dataType)
+    return {
+      __rowKey: `col-${c.ordinal}-${c.name}`,
+      originalName: c.name,
+      name: c.name,
+      dataType: parts.dataType,
+      typeBase: parts.typeBase,
+      typeLength: parts.typeLength,
+      typeScale: parts.typeScale,
+      nullable: c.nullable,
+      defaultExpr: c.default ?? '',
+      primaryKey: pk.has(c.name),
+      comment: c.comment ?? '',
+      removed: false,
+    }
+  })
+}
+
+export function toIndexDrafts(indexes: KingbaseIndexInfo[], pkCols: string[] = []): DesignIndexDraft[] {
+  const drafts = indexes.map((idx) => {
+    let columns = [...(idx.columns ?? [])]
+    let expression = (idx.keyExpression ?? '').trim()
+    // 后端偶发把普通列键误写入 keyExpression：若全是简单标识符则收回列清单
+    if (columns.length === 0 && expression) {
+      const parts = expression
+        .split(',')
+        .map((s) => s.trim().replaceAll(/^"|"$/g, '').replaceAll('""', '"'))
+        .filter(Boolean)
+      if (
+        parts.length > 0 &&
+        parts.every((p) => !/[()[\]+\-*/<>=!~|&\s]/.test(p))
+      ) {
+        columns = parts
+        expression = ''
+      }
+    }
+    const columnsText = joinColumnList(columns)
+    const whereText = idx.where ?? ''
+    const method = normalizeIndexMethod(idx.method ?? 'btree')
+    const primary = Boolean(idx.primary)
+    return {
+      __rowKey: `idx-${idx.name}`,
+      originalName: idx.name,
+      name: primary ? 'PRIMARY' : idx.name,
+      columnsText,
+      expression,
+      whereText,
+      unique: primary ? true : idx.unique,
+      method,
+      primary,
+      removed: false,
+      snapName: primary ? 'PRIMARY' : idx.name,
+      snapColumnsText: columnsText,
+      snapExpression: expression,
+      snapWhereText: whereText,
+      snapUnique: primary ? true : idx.unique,
+      snapMethod: method,
+    }
+  })
+
+  if (!drafts.some((d) => d.primary) && pkCols.length > 0) {
+    drafts.unshift(makePrimaryIndexDraft(pkCols, /* existing */ true))
+  }
+  drafts.sort((a, b) => Number(b.primary) - Number(a.primary))
+  return drafts
+}
+
+/** 构造主键索引草稿（新建或由列主键勾选同步）。 */
+export function makePrimaryIndexDraft(pkCols: string[], existing: boolean): DesignIndexDraft {
+  const columnsText = joinColumnList(pkCols)
+  return {
+    __rowKey: existing ? 'idx-PRIMARY' : `idx-pk-${Date.now()}`,
+    originalName: existing ? 'PRIMARY' : '',
+    name: 'PRIMARY',
+    columnsText,
+    expression: '',
+    whereText: '',
+    unique: true,
+    method: 'btree',
+    primary: true,
+    removed: false,
+    snapName: existing ? 'PRIMARY' : '',
+    snapColumnsText: existing ? columnsText : '',
+    snapExpression: '',
+    snapWhereText: '',
+    snapUnique: true,
+    snapMethod: 'btree',
+  }
+}
+
+/**
+ * 按列上的 primaryKey 勾选，同步索引页中的主键行（对齐 Navicat / MySQL / 达梦）。
+ */
+export function syncPrimaryIndexFromColumns(
+  indexes: DesignIndexDraft[],
+  columns: DesignColumnDraft[],
+): DesignIndexDraft[] {
+  const pkCols = columns.filter((c) => !c.removed && c.primaryKey && c.name).map((c) => c.name)
+  const others = indexes.filter((i) => !i.primary)
+  if (pkCols.length === 0) return others
+  const existing = indexes.find((i) => i.primary && !i.removed)
+  const primary = existing
+    ? {
+        ...existing,
+        columnsText: joinColumnList(pkCols),
+        unique: true,
+        primary: true,
+        expression: '',
+        removed: false,
+      }
+    : makePrimaryIndexDraft(pkCols, false)
+  return [primary, ...others]
+}
+
+/** 编辑索引页主键列清单后，回写列上的 primaryKey。 */
+export function applyPrimaryIndexToColumns(
+  columns: DesignColumnDraft[],
+  columnsText: string,
+): DesignColumnDraft[] {
+  const pkSet = new Set(parseColumnList(columnsText))
+  return columns.map((c) => {
+    if (c.removed) return c
+    const primaryKey = pkSet.has(c.name)
+    if (c.primaryKey === primaryKey && !(primaryKey && c.nullable)) return c
+    return {
+      ...c,
+      primaryKey,
+      nullable: primaryKey ? false : c.nullable,
+    }
+  })
+}
+
+export function toForeignKeyDrafts(fks: KingbaseForeignKeyInfo[]): DesignForeignKeyDraft[] {
+  return fks.map((fk) => {
+    const columnsText = fk.columns.join(', ')
+    const refColumnsText = fk.refColumns.join(', ')
+    const onDelete = normalizeFkAction(fk.onDelete ?? 'NO ACTION')
+    const onUpdate = normalizeFkAction(fk.onUpdate ?? 'NO ACTION')
+    return {
+      __rowKey: `fk-${fk.name}`,
+      originalName: fk.name,
+      name: fk.name,
+      columnsText,
+      refSchema: fk.refSchema,
+      refTable: fk.refTable,
+      refColumnsText,
+      onDelete,
+      onUpdate,
+      removed: false,
+      snapName: fk.name,
+      snapColumnsText: columnsText,
+      snapRefSchema: fk.refSchema,
+      snapRefTable: fk.refTable,
+      snapRefColumnsText: refColumnsText,
+      snapOnDelete: onDelete,
+      snapOnUpdate: onUpdate,
+    }
+  })
+}
+
+function extractCheckExpression(c: KingbaseConstraintInfo): string {
+  if (c.expression?.trim()) return c.expression.trim()
+  const d = (c.definition ?? '').trim()
+  const upper = d.toUpperCase()
+  if (!upper.startsWith('CHECK')) return d
+  const start = d.indexOf('(')
+  const end = d.lastIndexOf(')')
+  if (start < 0 || end <= start) return d.replace(/^CHECK\s*/i, '').trim()
+  return d.slice(start + 1, end).trim()
+}
+
+export function toCheckDrafts(constraints: KingbaseConstraintInfo[]): DesignCheckDraft[] {
+  return constraints
+    .filter((c) => c.type === 'c' || c.typeLabel?.toUpperCase() === 'CHECK')
+    .map((c) => {
+      const expression = extractCheckExpression(c)
+      return {
+        __rowKey: `chk-${c.name}`,
+        originalName: c.name,
+        name: c.name,
+        expression,
+        removed: false,
+        snapName: c.name,
+        snapExpression: expression,
+      }
+    })
+}
+
+export function buildCreateColumns(rows: DesignColumnDraft[]): KingbaseCreateTableColumn[] {
+  return rows
+    .filter((r) => !r.removed)
+    .map((r) => {
+      const dataType = syncColumnDataType(r)
+      const col: KingbaseCreateTableColumn = {
+        name: r.name.trim(),
+        dataType,
+        nullable: r.primaryKey ? false : r.nullable,
+        primaryKey: r.primaryKey,
+        comment: r.comment.trim() || undefined,
+      }
+      if (r.defaultExpr.trim()) col.default = r.defaultExpr.trim()
+      return col
+    })
+}
+
+function indexHasKeys(r: DesignIndexDraft): boolean {
+  return !!r.expression.trim() || parseColumnList(r.columnsText).length > 0
+}
+
+export function buildCreateIndexes(indexes: DesignIndexDraft[]): KingbaseCreateTableIndex[] {
+  return indexes
+    .filter((r) => !r.removed && !r.primary && r.name.trim() && indexHasKeys(r))
+    .map((r) => {
+      const item: KingbaseCreateTableIndex = {
+        name: r.name.trim(),
+        unique: r.unique,
+      }
+      if (r.expression.trim()) item.expression = r.expression.trim()
+      else item.columns = parseColumnList(r.columnsText)
+      if (r.whereText.trim()) item.where = r.whereText.trim()
+      const method = normalizeIndexMethod(r.method)
+      if (method && method !== 'btree') item.method = method
+      return item
+    })
+}
+
+export function buildCreateForeignKeys(
+  fks: DesignForeignKeyDraft[],
+): KingbaseCreateTableForeignKey[] {
+  return fks
+    .filter((r) => !r.removed)
+    .map((r) => {
+      const item: KingbaseCreateTableForeignKey = {
+        name: r.name.trim() || undefined,
+        columns: parseColumnList(r.columnsText),
+        refSchema: r.refSchema.trim() || undefined,
+        refTable: r.refTable.trim(),
+        refColumns: parseColumnList(r.refColumnsText),
+      }
+      const onDelete = normalizeFkAction(r.onDelete)
+      const onUpdate = normalizeFkAction(r.onUpdate)
+      if (onDelete !== 'NO ACTION') item.onDelete = onDelete
+      if (onUpdate !== 'NO ACTION') item.onUpdate = onUpdate
+      return item
+    })
+    .filter((r) => r.columns.length > 0 && r.refTable && r.refColumns.length > 0)
+}
+
+export function buildCreateChecks(checks: DesignCheckDraft[]): KingbaseCreateTableCheck[] {
+  return checks
+    .filter((r) => !r.removed && r.expression.trim())
+    .map((r) => {
+      const item: KingbaseCreateTableCheck = { expression: r.expression.trim() }
+      if (r.name.trim()) item.name = r.name.trim()
+      return item
+    })
+}
+
+function findPkConstraintName(constraints: KingbaseConstraintInfo[]): string | undefined {
+  return constraints.find((c) => c.type === 'p')?.name
+}
+
+function uniqueConstraintNames(constraints: KingbaseConstraintInfo[]): Set<string> {
+  return new Set(constraints.filter((c) => c.type === 'u').map((c) => c.name))
+}
+
+function pushDropIndex(
+  ops: KingbaseDesignOp[],
+  name: string,
+  uniqNames: Set<string>,
+): void {
+  if (uniqNames.has(name)) {
+    ops.push({ op: 'drop_constraint', name })
+  } else {
+    ops.push({ op: 'drop_index', name })
+  }
+}
+
+function pushAddIndex(ops: KingbaseDesignOp[], idx: DesignIndexDraft): void {
+  if (!idx.name.trim() || !indexHasKeys(idx)) return
+  const op: KingbaseDesignOp = {
+    op: 'add_index',
+    name: idx.name.trim(),
+    unique: idx.unique,
+  }
+  if (idx.expression.trim()) op.expression = idx.expression.trim()
+  else op.columns = parseColumnList(idx.columnsText)
+  if (idx.whereText.trim()) op.where = idx.whereText.trim()
+  const method = normalizeIndexMethod(idx.method)
+  if (method && method !== 'btree') op.method = method
+  ops.push(op)
+}
+
+function indexStructChanged(idx: DesignIndexDraft): boolean {
+  return (
+    idx.columnsText.trim() !== idx.snapColumnsText.trim() ||
+    idx.expression.trim() !== idx.snapExpression.trim() ||
+    idx.whereText.trim() !== idx.snapWhereText.trim() ||
+    idx.unique !== idx.snapUnique ||
+    normalizeIndexMethod(idx.method) !== normalizeIndexMethod(idx.snapMethod)
+  )
+}
+
+function fkStructChanged(fk: DesignForeignKeyDraft): boolean {
+  return (
+    fk.columnsText.trim() !== fk.snapColumnsText.trim() ||
+    fk.refSchema.trim() !== fk.snapRefSchema.trim() ||
+    fk.refTable.trim() !== fk.snapRefTable.trim() ||
+    fk.refColumnsText.trim() !== fk.snapRefColumnsText.trim() ||
+    normalizeFkAction(fk.onDelete) !== fk.snapOnDelete ||
+    normalizeFkAction(fk.onUpdate) !== fk.snapOnUpdate
+  )
+}
+
+function pushAddForeignKey(ops: KingbaseDesignOp[], fk: DesignForeignKeyDraft): void {
+  const cols = parseColumnList(fk.columnsText)
+  const refCols = parseColumnList(fk.refColumnsText)
+  if (cols.length === 0 || !fk.refTable.trim() || refCols.length === 0) return
+  const op: KingbaseDesignOp = {
+    op: 'add_foreign_key',
+    name: fk.name.trim(),
+    columns: cols,
+    refSchema: fk.refSchema.trim() || undefined,
+    refTable: fk.refTable.trim(),
+    refColumns: refCols,
+  }
+  const onDelete = normalizeFkAction(fk.onDelete)
+  const onUpdate = normalizeFkAction(fk.onUpdate)
+  if (onDelete !== 'NO ACTION') op.onDelete = onDelete
+  if (onUpdate !== 'NO ACTION') op.onUpdate = onUpdate
+  ops.push(op)
+}
+
+function pushAddCheck(ops: KingbaseDesignOp[], ck: DesignCheckDraft): void {
+  if (!ck.expression.trim()) return
+  ops.push({
+    op: 'add_check',
+    name: ck.name.trim(),
+    expression: ck.expression.trim(),
+  })
+}
+
+/** 生成 ALTER 设计 ops（列 + PK + 索引 + 外键 + CHECK + 表注释）。 */
+export function buildAlterDesignOps(input: {
+  tableName: string
+  rows: DesignColumnDraft[]
+  snapshot: KingbaseColumnInfo[]
+  pkSnapshot: string[]
+  indexes: DesignIndexDraft[]
+  foreignKeys: DesignForeignKeyDraft[]
+  checks: DesignCheckDraft[]
+  constraints: KingbaseConstraintInfo[]
+  tableComment: string
+  tableCommentSnapshot: string
+}): KingbaseDesignOp[] {
+  const ops: KingbaseDesignOp[] = []
+  const snapByName = new Map(input.snapshot.map((c) => [c.name, c]))
+
+  for (const r of input.rows) {
+    if (r.removed) {
+      if (r.originalName) ops.push({ op: 'drop_column', name: r.originalName })
+      continue
+    }
+    if (!r.originalName) {
+      const op: KingbaseDesignOp = {
+        op: 'add_column',
+        name: r.name,
+        dataType: syncColumnDataType(r),
+        nullable: r.nullable,
+      }
+      if (r.defaultExpr) op.default = r.defaultExpr
+      if (r.comment.trim()) op.comment = r.comment.trim()
+      ops.push(op)
+      continue
+    }
+
+    const orig = snapByName.get(r.originalName)
+    if (!orig) continue
+
+    if (r.name !== r.originalName) {
+      ops.push({ op: 'rename_column', name: r.originalName, newName: r.name })
+    }
+    const effectiveName = r.name
+    const nextType = syncColumnDataType(r)
+    if (nextType.toLowerCase() !== orig.dataType.trim().toLowerCase()) {
+      ops.push({ op: 'alter_type', name: effectiveName, dataType: nextType })
+    }
+    if (r.nullable !== orig.nullable) {
+      ops.push({
+        op: r.nullable ? 'set_null' : 'set_not_null',
+        name: effectiveName,
+      })
+    }
+    const origDefault = orig.default ?? ''
+    if (r.defaultExpr !== origDefault) {
+      if (!r.defaultExpr) {
+        ops.push({ op: 'drop_default', name: effectiveName })
+      } else {
+        ops.push({ op: 'set_default', name: effectiveName, default: r.defaultExpr })
+      }
+    }
+    const origComment = orig.comment ?? ''
+    if (r.comment !== origComment) {
+      ops.push({
+        op: 'set_column_comment',
+        name: effectiveName,
+        comment: r.comment,
+      })
+    }
+  }
+
+  const nextPk = input.rows
+    .filter((r) => !r.removed && r.primaryKey)
+    .map((r) => r.name.trim())
+    .filter(Boolean)
+  if (!columnsEqual(nextPk, input.pkSnapshot)) {
+    const pkName = findPkConstraintName(input.constraints)
+    if (input.pkSnapshot.length > 0) {
+      ops.push({
+        op: 'drop_primary_key',
+        name: pkName || `${input.tableName}_pkey`,
+      })
+    }
+    if (nextPk.length > 0) {
+      ops.push({ op: 'add_primary_key', name: '', columns: nextPk })
+    }
+  }
+
+  const uniqNames = uniqueConstraintNames(input.constraints)
+  for (const idx of input.indexes) {
+    if (idx.primary) continue
+    if (idx.removed) {
+      if (idx.originalName) pushDropIndex(ops, idx.originalName, uniqNames)
+      continue
+    }
+    if (!idx.originalName) {
+      pushAddIndex(ops, idx)
+      continue
+    }
+
+    const structChanged = indexStructChanged(idx)
+    const nameChanged = idx.name.trim() !== idx.snapName
+    if (!structChanged && !nameChanged) continue
+
+    if (!structChanged && nameChanged && !uniqNames.has(idx.originalName)) {
+      ops.push({
+        op: 'rename_index',
+        name: idx.originalName,
+        newName: idx.name.trim(),
+      })
+      continue
+    }
+
+    pushDropIndex(ops, idx.originalName, uniqNames)
+    pushAddIndex(ops, idx)
+  }
+
+  for (const fk of input.foreignKeys) {
+    if (fk.removed) {
+      if (fk.originalName) ops.push({ op: 'drop_constraint', name: fk.originalName })
+      continue
+    }
+    if (!fk.originalName) {
+      pushAddForeignKey(ops, fk)
+      continue
+    }
+    const nameChanged = fk.name.trim() !== fk.snapName
+    if (!fkStructChanged(fk) && !nameChanged) continue
+    ops.push({ op: 'drop_constraint', name: fk.originalName })
+    pushAddForeignKey(ops, fk)
+  }
+
+  for (const ck of input.checks) {
+    if (ck.removed) {
+      if (ck.originalName) ops.push({ op: 'drop_constraint', name: ck.originalName })
+      continue
+    }
+    if (!ck.originalName) {
+      pushAddCheck(ops, ck)
+      continue
+    }
+    const changed =
+      ck.name.trim() !== ck.snapName || ck.expression.trim() !== ck.snapExpression.trim()
+    if (!changed) continue
+    ops.push({ op: 'drop_constraint', name: ck.originalName })
+    pushAddCheck(ops, ck)
+  }
+
+  if (input.tableComment !== input.tableCommentSnapshot) {
+    ops.push({
+      op: 'set_table_comment',
+      name: '',
+      comment: input.tableComment,
+    })
+  }
+
+  return ops
+}
+
+export function addDraftColumn(rows: DesignColumnDraft[]): DesignColumnDraft[] {
+  return [...rows, newEmptyColumn(rows.length)]
+}
+
+export function addDraftIndex(indexes: DesignIndexDraft[]): DesignIndexDraft[] {
+  return [...indexes, newEmptyIndex(indexes.length)]
+}
+
+export function addDraftForeignKey(
+  fks: DesignForeignKeyDraft[],
+  schema: string,
+): DesignForeignKeyDraft[] {
+  return [...fks, newEmptyForeignKey(fks.length, schema)]
+}
+
+export function addDraftCheck(checks: DesignCheckDraft[]): DesignCheckDraft[] {
+  return [...checks, newEmptyCheck(checks.length)]
+}

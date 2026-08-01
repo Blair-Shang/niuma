@@ -16,7 +16,7 @@ import type {
   VastColumnInfo,
   VastConstraintInfo,
 } from '@/api/types/vastbase'
-import { refreshResourceIfLoaded } from '@/modules/ops/composables/useConnTreeChildren'
+import { patchCategoryObjectCount, refreshResourceIfLoaded } from '@/modules/ops/composables/useConnTreeChildren'
 import type { ConnItem } from '@/modules/ops/types'
 import { useTabStore } from '@/stores/tab'
 import {
@@ -1014,15 +1014,17 @@ async function preview(): Promise<void> {
 
 async function refreshTablesCategoryInTree(): Promise<void> {
   if (!props.profileId || !props.database || !props.schema) return
-  // 仅刷新「表」分类节点，避免 invalidate 整棵连接树导致已展开节点全部折叠
+  // 仅刷新「表」分类 + 就地 patch 计数，避免重拉整个 schema
   const conn = { profileId: props.profileId, kind: 'vastbase' } as ConnItem
-  await refreshResourceIfLoaded(conn, {
+  const tablesPath = {
     segments: [
       { kind: 'database', name: props.database },
       { kind: 'schema', name: props.schema },
       { kind: 'category', name: 'tables' },
     ],
-  })
+  }
+  await refreshResourceIfLoaded(conn, tablesPath)
+  patchCategoryObjectCount(conn, tablesPath, { delta: 1 })
 }
 
 async function apply(): Promise<void> {

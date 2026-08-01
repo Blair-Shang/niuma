@@ -15,6 +15,16 @@ import mysqlZh from '../modules/mysql/locale/zh-CN'
 import mysqlEn from '../modules/mysql/locale/en-US'
 import vastbaseZh from '../modules/vastbase/locale/zh-CN'
 import vastbaseEn from '../modules/vastbase/locale/en-US'
+import sqliteZh from '../modules/sqlite/locale/zh-CN'
+import sqliteEn from '../modules/sqlite/locale/en-US'
+import damengZh from '../modules/dameng/locale/zh-CN'
+import damengEn from '../modules/dameng/locale/en-US'
+import oracleZh from '../modules/oracle/locale/zh-CN'
+import oracleEn from '../modules/oracle/locale/en-US'
+import clickhouseZh from '../modules/clickhouse/locale/zh-CN'
+import clickhouseEn from '../modules/clickhouse/locale/en-US'
+import kingbaseZh from '../modules/kingbase/locale/zh-CN'
+import kingbaseEn from '../modules/kingbase/locale/en-US'
 
 const zhMessages = mergeMessages(
   zhCN,
@@ -24,6 +34,11 @@ const zhMessages = mergeMessages(
   mongodbZh,
   mysqlZh,
   vastbaseZh,
+  sqliteZh,
+  damengZh,
+  oracleZh,
+  clickhouseZh,
+  kingbaseZh,
 ) as typeof zhCN
 
 const enMessages = mergeMessages(
@@ -34,6 +49,11 @@ const enMessages = mergeMessages(
   mongodbEn,
   mysqlEn,
   vastbaseEn,
+  sqliteEn,
+  damengEn,
+  oracleEn,
+  clickhouseEn,
+  kingbaseEn,
 ) as typeof enUS
 
 export const i18n = createI18n({

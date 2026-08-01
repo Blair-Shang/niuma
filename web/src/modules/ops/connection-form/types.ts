@@ -5,6 +5,9 @@ import type { RedisSessionTestParams } from '@/api/types/redis'
 import type { SshAuthType, SshSessionTestParams } from '@/api/types/ssh'
 import type { VastSessionTestParams } from '@/api/types/vastbase'
 import type { MysqlSessionTestParams } from '@/api/types/mysql'
+import type { SqliteSessionTestParams } from '@/api/types/sqlite'
+import type { KingbaseSessionTestParams } from '@/api/types/kingbase'
+import type { ClickHouseSessionTestParams } from '@/api/types/clickhouse'
 import type { ProxyFormState, TunnelFormState } from '@/modules/connection'
 import type { ConnAccentColor, ConnItem } from '@/modules/ops/types'
 
@@ -61,6 +64,9 @@ export type ConnectionTestParams =
   | MongoSessionTestParams
   | VastSessionTestParams
   | MysqlSessionTestParams
+  | SqliteSessionTestParams
+  | ClickHouseSessionTestParams
+  | KingbaseSessionTestParams
 
 /** adapter 构造 connection_options 时可使用的通用上下文。 */
 export interface ConnectionFormAdapterBuildContext {

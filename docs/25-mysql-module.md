@@ -1,7 +1,7 @@
 # 25 — MySQL 管理模块（Layer-1 能力服务 + Web 模块）
 
-> 版本：v0.12 · 日期：2026-07-21  
-> 状态：**P0–P4 全量常用集已落地**（含 **完整 Monitor**（实例/进程/锁）、**表设计器**、**CSV/SQL 导入导出**；可选 `mysql-tools` 外部组件占位；可视化仍低于 Vastbase 密度）  
+> 版本：v0.15 · 日期：2026-07-23  
+> 状态：**P0–P4 全量常用集已落地**（含 **完整 Monitor**、**表设计器**、**对象脚本（视图/过程/函数）**、**CSV/SQL 导入导出**（列映射 / dump/4）、Browse 多格式、可选 `mysql-tools` CLI；可视化仍低于 Vastbase 密度）  
 > 范围：仅 **Oracle MySQL**（含 5.7 / 8.0+ 等**内部版本**差异）。**MariaDB 不在本服务**，见 [26 — MariaDB](./26-mariadb-module.md)。
 
 > 关联（**共享框架，不含其它库实现**）：  
@@ -60,7 +60,7 @@
 | 版本差异 | **仅 MySQL 主版本 Cap 表** | 5.7 / 8.0+ …；不做 MariaDB 行 |
 | 会话策略 | **`per_profile` + idle** | 同站点多 Tab 共享；见 [21](./21-session-registry.md) |
 | 凭据 | platform Vault 注入 | [14](./14-capability-connection-framework.md) |
-| 调试 | **首期不做** | 不引入双连接调试状态机 |
+| 调试 | **P5 辅助已落地** | UI 复用公共 `DebugShell`（assist：无步进）。面板内运行调用看结果；左侧源码/日志点**只读草稿、永不写库**。真断点引擎另议且须外置 |
 | **禁止** | 本服务兼容 MariaDB；MCP 编进 platform | 差异分叉 / 仓库外部化规则 |
 
 ---
@@ -106,7 +106,8 @@
 | `format.mysql` | 格式化方言 `mysql` | ✓ | ✓ | P0 |
 | `editor.builtin_sql` | Monaco 内置 `sql`（无 mysql Worker） | ✓ | ✓ | **P0 默认** |
 | `editor.mysql_monaco` | Monaco `mysql` + sql-languages | — | — | **P1+**（语言包登记后） |
-| `split.delimiter_blocks` | 拆句识别 `DELIMITER` / 过程体内 `;` | ✓ | ✓ | **已落地**（Web splitter + Query 批执行） |
+| `split.delimiter_blocks` | 拆句识别 `DELIMITER`（CLI 粘贴兼容） | ✓ | ✓ | **已落地**（Web splitter + Query 批执行） |
+| `split.mysql_compound` | `CREATE PROCEDURE/FUNCTION … BEGIN…END` 体内 `;` 不拆句（Navicat 风格） | ✓ | ✓ | **已落地** |
 | `routine.create_procedure` | `CREATE PROCEDURE` 模板 | ✓ | ✓ | P3 |
 | `routine.create_function` | `CREATE FUNCTION` 模板 | ✓ | ✓ | P3 |
 | `ddl.if_not_exists` | `CREATE … IF NOT EXISTS` | ✓ | ✓ | P2 |
@@ -195,9 +196,10 @@ services/
 web/src/modules/mysql/
 ├── views/          # Home / Session
 ├── completion/     # catalog-client（docs/23）
-├── components/     # ConnectionFields / QueryPane / BrowsePane / DdlPane / SourcePane / MysqlDdl*
-├── composables/    # useMysqlDdlExec / useMysqlSessionSql …
+├── components/     # ConnectionFields / QueryPane / BrowsePane / DdlPane / ObjectScriptPane / MysqlDdl*
+├── composables/    # useMysqlObjectScript / useMysqlDdlExec / useMysqlSessionSql …
 ├── stores/         # ddl-actions（树 DDL 确认队列）
+├── types/          # object-script（objectKind 等）
 ├── utils/          # script-templates
 ├── connection-form-adapter.ts
 ├── register-conn-form.ts
@@ -209,6 +211,11 @@ web/src/modules/mysql/
 ├── conn-nav-strategy.ts
 ├── locale/         # zh-CN.ts / en-US.ts
 └── pane-registry.ts
+
+# 跨库 UI 壳（样式复用，无 MySQL 业务）
+web/src/modules/database/
+├── components/ObjectScriptShell.vue   # 与 TableDesignShell / SqlQueryShell 同级
+└── types/object-script.ts
 
 web/src/api/
 ├── mysql.ts
@@ -260,7 +267,7 @@ P0 验收：明文 / TLS 常见组合 +（若平台已通）SSH 隧道下 `sessi
 | `query.fetch` / `query.close` / `query.cancel` | 游标分页与取消 |
 
 **批约定（P0）**：Web 拆句后 **严格顺序** 逐条 `query.exec`；服务端默认按 **单语句** 执行（DSN 不轻易开 `multiStatements`）。  
-**`DELIMITER`**：**已支持**（`split.delimiter_blocks`）：识别行首 `DELIMITER <token>`，按当前分隔符切句；指令行本身不提交；过程模板默认带 `DELIMITER //` … `//` … `DELIMITER ;`。
+**例程拆句**：**`split.mysql_compound`** 识别 `CREATE PROCEDURE|FUNCTION … BEGIN…END;`，体内 `;` 不拆（对齐 Navicat 直接写）。**`DELIMITER`**（`split.delimiter_blocks`）仍支持 CLI 脚本粘贴；指令行不提交。协议层从不发送 `DELIMITER`。
 
 ### 5.3 树（导航，P1）
 
@@ -271,6 +278,7 @@ P0 验收：明文 / TLS 常见组合 +（若平台已通）SSH 隧道下 `sessi
 | `tree.databases` | 库列表（可 `excludeSystem`） |
 | `tree.tables` | 指定 `database` 下表/视图（`types: table|view`） |
 | `tree.routines` | 指定 `database` 下过程/函数（`types: procedure|function`） |
+| `tree.categoryCounts` | `{ …, database }` → `{ tables, views, functions, procedures }`（对象数，非行数；供分类节点 label/badge） |
 
 对象树层级（对齐 Navicat / DBeaver）：
 
@@ -278,17 +286,34 @@ P0 验收：明文 / TLS 常见组合 +（若平台已通）SSH 隧道下 `sessi
 connection → database → {Tables|Views|Procedures|Functions} → object
 ```
 
-**P1+ 树右键（常用集，密度低于 Vastbase）**：新建库/对象模板、查询表数据、查看·复制 DDL、生成 CRUD/COUNT、表维护、重命名/Truncate/Drop、例程调用/源码、复制名、连接级 **进程列表 Monitor**。不含 Grant/Dump/设计器面板。
+分类节点（Tables / Views / …）展开前通过 `tree.categoryCounts` 显示子对象数量后缀（如 `Tables (12)`）。
+**树右键（对齐 Navicat / DBeaver 常用集，密度低于 Vastbase）**：
+- **库节点**：新建查询、新建（表设计器 / 视图 / 过程 / 函数）、工具（转储 SQL / 执行 SQL / 备份还原）、删除库、复制名称、复制 `CREATE DATABASE`；壳层追加刷新。不含 Owner / Rename / Schema / Grant。
+- **对象节点**：查询表数据、查看·复制 DDL（表）、编辑视图定义、生成 CRUD/COUNT、表维护、重命名/Truncate/Drop、例程调用/编辑源码、导入导出、复制名；连接级 **进程列表 Monitor**。
 
-**P2 面板**：双击/「打开」→ 只读 Browse（数据 / 列 / 索引）；「查看 DDL」→ DDL Tab（`meta.ddl`）。Query 仍用于脚本与维护 SQL。
+**P2 面板**：双击/「打开」→ 只读 Browse（数据 / 列 / 索引）；表「查看 DDL」→ DDL Tab（`meta.ddl`，只读）。Query 仍用于任意脚本与维护 SQL。
 
-**P3**：例程「查看源码」/ 双击 → Source Tab（`meta.routineSource`）；生成 INSERT/UPDATE/DELETE 用 `meta.columns` + 主键索引填充模板；**DELIMITER splitter** 已启用。
+**对象脚本面板（视图 / 过程 / 函数，新建 = 编辑）**：
+- Session Tab：`objectScript`（`objectKind` + `designMode: create|alter`）；旧 `source` 入口映射到同一面板。
+- 布局壳：公共 [`ObjectScriptShell`](../web/src/modules/database/components/ObjectScriptShell.vue)（`modules/database`，供其它 SQL 库复用样式）；MySQL 适配 [`MysqlObjectScriptPane`](../web/src/modules/mysql/components/MysqlObjectScriptPane.vue) + `useMysqlObjectScript`。
+- 编辑器：`useMysqlSqlEditor`（与 Query 同款 catalog 表/列补全）；工具栏仅格式化 / 复制 / 刷新(编辑) / 创建|保存（无 Explain、事务）。
+- 右键菜单：公共 `buildObjectScriptContextMenuItems`（创建|保存 / 格式化 / 压缩 / 复制粘贴 / **询问 AI**），对齐 Query 的 AI 选区交互；无 Explain / 导出 / 翻页。
+- 新建：树「新建视图/过程/函数」预填 `createObjectTemplate`（例程为 `CREATE…BEGIN…END;`，**无需手写 DELIMITER**）。
+- 编辑：视图拉 `meta.ddl`；过程/函数拉 `meta.routineSource`；保存时视图优先 `CREATE OR REPLACE`，例程 `DROP IF EXISTS` + **整包** `CREATE`（有 `DELIMITER` 时仍走拆句）；成功后刷新分类树。
+- **草稿恢复**：编辑器正文写入 `tab.props.draftSql`（随 `workspace.tabs` 持久化）；应用重启优先恢复草稿；「刷新」强制拉库并清除草稿。
+- 表 DDL 不并入本面板（仍走只读 DDL Tab）。
+
+**P3**：生成 INSERT/UPDATE/DELETE 用 `meta.columns` + 主键索引填充模板；例程拆句（`mysql_compound` + 可选 `DELIMITER`）Query 与对象脚本共用。
 
 **P4 Monitor**：连接右键「进程列表」→ 三标签（`meta.instanceOverview` / `meta.processlist`+`meta.kill` / `meta.locks`）。与 `query.cancel` 分立。
 
-**表设计器**：树「设计表」/ Tables「新建」→ Design Tab（`ddl.designPreview` / `ddl.designApply` / `ddl.createTable`；列 + 索引）。
+**表设计器**：树「设计表」/ Tables「新建」→ Design Tab（公共 `TableDesignShell` + MySQL 适配；对齐 Navicat / DBeaver 常用集）。
+- 新建：默认 `id BIGINT AUTO_INCREMENT PK`；真 `ddl.createTablePreview`；外键 Tab；创建后刷新连接树。
+- 表选项条（引擎 / 字符集 / collation / 注释）；工具栏添加与列上下移；空索引/外键仍显示网格表头。
+- 网格内编辑、列拖拽、索引方法 BTREE/HASH、索引/外键列多选、UNSIGNED / ENUM·SET；预览可复制或在查询中打开。
+- RPC：`ddl.designPreview` / `ddl.designApply` / `ddl.createTable` / `ddl.createTablePreview`。
 
-**导入导出**：表 CSV 导入/导出、库 SQL 转储 / 执行 SQL 文件（`io.*`，纯 Go；任务进全局数据任务 Dock）。可选外部组件 `components/mysql-tools`（mysqldump/mysql CLI，不编进 platform）。
+**导入导出**：表 CSV 导入/导出（可选列映射）、库 SQL 转储 / 执行 SQL 文件（`io.*`，纯 Go；`niuma-mysql-dump/4` 支持过程/函数/触发器/事件与可选 `CREATE DATABASE`；**对象名无库前缀**，可还原到另一库；任务进全局数据任务 Dock）。Browse 页支持当前页 CSV/SQL/Excel XML/JSON；全表 CSV 走 `io.exportCsv`。可选外部组件 `components/mysql-tools`（`tools.detect|dump|restore|cancel`，mysqldump/mysql CLI，不编进 platform）。
 
 ResourceId（与 [18](./18-ops-connection-tree.md) 对齐）：
 
@@ -317,13 +342,14 @@ MySQL 映射：
 
 | 方法 | 说明 |
 |------|------|
-| `meta.columns` / `indexes` / `ddl` | 表级面板（P2） |
-| `meta.routineSource` | 过程 / 函数源码面板（P3） |
+| `meta.columns` / `indexes` / `ddl` | 表级 Browse/DDL；视图编辑亦可读 `meta.ddl` |
+| `meta.routineSource` | 过程 / 函数对象脚本（编辑加载） |
 | `meta.processlist` / `meta.kill` | 进程列表与 KILL（非 `query.cancel`） |
 | `meta.instanceOverview` / `meta.locks` | 实例概览与锁等待 |
 | `meta.primaryKey` / `meta.foreignKeys` | 设计器辅助元数据 |
-| `ddl.designPreview` / `ddl.designApply` / `ddl.createTable` | 表设计器 |
-| `io.exportCsv` / `io.importCsv` / `io.dumpSql` / `io.execSqlFile` / `io.cancel` | CSV / SQL 文件任务 |
+| `ddl.designPreview` / `ddl.designApply` / `ddl.createTable` / `ddl.createTablePreview` | 表设计器 |
+| `io.exportCsv` / `io.importCsv` / `io.dumpSql` / `io.execSqlFile` / `io.cancel` | CSV / SQL 文件任务（CSV 支持 `columnMap`；dump/4 无库前缀，可跨库还原；含触发器/事件/可选建库） |
+| `tools.detect` / `tools.dump` / `tools.restore` / `tools.cancel` | 可选 mysqldump/mysql CLI（依赖 `mysql-tools` 外部组件路径） |
 | `ddl.script` | 入参可含 `sessionId` / `capabilities`；模板只读 Cap |
 | `ddl.exec` | 可选危险执行 |
 
@@ -334,7 +360,7 @@ MySQL 映射：
 ## 6. Web 接线（仅 `mysql` kind）
 
 1. **ConnKind** 注册 `mysql`（表单、侧栏、导航策略、图标）。  
-2. **session-policy**：`mysql: { mode: 'per_profile', idleMs: … }`。  
+2. **session-policy**：`mysql: { sharing: 'per_tab', closeOnRelease: true }`（多查询 Tab 独立连接与事务）。  
 3. **session-registry** `openRemoteSession`：仅增加 `case 'mysql'`，缓存 `dialect`。  
 4. **capabilities**：本库 Cap 常量 + `defaultMySQL57Profile` / `defaultMySQL8Profile`；  
    - P0：`editor.builtin_sql` → Monaco `sql`、不挂 mysql Worker；  
@@ -342,7 +368,7 @@ MySQL 映射：
    - `resolveSplitFeaturesFromProfile`：读 `mysql.backtick_ident` / `hash_comment` / `backslash_escape`（无 Cap 时 family 回退）；  
    - `buildAiDialectRules`：只生成 MySQL 规则；可选 `dialect_mysql.txt` 作无 caps 回退。  
 5. **Query 面板**：`splitSqlStatementsWithFeatures(resolveSplitFeaturesFromProfile(dialect))`。  
-6. **树 / DDL**：`getSessionIdForProfile(id, 'mysql')` + 传 `capabilities`。  
+6. **树 / DDL**：`withMysqlSession` 短开短关（不复用查询 Tab 的 `sessionId`）+ 传 `capabilities`。  
 7. **补全**：实现 `mysql.catalog.*` 后接入共用 CatalogCache（映射见 §5.4）。
 
 ---
@@ -392,9 +418,10 @@ permissions: []
 |-------|------|------|
 | **P0** | 服务骨架、manifest、kind、session、Probe、`query.exec/cancel`、最小 Query、ConnectParams（含 TLS） | Test → 开会话 → `SELECT 1`；lease 有 `capabilities` |
 | **P1** | `tree.databases/tables/routines`、连接树 Provider + **常用右键**；`catalog.*` + Query 轻量补全 | 展开见库表；`FROM db.` / `table.` 可补全 |
-| **P2** | 表预览（只读 browse）、`meta.columns/indexes/ddl`、DDL 面板；树 open→browse、ddl→DDL Tab | 双击表看数据/列/索引；右键 DDL 开专用 Tab |
-| **P3** | `meta.routineSource` + Source 面板；生成脚本填真实列；`DELIMITER` splitter + Cap | 双击过程看源码；INSERT 模板含列名；过程体可批执行 |
+| **P2** | 表预览（只读 browse）、`meta.columns/indexes/ddl`、表 DDL 只读面板；树 open→browse、表 ddl→DDL Tab | 双击表看数据/列/索引；右键表 DDL 开专用 Tab |
+| **P3** | `meta.routineSource`；对象脚本面板（视图/过程/函数新建=编辑，公共 `ObjectScriptShell`）；生成脚本填真实列；`DELIMITER` splitter + Cap | 新建/编辑视图·例程同一面板；INSERT 模板含列名；过程体可批执行 |
 | **P4** | Monitor（实例/进程/锁）；表设计器；CSV/SQL `io.*`；`query.explain`；可选 `mysql-tools` 外部组件（[20](./20-tool-components.md)） | 连接监控三页；设计表；导入导出进数据任务 Dock |
+| **P5** | 例程**调试辅助**（Navicat MySQL 级）：公共 [`DebugShell`](../web/src/modules/database/components/DebugShell.vue)（`showStepControls=false`）+ [`MysqlDebugPane`](../web/src/modules/mysql/components/MysqlDebugPane.vue)；面板内**运行调用**（结果/消息）；行旁插日志点仅编辑器草稿，**禁止写回例程 DDL**。**禁止**把 Vastbase `DBE_PLDEBUGGER` 状态机拷进 mysql-service | 右键「调试辅助」；本页可跑，不改线上定义 |
 
 ---
 
@@ -402,7 +429,7 @@ permissions: []
 
 1. **禁止**在 Query/DDL/AI 散落 `if (version < 8)`；只读 Cap。  
 2. **禁止**在本服务兼容 / 特判 / 降级支持 **MariaDB**（含「version 像 MariaDB 仍当 MySQL 用」）。  
-3. **禁止**把其它库的过程/脚本 Cap 或调试状态机拷进本服务默认集。  
+3. **禁止**把其它库的过程/脚本 Cap 或调试状态机拷进本服务默认集（调试 UI 外壳可共享，引擎不可抄）。  
 4. **禁止** platform 代理裁剪 `dialect`。  
 5. **禁止** MCP/工具逻辑编进 platform-core。  
 6. 树新建 / DDL：**优先传 `sessionId`**，服务端用会话 Probe 结果。  
@@ -437,3 +464,9 @@ permissions: []
 | v0.10 | 2026-07-21 | `catalog.*` + Query 轻量补全；`query.explain` + 工具栏 EXPLAIN/ANALYZE |
 | v0.11 | 2026-07-21 | `DELIMITER` splitter + Cap；轻量 Monitor（`meta.processlist` / `meta.kill`） |
 | v0.12 | 2026-07-21 | Monitor 三页；表设计器；CSV/SQL `io.*`；`components/mysql-tools` 外部占位 |
+| v0.13 | 2026-07-21 | dump/3 触发器·事件·CREATE DATABASE；CSV 列映射；Browse Excel/JSON；`tools.*` 接入 mysqldump CLI |
+| v0.14 | 2026-07-22 | dump/4：DROP/INSERT/DDL 去掉源库限定名，支持还原到另一库；表先于视图 |
+| v0.15 | 2026-07-23 | 对象脚本面板：视图/过程/函数新建=编辑；公共 `ObjectScriptShell`；表 DDL 仍只读；文档同步 |
+| v0.16 | 2026-07-23 | 对象脚本右键对齐 Query：`buildObjectScriptContextMenuItems` + 询问 AI |
+| v0.17 | 2026-07-24 | 例程编辑对齐 Navicat：`split.mysql_compound`；模板去掉 DELIMITER；保存 DROP+整包 CREATE |
+| v0.18 | 2026-07-24 | 对象脚本 `draftSql`：新建/编辑 Tab 重启恢复未保存正文 |

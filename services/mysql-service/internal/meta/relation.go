@@ -21,12 +21,15 @@ type RelationRef struct {
 
 // ColumnInfo 是列元数据。
 type ColumnInfo struct {
-	Ordinal  int     `json:"ordinal"`
-	Name     string  `json:"name"`
-	DataType string  `json:"dataType"`
-	Nullable bool    `json:"nullable"`
-	Default  *string `json:"default,omitempty"`
-	Comment  string  `json:"comment,omitempty"`
+	Ordinal       int     `json:"ordinal"`
+	Name          string  `json:"name"`
+	DataType      string  `json:"dataType"`
+	Nullable      bool    `json:"nullable"`
+	Default       *string `json:"default,omitempty"`
+	Comment       string  `json:"comment,omitempty"`
+	// AutoIncrement 来自 information_schema.COLUMNS.EXTRA（含 auto_increment）。
+	// 设计器改主键前必须知道此状态：带 AI 的列不能无 KEY（Error 1075）。
+	AutoIncrement bool `json:"autoIncrement,omitempty"`
 }
 
 // IndexInfo 是索引元数据。
@@ -83,7 +86,8 @@ SELECT
   COLUMN_TYPE,
   IS_NULLABLE,
   COLUMN_DEFAULT,
-  COLUMN_COMMENT
+  COLUMN_COMMENT,
+  EXTRA
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
 ORDER BY ORDINAL_POSITION`
@@ -100,7 +104,8 @@ ORDER BY ORDINAL_POSITION`
 		var nullable string
 		var def sql.NullString
 		var comment sql.NullString
-		if err := rows.Scan(&col.Ordinal, &col.Name, &col.DataType, &nullable, &def, &comment); err != nil {
+		var extra sql.NullString
+		if err := rows.Scan(&col.Ordinal, &col.Name, &col.DataType, &nullable, &def, &comment, &extra); err != nil {
 			return nil, fmt.Errorf("mysql: list columns scan: %w", err)
 		}
 		col.Nullable = strings.EqualFold(nullable, "YES")
@@ -110,6 +115,9 @@ ORDER BY ORDINAL_POSITION`
 		}
 		if comment.Valid {
 			col.Comment = comment.String
+		}
+		if extra.Valid {
+			col.AutoIncrement = strings.Contains(strings.ToLower(extra.String), "auto_increment")
 		}
 		out = append(out, col)
 	}

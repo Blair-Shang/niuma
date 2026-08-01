@@ -50,6 +50,24 @@ func (d *Dispatcher) ddlDesignApply(ctx context.Context, req Request) Response {
 	return okResponse(req.ID, result)
 }
 
+func (d *Dispatcher) ddlCreateTablePreview(_ context.Context, req Request) Response {
+	var params ddl.CreateTableParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	if params.Database == "" || params.Name == "" {
+		return errorResponse(req.ID, "database and name required")
+	}
+
+	result, err := ddl.PreviewCreateTable(params)
+	if err != nil {
+		logOpWarn(MethodDDLCreateTablePreview, err, "database", params.Database, "table", params.Name)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodDDLCreateTablePreview, "database", params.Database, "table", params.Name, "statements", len(result.SQL))
+	return okResponse(req.ID, result)
+}
+
 func (d *Dispatcher) ddlCreateTable(ctx context.Context, req Request) Response {
 	var params ddl.CreateTableParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {

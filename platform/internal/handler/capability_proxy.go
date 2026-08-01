@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"niuma/pkg/tunnel"
 )
@@ -37,6 +38,8 @@ type connectBridgeParams struct {
 	Secret            string          `json:"secret"`
 	Options           json.RawMessage `json:"options"`
 	ConnectionOptions json.RawMessage `json:"connectionOptions"`
+	// Database 可选：覆盖连接 options.database（MySQL / Kingbase 按 Tab 目标库建连）。
+	Database string `json:"database"`
 }
 
 // UnmarshalJSON 兼容历史 `password` 字段（Web 旧版仍可能发送 password）。
@@ -93,6 +96,10 @@ func paramsHaveSessionID(params json.RawMessage) bool {
 // mergeWithCredentials 将注入的连接凭据合并进原始请求参数。
 // 凭据字段（hostAddress / portNumber / loginAccount / secret / options）会覆盖原始值，
 // 其余业务字段（如 database、collection 等）保留自原始参数，确保不被凭据注入丢弃。
+//
+// 注意：业务参数禁止再使用顶层 options（会被连接 options 覆盖）。
+// CSV 用 csvOptions，执行 SQL 用 execOptions，工具用 dumpOptions / restoreOptions，
+// Dump SQL 已嵌套在 dump 下。
 func mergeWithCredentials(original json.RawMessage, cred injectedConnectParams) (json.RawMessage, error) {
 	var base map[string]json.RawMessage
 	if err := json.Unmarshal(original, &base); err != nil {
@@ -332,16 +339,46 @@ func (d *Dispatcher) resolveInlineConnectParams(
 	}, nil
 }
 
+// overrideOptionsDatabase 将顶层 database 合并进 connection options（session.open 按 Tab 目标库建连）。
+func overrideOptionsDatabase(opts json.RawMessage, database string) (json.RawMessage, error) {
+	database = strings.TrimSpace(database)
+	if database == "" {
+		return opts, nil
+	}
+	var m map[string]any
+	if len(opts) > 0 && string(opts) != "null" {
+		if err := json.Unmarshal(opts, &m); err != nil {
+			return nil, err
+		}
+	}
+	if m == nil {
+		m = map[string]any{}
+	}
+	m["database"] = database
+	return json.Marshal(m)
+}
+
 // resolveConnectParams 解析 Bridge 入参：优先 profileId 查库注入凭据，否则使用内联连接参数（新建站点测试场景）。
 func (d *Dispatcher) resolveConnectParams(ctx context.Context, raw json.RawMessage) (injectedConnectParams, error) {
 	var params connectBridgeParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return injectedConnectParams{}, fmt.Errorf("invalid params: %v", err)
 	}
+	var connect injectedConnectParams
+	var err error
 	if params.ProfileID != "" {
-		return d.resolveProfileConnectParams(ctx, params)
+		connect, err = d.resolveProfileConnectParams(ctx, params)
+	} else {
+		connect, err = d.resolveInlineConnectParams(ctx, params)
 	}
-	return d.resolveInlineConnectParams(ctx, params)
+	if err != nil {
+		return injectedConnectParams{}, err
+	}
+	connect.Options, err = overrideOptionsDatabase(connect.Options, params.Database)
+	if err != nil {
+		return injectedConnectParams{}, fmt.Errorf("override database: %v", err)
+	}
+	return connect, nil
 }
 
 // resolveConnectParamsFromProfile 按 profileId 从 SQLite 读取站点，并注入 Vault 解密后的密码后转发给能力服务。

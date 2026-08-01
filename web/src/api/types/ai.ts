@@ -541,3 +541,36 @@ export interface AiSkillDeleteParams {
 export interface AiSkillDeleteResult {
   deleted: boolean
 }
+
+/** skill_options.pack — OpenClaw 风格包安装元数据。 */
+export interface AiSkillPackMeta {
+  source?: string
+  installedAt?: string
+  packPath?: string
+  hasScripts?: boolean
+  mcpServerId?: string
+  description?: string
+  homepage?: string
+}
+
+export interface AiSkillInstallPackParams {
+  sourcePath: string
+}
+
+export interface AiSkillInstallPackResult {
+  skill: AiSkill
+  mcpServerId?: string
+  toolCount: number
+  hasScripts: boolean
+  packPath: string
+  warning?: string
+}
+
+export interface AiSkillExportPackParams {
+  skillId: string
+  destPath: string
+}
+
+export interface AiSkillExportPackResult {
+  path: string
+}

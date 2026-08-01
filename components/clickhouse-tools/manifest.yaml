@@ -1,0 +1,19 @@
+id: com.niuma.components.clickhouse-tools
+name: ClickHouse 官方客户端
+module: clickhouse
+# 外部化组件：clickhouse-client 不编进 platform / clickhouse-service。
+# 默认 detect_only（官方无统一便携 ZIP 直链）；可 PATH 探测或在设置中指定路径。
+install:
+  mode: detect_only
+tools:
+  - id: clickhouse-client
+    displayName: clickhouse-client
+    detect:
+      executables:
+        - clickhouse-client
+        - clickhouse
+      versionArgs:
+        - --version
+    install:
+      mode: detect_only
+      downloadPage: https://clickhouse.com/docs/en/install

@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"niuma/pkg/common/id"
 	"niuma/services/mysql-service/internal/session"
 )
 
@@ -19,7 +21,7 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 		return errorResponse(req.ID, errSessionIDRequired)
 	}
 
-	db, sess, release, err := d.resolveDBForDatabase(ctx, req.Params, params.Database)
+	db, sess, release, err := d.resolveDBForSessionQuery(ctx, req.Params, params.Database)
 	if err != nil {
 		return errorResponse(req.ID, err.Error())
 	}
@@ -27,10 +29,7 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 	if sess == nil {
 		defer release()
 		limit := params.Limit
-		requestID := strings.TrimSpace(params.RequestID)
-		if requestID == "" {
-			requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-		}
+		requestID := id.CoalesceID(params.RequestID, "q")
 		runCtx := ctx
 		var cancelTimeout context.CancelFunc
 		if params.TimeoutMS > 0 {
@@ -39,7 +38,7 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 		}
 		result, err := session.ExecOnDB(runCtx, db, params.SQL, limit, requestID)
 		if err != nil {
-			logOpWarn(MethodQueryExec, err, "session", params.SessionID, "database", params.Database)
+			logQueryExecErr(err, params.SessionID, params.Database)
 			return errorResponse(req.ID, err.Error())
 		}
 		logOpInfo(MethodQueryExec, "session", params.SessionID, "rows", result.RowCount, "hasMore", result.HasMore)
@@ -47,6 +46,12 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 	}
 
 	ownDB := db != sess.DB
+	if err := ensureSessionAllowsQueryDB(sess, ownDB); err != nil {
+		if ownDB {
+			release()
+		}
+		return errorResponse(req.ID, err.Error())
+	}
 	var releaseOwned func()
 	if ownDB {
 		releaseOwned = release
@@ -54,7 +59,7 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 
 	result, err := session.OpenPagedQuery(ctx, sess, db, params, releaseOwned)
 	if err != nil {
-		logOpWarn(MethodQueryExec, err, "session", params.SessionID, "database", params.Database)
+		logQueryExecErr(err, params.SessionID, params.Database)
 		return errorResponse(req.ID, err.Error())
 	}
 	logOpInfo(
@@ -65,6 +70,15 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 		"resultSet", result.ResultSetID,
 	)
 	return okResponse(req.ID, result)
+}
+
+// logQueryExecErr 区分主动取消与真实失败，避免 context canceled 刷 ERROR。
+func logQueryExecErr(err error, sessionID, database string) {
+	if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled") {
+		logOpInfo(MethodQueryExec, "session", sessionID, "database", database, "canceled", true)
+		return
+	}
+	logOpWarn(MethodQueryExec, err, "session", sessionID, "database", database)
 }
 
 func (d *Dispatcher) queryFetch(ctx context.Context, req Request) Response {

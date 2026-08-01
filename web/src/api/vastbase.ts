@@ -265,7 +265,8 @@ export const vastbaseApi = {
     schema: string
     table: string
     outputPath: string
-    options?: VastIoCsvOptions
+    /** 勿用 options：platform 凭据注入会覆盖连接 options */
+    csvOptions?: VastIoCsvOptions
   }): Promise<VastIoTaskResult> {
     return bridgeInvoke<VastIoTaskResult>('vastbase.io.exportCsv', params)
   },
@@ -277,7 +278,8 @@ export const vastbaseApi = {
     schema: string
     table: string
     inputPath: string
-    options?: VastIoCsvOptions
+    /** 勿用 options：platform 凭据注入会覆盖连接 options */
+    csvOptions?: VastIoCsvOptions
   }): Promise<VastIoTaskResult> {
     return bridgeInvoke<VastIoTaskResult>('vastbase.io.importCsv', params)
   },
@@ -320,7 +322,8 @@ export const vastbaseApi = {
     profileId?: string
     database: string
     outputPath?: string
-    options?: VastToolsDumpOptions
+    /** 勿用 options：platform 凭据注入会覆盖连接 options */
+    dumpOptions?: VastToolsDumpOptions
     toolPaths?: Record<string, string>
   }): Promise<VastIoTaskResult> {
     return bridgeInvoke<VastIoTaskResult>('vastbase.tools.dump', params)
@@ -331,7 +334,8 @@ export const vastbaseApi = {
     profileId?: string
     database: string
     inputPath: string
-    options?: VastToolsRestoreOptions
+    /** 勿用 options：platform 凭据注入会覆盖连接 options */
+    restoreOptions?: VastToolsRestoreOptions
     toolPaths?: Record<string, string>
   }): Promise<VastIoTaskResult> {
     return bridgeInvoke<VastIoTaskResult>('vastbase.tools.restore', params)

@@ -150,6 +150,50 @@ func (d *Dispatcher) metaRoutineSource(ctx context.Context, req Request) Respons
 	return okResponse(req.ID, result)
 }
 
+func (d *Dispatcher) metaRoutineParameters(ctx context.Context, req Request) Response {
+	var params metaRoutineParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	name := strings.TrimSpace(params.Name)
+	if name == "" {
+		name = strings.TrimSpace(params.Routine)
+	}
+	database := strings.TrimSpace(params.Database)
+	kind := strings.TrimSpace(params.Kind)
+	if database == "" || name == "" {
+		return errorResponse(req.ID, "database and name required")
+	}
+	if kind == "" {
+		return errorResponse(req.ID, "kind required (procedure|function)")
+	}
+
+	db, _, release, err := d.resolveDBForDatabase(ctx, req.Params, database)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := meta.ListRoutineParameters(ctx, db, meta.RoutineRef{
+		Database: database,
+		Name:     name,
+		Kind:     kind,
+	})
+	if err != nil {
+		logOpWarn(MethodMetaRoutineParameters, err, "session", params.SessionID, "database", database, "name", name)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(
+		MethodMetaRoutineParameters,
+		"session", params.SessionID,
+		"database", database,
+		"name", name,
+		"kind", result.Kind,
+		"count", len(result.Parameters),
+	)
+	return okResponse(req.ID, result)
+}
+
 type metaProcesslistParams struct {
 	SessionID string `json:"sessionId"`
 }
@@ -226,7 +270,11 @@ func (d *Dispatcher) metaInstanceOverview(ctx context.Context, req Request) Resp
 		logOpWarn(MethodMetaInstanceOverview, err, "session", params.SessionID)
 		return errorResponse(req.ID, err.Error())
 	}
-	logOpInfo(MethodMetaInstanceOverview, "session", params.SessionID)
+	if result.StatusPartial {
+		logOpWarn(MethodMetaInstanceOverview, fmt.Errorf("partial status"), "session", params.SessionID, "warnings", strings.Join(result.Warnings, "; "))
+	} else {
+		logOpInfo(MethodMetaInstanceOverview, "session", params.SessionID)
+	}
 	return okResponse(req.ID, result)
 }
 
@@ -247,7 +295,79 @@ func (d *Dispatcher) metaLocks(ctx context.Context, req Request) Response {
 		logOpWarn(MethodMetaLocks, err, "session", params.SessionID)
 		return errorResponse(req.ID, err.Error())
 	}
-	logOpInfo(MethodMetaLocks, "session", params.SessionID, "count", len(result.Locks))
+	if result.Unavailable {
+		logOpWarn(MethodMetaLocks, fmt.Errorf("%s", result.Message), "session", params.SessionID, "unavailable", true)
+	} else {
+		logOpInfo(MethodMetaLocks, "session", params.SessionID, "count", len(result.Locks))
+	}
+	return okResponse(req.ID, result)
+}
+
+type metaServerKVParams struct {
+	SessionID string `json:"sessionId"`
+	Like      string `json:"like"`
+}
+
+func (d *Dispatcher) metaServerVariables(ctx context.Context, req Request) Response {
+	var params metaServerKVParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+
+	db, _, release, err := d.resolveDB(ctx, req.Params)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := meta.ListServerVariables(ctx, db, params.Like)
+	if err != nil {
+		logOpWarn(MethodMetaServerVariables, err, "session", params.SessionID)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodMetaServerVariables, "session", params.SessionID, "count", len(result.Items))
+	return okResponse(req.ID, result)
+}
+
+func (d *Dispatcher) metaServerStatus(ctx context.Context, req Request) Response {
+	var params metaServerKVParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+
+	db, _, release, err := d.resolveDB(ctx, req.Params)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := meta.ListServerStatus(ctx, db, params.Like)
+	if err != nil {
+		logOpWarn(MethodMetaServerStatus, err, "session", params.SessionID)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodMetaServerStatus, "session", params.SessionID, "count", len(result.Items))
+	return okResponse(req.ID, result)
+}
+
+func (d *Dispatcher) metaInnoDBDeadlock(ctx context.Context, req Request) Response {
+	var params metaSessionIDParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+
+	db, _, release, err := d.resolveDB(ctx, req.Params)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := meta.LatestInnoDBDeadlock(ctx, db)
+	if err != nil {
+		logOpWarn(MethodMetaInnoDBDeadlock, err, "session", params.SessionID)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodMetaInnoDBDeadlock, "session", params.SessionID, "hasDeadlock", result.HasDeadlock)
 	return okResponse(req.ID, result)
 }
 

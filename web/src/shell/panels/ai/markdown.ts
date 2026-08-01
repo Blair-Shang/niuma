@@ -60,6 +60,8 @@ hljs.registerLanguage('sql', sql)
 hljs.registerLanguage('pgsql', sql)
 hljs.registerLanguage('postgres', sql)
 hljs.registerLanguage('mysql', sql)
+hljs.registerLanguage('dameng', sql)
+hljs.registerLanguage('kingbase', sql)
 hljs.registerLanguage('typescript', typescript)
 hljs.registerLanguage('ts', typescript)
 hljs.registerLanguage('tsx', typescript)
@@ -227,7 +229,7 @@ function renderCodeBlock(text: string, lang: string | undefined): string {
     `</button>`,
     `</div>`,
     `</div>`,
-    `<div class="nm-ai-md__code-body">`,
+    `<div class="nm-ai-md__code-body rs-native-scrollbar">`,
     `<div class="nm-ai-md__gutter" aria-hidden="true">${lineNos}</div>`,
     `<pre class="nm-ai-md__pre"><code class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre>`,
     `</div>`,
@@ -252,7 +254,8 @@ const marked = new Marked({
         return text
       }
       const title = token.title ? ` title="${escapeHtml(token.title)}"` : ''
-      return `<a href="${escapeHtml(href)}"${title} target="_blank" rel="noopener noreferrer">${text}</a>`
+      // 不设 target=_blank：CEF 会开 Popup 且 data/外链易黑屏；点击由 AiMarkdown 拦截转 openExternal
+      return `<a href="${escapeHtml(href)}"${title} rel="noopener noreferrer">${text}</a>`
     },
     image({ href, title, text }) {
       const src = href?.trim() ?? ''
@@ -272,7 +275,7 @@ const marked = new Marked({
 
 function wrapTables(html: string): string {
   return html.replace(/<table\b[\s\S]*?<\/table>/gi, (table) => {
-    return `<div class="nm-ai-md__table-wrap">${table}</div>`
+    return `<div class="nm-ai-md__table-wrap rs-native-scrollbar">${table}</div>`
   })
 }
 

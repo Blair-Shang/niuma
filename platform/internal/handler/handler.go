@@ -33,6 +33,10 @@ const (
 	MethodConnectionUpdate = "platform.connection.update"
 	// MethodConnectionDelete 删除连接站点并级联清理孤儿凭据。
 	MethodConnectionDelete = "platform.connection.delete"
+	// MethodConnectionExport 导出连接配置到本机 JSON 文件（不含凭据明文）。
+	MethodConnectionExport = "platform.connection.export"
+	// MethodConnectionImport 从本机 JSON 文件导入连接配置（不含凭据明文）。
+	MethodConnectionImport = "platform.connection.import"
 	// MethodCredentialSet 写入或更新凭据（明文经 VaultStore 加密写入 cipher_text）。
 	MethodCredentialSet = "platform.credential.set"
 	// MethodCredentialDelete 删除凭据（密文行与关联一并清理）。
@@ -109,6 +113,10 @@ const (
 	MethodAISkillUpsert = "platform.ai.skill.upsert"
 	// MethodAISkillDelete 删除 Skill。
 	MethodAISkillDelete = "platform.ai.skill.delete"
+	// MethodAISkillInstallPack 从目录或 zip 安装 OpenClaw 风格 Skill 包。
+	MethodAISkillInstallPack = "platform.ai.skill.installPack"
+	// MethodAISkillExportPack 导出 Skill 包为 zip（本机「下载」）。
+	MethodAISkillExportPack = "platform.ai.skill.exportPack"
 )
 
 // Request 是 Shell 透传过来的原始请求（cefQuery 请求体）。
@@ -233,6 +241,10 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 		return d.connectionUpdate(ctx, req)
 	case MethodConnectionDelete:
 		return d.connectionDelete(ctx, req)
+	case MethodConnectionExport:
+		return d.connectionExport(ctx, req)
+	case MethodConnectionImport:
+		return d.connectionImport(ctx, req)
 	case MethodCredentialSet:
 		return d.credentialSet(ctx, req)
 	case MethodCredentialDelete:
@@ -309,6 +321,10 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 		return d.aiSkillUpsert(ctx, req)
 	case MethodAISkillDelete:
 		return d.aiSkillDelete(ctx, req)
+	case MethodAISkillInstallPack:
+		return d.aiSkillInstallPack(ctx, req)
+	case MethodAISkillExportPack:
+		return d.aiSkillExportPack(ctx, req)
 	default:
 		if d.fileEditor != nil {
 			if resp, handled := d.fileEditor.Dispatch(ctx, req); handled {

@@ -109,3 +109,45 @@ func (d *Dispatcher) aiSkillDelete(ctx context.Context, req Request) Response {
 	}
 	return okResponse(req.ID, map[string]any{"deleted": deleted})
 }
+
+// aiSkillInstallPack 处理 platform.ai.skill.installPack。
+func (d *Dispatcher) aiSkillInstallPack(ctx context.Context, req Request) Response {
+	svc := d.requireAI()
+	if svc == nil {
+		return errorResponse(req.ID, "ai service unavailable")
+	}
+	var params struct {
+		SourcePath string `json:"sourcePath"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+	}
+	res, err := svc.InstallSkillPack(ctx, ai.SkillPackInstallParams{SourcePath: params.SourcePath})
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	return okResponse(req.ID, res)
+}
+
+// aiSkillExportPack 处理 platform.ai.skill.exportPack。
+func (d *Dispatcher) aiSkillExportPack(ctx context.Context, req Request) Response {
+	svc := d.requireAI()
+	if svc == nil {
+		return errorResponse(req.ID, "ai service unavailable")
+	}
+	var params struct {
+		SkillID  string `json:"skillId"`
+		DestPath string `json:"destPath"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+	}
+	path, err := svc.ExportSkillPack(ctx, ai.SkillPackExportParams{
+		SkillID:  params.SkillID,
+		DestPath: params.DestPath,
+	})
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	return okResponse(req.ID, map[string]any{"path": path})
+}

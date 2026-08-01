@@ -8,6 +8,11 @@ export const CONN_KIND_DEFS = [
   { kind: 'mongodb' as const, label: 'MongoDB', icon: 'mongodb', defaultPort: 27017 },
   { kind: 'vastbase' as const, label: 'Vastbase', icon: 'vastbase', defaultPort: 5432 },
   { kind: 'mysql' as const, label: 'MySQL', icon: 'mysql', defaultPort: 3306 },
+  { kind: 'sqlite' as const, label: 'SQLite', icon: 'sqlite', defaultPort: 0 },
+  { kind: 'dameng' as const, label: 'Dameng', icon: 'dameng', defaultPort: 5236 },
+  { kind: 'oracle' as const, label: 'Oracle', icon: 'oracle', defaultPort: 1521 },
+  { kind: 'clickhouse' as const, label: 'ClickHouse', icon: 'clickhouse', defaultPort: 9000 },
+  { kind: 'kingbase' as const, label: '人大金仓', icon: 'kingbase', defaultPort: 54321 },
 ] as const
 
 /** macOS 标签色盘（Finder / Terminal 连接标记风格） */

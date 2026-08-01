@@ -4,9 +4,11 @@ import { useI18n } from 'vue-i18n'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import {
   invalidateConnTreeChildren,
+  patchCategoryObjectCount,
   refreshConnTreeRoot,
   refreshResourceIfLoaded,
 } from '@/modules/ops/composables/useConnTreeChildren'
+import { segmentName } from '@/modules/mysql/conn-tree-shared'
 import { execMysqlSql } from '@/modules/mysql/composables/useMysqlSessionSql'
 import {
   createDatabaseSql,
@@ -68,6 +70,7 @@ export function useMysqlDdlExec() {
     refreshPath: ConnResourcePath | undefined,
     refreshDeep: boolean | undefined,
     prunePaths: ConnResourcePath[] | undefined,
+    countDelta?: number,
   ): Promise<void> {
     const prune = prunePaths?.length ? prunePaths : undefined
     if (refreshPath) {
@@ -75,6 +78,9 @@ export function useMysqlDdlExec() {
         deep: refreshDeep !== false,
         prunePaths: prune,
       })
+      if (segmentName(refreshPath, 'category')) {
+        patchCategoryObjectCount(conn, refreshPath, { delta: countDelta })
+      }
       return
     }
     await refreshConnTreeRoot(conn, { prunePaths: prune })
@@ -112,7 +118,8 @@ export function useMysqlDdlExec() {
       await execMysqlSql(req.profileId, sql, database)
       toast.success(t('modules.mysql.ddl.done'))
       if (conn) {
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths)
+        const countDelta = req.action.startsWith('drop_') ? -1 : 0
+        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
       } else {
         invalidateConnTreeChildren(req.profileId)
       }

@@ -53,7 +53,7 @@ export interface SqlSplitFeatures {
    */
   postgresEscapeStringPrefix: boolean
   /**
-   * 识别裸 PL/SQL 体（CREATE PROCEDURE/FUNCTION … AS|IS BEGIN…END，或 DECLARE/BEGIN 匿名块）。
+   * 识别裸 PL/SQL 体（CREATE PROCEDURE/FUNCTION/PACKAGE/TRIGGER …、或 DECLARE/BEGIN 匿名块）。
    * 体内 `;` 不拆句；可选独立行 `/` 作结束符（gsql / SQL\*Plus）。
    */
   plsqlBlocks: boolean
@@ -62,12 +62,18 @@ export interface SqlSplitFeatures {
    * 指令行本身不作为可执行语句输出。
    */
   delimiterBlocks: boolean
+  /**
+   * MySQL 复合语句：`CREATE PROCEDURE|FUNCTION … BEGIN…END;` 体内 `;` 不拆句
+   *（对齐 Navicat：编辑器无需手写 DELIMITER；仍兼容 delimiterBlocks）。
+   */
+  mysqlCompoundBlocks: boolean
 }
 
 /** 按产品方言解析拆句词法能力。 */
 export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
   switch (dialect) {
     case 'vastbase':
+    case 'kingbase':
       return {
         dollarQuotes: true,
         backticks: false,
@@ -78,6 +84,7 @@ export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
         postgresEscapeStringPrefix: true,
         plsqlBlocks: true,
         delimiterBlocks: false,
+        mysqlCompoundBlocks: false,
       }
     case 'postgresql':
       return {
@@ -91,6 +98,7 @@ export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
         // PG 过程体通常包在 $$ 内；裸 BEGIN…END 较少，仍开启以兼容 DO 外脚本
         plsqlBlocks: true,
         delimiterBlocks: false,
+        mysqlCompoundBlocks: false,
       }
     case 'mysql':
       return {
@@ -103,6 +111,7 @@ export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
         postgresEscapeStringPrefix: false,
         plsqlBlocks: false,
         delimiterBlocks: true,
+        mysqlCompoundBlocks: true,
       }
     case 'oracle':
     case 'dameng':
@@ -116,6 +125,20 @@ export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
         postgresEscapeStringPrefix: false,
         plsqlBlocks: true,
         delimiterBlocks: false,
+        mysqlCompoundBlocks: false,
+      }
+    case 'clickhouse':
+      return {
+        dollarQuotes: false,
+        backticks: true,
+        hashLineComments: false,
+        nestedBlockComments: false,
+        oracleQQuotes: false,
+        backslashStringEscapes: true,
+        postgresEscapeStringPrefix: false,
+        plsqlBlocks: false,
+        delimiterBlocks: false,
+        mysqlCompoundBlocks: false,
       }
     case 'sqlserver':
     case 'sqlite':
@@ -131,6 +154,7 @@ export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
         postgresEscapeStringPrefix: false,
         plsqlBlocks: false,
         delimiterBlocks: false,
+        mysqlCompoundBlocks: false,
       }
   }
 }

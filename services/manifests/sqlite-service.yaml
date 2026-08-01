@@ -1,0 +1,52 @@
+id: com.niuma.sqlite
+name: SQLite Service
+version: 0.1.0
+bridge:
+  namespace: sqlite
+  connection_kind: sqlite
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+    - session.attach
+    - tree.schemas
+    - tree.tables
+    - tree.indexes
+    - tree.triggers
+    - tree.categoryCounts
+    - meta.columns
+    - meta.indexes
+    - meta.ddl
+    - meta.primaryKey
+    - meta.foreignKeys
+    - meta.databaseInfo
+    - catalog.schemas
+    - catalog.tables
+    - catalog.columns
+    - io.exportCsv
+    - io.importCsv
+    - io.dumpSql
+    - io.execSqlFile
+    - io.cancel
+    - ddl.designPreview
+    - ddl.designApply
+    - ddl.createTable
+    - ddl.createTablePreview
+    - backup.copy
+runtime:
+  executable: bin/niuma-sqlite-service.exe
+  executable_windows: bin/niuma-sqlite-service.exe
+  executable_unix: bin/niuma-sqlite-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.sqlite'
+  address_windows: '\\.\pipe\niuma.sqlite'
+  address_unix: '/tmp/niuma.sqlite.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

@@ -19,4 +19,5 @@ export {
   mongoResourceFromContext,
   buildConnectionTabTitle,
   buildConnectionTabTooltip,
+  nextQueryTabIndex,
 } from './utils'

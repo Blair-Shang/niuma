@@ -135,6 +135,57 @@ export interface ConnectionDeleteResult {
   deleted: boolean
 }
 
+/** 导出包中的前端组织层（文件夹），由 Web 管理、platform 透传。 */
+export interface ConnectionExportOrganization {
+  folders: Array<{
+    id: string
+    name: string
+    parentId: string | null
+    profileIds: string[]
+    accentColor?: string
+  }>
+  rootOrder: string[]
+}
+
+/** `platform.connection.export` 入参 */
+export interface ConnectionExportParams {
+  /** 本机目标文件路径 */
+  path: string
+  /** 为空则导出全部站点；否则仅导出指定站点 */
+  profileIds?: string[]
+  /** 前端文件夹结构（opaque，写入文件） */
+  organization?: ConnectionExportOrganization | null
+  /** 是否把凭据写入口令加密信封（导入后可直接连接） */
+  includeSecrets?: boolean
+  /** includeSecrets 时必填；用于 Argon2id 派生密钥 */
+  passphrase?: string
+}
+
+/** `platform.connection.export` 返回 */
+export interface ConnectionExportResult {
+  exported: number
+  path: string
+  includeSecrets?: boolean
+}
+
+/** `platform.connection.import` 入参 */
+export interface ConnectionImportParams {
+  path: string
+  /** 文件含加密凭据时必填 */
+  passphrase?: string
+}
+
+/** `platform.connection.import` 返回 */
+export interface ConnectionImportResult {
+  imported: number
+  skipped: number
+  withSecrets?: number
+  hasSecrets?: boolean
+  /** exportId → 新建 profileId */
+  idMap: Record<string, string>
+  organization?: ConnectionExportOrganization | null
+}
+
 /** `platform.credential.get` 入参（按站点 ID 从 OS Keychain 读取明文凭据，仅供本地 IPC） */
 export interface CredentialGetParams {
   profileId: string

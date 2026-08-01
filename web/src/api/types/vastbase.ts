@@ -338,6 +338,8 @@ export interface VastQueryExecResult {
   truncated?: boolean
   durationMs: number
   commandTag?: string
+  /** DML/DDL 影响行数（无结果集时）；与 MySQL rowsAffected 对齐 */
+  rowsAffected?: number
   notices?: string[]
 }
 

@@ -5,12 +5,24 @@ import { useTabStore, type WorkspaceTab } from '@/stores/tab'
 import { useSessionRegistry } from '@/stores/session-registry'
 import {
   buildAiDialectRules,
-  defaultVastbaseProfile,
+  defaultProfileForFamily,
 } from '@/modules/sql-editor/capabilities'
+import type { ConnKind } from '@/modules/ops/types'
 import {
   getEditorSelection,
   listDiagnostics,
 } from './workspace-context'
+
+/** 有 SQL 方言默认 Profile 的模块（无 lease 时回退用） */
+const SQL_DIALECT_MODULES = new Set<string>([
+  'vastbase',
+  'mysql',
+  'sqlite',
+  'dameng',
+  'oracle',
+  'clickhouse',
+  'kingbase',
+])
 
 export type AiContextKind = 'tab' | 'selection' | 'connection' | 'diagnostic' | 'schema'
 
@@ -204,13 +216,16 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
   const sessionRegistry = useSessionRegistry()
   const active = tabStore.activeTab
   const sessionId = active ? sessionRegistry.getSessionIdForTab(active.tabId) ?? undefined : undefined
-  // 优先会话探测结果；无 lease 时才用产品默认（非永久禁令）
+  // 优先会话探测结果；无 lease 时按当前模块方言回退（非永久禁令）
+  const moduleKind = (active?.moduleId && SQL_DIALECT_MODULES.has(active.moduleId)
+    ? active.moduleId
+    : undefined) as ConnKind | undefined
   const dialect =
     (sessionId ? sessionRegistry.getDialectForSession(sessionId) : null) ??
     (typeof active?.props.profileId === 'string'
-      ? sessionRegistry.getDialectForProfile(active.props.profileId, 'vastbase')
+      ? sessionRegistry.getDialectForProfile(active.props.profileId, moduleKind)
       : null) ??
-    (active?.moduleId === 'vastbase' ? defaultVastbaseProfile() : null)
+    (moduleKind ? defaultProfileForFamily(moduleKind) : null)
   const workspace = {
     tabId: active?.tabId,
     moduleId: active?.moduleId,

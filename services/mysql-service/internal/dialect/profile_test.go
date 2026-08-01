@@ -34,11 +34,14 @@ func TestResolveCapabilities57(t *testing.T) {
 	if Has(&p, CapAuthCachingSHA2) {
 		t.Fatal("5.7 must not enable caching_sha2 by default")
 	}
-	if !Has(&p, CapBacktickIdent) || !Has(&p, CapEditorBuiltinSQL) {
+	if !Has(&p, CapBacktickIdent) || !Has(&p, CapEditorSqlLsp) {
 		t.Fatal("missing base caps")
 	}
 	if !Has(&p, CapSplitDelimiterBlocks) {
 		t.Fatal("5.7 must enable split.delimiter_blocks")
+	}
+	if !Has(&p, CapSplitMysqlCompound) {
+		t.Fatal("5.7 must enable split.mysql_compound")
 	}
 	if Has(&p, CapJSONNativeType) {
 		t.Fatal("5.7 must not default json.native_type")
@@ -53,6 +56,9 @@ func TestResolveCapabilities8(t *testing.T) {
 	}
 	if !Has(&p, CapSplitDelimiterBlocks) {
 		t.Fatal("8.0 must enable split.delimiter_blocks")
+	}
+	if !Has(&p, CapSplitMysqlCompound) {
+		t.Fatal("8.0 must enable split.mysql_compound")
 	}
 	if p.VersionNum != "80036" {
 		t.Fatalf("versionNum=%q", p.VersionNum)

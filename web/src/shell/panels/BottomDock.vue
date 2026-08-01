@@ -42,8 +42,12 @@ onBeforeUnmount(() => stopDrag?.())
 <template>
   <Teleport to="body">
     <Transition name="nm-dock-slide">
+      <!--
+        必须用 v-show：数据任务内容经 Teleport 挂到 Dock 内挂载点。
+        v-if 销毁挂载点时会把已 teleport 的表单一起卸掉，折叠再展开后内容空白。
+      -->
       <section
-        v-if="shellStore.bottomDockOpen"
+        v-show="shellStore.bottomDockOpen"
         class="nm-bottom-dock"
         :style="{ height: `${shellStore.bottomDockHeight}px` }"
       >
@@ -96,7 +100,7 @@ onBeforeUnmount(() => stopDrag?.())
 
         <div class="nm-bottom-dock__body">
           <TransferQueue
-            v-if="shellStore.bottomDockTab === 'transfers'"
+            v-show="shellStore.bottomDockTab === 'transfers'"
             class="nm-bottom-dock__queue"
             hide-header
             :tasks="transferHub.tasks"
@@ -106,7 +110,7 @@ onBeforeUnmount(() => stopDrag?.())
             @resume="(id) => void transferHub.resume(id)"
           />
           <DataTaskDockPanel
-            v-else-if="shellStore.bottomDockTab === 'dataTasks'"
+            v-show="shellStore.bottomDockTab === 'dataTasks'"
             class="nm-bottom-dock__queue"
           />
         </div>

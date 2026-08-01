@@ -4,6 +4,13 @@ import type {
   MysqlCatalogListParams,
   MysqlCatalogSchemasResult,
   MysqlCatalogTablesResult,
+  MysqlLspCloseParams,
+  MysqlLspOpenParams,
+  MysqlLspOpenResult,
+  MysqlLspRpcParams,
+  MysqlLspRpcResult,
+  MysqlLspLexiconParams,
+  MysqlLspLexiconResult,
   MysqlDdlCreateTableParams,
   MysqlDdlCreateTableResult,
   MysqlDdlDesignApplyParams,
@@ -27,13 +34,18 @@ import type {
   MysqlMetaKillResult,
   MysqlMetaLocksParams,
   MysqlMetaLocksResult,
+  MysqlMetaInnoDBDeadlockParams,
+  MysqlMetaInnoDBDeadlockResult,
   MysqlMetaPrimaryKeyParams,
   MysqlMetaPrimaryKeyResult,
   MysqlMetaProcesslistParams,
   MysqlMetaProcesslistResult,
   MysqlMetaRelationParams,
   MysqlMetaRoutineParams,
+  MysqlMetaRoutineParametersResult,
   MysqlMetaRoutineSourceResult,
+  MysqlMetaServerKVParams,
+  MysqlMetaServerKVResult,
   MysqlQueryCancelParams,
   MysqlQueryCloseParams,
   MysqlQueryExecParams,
@@ -48,8 +60,18 @@ import type {
   MysqlSessionTestResult,
   MysqlTreeDatabasesResult,
   MysqlTreeListParams,
+  MysqlTreeCategoryCountsResult,
   MysqlTreeRoutinesResult,
   MysqlTreeTablesResult,
+  MysqlToolsCancelParams,
+  MysqlToolsDetectParams,
+  MysqlToolsDetectResult,
+  MysqlToolsDumpParams,
+  MysqlToolsRestoreParams,
+  MysqlToolsTaskResult,
+  MysqlTxSessionParams,
+  MysqlTxSetAutoCommitParams,
+  MysqlTxState,
 } from '@/api/types/mysql'
 
 /**
@@ -80,6 +102,10 @@ export const mysqlApi = {
     return bridgeInvoke<MysqlTreeRoutinesResult>('mysql.tree.routines', params)
   },
 
+  treeCategoryCounts(params: MysqlTreeListParams): Promise<MysqlTreeCategoryCountsResult> {
+    return bridgeInvoke<MysqlTreeCategoryCountsResult>('mysql.tree.categoryCounts', params)
+  },
+
   metaColumns(params: MysqlMetaRelationParams): Promise<MysqlMetaColumnsResult> {
     return bridgeInvoke<MysqlMetaColumnsResult>('mysql.meta.columns', params)
   },
@@ -94,6 +120,12 @@ export const mysqlApi = {
 
   metaRoutineSource(params: MysqlMetaRoutineParams): Promise<MysqlMetaRoutineSourceResult> {
     return bridgeInvoke<MysqlMetaRoutineSourceResult>('mysql.meta.routineSource', params)
+  },
+
+  metaRoutineParameters(
+    params: MysqlMetaRoutineParams,
+  ): Promise<MysqlMetaRoutineParametersResult> {
+    return bridgeInvoke<MysqlMetaRoutineParametersResult>('mysql.meta.routineParameters', params)
   },
 
   metaProcesslist(params: MysqlMetaProcesslistParams): Promise<MysqlMetaProcesslistResult> {
@@ -116,6 +148,22 @@ export const mysqlApi = {
     return bridgeInvoke<MysqlCatalogColumnsResult>('mysql.catalog.columns', params)
   },
 
+  lspOpen(params: MysqlLspOpenParams): Promise<MysqlLspOpenResult> {
+    return bridgeInvoke<MysqlLspOpenResult>('mysql.lsp.open', params)
+  },
+
+  lspRpc(params: MysqlLspRpcParams): Promise<MysqlLspRpcResult> {
+    return bridgeInvoke<MysqlLspRpcResult>('mysql.lsp.rpc', params)
+  },
+
+  lspClose(params: MysqlLspCloseParams): Promise<{ closed: boolean }> {
+    return bridgeInvoke<{ closed: boolean }>('mysql.lsp.close', params)
+  },
+
+  lspLexicon(params: MysqlLspLexiconParams = {}): Promise<MysqlLspLexiconResult> {
+    return bridgeInvoke<MysqlLspLexiconResult>('mysql.lsp.lexicon', params)
+  },
+
   queryExec(params: MysqlQueryExecParams): Promise<MysqlQueryExecResult> {
     return bridgeInvoke<MysqlQueryExecResult>('mysql.query.exec', params)
   },
@@ -136,12 +184,40 @@ export const mysqlApi = {
     return bridgeInvoke<{ cancelled: boolean; count?: number }>('mysql.query.cancel', params)
   },
 
+  txGetState(params: MysqlTxSessionParams): Promise<MysqlTxState> {
+    return bridgeInvoke<MysqlTxState>('mysql.tx.getState', params)
+  },
+
+  txSetAutoCommit(params: MysqlTxSetAutoCommitParams): Promise<MysqlTxState> {
+    return bridgeInvoke<MysqlTxState>('mysql.tx.setAutoCommit', params)
+  },
+
+  txCommit(params: MysqlTxSessionParams): Promise<MysqlTxState> {
+    return bridgeInvoke<MysqlTxState>('mysql.tx.commit', params)
+  },
+
+  txRollback(params: MysqlTxSessionParams): Promise<MysqlTxState> {
+    return bridgeInvoke<MysqlTxState>('mysql.tx.rollback', params)
+  },
+
   metaInstanceOverview(params: MysqlMetaInstanceOverviewParams): Promise<MysqlMetaInstanceOverviewResult> {
     return bridgeInvoke<MysqlMetaInstanceOverviewResult>('mysql.meta.instanceOverview', params)
   },
 
   metaLocks(params: MysqlMetaLocksParams): Promise<MysqlMetaLocksResult> {
     return bridgeInvoke<MysqlMetaLocksResult>('mysql.meta.locks', params)
+  },
+
+  metaServerVariables(params: MysqlMetaServerKVParams): Promise<MysqlMetaServerKVResult> {
+    return bridgeInvoke<MysqlMetaServerKVResult>('mysql.meta.serverVariables', params)
+  },
+
+  metaServerStatus(params: MysqlMetaServerKVParams): Promise<MysqlMetaServerKVResult> {
+    return bridgeInvoke<MysqlMetaServerKVResult>('mysql.meta.serverStatus', params)
+  },
+
+  metaInnoDBDeadlock(params: MysqlMetaInnoDBDeadlockParams): Promise<MysqlMetaInnoDBDeadlockResult> {
+    return bridgeInvoke<MysqlMetaInnoDBDeadlockResult>('mysql.meta.innodbDeadlock', params)
   },
 
   metaPrimaryKey(params: MysqlMetaPrimaryKeyParams): Promise<MysqlMetaPrimaryKeyResult> {
@@ -164,6 +240,10 @@ export const mysqlApi = {
     return bridgeInvoke<MysqlDdlCreateTableResult>('mysql.ddl.createTable', params)
   },
 
+  ddlCreateTablePreview(params: MysqlDdlCreateTableParams): Promise<MysqlDdlCreateTableResult> {
+    return bridgeInvoke<MysqlDdlCreateTableResult>('mysql.ddl.createTablePreview', params)
+  },
+
   ioExportCsv(params: MysqlIoExportCsvParams): Promise<MysqlIoTaskResult> {
     return bridgeInvoke<MysqlIoTaskResult>('mysql.io.exportCsv', params)
   },
@@ -182,5 +262,21 @@ export const mysqlApi = {
 
   ioCancel(params: MysqlIoCancelParams): Promise<{ cancelled: boolean }> {
     return bridgeInvoke<{ cancelled: boolean }>('mysql.io.cancel', params)
+  },
+
+  toolsDetect(params: MysqlToolsDetectParams = {}): Promise<MysqlToolsDetectResult> {
+    return bridgeInvoke<MysqlToolsDetectResult>('mysql.tools.detect', params)
+  },
+
+  toolsDump(params: MysqlToolsDumpParams): Promise<MysqlToolsTaskResult> {
+    return bridgeInvoke<MysqlToolsTaskResult>('mysql.tools.dump', params)
+  },
+
+  toolsRestore(params: MysqlToolsRestoreParams): Promise<MysqlToolsTaskResult> {
+    return bridgeInvoke<MysqlToolsTaskResult>('mysql.tools.restore', params)
+  },
+
+  toolsCancel(params: MysqlToolsCancelParams): Promise<{ canceled: boolean; taskId: string }> {
+    return bridgeInvoke<{ canceled: boolean; taskId: string }>('mysql.tools.cancel', params)
   },
 }

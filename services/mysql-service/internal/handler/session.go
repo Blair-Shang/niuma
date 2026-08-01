@@ -67,6 +67,10 @@ func (d *Dispatcher) sessionClose(ctx context.Context, req Request) Response {
 		return errorResponse(req.ID, err.Error())
 	}
 	d.io.CancelBySession(params.SessionID)
+	d.tools.CancelBySession(params.SessionID)
+	if d.lspConns != nil {
+		d.lspConns.CloseBySession(params.SessionID)
+	}
 	logOpInfo(MethodSessionClose, "session", params.SessionID)
 	return okResponse(req.ID, map[string]any{"closed": true})
 }
@@ -161,4 +165,18 @@ func (d *Dispatcher) resolveDBForDatabase(ctx context.Context, raw json.RawMessa
 			tunnelStop()
 		}
 	}, nil
+}
+
+// resolveDBForSessionQuery 解析查询用 *sql.DB。
+// 非 Auto-commit 时禁止短连换库，强制走会话池（随后在事务连接上 USE）。
+func (d *Dispatcher) resolveDBForSessionQuery(ctx context.Context, raw json.RawMessage, database string) (*sql.DB, *session.Session, func(), error) {
+	db, sess, release, err := d.resolveDBForDatabase(ctx, raw, database)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if sess != nil && !sess.IsAutoCommit() && db != sess.DB {
+		release()
+		return sess.DB, sess, func() {}, nil
+	}
+	return db, sess, release, nil
 }

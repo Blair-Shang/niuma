@@ -6,9 +6,11 @@ import type { VastDdlParams } from '@/api/types/vastbase'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import {
   invalidateConnTreeChildren,
+  patchCategoryObjectCount,
   refreshConnTreeRoot,
   refreshResourceIfLoaded,
 } from '@/modules/ops/composables/useConnTreeChildren'
+import { segmentName } from '@/modules/vastbase/conn-tree-shared'
 import { useVastDdlActionStore } from '@/modules/vastbase/stores/ddl-actions'
 
 /** 执行 DDL 并刷新连接树、提示结果。 */
@@ -23,6 +25,7 @@ export function useVastDdlExec() {
     refreshPath: ConnResourcePath | undefined,
     refreshDeep: boolean | undefined,
     prunePaths: ConnResourcePath[] | undefined,
+    countDelta?: number,
   ): Promise<void> {
     const prune = prunePaths?.length ? prunePaths : undefined
     if (refreshPath) {
@@ -30,6 +33,9 @@ export function useVastDdlExec() {
         deep: refreshDeep !== false,
         prunePaths: prune,
       })
+      if (segmentName(refreshPath, 'category')) {
+        patchCategoryObjectCount(conn, refreshPath, { delta: countDelta })
+      }
       return
     }
     await refreshConnTreeRoot(conn, { prunePaths: prune })
@@ -46,7 +52,9 @@ export function useVastDdlExec() {
       await vastbaseApi.ddlExec(payload)
       toast.success(t('modules.vastbase.ddl.done'))
       if (conn) {
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths)
+        const action = pending?.action ?? ''
+        const countDelta = action.startsWith('drop_') ? -1 : 0
+        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
       } else {
         invalidateConnTreeChildren(payload.profileId)
       }

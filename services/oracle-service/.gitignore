@@ -1,0 +1,9 @@
+/build/
+/out/
+/.vs/
+/CMakeUserPresets.json
+*.user
+*.sdf
+*.opensdf
+# ODPI-C：构建脚本自动 git clone（体积大，不进主仓）
+/third_party/odpi/

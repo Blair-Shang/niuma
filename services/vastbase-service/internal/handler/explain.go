@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"niuma/pkg/common/id"
 	"niuma/services/vastbase-service/internal/explainrewrite"
 	"niuma/services/vastbase-service/internal/session"
 )
@@ -56,10 +57,7 @@ func (d *Dispatcher) queryExplain(ctx context.Context, req Request) Response {
 		explainSQL = "EXPLAIN (FORMAT TEXT)\n" + explainTarget
 	}
 
-	requestID := strings.TrimSpace(params.RequestID)
-	if requestID == "" {
-		requestID = fmt.Sprintf("q-%d", time.Now().UnixNano())
-	}
+	requestID := id.CoalesceID(params.RequestID, "explain")
 	runCtx := ctx
 	var cancelTimeout context.CancelFunc
 	if params.TimeoutMS > 0 {

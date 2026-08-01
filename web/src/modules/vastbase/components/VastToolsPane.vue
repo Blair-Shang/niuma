@@ -324,7 +324,7 @@ async function runDump(): Promise<void> {
       ...scope,
       database: database.value,
       outputPath: dumpOutputPath.value || undefined,
-      options: buildDumpOptions(),
+      dumpOptions: buildDumpOptions(),
       toolPaths: toolPaths.value,
     }),
   )
@@ -341,7 +341,7 @@ async function runRestore(): Promise<void> {
       ...scope,
       database: database.value,
       inputPath: restoreInputPath.value,
-      options: buildRestoreOptions(),
+      restoreOptions: buildRestoreOptions(),
       toolPaths: toolPaths.value,
     }),
   )

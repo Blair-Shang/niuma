@@ -171,7 +171,7 @@ func (s *Service) UpsertSkill(ctx context.Context, params SkillUpsertParams) (*S
 	return &v, nil
 }
 
-// DeleteSkill 删除 Skill。
+// DeleteSkill 删除 Skill；若为已安装 Skill 包则同时卸载 MCP 与本机目录。
 func (s *Service) DeleteSkill(ctx context.Context, skillID string) (bool, error) {
 	if s == nil || s.Skills == nil {
 		return false, fmt.Errorf("ai: skills unavailable")
@@ -185,6 +185,9 @@ func (s *Service) DeleteSkill(ctx context.Context, skillID string) (bool, error)
 	}
 	if existing == nil {
 		return false, nil
+	}
+	if parseSkillPackMeta(existing.SkillOptions) != nil {
+		return s.UninstallSkillPack(ctx, skillID)
 	}
 	if err := s.Skills.Delete(ctx, skillID); err != nil {
 		return false, err

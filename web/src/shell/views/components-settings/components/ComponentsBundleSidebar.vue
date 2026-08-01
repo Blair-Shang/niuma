@@ -61,8 +61,10 @@ const { t, te } = useI18n()
   flex-direction: column;
   width: 14.5rem;
   flex-shrink: 0;
+  min-height: 0;
   border-right: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--rs-text) 2%, var(--rs-surface-elevated));
+  overflow: auto;
 }
 
 .nm-components__sidebar-title {

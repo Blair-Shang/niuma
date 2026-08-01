@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/jackc/pgx/v5 v5.7.5
+	niuma/pkg/common v0.0.0
 	niuma/pkg/logutil v0.0.0
 	niuma/pkg/netproxy v0.0.0
 	niuma/pkg/serviceipc v0.0.0
@@ -22,6 +23,8 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
+
+replace niuma/pkg/common => ../../packages/go/common
 
 replace niuma/pkg/logutil => ../../packages/go/logutil
 

@@ -5,7 +5,10 @@
 import { copyTextToClipboard } from '@niuma/ui'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { isBridgeAvailable } from '@/api/client'
+import { shellApi } from '@/api/shell'
 import { useTabStore } from '@/stores/tab'
+import AiMediaLightbox from './AiMediaLightbox.vue'
 import { hydrateMathInElement, renderAiMarkdown, stabilizeStreamingMarkdown } from './markdown'
 import { splitMarkdownBlocks, type AiMarkdownBlock } from './split-markdown-blocks'
 
@@ -34,6 +37,8 @@ const props = withDefaults(
 const { t } = useI18n()
 const tabStore = useTabStore()
 const rootEl = ref<HTMLElement | null>(null)
+const previewOpen = ref(false)
+const previewSrc = ref<string | null>(null)
 
 type ViewBlock =
   | { key: string; kind: 'html'; html: string }
@@ -201,10 +206,38 @@ watch(
   { immediate: true },
 )
 
+async function openExternalHref(href: string): Promise<void> {
+  if (isBridgeAvailable()) {
+    await shellApi.openExternal({ url: href }).catch(() => {
+      window.open(href, '_blank', 'noopener,noreferrer')
+    })
+    return
+  }
+  window.open(href, '_blank', 'noopener,noreferrer')
+}
+
 async function onClick(e: MouseEvent): Promise<void> {
   const target = e.target
   if (!(target instanceof Element) || !rootEl.value) {
     return
+  }
+  // 图片：应用内预览，禁止 CEF 对 data:/http 开 Popup（易黑屏）
+  const img = target.closest<HTMLImageElement>('[data-nm-ai-img]')
+  if (img && rootEl.value.contains(img) && img.src && !img.classList.contains('is-broken')) {
+    e.preventDefault()
+    previewSrc.value = img.src
+    previewOpen.value = true
+    return
+  }
+  // 外链：系统浏览器打开，避免 CEF Popup 黑屏
+  const anchor = target.closest<HTMLAnchorElement>('a[href]')
+  if (anchor && rootEl.value.contains(anchor)) {
+    const href = anchor.getAttribute('href')?.trim() ?? ''
+    if (/^https?:\/\//i.test(href)) {
+      e.preventDefault()
+      await openExternalHref(href)
+      return
+    }
   }
   const expand = target.closest<HTMLButtonElement>('[data-nm-ai-expand]')
   if (expand && rootEl.value.contains(expand)) {
@@ -231,7 +264,15 @@ async function onClick(e: MouseEvent): Promise<void> {
     const lang = block?.getAttribute('data-nm-ai-lang') || 'sql'
     const active = tabStore.activeTab
     const profileId = typeof active?.props.profileId === 'string' ? active.props.profileId : undefined
-    if (profileId && (lang === 'sql' || lang === 'pgsql' || lang === 'postgres' || lang === 'mysql')) {
+    if (
+      profileId &&
+      (lang === 'sql' ||
+        lang === 'pgsql' ||
+        lang === 'postgres' ||
+        lang === 'mysql' ||
+        lang === 'dameng' ||
+        lang === 'kingbase')
+    ) {
       tabStore.openTab({
         moduleId: active?.moduleId || 'vastbase',
         title: active?.title,
@@ -332,6 +373,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
         :source="block.text"
       />
     </template>
+    <AiMediaLightbox v-model:open="previewOpen" :image-src="previewSrc" />
   </div>
 </template>
 
@@ -725,6 +767,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   height: auto;
   border-radius: 8px;
   border: 1px solid var(--rs-border-subtle);
+  cursor: zoom-in;
 }
 
 .nm-ai-md :deep(.nm-ai-md__img.is-broken) {

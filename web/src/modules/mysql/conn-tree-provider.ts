@@ -1,7 +1,7 @@
 /**
  * MySQL 连接树 Provider：
  * connection → database → {Tables|Views|Procedures|Functions} → object
- * （对齐 Navicat / DBeaver；无独立 schema 层）。
+ * （对齐 Navicat / DBeaver 常用集；无独立 schema 层；密度低于 Vastbase）。
  *
  * 菜单同步定义；激活动作经 dynamic import 加载 conn-tree-actions，
  * 避免 sql-seed / script-templates / ddl Dialog 进入启动注册闭包。
@@ -12,11 +12,11 @@ import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import { mysqlApi } from '@/api'
 import type { ConnItem } from '@/modules/ops/types'
 import {
-  databaseCategoryNodes,
   isCategoryId,
   isProtectedDatabase,
   lastSegment,
   loadCategoryChildren,
+  loadDatabaseCategories,
   segmentName,
   t,
 } from '@/modules/mysql/conn-tree-shared'
@@ -32,7 +32,7 @@ function loadActions(): Promise<ActionsModule> {
   return actionsPromise
 }
 
-const CONN_MENU_KEYS = new Set(['createDatabase', 'query', 'monitor'])
+const CONN_MENU_KEYS = new Set(['createDatabase', 'query', 'monitor', 'tools'])
 
 
 function scriptMenus(allowMutating: boolean): RsContextMenuItem {
@@ -58,6 +58,105 @@ function scriptMenus(allowMutating: boolean): RsContextMenuItem {
     icon: 'file-text',
     children,
   }
+}
+
+/**
+ * 表/视图导入导出（对齐 Navicat Export/Import Wizard + Dump SQL、DBeaver Export/Import Data）：
+ * - 基表：导入 CSV、导出 CSV、转储 SQL
+ * - 视图：仅导出 CSV（SELECT *）与转储 SQL（结构）；不可导入
+ */
+function dataIoMenus(isView: boolean): RsContextMenuItem[] {
+  const children: RsContextMenuItem[] = []
+  if (!isView) {
+    children.push({
+      key: 'importCsv',
+      label: t('modules.mysql.tree.importCsv'),
+      icon: 'upload',
+    })
+  }
+  children.push(
+    {
+      key: 'exportCsv',
+      label: t('modules.mysql.tree.exportCsv'),
+      icon: 'download',
+    },
+    {
+      key: 'dumpSql',
+      label: t('modules.mysql.tree.dumpSql'),
+      icon: 'file-down',
+    },
+  )
+  return [
+    {
+      key: 'dataIo',
+      label: t('modules.mysql.tree.dataIo'),
+      icon: 'arrow-left-right',
+      children,
+    },
+  ]
+}
+
+/**
+ * 库级「新建」：对齐 Navicat New Table/View/Procedure/Function、DBeaver Create New。
+ * 表走设计器；视图 / 过程 / 函数走对象脚本面板（新建与编辑共用）。
+ */
+function databaseCreateMenus(): RsContextMenuItem {
+  return {
+    key: 'createMenu',
+    label: t('modules.mysql.tree.createMenu'),
+    icon: 'plus',
+    children: [
+      {
+        key: 'createDesign',
+        label: t('modules.mysql.tree.create.tables'),
+        icon: 'layout-list',
+      },
+      {
+        key: 'createView',
+        label: t('modules.mysql.tree.create.views'),
+        icon: 'eye',
+      },
+      {
+        key: 'createProcedure',
+        label: t('modules.mysql.tree.create.procedures'),
+        icon: 'workflow',
+      },
+      {
+        key: 'createFunction',
+        label: t('modules.mysql.tree.create.functions'),
+        icon: 'square-function',
+      },
+    ],
+  }
+}
+
+/** 库级工具：转储 / 执行 SQL / 备份还原面板（对齐 Navicat Dump/Execute SQL File、DBeaver Tools）。 */
+function databaseToolsMenus(): RsContextMenuItem[] {
+  return [
+    {
+      key: 'toolsMenu',
+      label: t('modules.mysql.tree.toolsMenu'),
+      icon: 'wrench',
+      children: [
+        {
+          key: 'dumpSql',
+          label: t('modules.mysql.tree.dumpSql'),
+          icon: 'file-down',
+        },
+        {
+          key: 'execSqlFile',
+          label: t('modules.mysql.tree.execSqlFile'),
+          icon: 'file-up',
+        },
+        { key: 'sep-backup', label: '', separator: true },
+        {
+          key: 'tools',
+          label: t('modules.mysql.tree.openTools'),
+          icon: 'archive',
+        },
+      ],
+    },
+  ]
 }
 
 function tableMenus(isView: boolean): RsContextMenuItem[] {
@@ -95,6 +194,7 @@ function tableMenus(isView: boolean): RsContextMenuItem[] {
           },
         ] as RsContextMenuItem[])
       : []),
+    ...dataIoMenus(isView),
     { key: 'sep-mutate', label: '', separator: true },
     ...(!isView
       ? ([
@@ -113,9 +213,6 @@ function tableMenus(isView: boolean): RsContextMenuItem[] {
       icon: 'trash-2',
       danger: true,
     },
-    { key: 'sep-io', label: '', separator: true },
-    { key: 'exportCsv', label: t('modules.mysql.tree.exportCsv'), icon: 'download' },
-    ...(!isView ? ([{ key: 'importCsv', label: t('modules.mysql.tree.importCsv'), icon: 'upload' }] as RsContextMenuItem[]) : []),
     { key: 'sep-clipboard', label: '', separator: true },
     { key: 'copyName', label: t('modules.mysql.tree.copyName'), icon: 'copy' },
     {
@@ -136,8 +233,19 @@ function routineMenus(isFunction: boolean): RsContextMenuItem[] {
     },
     {
       key: 'source',
-      label: t(isFunction ? 'modules.mysql.tree.funcOpen' : 'modules.mysql.tree.procOpen'),
+      label: t('modules.mysql.tree.editSource'),
       icon: 'file-code',
+    },
+    {
+      key: 'debug',
+      label: t(isFunction ? 'modules.mysql.tree.funcDebug' : 'modules.mysql.tree.procDebug'),
+      icon: 'bug',
+    },
+    { key: 'sep-io', label: '', separator: true },
+    {
+      key: 'dumpSql',
+      label: t('modules.mysql.tree.dumpSql'),
+      icon: 'file-down',
     },
     { key: 'sep-mutate', label: '', separator: true },
     {
@@ -182,7 +290,7 @@ export const mysqlConnTreeProvider: ConnTreeChildProvider = {
     }
 
     if (database) {
-      return databaseCategoryNodes(database)
+      return loadDatabaseCategories(conn, database)
     }
 
     try {
@@ -208,6 +316,7 @@ export const mysqlConnTreeProvider: ConnTreeChildProvider = {
       { key: 'sep-query', label: '', separator: true },
       { key: 'query', label: t('modules.mysql.tree.connQuery'), icon: 'code-2' },
       { key: 'monitor', label: t('modules.mysql.tree.connMonitor'), icon: 'activity' },
+      { key: 'tools', label: t('modules.mysql.tree.openTools'), icon: 'archive' },
     ]
   },
 
@@ -222,12 +331,13 @@ export const mysqlConnTreeProvider: ConnTreeChildProvider = {
     if (!last || last.kind === 'hint') return []
 
     if (last.kind === 'database') {
+      // 对齐 Navicat / DBeaver 库节点常用集；不含 Vastbase 的 Owner/Rename/Schema/Grant。
+      // 壳层会追加「刷新」。
       const protectedDb = isProtectedDatabase(last.name)
       return [
         { key: 'query', label: t('modules.mysql.tree.dbQuery'), icon: 'code-2' },
-        { key: 'sep-io', label: '', separator: true },
-        { key: 'dumpSql', label: t('modules.mysql.tree.dumpSql'), icon: 'archive' },
-        { key: 'execSqlFile', label: t('modules.mysql.tree.execSqlFile'), icon: 'play-circle' },
+        databaseCreateMenus(),
+        ...databaseToolsMenus(),
         ...(!protectedDb
           ? ([
               { key: 'sep-mutate', label: '', separator: true },
@@ -241,20 +351,31 @@ export const mysqlConnTreeProvider: ConnTreeChildProvider = {
           : []),
         { key: 'sep-clipboard', label: '', separator: true },
         { key: 'copyName', label: t('modules.mysql.tree.copyName'), icon: 'copy' },
+        {
+          key: 'copyCreateDdl',
+          label: t('modules.mysql.tree.copyCreateDdl'),
+          icon: 'clipboard',
+        },
       ]
     }
 
     if (last.kind === 'category' && isCategoryId(last.name)) {
-      const isTables = last.name === 'tables'
+      // 表/视图/过程/函数：各一条「新建…」；表统一走设计器（不再并列「用设计器新建表」）。
       return [
         {
           key: 'create',
           label: t(`modules.mysql.tree.create.${last.name}`),
-          icon: 'plus',
+          icon: last.name === 'tables' ? 'layout-list' : 'plus',
         },
-        ...(isTables ? ([{ key: 'createDesign', label: t('modules.mysql.tree.createDesign'), icon: 'layout-list' }] as RsContextMenuItem[]) : []),
         { key: 'sep-query', label: '', separator: true },
         { key: 'query', label: t('modules.mysql.tree.dbQuery'), icon: 'code-2' },
+        // 表/视图/过程/函数分类：整类转储（对齐 Navicat 在对象组上 Dump SQL）
+        { key: 'sep-io', label: '', separator: true },
+        {
+          key: 'dumpSql',
+          label: t('modules.mysql.tree.dumpSql'),
+          icon: 'file-down',
+        },
       ]
     }
 

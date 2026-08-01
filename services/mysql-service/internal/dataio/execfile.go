@@ -8,11 +8,12 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
 )
 
 // execSqlFile 从本地 SQL 文件逐条读取并执行语句。
-// 支持 MySQL 语法：单引号/双引号字符串、反引号标识符、-- 和 # 行注释、/* */ 块注释。
-// 语句以 `;` 分隔；不支持 DELIMITER 重写（如需存储过程请使用 query.exec）。
+// 支持：单/双引号字符串、反引号标识符、-- / # 行注释、/* */ 块注释、
+// 客户端 DELIMITER 指令（对齐 mysql CLI / Navicat / DBeaver 还原过程与函数）。
 func execSqlFile(
 	ctx context.Context,
 	db *sql.DB,
@@ -37,15 +38,17 @@ func execSqlFile(
 
 	var (
 		stmt             strings.Builder
-		inSingle         bool // 单引号字符串内
-		inDouble         bool // 双引号字符串内
-		inBacktick       bool // 反引号标识符内
-		inLineComment    bool // 行注释（-- 或 #）内
-		inBlockComment   bool // 块注释 /* */ 内
-		blockCommentStar bool // 块注释中上一字符为 *
+		inSingle         bool
+		inDouble         bool
+		inBacktick       bool
+		inLineComment    bool
+		inBlockComment   bool
+		blockCommentStar bool
 		bytesRead        int64
 		executed         int
 		failed           int
+		delimiter        = ";"
+		held             []rune // 分隔符部分匹配缓冲
 	)
 
 	handleErr := func(stmtNo int, execErr error) error {
@@ -58,10 +61,27 @@ func execSqlFile(
 		return nil
 	}
 
+	flushHeld := func() {
+		for _, hr := range held {
+			stmt.WriteRune(hr)
+		}
+		held = held[:0]
+	}
+
 	flush := func() error {
+		flushHeld()
 		raw := strings.TrimSpace(stmt.String())
 		stmt.Reset()
 		if raw == "" {
+			return nil
+		}
+		if newDelim, ok := parseDelimiterCommand(raw); ok {
+			if newDelim == "" {
+				return fmt.Errorf("mysql: empty DELIMITER")
+			}
+			delimiter = newDelim
+			m.emitProgress(taskID, PhaseRunning, bytesRead, int64(executed),
+				fmt.Sprintf("delimiter set to %q", delimiter))
 			return nil
 		}
 		stmtNo := executed + failed + 1
@@ -72,6 +92,10 @@ func execSqlFile(
 		m.emitProgress(taskID, PhaseRunning, bytesRead, int64(executed),
 			fmt.Sprintf("executed %d statement(s)", executed))
 		return nil
+	}
+
+	inQuoteOrComment := func() bool {
+		return inSingle || inDouble || inBacktick || inLineComment || inBlockComment
 	}
 
 	for {
@@ -90,7 +114,6 @@ func execSqlFile(
 		}
 		bytesRead++
 
-		// 块注释内
 		if inBlockComment {
 			if blockCommentStar && r == '/' {
 				inBlockComment = false
@@ -101,20 +124,17 @@ func execSqlFile(
 			continue
 		}
 
-		// 行注释内
 		if inLineComment {
 			if r == '\n' {
 				inLineComment = false
-				stmt.WriteRune(r) // 保留换行以便行号对齐
+				stmt.WriteRune(r)
 			}
 			continue
 		}
 
-		// 单引号字符串内
 		if inSingle {
 			stmt.WriteRune(r)
 			if r == '\'' {
-				// MySQL 用 '' 转义单引号
 				next, peekErr := reader.Peek(1)
 				if peekErr == nil && next[0] == '\'' {
 					b, _ := reader.ReadByte()
@@ -124,7 +144,6 @@ func execSqlFile(
 					inSingle = false
 				}
 			} else if r == '\\' {
-				// 反斜杠转义下一字符
 				b, _, readErr := reader.ReadRune()
 				if readErr == nil {
 					stmt.WriteRune(b)
@@ -134,7 +153,6 @@ func execSqlFile(
 			continue
 		}
 
-		// 双引号字符串内
 		if inDouble {
 			stmt.WriteRune(r)
 			if r == '"' {
@@ -150,7 +168,6 @@ func execSqlFile(
 			continue
 		}
 
-		// 反引号标识符内
 		if inBacktick {
 			stmt.WriteRune(r)
 			if r == '`' {
@@ -166,18 +183,18 @@ func execSqlFile(
 			continue
 		}
 
-		// 普通状态：检测注释开始
 		if r == '-' {
 			next, peekErr := reader.Peek(1)
 			if peekErr == nil && next[0] == '-' {
-				// -- 行注释
 				_, _ = reader.ReadByte()
 				bytesRead++
+				flushHeld()
 				inLineComment = true
 				continue
 			}
 		}
 		if r == '#' {
+			flushHeld()
 			inLineComment = true
 			continue
 		}
@@ -186,41 +203,75 @@ func execSqlFile(
 			if peekErr == nil && next[0] == '*' {
 				_, _ = reader.ReadByte()
 				bytesRead++
+				flushHeld()
 				inBlockComment = true
 				blockCommentStar = false
 				continue
 			}
 		}
 
-		// 引号/反引号开始
 		if r == '\'' {
+			flushHeld()
 			inSingle = true
 			stmt.WriteRune(r)
 			continue
 		}
 		if r == '"' {
+			flushHeld()
 			inDouble = true
 			stmt.WriteRune(r)
 			continue
 		}
 		if r == '`' {
+			flushHeld()
 			inBacktick = true
 			stmt.WriteRune(r)
 			continue
 		}
 
-		// 语句分隔符
-		if r == ';' {
-			if err := flush(); err != nil {
-				return err
+		// DELIMITER 指令按整行结束（mysql 客户端语义），忽略其中的分隔符字符
+		if !inQuoteOrComment() && isDelimiterCommandLine(stmt.String(), held, r) {
+			if r == '\n' {
+				stmt.WriteRune(r)
+				if err := flush(); err != nil {
+					return err
+				}
+				continue
 			}
+			flushHeld()
+			stmt.WriteRune(r)
+			continue
+		}
+
+		// 普通语句：匹配当前 delimiter
+		if !inQuoteOrComment() && len(delimiter) > 0 {
+			dr := []rune(delimiter)
+			held = append(held, r)
+			matched := true
+			for i := 0; i < len(held); i++ {
+				if held[i] != dr[i] {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				if len(held) == len(dr) {
+					held = held[:0]
+					if err := flush(); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			// 失配：写出 held，当前已含在 held 末尾
+			flushHeld()
 			continue
 		}
 
 		stmt.WriteRune(r)
 	}
 
-	// 文件末尾可能有无 `;` 的最后一条语句
+	flushHeld()
 	if err := flush(); err != nil {
 		return err
 	}
@@ -233,4 +284,51 @@ func execSqlFile(
 	m.emitProgress(taskID, PhaseRunning, total, int64(executed),
 		fmt.Sprintf("executed %d statement(s)", executed))
 	return nil
+}
+
+// isDelimiterCommandLine 判断当前缓冲是否为（或正在输入）DELIMITER 客户端指令行。
+func isDelimiterCommandLine(buf string, held []rune, next rune) bool {
+	var b strings.Builder
+	b.WriteString(buf)
+	for _, hr := range held {
+		b.WriteRune(hr)
+	}
+	b.WriteRune(next)
+	line := strings.TrimLeft(b.String(), " \t")
+	if line == "" {
+		return false
+	}
+	upper := strings.ToUpper(line)
+	const keyword = "DELIMITER"
+	if len(upper) < len(keyword) {
+		return strings.HasPrefix(keyword, upper)
+	}
+	if !strings.HasPrefix(upper, keyword) {
+		return false
+	}
+	if len(upper) == len(keyword) {
+		return true
+	}
+	return unicode.IsSpace(rune(line[len(keyword)])) || line[len(keyword)] == '\n' || line[len(keyword)] == '\r'
+}
+
+// parseDelimiterCommand 识别客户端 DELIMITER 指令，返回新分隔符。
+func parseDelimiterCommand(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if len(trimmed) < 9 {
+		return "", false
+	}
+	upper := strings.ToUpper(trimmed)
+	if !strings.HasPrefix(upper, "DELIMITER") {
+		return "", false
+	}
+	rest := strings.TrimSpace(trimmed[len("DELIMITER"):])
+	if rest == "" {
+		return "", true
+	}
+	end := 0
+	for end < len(rest) && !unicode.IsSpace(rune(rest[end])) {
+		end++
+	}
+	return rest[:end], true
 }

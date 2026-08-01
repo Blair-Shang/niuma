@@ -42,6 +42,9 @@ type CsvOptions struct {
 	Truncate bool `json:"truncate"`
 	// Encoding 文件编码（当前仅记录，实际写入固定 UTF-8）。
 	Encoding string `json:"encoding"`
+	// ColumnMap 列映射：CSV 表头（或无表头时的 col1/col2…）→ 表列名；未列出的源列跳过。
+	// 对齐 Navicat / DBeaver 导入向导的字段映射。
+	ColumnMap map[string]string `json:"columnMap"`
 }
 
 // DumpMode 控制 Dump SQL 内容范围。
@@ -60,20 +63,30 @@ const (
 type DumpParams struct {
 	// Database 目标数据库名（必填）。
 	Database string `json:"database"`
-	// Tables 指定表名列表；空表示导出库下全部表。
+	// Tables 指定表/视图名列表；空表示按 Include* 导出库下全部匹配对象。
 	Tables []string `json:"tables"`
 	// Mode 导出模式，默认 structure_and_data。
 	Mode DumpMode `json:"mode"`
 	// OutputPath 输出文件路径。
 	OutputPath string `json:"outputPath"`
-	// DropIfExists 在 CREATE TABLE 前写 DROP TABLE IF EXISTS。
+	// DropIfExists 在 CREATE 前写 DROP IF EXISTS。
 	DropIfExists bool `json:"dropIfExists"`
 	// TruncateBeforeData 在数据 INSERT 前写 TRUNCATE TABLE。
 	TruncateBeforeData bool `json:"truncateBeforeData"`
+	// IncludeCreateDatabase 是否写入 CREATE DATABASE / USE（对齐 mysqldump --databases）。
+	IncludeCreateDatabase bool `json:"includeCreateDatabase"`
 	// IncludeTables 是否包含普通表。
 	IncludeTables bool `json:"includeTables"`
 	// IncludeViews 是否包含视图。
 	IncludeViews bool `json:"includeViews"`
+	// IncludeProcedures 是否包含存储过程（对齐 mysqldump / Navicat）。
+	IncludeProcedures bool `json:"includeProcedures"`
+	// IncludeFunctions 是否包含函数。
+	IncludeFunctions bool `json:"includeFunctions"`
+	// IncludeTriggers 是否包含触发器。
+	IncludeTriggers bool `json:"includeTriggers"`
+	// IncludeEvents 是否包含事件。
+	IncludeEvents bool `json:"includeEvents"`
 }
 
 // ExecSqlFileOptions 控制执行 SQL 文件的行为。
@@ -87,8 +100,9 @@ func normalizeDumpParams(p *DumpParams) {
 	if p.Mode == "" {
 		p.Mode = DumpStructureAndData
 	}
-	// 若未明确指定对象类型，默认表+视图都导出
-	if !p.IncludeTables && !p.IncludeViews {
+	hasAny := p.IncludeTables || p.IncludeViews || p.IncludeProcedures || p.IncludeFunctions ||
+		p.IncludeTriggers || p.IncludeEvents
+	if !hasAny {
 		p.IncludeTables = true
 		p.IncludeViews = true
 	}

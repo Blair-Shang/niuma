@@ -189,7 +189,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
               {{ t('ai.noHistory') }}
             </p>
 
-            <div v-else class="nm-ai-history__list">
+            <div v-else class="nm-ai-history__list rs-native-scrollbar">
               <div
                 v-for="c in aiStore.conversations"
                 :key="c.conversationId"
@@ -347,9 +347,13 @@ function onTitleKeydown(e: KeyboardEvent): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 4px;
-  min-width: 220px;
-  max-width: 280px;
+  box-sizing: border-box;
+  /* 抵消 RsPopover 默认 0.75rem 内边距，列表与滚动条贴齐面板边缘 */
+  width: calc(100% + 1.5rem);
+  margin: -0.25rem -0.75rem;
+  min-width: 0;
+  max-width: none;
+  padding: 0.25rem 0;
 }
 
 .nm-ai-history__head {
@@ -357,6 +361,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 0 0.75rem;
 }
 
 .nm-ai-history__title {
@@ -384,7 +389,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
 
 .nm-ai-history__empty {
   margin: 0;
-  padding: 12px 4px;
+  padding: 12px 0.75rem;
   font-size: var(--nm-font-caption);
   color: var(--rs-text-secondary);
 }
@@ -395,6 +400,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   gap: 2px;
   max-height: 280px;
   overflow: auto;
+  padding: 0 0 0 0.5rem;
 }
 
 .nm-ai-history__item {
@@ -402,6 +408,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   align-items: center;
   gap: 2px;
   border-radius: 6px;
+  margin-right: 0.25rem;
 }
 
 .nm-ai-history__item--active {

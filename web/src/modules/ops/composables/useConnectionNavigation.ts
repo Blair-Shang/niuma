@@ -63,6 +63,12 @@ export function useConnectionNavigation() {
       const existing = strategy.findExistingTab(tabStore.allTabs, spec, item, ctx)
       if (existing) {
         tabStore.activateTab(existing.tabId)
+        // 复用 Tab 时同步目标资源（如调试页切换过程/函数）
+        tabStore.updateTabProps(existing.tabId, spec.props)
+        tabStore.updateTitle(existing.tabId, spec.title)
+        if (spec.tooltip !== undefined) {
+          existing.tooltip = spec.tooltip
+        }
         return
       }
     }

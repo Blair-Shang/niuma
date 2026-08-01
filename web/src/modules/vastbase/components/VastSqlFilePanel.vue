@@ -414,8 +414,10 @@ defineExpose({ scrollLogToBottom })
 .nm-vast-sql__objects {
   list-style: none;
   margin: 0;
+  height: 148px;
   max-height: 148px;
   overflow: auto;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 2px;

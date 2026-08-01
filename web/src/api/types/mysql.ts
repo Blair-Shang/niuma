@@ -75,6 +75,8 @@ export interface MysqlDialectProfile {
 
 export interface MysqlSessionOpenParams {
   profileId: string
+  /** 覆盖连接配置默认库，按查询 Tab 目标库建连 */
+  database?: string
 }
 
 export interface MysqlSessionOpenResult {
@@ -114,6 +116,12 @@ export interface MysqlQueryExecParams {
 export interface MysqlQueryColumn {
   name: string
   dataType?: string
+  nullable?: boolean
+  primaryKey?: boolean
+  /** 显示宽度 / 字符长度（如 TINYINT(1)、VARCHAR(n)、BIT(n)） */
+  length?: number
+  precision?: number
+  scale?: number
 }
 
 export interface MysqlQueryExecResult {
@@ -157,6 +165,22 @@ export interface MysqlQueryCancelParams {
   requestId?: string
 }
 
+/** 会话事务 / Auto-commit 状态 */
+export interface MysqlTxState {
+  autoCommit: boolean
+  inTransaction: boolean
+}
+
+export interface MysqlTxSessionParams {
+  sessionId: string
+}
+
+export interface MysqlTxSetAutoCommitParams {
+  sessionId: string
+  autoCommit: boolean
+}
+
+
 export interface MysqlTreeListParams {
   profileId?: string
   sessionId?: string
@@ -197,6 +221,14 @@ export interface MysqlTreeRoutinesResult {
   truncated?: boolean
 }
 
+/** database 下分类对象数量（非行数） */
+export interface MysqlTreeCategoryCountsResult {
+  tables: number
+  views: number
+  functions: number
+  procedures: number
+}
+
 /** 元数据关系定位（表 / 视图） */
 export interface MysqlMetaRelationParams {
   sessionId?: string
@@ -214,6 +246,8 @@ export interface MysqlColumnInfo {
   nullable: boolean
   default?: string | null
   comment?: string
+  /** 是否 AUTO_INCREMENT（information_schema.COLUMNS.EXTRA） */
+  autoIncrement?: boolean
 }
 
 export interface MysqlIndexInfo {
@@ -253,6 +287,23 @@ export interface MysqlMetaRoutineSourceResult {
   name: string
   kind: string
   definition: string
+}
+
+export interface MysqlRoutineParameter {
+  ordinal: number
+  name: string
+  /** IN | OUT | INOUT；返回值伪行无 mode */
+  mode: string
+  dataType: string
+  dtdIdentifier: string
+  isReturn: boolean
+}
+
+export interface MysqlMetaRoutineParametersResult {
+  name: string
+  kind: string
+  parameters: MysqlRoutineParameter[]
+  returnType?: string
 }
 
 /** 进程列表（SHOW FULL PROCESSLIST） */
@@ -317,6 +368,48 @@ export interface MysqlCatalogColumnsResult {
   truncated?: boolean
 }
 
+/** SQL Language Server（Bridge 隧道 LSP） */
+export interface MysqlLspOpenParams {
+  sessionId: string
+  clientId: string
+  /** 编辑器当前库（补全默认 schema）；可空 */
+  database?: string
+}
+
+export interface MysqlLspOpenResult {
+  connectionId: string
+}
+
+export interface MysqlLspRpcParams {
+  connectionId: string
+  sessionId: string
+  /** JSON-RPC 2.0 消息对象 */
+  message: Record<string, unknown>
+}
+
+export interface MysqlLspRpcResult {
+  ok?: boolean
+  message?: Record<string, unknown>
+}
+
+export interface MysqlLspCloseParams {
+  connectionId: string
+  sessionId?: string
+}
+
+/** Monarch 高亮词表（关键字 + 内置函数）；无需 session */
+export interface MysqlLspLexiconParams {
+  /** 预留；MySQL 忽略 */
+  sessionId?: string
+  compat?: string
+}
+
+export interface MysqlLspLexiconResult {
+  keywords: string[]
+  functions: string[]
+  compat?: string
+}
+
 export interface MysqlQueryExplainParams {
   sessionId: string
   database?: string
@@ -345,6 +438,9 @@ export interface MysqlMetaInstanceOverviewResult {
   maxConnections?: number
   questions?: number
   slowQueries?: number
+  /** 部分 GLOBAL STATUS 读取失败 */
+  statusPartial?: boolean
+  warnings?: string[]
 }
 
 // ─── Monitor: lock info ─────────────────────────────────────────────────────
@@ -370,6 +466,38 @@ export interface MysqlMetaLocksResult {
   locks: MysqlLockInfo[]
   truncated?: boolean
   limit?: number
+  /** 无权限 / performance_schema 未开等：非硬失败 */
+  unavailable?: boolean
+  message?: string
+}
+
+// ─── Monitor: variables / status / deadlock ─────────────────────────────────
+
+export interface MysqlServerKVItem {
+  name: string
+  value: string
+}
+
+export interface MysqlMetaServerKVParams {
+  sessionId: string
+  /** 可选 SHOW ... LIKE 模式；空则全量（服务端有上限） */
+  like?: string
+}
+
+export interface MysqlMetaServerKVResult {
+  items: MysqlServerKVItem[]
+  truncated?: boolean
+  limit?: number
+}
+
+export interface MysqlMetaInnoDBDeadlockParams {
+  sessionId: string
+}
+
+export interface MysqlMetaInnoDBDeadlockResult {
+  hasDeadlock: boolean
+  excerpt?: string
+  rawLength?: number
 }
 
 // ─── Meta: primary key & foreign keys ──────────────────────────────────────
@@ -417,6 +545,7 @@ export interface MysqlDesignColumnSpec {
   default?: string | null
   comment?: string
   autoIncrement?: boolean
+  primaryKey?: boolean
 }
 
 export interface MysqlDesignIndexSpec {
@@ -424,6 +553,7 @@ export interface MysqlDesignIndexSpec {
   columns: string[]
   unique?: boolean
   primary?: boolean
+  method?: string
 }
 
 export interface MysqlDesignForeignKeySpec {
@@ -435,18 +565,23 @@ export interface MysqlDesignForeignKeySpec {
   onUpdate?: string
 }
 
-export type MysqlDesignOp =
-  | { op: 'add_column'; column: MysqlDesignColumnSpec; position?: string }
-  | { op: 'drop_column'; name: string }
-  | { op: 'alter_column'; oldName: string; column: MysqlDesignColumnSpec }
-  | { op: 'set_primary_key'; columns: string[] }
-  | { op: 'add_index'; index: MysqlDesignIndexSpec }
-  | { op: 'drop_index'; name: string }
-  | { op: 'add_foreign_key'; fk: MysqlDesignForeignKeySpec }
-  | { op: 'drop_foreign_key'; name: string }
-  | { op: 'set_comment'; comment: string }
-  | { op: 'set_engine'; engine: string }
-  | { op: 'set_charset'; charset: string }
+export type MysqlDesignOp = {
+  op: string
+  name?: string
+  newName?: string
+  dataType?: string
+  default?: string | null
+  nullable?: boolean
+  comment?: string
+  columns?: string[]
+  unique?: boolean
+  method?: string
+  refDatabase?: string
+  refTable?: string
+  refColumns?: string[]
+  onDelete?: string
+  onUpdate?: string
+}
 
 export interface MysqlDdlDesignPreviewParams {
   sessionId?: string
@@ -481,10 +616,11 @@ export interface MysqlDdlCreateTableParams {
   comment?: string
   engine?: string
   charset?: string
+  collation?: string
 }
 
 export interface MysqlDdlCreateTableResult {
-  sql: string
+  sql: string[]
   durationMs?: number
 }
 
@@ -495,6 +631,8 @@ export interface MysqlIoCsvOptions {
   delimiter?: string
   nullString?: string
   truncate?: boolean
+  /** CSV 表头（或 col1…）→ 表列名；空映射跳过该源列 */
+  columnMap?: Record<string, string>
 }
 
 export type MysqlIoDumpMode = 'structure_and_data' | 'structure_only' | 'data_only'
@@ -505,7 +643,8 @@ export interface MysqlIoExportCsvParams {
   database: string
   table: string
   outputPath: string
-  options?: MysqlIoCsvOptions
+  /** 勿用 options：platform 凭据注入会覆盖连接 options */
+  csvOptions?: MysqlIoCsvOptions
 }
 
 export interface MysqlIoImportCsvParams {
@@ -514,7 +653,8 @@ export interface MysqlIoImportCsvParams {
   database: string
   table: string
   inputPath: string
-  options?: MysqlIoCsvOptions
+  /** 勿用 options：platform 凭据注入会覆盖连接 options */
+  csvOptions?: MysqlIoCsvOptions
 }
 
 export interface MysqlIoDumpSqlParams {
@@ -527,8 +667,13 @@ export interface MysqlIoDumpSqlParams {
     outputPath: string
     dropIfExists?: boolean
     truncateBeforeData?: boolean
+    includeCreateDatabase?: boolean
     includeTables?: boolean
     includeViews?: boolean
+    includeProcedures?: boolean
+    includeFunctions?: boolean
+    includeTriggers?: boolean
+    includeEvents?: boolean
   }
 }
 
@@ -537,7 +682,8 @@ export interface MysqlIoExecSqlFileParams {
   profileId?: string
   database: string
   inputPath: string
-  options?: { continueOnError?: boolean }
+  /** 勿用 options：platform 凭据注入会覆盖连接 options */
+  execOptions?: { continueOnError?: boolean }
 }
 
 export interface MysqlIoTaskResult {
@@ -562,4 +708,74 @@ export interface MysqlIoDoneEvent {
   ok: boolean
   message?: string
   outputPath?: string
+}
+
+// ─── tools: mysqldump / mysql CLI ───────────────────────────────────────────
+
+export interface MysqlToolDetectEntry {
+  available: boolean
+  path?: string
+  version?: string
+}
+
+export interface MysqlToolsDetectResult {
+  mysqldump: MysqlToolDetectEntry
+  mysql: MysqlToolDetectEntry
+}
+
+export interface MysqlToolsDumpOptions {
+  structureOnly?: boolean
+  dataOnly?: boolean
+  dropIfExists?: boolean
+  routines?: boolean
+  triggers?: boolean
+  events?: boolean
+  singleTransaction?: boolean
+  /** OFF | ON | AUTO；默认 OFF，避免逻辑备份写入 GTID */
+  setGtidPurged?: 'OFF' | 'ON' | 'AUTO'
+  tables?: string[]
+  /** 输出过程日志（--verbose，默认 true） */
+  verbose?: boolean
+}
+
+export interface MysqlToolsRestoreOptions {
+  /** 遇 SQL 错误继续（如表已存在） */
+  force?: boolean
+  /** 过滤备份中的 GTID_PURGED / SQL_LOG_BIN（默认 true） */
+  stripGtid?: boolean
+  /** 输出过程日志（--verbose，默认 true） */
+  verbose?: boolean
+}
+
+export interface MysqlToolsDumpParams {
+  sessionId?: string
+  profileId?: string
+  database: string
+  outputPath?: string
+  /** 勿用 options：platform 凭据注入会覆盖连接 options */
+  dumpOptions?: MysqlToolsDumpOptions
+  toolPaths?: Record<string, string>
+}
+
+export interface MysqlToolsRestoreParams {
+  sessionId?: string
+  profileId?: string
+  database: string
+  inputPath: string
+  /** 勿用 options：platform 凭据注入会覆盖连接 options */
+  restoreOptions?: MysqlToolsRestoreOptions
+  toolPaths?: Record<string, string>
+}
+
+export interface MysqlToolsTaskResult {
+  taskId: string
+}
+
+export interface MysqlToolsCancelParams {
+  taskId: string
+  sessionId?: string
+}
+
+export interface MysqlToolsDetectParams {
+  toolPaths?: Record<string, string>
 }

@@ -1,19 +1,19 @@
 /**
- * MySQL 树 DDL / SHOW CREATE：复用已有 session，否则短暂 open/close。
+ * MySQL 树 DDL / SHOW CREATE：始终短暂 open/close。
+ * 不复用查询 Tab 的 per_tab 会话，避免卷入对方未提交事务。
  */
 import { mysqlApi } from '@/api'
 import type { MysqlQueryExecResult } from '@/api/types/mysql'
-import { useSessionRegistry } from '@/stores/session-registry'
 
 export async function withMysqlSession<T>(
   profileId: string,
   fn: (sessionId: string) => Promise<T>,
+  database?: string,
 ): Promise<T> {
-  const existing = useSessionRegistry().getSessionIdForProfile(profileId, 'mysql')
-  if (existing) {
-    return fn(existing)
-  }
-  const opened = await mysqlApi.sessionOpen({ profileId })
+  const opened = await mysqlApi.sessionOpen({
+    profileId,
+    database: database?.trim() || undefined,
+  })
   try {
     return await fn(opened.sessionId)
   } finally {
@@ -26,20 +26,24 @@ export async function execMysqlSql(
   sql: string,
   database?: string,
 ): Promise<MysqlQueryExecResult> {
-  return withMysqlSession(profileId, async (sessionId) => {
-    const result = await mysqlApi.queryExec({
-      sessionId,
-      database,
-      sql,
-      limit: 50,
-    })
-    if (result.resultSetId) {
-      await mysqlApi
-        .queryClose({ sessionId, resultSetId: result.resultSetId })
-        .catch(() => undefined)
-    }
-    return result
-  })
+  return withMysqlSession(
+    profileId,
+    async (sessionId) => {
+      const result = await mysqlApi.queryExec({
+        sessionId,
+        database,
+        sql,
+        limit: 50,
+      })
+      if (result.resultSetId) {
+        await mysqlApi
+          .queryClose({ sessionId, resultSetId: result.resultSetId })
+          .catch(() => undefined)
+      }
+      return result
+    },
+    database,
+  )
 }
 
 /** 从 SHOW CREATE 结果取 DDL 文本（通常为第 2 列）。 */

@@ -74,6 +74,8 @@ type CreateTableParams struct {
 	Engine string `json:"engine,omitempty"`
 	// Charset 字符集，默认 utf8mb4。
 	Charset string `json:"charset,omitempty"`
+	// Collation 排序规则（可选；空则跟随字符集默认）。
+	Collation string `json:"collation,omitempty"`
 }
 
 // CreateTableResult 是新建表预览 / 应用结果。
@@ -123,7 +125,7 @@ func BuildCreateTableSQL(p CreateTableParams) (string, error) {
 			b.WriteString(" AUTO_INCREMENT")
 		}
 		if col.Default != nil {
-			if def := strings.TrimSpace(*col.Default); def != "" {
+			if def := FormatDefaultExpr(*col.Default); def != "" {
 				b.WriteString(" DEFAULT ")
 				b.WriteString(def)
 			}
@@ -227,6 +229,9 @@ func BuildCreateTableSQL(p CreateTableParams) (string, error) {
 		charset = "utf8mb4"
 	}
 	opts := fmt.Sprintf("ENGINE=%s DEFAULT CHARSET=%s", engine, charset)
+	if col := strings.TrimSpace(p.Collation); col != "" {
+		opts += " COLLATE=" + col
+	}
 	if c := strings.TrimSpace(p.Comment); c != "" {
 		opts += " COMMENT=" + quoteStringLiteral(c)
 	}

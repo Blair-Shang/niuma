@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"strings"
 
+	"niuma/pkg/sqllsp"
 	"niuma/services/mysql-service/internal/dataio"
 	"niuma/services/mysql-service/internal/eventpub"
 	"niuma/services/mysql-service/internal/idgen"
 	"niuma/services/mysql-service/internal/session"
+	"niuma/services/mysql-service/internal/tools"
 )
 
 const (
@@ -23,18 +25,23 @@ const (
 	MethodQueryClose  = "query.close"
 	MethodQueryCancel = "query.cancel"
 
-	MethodTreeDatabases = "tree.databases"
-	MethodTreeTables    = "tree.tables"
-	MethodTreeRoutines  = "tree.routines"
+	MethodTreeDatabases      = "tree.databases"
+	MethodTreeTables         = "tree.tables"
+	MethodTreeRoutines       = "tree.routines"
+	MethodTreeCategoryCounts = "tree.categoryCounts"
 
 	MethodMetaColumns          = "meta.columns"
 	MethodMetaIndexes          = "meta.indexes"
 	MethodMetaDDL              = "meta.ddl"
-	MethodMetaRoutineSource    = "meta.routineSource"
-	MethodMetaProcesslist      = "meta.processlist"
+	MethodMetaRoutineSource     = "meta.routineSource"
+	MethodMetaRoutineParameters = "meta.routineParameters"
+	MethodMetaProcesslist       = "meta.processlist"
 	MethodMetaKill             = "meta.kill"
 	MethodMetaInstanceOverview = "meta.instanceOverview"
 	MethodMetaLocks            = "meta.locks"
+	MethodMetaServerVariables  = "meta.serverVariables"
+	MethodMetaServerStatus     = "meta.serverStatus"
+	MethodMetaInnoDBDeadlock   = "meta.innodbDeadlock"
 	MethodMetaPrimaryKey       = "meta.primaryKey"
 	MethodMetaForeignKeys      = "meta.foreignKeys"
 
@@ -44,15 +51,28 @@ const (
 
 	MethodQueryExplain = "query.explain"
 
+	MethodTxGetState      = "tx.getState"
+	MethodTxSetAutoCommit = "tx.setAutoCommit"
+	MethodTxCommit        = "tx.commit"
+	MethodTxRollback      = "tx.rollback"
+
 	MethodDDLDesignPreview = "ddl.designPreview"
 	MethodDDLDesignApply   = "ddl.designApply"
-	MethodDDLCreateTable   = "ddl.createTable"
+	MethodDDLCreateTable        = "ddl.createTable"
+	MethodDDLCreateTablePreview = "ddl.createTablePreview"
 
-	MethodIOExportCsv    = "io.exportCsv"
-	MethodIOImportCsv    = "io.importCsv"
-	MethodIODumpSql      = "io.dumpSql"
-	MethodIOExecSqlFile  = "io.execSqlFile"
-	MethodIOCancel       = "io.cancel"
+	MethodIOExportCsv   = "io.exportCsv"
+	MethodIOImportCsv   = "io.importCsv"
+	MethodIODumpSql     = "io.dumpSql"
+	MethodIOExecSqlFile = "io.execSqlFile"
+	MethodIOCancel      = "io.cancel"
+
+	MethodToolsDetect  = "tools.detect"
+	MethodToolsDump    = "tools.dump"
+	MethodToolsRestore = "tools.restore"
+	MethodToolsCancel  = "tools.cancel"
+
+	// LSP methods 见 lsp.go（MethodLspOpen/Rpc/Close）
 
 	errInvalidParamsFmt  = "invalid params: %v"
 	errSessionIDRequired = "sessionId required"
@@ -83,15 +103,25 @@ type Dispatcher struct {
 	sessions *session.Manager
 	events   *eventpub.Async
 	io       *dataio.Manager
+	tools    *tools.Manager
+	lsp      *sqllsp.Server
+	lspConns *sqllsp.Manager
 }
 
 // New 创建 Dispatcher。
 func New(ids idgen.Generator, events *eventpub.Async) *Dispatcher {
+	emit := func(payload map[string]any) {
+		if events != nil {
+			events.Emit(payload)
+		}
+	}
+	sessions := session.NewManager()
 	return &Dispatcher{
 		ids:      ids,
-		sessions: session.NewManager(),
+		sessions: sessions,
 		events:   events,
-		io:       dataio.NewManager(ids, events.Emit),
+		io:       dataio.NewManager(ids, emit),
+		tools:    tools.NewManager(sessions, ids, emit),
 	}
 }
 
@@ -110,7 +140,10 @@ func (d *Dispatcher) HandleFrame(ctx context.Context, raw []byte) []byte {
 func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 	resp := d.dispatchMethod(ctx, req)
 	if !resp.OK && strings.TrimSpace(resp.Error) != "" {
-		logOpError(req.Method, fmt.Errorf("%s", resp.Error), "id", req.ID)
+		// 主动取消不是故障：浏览并发 COUNT/SELECT、query.cancel、超时等都会走到这里。
+		if !strings.Contains(resp.Error, "context canceled") {
+			logOpError(req.Method, fmt.Errorf("%s", resp.Error), "id", req.ID)
+		}
 	}
 	return resp
 }
@@ -137,6 +170,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.treeTables(ctx, req)
 	case MethodTreeRoutines:
 		return d.treeRoutines(ctx, req)
+	case MethodTreeCategoryCounts:
+		return d.treeCategoryCounts(ctx, req)
 	case MethodMetaColumns:
 		return d.metaColumns(ctx, req)
 	case MethodMetaIndexes:
@@ -145,6 +180,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.metaDDL(ctx, req)
 	case MethodMetaRoutineSource:
 		return d.metaRoutineSource(ctx, req)
+	case MethodMetaRoutineParameters:
+		return d.metaRoutineParameters(ctx, req)
 	case MethodMetaProcesslist:
 		return d.metaProcesslist(ctx, req)
 	case MethodMetaKill:
@@ -153,6 +190,12 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.metaInstanceOverview(ctx, req)
 	case MethodMetaLocks:
 		return d.metaLocks(ctx, req)
+	case MethodMetaServerVariables:
+		return d.metaServerVariables(ctx, req)
+	case MethodMetaServerStatus:
+		return d.metaServerStatus(ctx, req)
+	case MethodMetaInnoDBDeadlock:
+		return d.metaInnoDBDeadlock(ctx, req)
 	case MethodMetaPrimaryKey:
 		return d.metaPrimaryKey(ctx, req)
 	case MethodMetaForeignKeys:
@@ -165,10 +208,20 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.catalogColumns(ctx, req)
 	case MethodQueryExplain:
 		return d.queryExplain(ctx, req)
+	case MethodTxGetState:
+		return d.txGetState(ctx, req)
+	case MethodTxSetAutoCommit:
+		return d.txSetAutoCommit(ctx, req)
+	case MethodTxCommit:
+		return d.txCommit(ctx, req)
+	case MethodTxRollback:
+		return d.txRollback(ctx, req)
 	case MethodDDLDesignPreview:
 		return d.ddlDesignPreview(ctx, req)
 	case MethodDDLDesignApply:
 		return d.ddlDesignApply(ctx, req)
+	case MethodDDLCreateTablePreview:
+		return d.ddlCreateTablePreview(ctx, req)
 	case MethodDDLCreateTable:
 		return d.ddlCreateTable(ctx, req)
 	case MethodIOExportCsv:
@@ -181,6 +234,22 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.ioExecSqlFile(ctx, req)
 	case MethodIOCancel:
 		return d.ioCancel(ctx, req)
+	case MethodToolsDetect:
+		return d.toolsDetect(ctx, req)
+	case MethodToolsDump:
+		return d.toolsDump(ctx, req)
+	case MethodToolsRestore:
+		return d.toolsRestore(ctx, req)
+	case MethodToolsCancel:
+		return d.toolsCancel(ctx, req)
+	case MethodLspOpen:
+		return d.lspOpen(ctx, req)
+	case MethodLspRpc:
+		return d.lspRpc(ctx, req)
+	case MethodLspClose:
+		return d.lspClose(ctx, req)
+	case MethodLspLexicon:
+		return d.lspLexicon(ctx, req)
 	default:
 		return errorResponse(req.ID, "method not found: "+req.Method)
 	}

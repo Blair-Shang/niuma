@@ -68,7 +68,8 @@ const { t } = useI18n()
 .nm-components__workspace {
   position: relative;
   display: flex;
-  min-height: 22rem;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   background: var(--rs-surface-elevated);
 }
@@ -232,7 +233,6 @@ const { t } = useI18n()
 @media (max-width: 48rem) {
   .nm-components__workspace {
     flex-direction: column;
-    min-height: auto;
   }
 
   .nm-components__sidebar {
