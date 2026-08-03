@@ -14,6 +14,7 @@ import {
   buildSqlQueryContextMenuItems,
   formatBrowseCellValue,
   resolveSqlValueType,
+  useQueryDraftPersist,
   useSqlQueryHistory,
   type QueryResultMessageItem,
   type QueryResultPanelLabels,
@@ -48,6 +49,8 @@ export type MysqlQueryPaneProps = {
   profileId?: string
   database?: string
   initialSql?: string
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   sessionLabel?: string
   active?: boolean
@@ -62,7 +65,12 @@ export function useMysqlQueryPane(props: MysqlQueryPaneProps) {
   const toast = useRsToast()
   const sessionRegistry = useSessionRegistry()
 
-  const sqlText = ref(props.initialSql?.trim() || 'SELECT 1;\n')
+  const { sqlText, restoredFromDraft } = useQueryDraftPersist({
+    tabId: () => props.tabId,
+    draftSql: () => props.draftSql,
+    initialSql: () => props.initialSql,
+    defaultSql: 'SELECT 1;\n',
+  })
   const running = ref(false)
   const cancelling = ref(false)
   const cancelled = ref(false)
@@ -1105,7 +1113,7 @@ export function useMysqlQueryPane(props: MysqlQueryPaneProps) {
   )
 
   onMounted(() => {
-    if (props.autoRunInitialSql && props.initialSql?.trim()) {
+    if (!restoredFromDraft && props.autoRunInitialSql && props.initialSql?.trim()) {
       void runSql()
     }
   })

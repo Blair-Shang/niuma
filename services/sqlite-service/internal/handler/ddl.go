@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"niuma/services/sqlite-service/internal/ddl"
+	"niuma/services/sqlite-service/internal/dialect"
 )
 
 type ddlDesignPreviewParams struct {
@@ -141,4 +142,81 @@ func (d *Dispatcher) ddlCreateTable(ctx context.Context, req Request) Response {
 	}
 	logOpInfo(MethodDDLCreateTable, "table", params.Name, "durationMs", result.DurationMS)
 	return okResponse(req.ID, result)
+}
+
+type objectScriptRPCParams struct {
+	SessionID      string `json:"sessionId"`
+	Kind           string `json:"kind"`
+	SQL            string `json:"sql"`
+	Schema         string `json:"schema"`
+	Database       string `json:"database"`
+	ExistingName   string `json:"existingName"`
+	Mode           string `json:"mode"`
+	SelectionOnly  bool   `json:"selectionOnly"`
+	PreferFallback bool   `json:"preferFallback"`
+}
+
+func (d *Dispatcher) objectScriptProfile(sessionID string) *dialect.ServerProfile {
+	if strings.TrimSpace(sessionID) == "" {
+		p := dialect.DefaultProfile()
+		return &p
+	}
+	sess, err := d.sessions.Get(sessionID)
+	if err != nil || sess == nil || sess.Dialect == nil {
+		p := dialect.DefaultProfile()
+		return &p
+	}
+	return sess.Dialect
+}
+
+func (d *Dispatcher) ddlObjectScriptPreview(_ context.Context, req Request) Response {
+	var p objectScriptRPCParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	profile := d.objectScriptProfile(p.SessionID)
+	v, err := ddl.PreviewObjectScript(ddl.ObjectScriptParams{
+		Kind:           p.Kind,
+		SQL:            p.SQL,
+		Schema:         p.Schema,
+		Database:       p.Database,
+		ExistingName:   p.ExistingName,
+		Mode:           p.Mode,
+		SelectionOnly:  p.SelectionOnly,
+		PreferFallback: p.PreferFallback,
+	}, profile)
+	if err != nil {
+		logOpWarn(MethodDDLObjectScriptPreview, err, "kind", p.Kind)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodDDLObjectScriptPreview, "kind", p.Kind, "strategy", v.Strategy, "statements", len(v.SQL))
+	return okResponse(req.ID, v)
+}
+
+func (d *Dispatcher) ddlObjectScriptApply(ctx context.Context, req Request) Response {
+	var p objectScriptRPCParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	sess, err := d.resolveSessionDB(req.Params)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	profile := d.objectScriptProfile(p.SessionID)
+	v, err := ddl.ApplyObjectScript(ctx, sess.DB, ddl.ObjectScriptParams{
+		Kind:           p.Kind,
+		SQL:            p.SQL,
+		Schema:         p.Schema,
+		Database:       p.Database,
+		ExistingName:   p.ExistingName,
+		Mode:           p.Mode,
+		SelectionOnly:  p.SelectionOnly,
+		PreferFallback: p.PreferFallback,
+	}, profile)
+	if err != nil {
+		logOpWarn(MethodDDLObjectScriptApply, err, "kind", p.Kind)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodDDLObjectScriptApply, "kind", p.Kind, "strategy", v.Strategy, "durationMs", v.DurationMS)
+	return okResponse(req.ID, v)
 }

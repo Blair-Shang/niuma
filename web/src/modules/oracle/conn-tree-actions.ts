@@ -7,12 +7,41 @@ import { i18n } from '@/locale'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import type { ConnOpenContext, ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import type { ConnItem } from '@/modules/ops/types'
-import { oracleSelectSeed, qualifiedName, quoteIdent } from '@/modules/oracle/sql-seed'
+import { withOracleSession } from '@/modules/oracle/composables/useOracleSessionSql'
 import {
+  useOracleDdlActionStore,
+  type OracleDdlAction,
+} from '@/modules/oracle/stores/ddl-actions'
+import {
+  callRoutineSeed,
+  oracleSelectSeed,
+  qualifiedName,
+  quoteIdent,
+  sequenceCurrvalSeed,
+  sequenceNextvalSeed,
+} from '@/modules/oracle/sql-seed'
+import {
+  categoryToObjectKind,
   isObjectCategory,
+  ORACLE_CREATE_OBJECT_PLACEHOLDERS,
+  type OracleObjectCategory,
   type OracleObjectKind,
   type OracleObjectScriptMode,
 } from '@/modules/oracle/types/object-script'
+import {
+  compileFunctionSql,
+  compilePackageBodySql,
+  compilePackageSql,
+  compileProcedureSql,
+  countSql,
+  createObjectTemplate,
+  createSequenceSql,
+  deleteTemplateSql,
+  insertTemplateSql,
+  selectAllSql,
+  updateTemplateSql,
+  type ScriptColumn,
+} from '@/modules/oracle/utils/script-templates'
 
 const t = (key: string, params?: Record<string, unknown>) =>
   params ? i18n.global.t(key, params) : i18n.global.t(key)
@@ -25,6 +54,31 @@ function segmentName(path: ConnResourcePath | undefined, kind: string): string |
 
 function isRelationCategory(category: string | undefined): boolean {
   return category === 'tables' || category === 'views'
+}
+
+function isCategoryId(
+  name: string | undefined,
+): name is 'tables' | 'views' | 'procedures' | 'functions' | 'packages' | 'sequences' {
+  return (
+    name === 'tables' ||
+    name === 'views' ||
+    name === 'procedures' ||
+    name === 'functions' ||
+    name === 'packages' ||
+    name === 'sequences'
+  )
+}
+
+function categoryRefreshPath(path: ConnResourcePath): ConnResourcePath | undefined {
+  const schema = segmentName(path, 'schema')
+  const category = segmentName(path, 'category')
+  if (!schema || !isCategoryId(category)) return undefined
+  return {
+    segments: [
+      { kind: 'schema', name: schema },
+      { kind: 'category', name: category },
+    ],
+  }
 }
 
 async function copyText(text: string): Promise<void> {
@@ -54,7 +108,8 @@ export function openFeature(
   if (
     options?.objectKind === 'view' ||
     options?.objectKind === 'procedure' ||
-    options?.objectKind === 'function'
+    options?.objectKind === 'function' ||
+    options?.objectKind === 'package'
   ) {
     ctx.objectKind = options.objectKind
   }
@@ -69,10 +124,14 @@ export function openQuery(
 ): void {
   const schema = segmentName(path, 'schema')
   const table = segmentName(path, 'table')
+  const sequence = segmentName(path, 'sequence')
   const category = segmentName(path, 'category')
   let seed = initialSql
   if (!seed?.trim() && table && isRelationCategory(category)) {
     seed = oracleSelectSeed(schema, table)
+  }
+  if (!seed?.trim() && schema && sequence) {
+    seed = sequenceNextvalSeed(schema, sequence)
   }
   openFeature(conn, path, 'query', seed, { autoRun: options?.autoRun && Boolean(seed) })
 }
@@ -107,17 +166,70 @@ export function openCreateTableDesign(conn: ConnItem, schema: string): void {
   openDesign(conn, path, 'create')
 }
 
+function objectScriptPath(
+  schema: string,
+  category: OracleObjectCategory,
+  objectName?: string,
+): ConnResourcePath {
+  const segments: ConnResourcePath['segments'] = [
+    { kind: 'schema', name: schema },
+    { kind: 'category', name: category },
+  ]
+  if (objectName) {
+    if (category === 'views') {
+      segments.push({ kind: 'table', name: objectName })
+    } else if (category === 'packages') {
+      segments.push({ kind: 'package', name: objectName })
+    } else {
+      segments.push({ kind: 'routine', name: objectName })
+    }
+  }
+  return { segments }
+}
+
 export function openObjectScript(
   conn: ConnItem,
   path?: ConnResourcePath,
   designMode: OracleObjectScriptMode = 'alter',
+  options?: { objectKind?: OracleObjectKind; initialSql?: string },
 ): void {
-  openFeature(conn, path, 'objectScript', undefined, { designMode })
+  openFeature(conn, path, 'objectScript', options?.initialSql, {
+    designMode,
+    objectKind: options?.objectKind,
+  })
 }
 
+export function openCreateObjectScript(
+  conn: ConnItem,
+  schema: string,
+  category: OracleObjectCategory,
+): void {
+  const placeholder = ORACLE_CREATE_OBJECT_PLACEHOLDERS[category]
+  const path = objectScriptPath(schema, category, placeholder)
+  const sql = createObjectTemplate(schema, category)
+  openObjectScript(conn, path, 'create', {
+    objectKind: categoryToObjectKind(category),
+    initialSql: sql,
+  })
+}
+
+/** 序列暂无 ObjectScript 面板：用查询 Tab 打开 CREATE SEQUENCE 模板。 */
+export function openCreateSequence(conn: ConnItem, schema: string): void {
+  const path: ConnResourcePath = {
+    segments: [
+      { kind: 'schema', name: schema },
+      { kind: 'category', name: 'sequences' },
+    ],
+  }
+  openQuery(conn, path, createSequenceSql(schema))
+}
+
+/** @deprecated 使用 openCreateObjectScript */
 export function openCreate(conn: ConnItem, path: ConnResourcePath): void {
-  if (!isObjectCategory(segmentName(path, 'category'))) return
-  openObjectScript(conn, path, 'create')
+  const category = segmentName(path, 'category')
+  const schema = segmentName(path, 'schema')
+  if (!schema || !isObjectCategory(category)) return
+  openCreateObjectScript(conn, schema, category)
 }
 
 export function openOracleIoTask(
@@ -182,6 +294,138 @@ export function openOracleIoTask(
   })
 }
 
+async function loadTableScriptMeta(
+  conn: ConnItem,
+  schema: string,
+  table: string,
+): Promise<{ columns: ScriptColumn[]; pkColumns: string[] }> {
+  try {
+    return await withOracleSession(conn.profileId, async (sessionId) => {
+      const { oracleApi } = await import('@/api/oracle')
+      const [cols, pk] = await Promise.all([
+        oracleApi.metaColumns({ sessionId, schema, table }),
+        oracleApi.metaPrimaryKey({ sessionId, schema, table }),
+      ])
+      const columns: ScriptColumn[] = (cols.columns ?? []).map((c) => ({
+        name: c.name,
+        dataType: c.dataType,
+      }))
+      return { columns, pkColumns: pk.columns ?? [] }
+    })
+  } catch {
+    return { columns: [], pkColumns: [] }
+  }
+}
+
+async function fetchMetaDdl(conn: ConnItem, schema: string, name: string): Promise<string | null> {
+  try {
+    return await withOracleSession(conn.profileId, async (sessionId) => {
+      const { oracleApi } = await import('@/api/oracle')
+      const result = await oracleApi.metaDDL({ sessionId, schema, table: name, name })
+      if (!result.ddl?.trim()) {
+        toast.error(t('modules.oracle.tree.ddlEmpty'))
+        return null
+      }
+      return result.ddl
+    })
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.oracle.tree.ddlFailed'))
+    return null
+  }
+}
+
+async function fetchRoutineSource(
+  conn: ConnItem,
+  schema: string,
+  name: string,
+  kind: 'procedure' | 'function',
+): Promise<string | null> {
+  try {
+    return await withOracleSession(conn.profileId, async (sessionId) => {
+      const { oracleApi } = await import('@/api/oracle')
+      const result = await oracleApi.metaRoutineSource({ sessionId, schema, name, kind })
+      if (!result.definition?.trim()) {
+        toast.error(t('modules.oracle.tree.ddlEmpty'))
+        return null
+      }
+      return result.definition
+    })
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.oracle.tree.ddlFailed'))
+    return null
+  }
+}
+
+async function fetchPackageSource(
+  conn: ConnItem,
+  schema: string,
+  name: string,
+): Promise<string | null> {
+  try {
+    return await withOracleSession(conn.profileId, async (sessionId) => {
+      const { oracleApi } = await import('@/api/oracle')
+      const result = await oracleApi.metaPackageSource({ sessionId, schema, name, part: 'both' })
+      const text = [result.definition, result.bodyDefinition].filter((s) => s?.trim()).join('\n/\n')
+      if (!text.trim()) {
+        toast.error(t('modules.oracle.tree.ddlEmpty'))
+        return null
+      }
+      return text
+    })
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.oracle.tree.ddlFailed'))
+    return null
+  }
+}
+
+function requestDanger(
+  conn: ConnItem,
+  path: ConnResourcePath,
+  action: OracleDdlAction,
+  titleKey: string,
+  descKey: string,
+  name: string,
+  schema?: string,
+): void {
+  useOracleDdlActionStore().request({
+    conn,
+    action,
+    profileId: conn.profileId,
+    schema,
+    name,
+    title: t(titleKey),
+    description: t(descKey, { name }),
+    kind: 'danger',
+    refreshPath: categoryRefreshPath(path) ?? path,
+    refreshDeep: false,
+    prunePaths: action.startsWith('drop_') || action.startsWith('rename_') ? [path] : undefined,
+  })
+}
+
+function requestRename(
+  conn: ConnItem,
+  path: ConnResourcePath,
+  action: 'rename_table' | 'rename_view' | 'rename_sequence',
+  name: string,
+  schema: string,
+  descKey: string,
+): void {
+  useOracleDdlActionStore().request({
+    conn,
+    action,
+    profileId: conn.profileId,
+    schema,
+    name,
+    newName: name,
+    title: t('modules.oracle.tree.rename'),
+    description: t(descKey, { name }),
+    kind: 'rename',
+    refreshPath: categoryRefreshPath(path),
+    refreshDeep: false,
+    prunePaths: [path],
+  })
+}
+
 /** Tables and views open Browse; editable objects open their source script. */
 export function activate(conn: ConnItem, path: ConnResourcePath): void {
   const category = segmentName(path, 'category')
@@ -191,7 +435,9 @@ export function activate(conn: ConnItem, path: ConnResourcePath): void {
     return
   }
   if (isObjectCategory(category)) {
-    openObjectScript(conn, path)
+    openObjectScript(conn, path, 'alter', {
+      objectKind: categoryToObjectKind(category),
+    })
     return
   }
   openQuery(conn, path)
@@ -207,7 +453,13 @@ export async function onResourceMenuSelect(
 
   const schema = segmentName(path, 'schema')
   const table = segmentName(path, 'table')
+  const routine = segmentName(path, 'routine')
+  const pkg = segmentName(path, 'package')
+  const sequence = segmentName(path, 'sequence')
   const category = segmentName(path, 'category')
+  const isView = category === 'views'
+  const isFunction = category === 'functions'
+  const objectName = table ?? routine ?? pkg ?? sequence
 
   switch (key) {
     case 'open':
@@ -224,7 +476,60 @@ export async function onResourceMenuSelect(
       return
     case 'editView':
     case 'editSource':
-      openObjectScript(conn, path, 'alter')
+    case 'source':
+      openObjectScript(conn, path, 'alter', {
+        objectKind: isObjectCategory(category) ? categoryToObjectKind(category) : undefined,
+      })
+      return
+    case 'call':
+      if (schema && routine) {
+        openQuery(conn, path, callRoutineSeed(schema, routine, isFunction))
+      }
+      return
+    case 'genSelect':
+      if (schema && table) openQuery(conn, path, selectAllSql(schema, table))
+      return
+    case 'genCount':
+      if (schema && table) openQuery(conn, path, countSql(schema, table))
+      return
+    case 'genInsert':
+      if (schema && table && !isView) {
+        const meta = await loadTableScriptMeta(conn, schema, table)
+        openQuery(conn, path, insertTemplateSql(schema, table, meta.columns))
+      }
+      return
+    case 'genUpdate':
+      if (schema && table && !isView) {
+        const meta = await loadTableScriptMeta(conn, schema, table)
+        openQuery(conn, path, updateTemplateSql(schema, table, meta.columns, meta.pkColumns))
+      }
+      return
+    case 'genDelete':
+      if (schema && table && !isView) {
+        const meta = await loadTableScriptMeta(conn, schema, table)
+        openQuery(conn, path, deleteTemplateSql(schema, table, meta.pkColumns))
+      }
+      return
+    case 'genNextval':
+      if (schema && sequence) openQuery(conn, path, sequenceNextvalSeed(schema, sequence))
+      return
+    case 'genCurrval':
+      if (schema && sequence) openQuery(conn, path, sequenceCurrvalSeed(schema, sequence))
+      return
+    case 'compilePackage':
+      if (schema && pkg) openQuery(conn, path, compilePackageSql(schema, pkg))
+      return
+    case 'compilePackageBody':
+      if (schema && pkg) openQuery(conn, path, compilePackageBodySql(schema, pkg))
+      return
+    case 'compileRoutine':
+      if (schema && routine) {
+        openQuery(
+          conn,
+          path,
+          isFunction ? compileFunctionSql(schema, routine) : compileProcedureSql(schema, routine),
+        )
+      }
       return
     case 'exportCsv':
       if (schema && table) {
@@ -232,14 +537,14 @@ export async function onResourceMenuSelect(
       }
       return
     case 'importCsv':
-      if (schema && table) {
+      if (schema && table && !isView) {
         openOracleIoTask(conn, 'import_csv', { schema, table, dumpScope: 'table' })
       }
       return
     case 'dumpSql': {
       if (!schema) return
       const dumpScope =
-        table
+        objectName
           ? 'table'
           : category === 'tables' ||
               category === 'views' ||
@@ -247,7 +552,11 @@ export async function onResourceMenuSelect(
               category === 'functions'
             ? category
             : 'schema'
-      openOracleIoTask(conn, 'dump_sql', { schema, table, dumpScope })
+      openOracleIoTask(conn, 'dump_sql', {
+        schema,
+        table: objectName,
+        dumpScope,
+      })
       return
     }
     case 'execSqlFile':
@@ -255,13 +564,122 @@ export async function onResourceMenuSelect(
         openOracleIoTask(conn, 'exec_sql_file', { schema, dumpScope: 'schema' })
       }
       return
+    case 'rename':
+      if (schema && table && !isView) {
+        requestRename(conn, path, 'rename_table', table, schema, 'modules.oracle.ddl.renameTableDesc')
+        return
+      }
+      if (schema && table && isView) {
+        requestRename(conn, path, 'rename_view', table, schema, 'modules.oracle.ddl.renameViewDesc')
+        return
+      }
+      if (schema && sequence) {
+        requestRename(
+          conn,
+          path,
+          'rename_sequence',
+          sequence,
+          schema,
+          'modules.oracle.ddl.renameSequenceDesc',
+        )
+      }
+      return
+    case 'truncate':
+      if (schema && table && !isView) {
+        requestDanger(
+          conn,
+          path,
+          'truncate_table',
+          'modules.oracle.tree.truncate',
+          'modules.oracle.ddl.truncateDesc',
+          table,
+          schema,
+        )
+      }
+      return
+    case 'drop':
+      if (schema && table) {
+        requestDanger(
+          conn,
+          path,
+          isView ? 'drop_view' : 'drop_table',
+          isView ? 'modules.oracle.tree.dropView' : 'modules.oracle.tree.dropTable',
+          isView ? 'modules.oracle.ddl.dropViewDesc' : 'modules.oracle.ddl.dropTableDesc',
+          table,
+          schema,
+        )
+        return
+      }
+      if (schema && routine) {
+        requestDanger(
+          conn,
+          path,
+          isFunction ? 'drop_function' : 'drop_procedure',
+          isFunction ? 'modules.oracle.tree.dropFunc' : 'modules.oracle.tree.dropProc',
+          isFunction ? 'modules.oracle.ddl.dropFuncDesc' : 'modules.oracle.ddl.dropProcDesc',
+          routine,
+          schema,
+        )
+        return
+      }
+      if (schema && pkg) {
+        requestDanger(
+          conn,
+          path,
+          'drop_package',
+          'modules.oracle.tree.dropPackage',
+          'modules.oracle.ddl.dropPackageDesc',
+          pkg,
+          schema,
+        )
+        return
+      }
+      if (schema && sequence) {
+        requestDanger(
+          conn,
+          path,
+          'drop_sequence',
+          'modules.oracle.tree.dropSequence',
+          'modules.oracle.ddl.dropSequenceDesc',
+          sequence,
+          schema,
+        )
+      }
+      return
     case 'copyName':
       if (last.name) void copyText(last.name)
       return
     case 'copyQualified':
-      if (schema && table) void copyText(qualifiedName(schema, table))
+      if (schema && objectName) void copyText(qualifiedName(schema, objectName))
       else if (schema) void copyText(quoteIdent(schema))
       return
+    case 'copyDdl': {
+      if (schema && table) {
+        const ddl = await fetchMetaDdl(conn, schema, table)
+        if (ddl) void copyText(ddl)
+        return
+      }
+      if (schema && sequence) {
+        const ddl = await fetchMetaDdl(conn, schema, sequence)
+        if (ddl) void copyText(ddl)
+        return
+      }
+      if (schema && pkg) {
+        const ddl = await fetchPackageSource(conn, schema, pkg)
+        if (ddl) void copyText(ddl)
+        return
+      }
+      if (schema && routine && (category === 'procedures' || category === 'functions')) {
+        const ddl = await fetchRoutineSource(
+          conn,
+          schema,
+          routine,
+          isFunction ? 'function' : 'procedure',
+        )
+        if (ddl) void copyText(ddl)
+      }
+      return
+    }
     default:
       return
   }

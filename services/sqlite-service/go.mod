@@ -3,10 +3,13 @@ module niuma/services/sqlite-service
 go 1.25.0
 
 require (
+	github.com/mutecomm/go-sqlcipher/v4 v4.4.2
+	golang.org/x/text v0.40.0
 	modernc.org/sqlite v1.29.10
 	niuma/pkg/common v0.0.0
 	niuma/pkg/logutil v0.0.0
 	niuma/pkg/serviceipc v0.0.0
+	niuma/pkg/sqllsp v0.0.0
 )
 
 require (
@@ -17,9 +20,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/tools v0.47.0 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.49.3 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
@@ -33,3 +34,5 @@ replace niuma/pkg/common => ../../packages/go/common
 replace niuma/pkg/logutil => ../../packages/go/logutil
 
 replace niuma/pkg/serviceipc => ../../packages/go/serviceipc
+
+replace niuma/pkg/sqllsp => ../../packages/go/sqllsp

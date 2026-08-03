@@ -3,22 +3,39 @@
  * 对齐 sqlite-service DDL；不含 unsigned / enum / comment / engine / charset。
  */
 
-export type DataTypeParamKind = 'none' | 'length'
+export type DataTypeParamKind = 'none' | 'length' | 'precision'
 
 export interface SqliteBaseTypeOption {
   base: string
   kind: DataTypeParamKind
   defaultLength?: number
+  defaultPrecision?: number
+  defaultScale?: number
 }
 
+/** 常用存储类 + 亲和类型别名（与 sqliteparser keywords 对齐）。 */
 export const SQLITE_BASE_TYPE_OPTIONS: SqliteBaseTypeOption[] = [
   { base: 'INTEGER', kind: 'none' },
+  { base: 'INT', kind: 'none' },
+  { base: 'TINYINT', kind: 'none' },
+  { base: 'SMALLINT', kind: 'none' },
+  { base: 'MEDIUMINT', kind: 'none' },
+  { base: 'BIGINT', kind: 'none' },
   { base: 'REAL', kind: 'none' },
-  { base: 'TEXT', kind: 'none' },
-  { base: 'BLOB', kind: 'none' },
+  { base: 'FLOAT', kind: 'none' },
+  { base: 'DOUBLE', kind: 'none' },
   { base: 'NUMERIC', kind: 'none' },
+  { base: 'DECIMAL', kind: 'precision', defaultPrecision: 10, defaultScale: 2 },
+  { base: 'TEXT', kind: 'none' },
+  { base: 'CLOB', kind: 'none' },
+  { base: 'CHAR', kind: 'length', defaultLength: 1 },
   { base: 'VARCHAR', kind: 'length', defaultLength: 255 },
+  { base: 'NVARCHAR', kind: 'length', defaultLength: 255 },
+  { base: 'BLOB', kind: 'none' },
   { base: 'BOOLEAN', kind: 'none' },
+  { base: 'DATE', kind: 'none' },
+  { base: 'DATETIME', kind: 'none' },
+  { base: 'TIMESTAMP', kind: 'none' },
 ]
 
 export const SQLITE_FK_ACTIONS = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'] as const
@@ -27,6 +44,7 @@ export type SqliteFkAction = (typeof SQLITE_FK_ACTIONS)[number]
 export interface ParsedDataType {
   base: string
   length?: number
+  scale?: number
   raw: string
 }
 
@@ -36,10 +54,11 @@ export interface DesignColumnDraft {
   __rowKey: string
   originalName: string
   name: string
-  /** 完整类型字面量，如 INTEGER、VARCHAR(255) */
+  /** 完整类型字面量，如 INTEGER、VARCHAR(255)、DECIMAL(10,2) */
   dataType: string
   typeBase: string
   typeLength?: number
+  typeScale?: number
   nullable: boolean
   defaultExpr: string
   primaryKey: boolean
@@ -58,10 +77,13 @@ export interface DesignIndexDraft {
   columnsText: string
   unique: boolean
   primary: boolean
+  /** 部分索引 WHERE 子句（不含 WHERE 关键字） */
+  partialWhere: string
   removed: boolean
   snapName: string
   snapColumnsText: string
   snapUnique: boolean
+  snapPartialWhere: string
 }
 
 export interface DesignForeignKeyDraft {
@@ -137,10 +159,12 @@ export function newEmptyIndex(): DesignIndexDraft {
     columnsText: '',
     unique: false,
     primary: false,
+    partialWhere: '',
     removed: false,
     snapName: '',
     snapColumnsText: '',
     snapUnique: false,
+    snapPartialWhere: '',
   }
 }
 
@@ -158,42 +182,58 @@ export function newEmptyForeignKey(): DesignForeignKeyDraft {
   }
 }
 
-/** 解析类型字符串（支持 VARCHAR(n)）。 */
+/** 解析类型字符串（支持 VARCHAR(n)、DECIMAL(p,s)）。 */
 export function parseDataType(raw: string): ParsedDataType {
   const trimmed = raw.trim()
-  const match = trimmed.match(/^([A-Za-z]+)\s*\(\s*(\d+)\s*\)\s*$/i)
+  const match = trimmed.match(/^([A-Za-z]+)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)\s*$/i)
   if (match) {
-    return { base: match[1].toUpperCase(), length: parseInt(match[2], 10), raw }
+    const base = match[1].toUpperCase()
+    const first = parseInt(match[2], 10)
+    const second = match[3] != null ? parseInt(match[3], 10) : undefined
+    if (second !== undefined) {
+      return { base, length: first, scale: second, raw }
+    }
+    return { base, length: first, raw }
   }
   return { base: trimmed.toUpperCase(), raw }
 }
 
-export function buildDataType(base: string, opts?: { length?: number }): string {
+export function buildDataType(
+  base: string,
+  opts?: { length?: number; scale?: number },
+): string {
   const opt = resolveBaseTypeOption(base)
   const kind = opt?.kind ?? 'none'
   const core = base.toUpperCase()
   if (kind === 'length' && opts?.length != null) {
     return `${core}(${opts.length})`
   }
+  if (kind === 'precision' && opts?.length != null) {
+    return opts.scale != null
+      ? `${core}(${opts.length},${opts.scale})`
+      : `${core}(${opts.length})`
+  }
   return core
 }
 
 export function syncColumnDataType(
-  col: Pick<DesignColumnDraft, 'typeBase' | 'typeLength'>,
+  col: Pick<DesignColumnDraft, 'typeBase' | 'typeLength' | 'typeScale'>,
 ): string {
-  return buildDataType(col.typeBase, { length: col.typeLength })
+  return buildDataType(col.typeBase, { length: col.typeLength, scale: col.typeScale })
 }
 
 export function splitDataTypeFields(raw: string): {
   dataType: string
   typeBase: string
   typeLength?: number
+  typeScale?: number
 } {
   const p = parseDataType(raw)
   return {
-    dataType: buildDataType(p.base, { length: p.length }),
+    dataType: buildDataType(p.base, { length: p.length, scale: p.scale }),
     typeBase: p.base,
     typeLength: p.length,
+    typeScale: p.scale,
   }
 }
 

@@ -110,13 +110,10 @@ const scopeLabel = computed(() => {
     <template #toolbar-start>
       <TableDesignPreviewPopover
         :open="showPreview"
-        :title="t('modules.clickhouse.objectScript.previewTitle')"
         :sql="previewSqls"
         :loading="previewLoading"
-        :copy-label="t('modules.clickhouse.objectScript.copyPreview')"
         :empty-label="t('modules.clickhouse.objectScript.previewEmpty')"
         @update:open="onPreviewOpenChange"
-        @copy="copyPreview"
       >
         <RsButton
           size="sm"

@@ -484,7 +484,7 @@ export const damengConnTreeProvider: ConnTreeChildProvider = {
         openCreateTrigger(conn, schema)
         return
       case 'create': {
-        // 兼容旧 key：仅视图/过程/函数走对象脚本
+        // 分类节点「新建」：视图/过程/函数等走对象脚本
         const category = segmentName(path, 'category')
         if (isObjectCategory(category)) {
           openCreateObjectScript(conn, schema, category)

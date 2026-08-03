@@ -8,7 +8,6 @@ import {
   withPlatformRetry,
 } from '@/api'
 import type {
-  ConnectionProfile,
   ConnectionProfileInput,
   CredentialInput,
 } from '@/api/types/connection'
@@ -38,7 +37,7 @@ import {
   type ConnectionFormState,
   type ConnectionTestParams,
 } from '@/modules/ops/connection-form/index'
-import { ensureConnKindForm, prefetchConnKindForms } from '@/modules/ops/conn-kind-loaders'
+import { ensureConnKindForm } from '@/modules/ops/conn-kind-loaders'
 
 export type { ConnectionDlgMode, ConnectionFormState } from '@/modules/ops/connection-form/index'
 
@@ -79,9 +78,7 @@ function emptyProfileMap(): Record<ConnKind, ConnItem[]> {
  */
 export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k) => k.kind)) {
   const { t } = useI18n()
-
-  // 进入面板/模块页即预热表单 chunk，降低首次新建/编辑等待
-  prefetchConnKindForms(kinds)
+  const kindSet = new Set<string>(kinds)
 
   const profileMap = ref<Record<ConnKind, ConnItem[]>>(emptyProfileMap())
   const loading = ref(false)
@@ -107,15 +104,28 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     return flat
   })
 
-  async function listProfilesByKind(): Promise<
-    Array<{ kind: ConnKind; profiles: ConnectionProfile[] }>
-  > {
-    return Promise.all(
-      kinds.map(async (kind) => {
-        const res = await connectionApi.list({ kind })
-        return { kind, profiles: res.profiles ?? [] }
-      }),
-    )
+  /**
+   * 拉取站点列表并按 kind 分组。
+   * - 多协议（侧栏）：一次 `list({})`，避免 N 次并行请求
+   * - 单协议（模块 Home）：仍带 kind 过滤，少传无关数据
+   * 协议 chunk / 表单不在此处预热，展开树或打开对话框时再 ensure。
+   */
+  async function fetchProfilesByKind(): Promise<Record<ConnKind, ConnItem[]>> {
+    const res =
+      kinds.length === 1
+        ? await connectionApi.list({ kind: kinds[0] })
+        : await connectionApi.list({})
+
+    const grouped = emptyProfileMap()
+    for (const kind of kinds) {
+      grouped[kind] = []
+    }
+    for (const profile of res.profiles ?? []) {
+      const kind = (kinds.length === 1 ? kinds[0] : profile.connectionKind) as ConnKind
+      if (!kindSet.has(kind)) continue
+      grouped[kind].push({ ...profile, kind })
+    }
+    return grouped
   }
 
   async function loadAll(): Promise<void> {
@@ -125,19 +135,12 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     loading.value = true
     try {
       // Platform 刚 spawn / dev:hot 偶发未就绪：有界重试真实 list，不单独探测就绪
-      const results = await withPlatformRetry(listProfilesByKind)
+      const grouped = await withPlatformRetry(fetchProfilesByKind)
       const next = { ...profileMap.value }
-      for (const { kind, profiles } of results) {
-        next[kind] = profiles.map((p) => ({ ...p, kind }))
+      for (const kind of kinds) {
+        next[kind] = grouped[kind]
       }
       profileMap.value = next
-      // 已有站点：预取完整 kind（树菜单等）；表单另由面板 idle 预热
-      const present = new Set(results.filter((r) => r.profiles.length > 0).map((r) => r.kind))
-      void Promise.all(
-        [...present].map((kind) =>
-          import('@/modules/ops/conn-kind-loaders').then((m) => m.ensureConnKind(kind).catch(() => undefined)),
-        ),
-      )
     } catch (err) {
       if (isPlatformUnavailable(err)) {
         console.warn('[connection] list unavailable after retries', err)

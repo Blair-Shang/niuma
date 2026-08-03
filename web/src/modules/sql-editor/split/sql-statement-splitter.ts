@@ -491,6 +491,9 @@ function tryStartMysqlCompound(
   if (procAt >= 0) return { next: procAt, mode: { kind: 'await_begin' } }
   const funcAt = matchKeyword(sql, p, 'function')
   if (funcAt >= 0) return { next: funcAt, mode: { kind: 'await_begin' } }
+  // SQLite / MySQL：CREATE TRIGGER … BEGIN … END;（体内分号不拆句）
+  const triggerAt = matchKeyword(sql, p, 'trigger')
+  if (triggerAt >= 0) return { next: triggerAt, mode: { kind: 'await_begin' } }
   return null
 }
 

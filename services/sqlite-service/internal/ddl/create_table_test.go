@@ -33,6 +33,62 @@ func TestBuildCreateTableSQL_CheckAndGenerated(t *testing.T) {
 	}
 }
 
+func TestBuildCreateTableSQL_StrictWithoutRowidPartialIndex(t *testing.T) {
+	sqls, err := BuildCreateTableSQL(CreateTableParams{
+		Schema:       "main",
+		Name:         "t",
+		Strict:       true,
+		WithoutRowid: true,
+		Columns: []CreateTableColumn{
+			{Name: "id", DataType: "INTEGER", PrimaryKey: true, Nullable: false},
+			{Name: "status", DataType: "INTEGER", Nullable: false},
+		},
+		Indexes: []CreateTableIndex{
+			{Name: "idx_status", Columns: []string{"status"}, PartialWhere: "status = 1"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sqls) != 2 {
+		t.Fatalf("expected create + index, got %d", len(sqls))
+	}
+	if !strings.Contains(sqls[0], "WITHOUT ROWID") || !strings.Contains(sqls[0], "STRICT") {
+		t.Fatalf("missing table options: %s", sqls[0])
+	}
+	if !strings.Contains(sqls[1], "WHERE status = 1") {
+		t.Fatalf("missing partial where: %s", sqls[1])
+	}
+	// schema 在索引名上，ON 后为裸表名
+	if !strings.Contains(sqls[1], `"main"."idx_status"`) || strings.Contains(sqls[1], `ON "main".`) {
+		t.Fatalf("index schema qualification wrong: %s", sqls[1])
+	}
+}
+
+func TestBuildCreateTableSQL_IndexSchemaOnName(t *testing.T) {
+	sqls, err := BuildCreateTableSQL(CreateTableParams{
+		Schema: "main",
+		Name:   "a1234",
+		Columns: []CreateTableColumn{
+			{Name: "id", DataType: "INTEGER", PrimaryKey: true, Nullable: false},
+			{Name: "col_6", DataType: "TEXT", Nullable: true},
+		},
+		Indexes: []CreateTableIndex{
+			{Name: "idx_col_6", Columns: []string{"col_6"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sqls) != 2 {
+		t.Fatalf("expected 2 stmts, got %d", len(sqls))
+	}
+	want := `CREATE INDEX IF NOT EXISTS "main"."idx_col_6" ON "a1234" ("col_6")`
+	if sqls[1] != want {
+		t.Fatalf("got %q want %q", sqls[1], want)
+	}
+}
+
 func TestBuildCreateTableSQL_AutoIncrement(t *testing.T) {
 	sqls, err := BuildCreateTableSQL(CreateTableParams{
 		Schema: "main",
@@ -50,6 +106,72 @@ func TestBuildCreateTableSQL_AutoIncrement(t *testing.T) {
 	}
 	if !strings.Contains(sqls[0], "PRIMARY KEY AUTOINCREMENT") {
 		t.Fatalf("sql: %s", sqls[0])
+	}
+}
+
+func TestApplyCreateTable_RollbackOnIndexFailure(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "rollback.db")
+	ctx := context.Background()
+	db, err := session.Connect(ctx, session.ConnectParams{
+		FilePath: dbPath,
+		Options:  session.ConnectOptions{CreateIfMissing: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = ApplyCreateTable(ctx, db, CreateTableParams{
+		Schema: "main",
+		Name:   "demo",
+		Columns: []CreateTableColumn{
+			{Name: "id", DataType: "INTEGER", PrimaryKey: true, Nullable: false},
+			{Name: "status", DataType: "INTEGER", Nullable: true},
+		},
+		Indexes: []CreateTableIndex{
+			{Name: "idx_bad", Columns: []string{"status"}, PartialWhere: "NOT A VALID EXPR !!!"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected index failure")
+	}
+
+	exists, err := objectExists(ctx, db, "main", "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("table should not remain after failed create+index tx")
+	}
+}
+
+func TestApplyCreateTable_RejectExisting(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "exists.db")
+	ctx := context.Background()
+	db, err := session.Connect(ctx, session.ConnectParams{
+		FilePath: dbPath,
+		Options:  session.ConnectOptions{CreateIfMissing: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	params := CreateTableParams{
+		Schema: "main",
+		Name:   "demo",
+		Columns: []CreateTableColumn{
+			{Name: "id", DataType: "INTEGER", PrimaryKey: true, AutoIncrement: true},
+		},
+	}
+	if _, err := ApplyCreateTable(ctx, db, params); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ApplyCreateTable(ctx, db, params)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected already exists, got %v", err)
 	}
 }
 

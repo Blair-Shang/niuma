@@ -7,12 +7,14 @@ import {
   FALLBACK_DAMENG_LEXICON,
   FALLBACK_KINGBASE_LEXICON,
   FALLBACK_MYSQL_LEXICON,
+  FALLBACK_SQLITE_LEXICON,
 } from './fallback-lexicon'
 import {
   CLICKHOUSE_MONACO_LANGUAGE_ID,
   DAMENG_MONACO_LANGUAGE_ID,
   KINGBASE_MONACO_LANGUAGE_ID,
   MYSQL_MONACO_LANGUAGE_ID,
+  SQLITE_MONACO_LANGUAGE_ID,
 } from './language-ids'
 import {
   buildSqlMonarch,
@@ -411,6 +413,7 @@ let mysqlLexiconFetcher: LexiconFetcher | null = null
 let damengLexiconFetcher: LexiconFetcher | null = null
 let kingbaseLexiconFetcher: LexiconFetcher | null = null
 let clickhouseLexiconFetcher: LexiconFetcher | null = null
+let sqliteLexiconFetcher: LexiconFetcher | null = null
 
 /** 由方言 bootstrap 注入 bridge 拉词表实现。 */
 export function setMysqlLexiconFetcher(fn: LexiconFetcher): void {
@@ -424,6 +427,9 @@ export function setKingbaseLexiconFetcher(fn: LexiconFetcher): void {
 }
 export function setClickHouseLexiconFetcher(fn: LexiconFetcher): void {
   clickhouseLexiconFetcher = fn
+}
+export function setSqliteLexiconFetcher(fn: LexiconFetcher): void {
+  sqliteLexiconFetcher = fn
 }
 
 function requireFetcher(
@@ -501,6 +507,23 @@ export async function ensureClickHouseLspLanguage(
     triggerCharacters: ['.', ' ', '`', '_'],
     fetchLexicon: ensureOpts?.fetchLexicon ?? requireFetcher('clickhouse', () => clickhouseLexiconFetcher),
     fallbackLexicon: FALLBACK_CLICKHOUSE_LEXICON,
+    ensureOpts,
+  })
+}
+
+/**
+ * 注册 `sqlite` 语言（Monarch 高亮 + 格式化 + LSP 补全）。幂等。
+ */
+export async function ensureSqliteLspLanguage(
+  ensureOpts?: EnsureSqlLspLanguageOptions,
+): Promise<string> {
+  return ensureSqlLspLanguage({
+    languageId: SQLITE_MONACO_LANGUAGE_ID,
+    aliases: ['SQLite'],
+    formatDialect: 'sqlite',
+    triggerCharacters: ['.', ' ', '"', '[', '_'],
+    fetchLexicon: ensureOpts?.fetchLexicon ?? requireFetcher('sqlite', () => sqliteLexiconFetcher),
+    fallbackLexicon: FALLBACK_SQLITE_LEXICON,
     ensureOpts,
   })
 }

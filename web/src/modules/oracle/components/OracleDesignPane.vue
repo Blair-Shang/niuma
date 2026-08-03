@@ -1006,13 +1006,10 @@ watch(activeSection, (sec) => {
     <template #preview>
       <TableDesignPreviewPopover
         :open="showPreview"
-        :title="shellLabels.previewTitle"
         :sql="previewSqls"
         :loading="previewLoading"
-        :copy-label="shellLabels.copyPreview"
         :empty-label="t('modules.oracle.design.noChanges')"
         @update:open="onPreviewOpenChange"
-        @copy="copyPreviewSql"
       >
         <RsButton size="sm" variant="ghost" :disabled="loading">
           {{ shellLabels.preview }}

@@ -77,6 +77,9 @@ export const Cap = {
   SqliteWal: 'sqlite.wal',
   SqliteReadonly: 'sqlite.readonly',
   SqliteAttach: 'sqlite.attach',
+  SqliteSqlCipher: 'sqlite.sqlcipher',
+  SplitSqliteTrigger: 'split.sqlite_trigger',
+  DdlCreateOrReplaceView: 'ddl.create_or_replace_view',
   IoCsv: 'io.csv',
   IoSqlFile: 'io.sql_file',
   IoBackupApi: 'io.backup_api',
@@ -216,7 +219,9 @@ export function defaultSqliteProfile(): SqlServerProfile {
       Cap.SqliteBracketIdent,
       Cap.SqlitePragma,
       Cap.FormatSqlite,
-      Cap.EditorGenericSqlMonaco,
+      Cap.EditorBuiltinSql,
+      Cap.EditorSqlLsp,
+      Cap.SplitSqliteTrigger,
       Cap.DdlIfNotExists,
       Cap.CteWindow,
       Cap.SqliteAttach,
@@ -372,13 +377,16 @@ export function resolveMonacoLanguageFromProfile(
   if (profile?.family === 'clickhouse' && hasCapability(profile, Cap.EditorSqlLsp)) {
     return { monacoLanguageId: 'clickhouse', monacoSqlLanguages: false, useLsp: true }
   }
+  if (profile?.family === 'sqlite' && hasCapability(profile, Cap.EditorSqlLsp)) {
+    return { monacoLanguageId: 'sqlite', monacoSqlLanguages: false, useLsp: true }
+  }
   if (
     profile?.family === 'mysql' ||
     hasCapability(profile, Cap.EditorMysqlMonaco)
   ) {
     return { monacoLanguageId: 'mysql', monacoSqlLanguages: false, useLsp: true }
   }
-  // 未迁 LSP：静默内置 sql（含 SQLite / PG / Vastbase / Oracle…）
+  // 未迁 LSP：静默内置 sql（含 PG / Vastbase / Oracle…）
   if (hasCapability(profile, Cap.EditorBuiltinSql)) {
     return { monacoLanguageId: 'sql', monacoSqlLanguages: false, useLsp: false }
   }
@@ -416,7 +424,10 @@ export function resolveSplitFeaturesFromProfile(
     plsqlBlocks: plsql,
     delimiterBlocks: hasCapability(profile, Cap.SplitDelimiterBlocks),
     mysqlCompoundBlocks:
-      hasCapability(profile, Cap.SplitMysqlCompound) || isMysqlFamily,
+      hasCapability(profile, Cap.SplitMysqlCompound) ||
+      hasCapability(profile, Cap.SplitSqliteTrigger) ||
+      isMysqlFamily ||
+      family === 'sqlite',
   }
 }
 

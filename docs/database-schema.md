@@ -149,8 +149,8 @@ PRIMARY KEY (parent_id, child_id)
 
 | 表名 | 说明 | 主键 |
 |------|------|------|
-| `nm_workspace` | 本地工作区/分组 | `workspace_id` |
-| `nm_app_setting` | 全局 KV 配置 | `setting_key`（天然主键）或 `setting_id` |
+| `nm_workspace` | **预留未用**：多工作区/分组占位；当前 Tab 工作区不读此表 | `workspace_id` |
+| `nm_app_setting` | 全局 KV 配置（含 Tab：`workspace.tabs`） | `setting_key`（天然主键）或 `setting_id` |
 | `nm_schema_migration` | 迁移版本（工具用） | `version` |
 
 ### 5.2 连接与凭据（运维核心）
@@ -210,8 +210,11 @@ PRIMARY KEY (parent_id, child_id)
 
 ### 6.1 nm_workspace
 
+> **状态：预留未用。** 迁移会建表并插入 Default 行，但 Platform / Web **尚未**用其管理编辑区 Tab。  
+> 当前 Tab 持久化在 `nm_app_setting.setting_key = 'workspace.tabs'`（见 [09-web-app-shell](./09-web-app-shell.md) §6）。
+
 ```sql
--- 本地工作区
+-- 本地工作区（预留：多工作区；与 workspace.tabs 无关）
 CREATE TABLE nm_workspace (
     workspace_id    TEXT NOT NULL PRIMARY KEY,
     workspace_name  TEXT NOT NULL,

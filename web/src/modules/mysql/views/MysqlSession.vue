@@ -42,8 +42,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const toast = useRsToast()
 
-const rawFeature = normalizeMysqlFeature(props.initialTab)
-const feature = rawFeature === 'source' ? 'objectScript' : rawFeature
+const feature = normalizeMysqlFeature(props.initialTab)
 const featureDef = mysqlPaneRegistry[feature]
 const embedsChrome = mysqlFeatureEmbedsChrome(feature)
 

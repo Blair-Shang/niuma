@@ -353,6 +353,29 @@ describe('splitSqlTexts · oracle', () => {
   })
 })
 
+describe('splitSqlTexts · sqlite', () => {
+  it('keeps CREATE TRIGGER … BEGIN … END; as one statement', () => {
+    const sql = [
+      'CREATE TRIGGER t1 AFTER INSERT ON t',
+      'BEGIN',
+      '  UPDATE t SET n = n + 1;',
+      "  INSERT INTO log(msg) VALUES ('x');",
+      'END;',
+      'SELECT 1;',
+    ].join('\n')
+    expect(splitSqlTexts(sql, 'sqlite')).toEqual([
+      [
+        'CREATE TRIGGER t1 AFTER INSERT ON t',
+        'BEGIN',
+        '  UPDATE t SET n = n + 1;',
+        "  INSERT INTO log(msg) VALUES ('x');",
+        'END;',
+      ].join('\n'),
+      'SELECT 1',
+    ])
+  })
+})
+
 describe('splitSqlTexts · dameng', () => {
   it('keeps CREATE TRIGGER … BEGIN … END; / as one statement', () => {
     const sql = [

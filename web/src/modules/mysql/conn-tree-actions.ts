@@ -48,7 +48,6 @@ function openFeature(
     | 'query'
     | 'browse'
     | 'ddl'
-    | 'source'
     | 'objectScript'
     | 'monitor'
     | 'design'

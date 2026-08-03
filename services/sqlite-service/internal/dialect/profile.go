@@ -19,9 +19,10 @@ const (
 	CapDoubleQuoteIdent = "sqlite.double_quote_ident"
 	CapBracketIdent     = "sqlite.bracket_ident"
 	CapPragma           = "sqlite.pragma"
-	CapFormatSQLite          = "format.sqlite"
+	CapFormatSQLite   = "format.sqlite"
+	CapDDLIfNotExists = "ddl.if_not_exists"
+	// CapEditorGenericSQLMonaco 已弃用：保留常量避免历史会话误读 panic；DefaultProfile 不再下发。
 	CapEditorGenericSQLMonaco = "editor.genericsql_monaco"
-	CapDDLIfNotExists        = "ddl.if_not_exists"
 	CapJSONFunctions    = "json.functions"
 	CapCTEWindow        = "cte.window"
 	CapWAL              = "sqlite.wal"
@@ -31,6 +32,11 @@ const (
 	CapIOSqlFile        = "io.sql_file"
 	CapIOBackupAPI      = "io.backup_api"
 	CapDDLDesign        = "ddl.design"
+	CapSQLCipher        = "sqlite.sqlcipher"
+	CapEditorBuiltinSQL = "editor.builtin_sql"
+	CapEditorSqlLsp     = "editor.sql_lsp"
+	CapSplitSqliteTrigger = "split.sqlite_trigger"
+	CapCreateOrReplaceView = "ddl.create_or_replace_view"
 )
 
 // ServerProfile 是一次连接探测后的方言档案。
@@ -57,22 +63,28 @@ func Has(p *ServerProfile, cap string) bool {
 
 // DefaultProfile 返回 SQLite 产品默认能力（探测失败时的回退）。
 func DefaultProfile() ServerProfile {
+	caps := []string{
+		CapDoubleQuoteIdent,
+		CapBracketIdent,
+		CapPragma,
+		CapFormatSQLite,
+		CapEditorBuiltinSQL,
+		CapEditorSqlLsp,
+		CapSplitSqliteTrigger,
+		CapDDLIfNotExists,
+		CapCTEWindow,
+		CapAttach,
+		CapIOCsv,
+		CapIOSqlFile,
+		CapIOBackupAPI,
+		CapDDLDesign,
+	}
+	if BuildSupportsSQLCipher() {
+		caps = append(caps, CapSQLCipher)
+	}
 	return ServerProfile{
-		Family: FamilySQLite,
-		Capabilities: []string{
-			CapDoubleQuoteIdent,
-			CapBracketIdent,
-			CapPragma,
-			CapFormatSQLite,
-			CapEditorGenericSQLMonaco,
-			CapDDLIfNotExists,
-			CapCTEWindow,
-			CapAttach,
-			CapIOCsv,
-			CapIOSqlFile,
-			CapIOBackupAPI,
-			CapDDLDesign,
-		},
+		Family:       FamilySQLite,
+		Capabilities: caps,
 	}
 }
 
@@ -122,6 +134,10 @@ func ResolveCapabilities(version string, readOnly bool, journalMode string, hasJ
 	major, minor := MajorMinor(p.Version)
 	if major > 0 && (major < 3 || (major == 3 && minor < 8)) {
 		caps = filterOut(caps, CapCTEWindow)
+	}
+	// CREATE OR REPLACE VIEW：SQLite 3.49.0+
+	if major > 3 || (major == 3 && minor >= 49) {
+		caps = append(caps, CapCreateOrReplaceView)
 	}
 	p.Capabilities = uniqueCaps(caps)
 	return p

@@ -118,7 +118,7 @@ func dumpSql(
 func resolveDumpObjects(ctx context.Context, db *sql.DB, schema string, params DumpParams) ([]dumpObject, error) {
 	master := quoteIdent(schema) + ".sqlite_master"
 	q := fmt.Sprintf(
-		`SELECT name, type, sql FROM %s WHERE name NOT LIKE 'sqlite_%%' AND sql IS NOT NULL ORDER BY
+		`SELECT name, type, tbl_name, sql FROM %s WHERE name NOT LIKE 'sqlite_%%' AND sql IS NOT NULL ORDER BY
 CASE type WHEN 'table' THEN 1 WHEN 'index' THEN 2 WHEN 'view' THEN 3 WHEN 'trigger' THEN 4 ELSE 5 END, name`,
 		master,
 	)
@@ -138,8 +138,8 @@ CASE type WHEN 'table' THEN 1 WHEN 'index' THEN 2 WHEN 'view' THEN 3 WHEN 'trigg
 
 	var out []dumpObject
 	for rows.Next() {
-		var name, typ, sqlText string
-		if err := rows.Scan(&name, &typ, &sqlText); err != nil {
+		var name, typ, tblName, sqlText string
+		if err := rows.Scan(&name, &typ, &tblName, &sqlText); err != nil {
 			return nil, err
 		}
 		typ = strings.ToLower(strings.TrimSpace(typ))
@@ -164,14 +164,28 @@ CASE type WHEN 'table' THEN 1 WHEN 'index' THEN 2 WHEN 'view' THEN 3 WHEN 'trigg
 		default:
 			continue
 		}
-		if len(want) > 0 {
-			if _, ok := want[name]; !ok {
-				continue
-			}
+		if len(want) > 0 && !dumpObjectWanted(typ, name, tblName, want) {
+			continue
 		}
 		out = append(out, dumpObject{Name: name, Type: typ, SQL: sqlText})
 	}
 	return out, rows.Err()
+}
+
+// dumpObjectWanted：表/视图按自身名过滤；索引/触发器按所属 tbl_name 关联（避免只导出表时丢索引）。
+func dumpObjectWanted(typ, name, tblName string, want map[string]struct{}) bool {
+	switch typ {
+	case "index", "trigger":
+		key := strings.TrimSpace(tblName)
+		if key == "" {
+			key = name
+		}
+		_, ok := want[key]
+		return ok
+	default:
+		_, ok := want[name]
+		return ok
+	}
 }
 
 func writeInsertData(

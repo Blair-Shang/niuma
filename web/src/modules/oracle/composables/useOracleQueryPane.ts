@@ -6,7 +6,7 @@ import type { OracleQueryColumn, OracleQueryExecResult } from '@/api/types/oracl
 import { defaultOracleProfile, resolveSplitFeaturesFromProfile } from '@/modules/sql-editor/capabilities'
 import { splitSqlStatementsWithFeatures } from '@/modules/sql-editor/split/sql-statement-splitter'
 import { useOracleSqlEditor } from '@/modules/oracle/composables/useOracleSqlEditor'
-import { alignForValueType, buildSqlQueryContextMenuItems, formatBrowseCellValue, resolveSqlValueType, useSqlQueryHistory, type QueryResultMessageItem, type QueryResultPanelLabels, type SqlQueryToolbarLabels } from '@/modules/database'
+import { alignForValueType, buildSqlQueryContextMenuItems, formatBrowseCellValue, resolveSqlValueType, useQueryDraftPersist, useSqlQueryHistory, type QueryResultMessageItem, type QueryResultPanelLabels, type SqlQueryToolbarLabels } from '@/modules/database'
 import { mapResultRowsByName, type QueryResultRow } from '@/modules/database/utils/query-result-tabs'
 import { useSessionRegistry } from '@/stores/session-registry'
 
@@ -15,6 +15,8 @@ export type OracleQueryPaneProps = {
   profileId?: string
   schema?: string
   initialSql?: string
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   sessionLabel?: string
   active?: boolean
@@ -50,7 +52,12 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
   const { t } = useI18n()
   const toast = useRsToast()
   const sessions = useSessionRegistry()
-  const sqlText = ref(props.initialSql?.trim() || 'SELECT 1 FROM DUAL;\n')
+  const { sqlText, restoredFromDraft } = useQueryDraftPersist({
+    tabId: () => props.tabId,
+    draftSql: () => props.draftSql,
+    initialSql: () => props.initialSql,
+    defaultSql: 'SELECT 1 FROM DUAL;\n',
+  })
   const running = ref(false)
   const cancelling = ref(false)
   const loadingMore = ref(false)
@@ -203,7 +210,7 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
   const contextMenuItems = computed((): RsContextMenuItem[] => buildSqlQueryContextMenuItems({ labels: { run: t('modules.oracle.query.run'), runSelection: t('modules.oracle.query.runSelection'), cancel: t('modules.oracle.query.cancel'), format: t('modules.oracle.query.format'), compress: t('modules.oracle.query.format'), copy: t('modules.oracle.query.run'), paste: t('modules.oracle.query.run'), explain: t('modules.oracle.query.explain'), explainAnalyze: '', exportCsv: t('modules.oracle.query.exportCsv'), fetchMore: t('modules.oracle.query.loadMore'), fetchAll: t('modules.oracle.query.fetchAll') }, running: running.value, cancelling: cancelling.value, hasSelection: editor.hasSelection.value, sqlEmpty: !sqlText.value.trim(), hasResultRows: Boolean(resultRows.value.length), hasMore: hasMore.value, loadingMore: loadingMore.value, showAskAi: false }))
   const toolbarLabels = computed((): SqlQueryToolbarLabels => ({ toolbarAria: 'Oracle', run: t('modules.oracle.query.run'), runSelection: t('modules.oracle.query.runSelection'), runTooltip: t('modules.oracle.query.runHint'), cancel: t('modules.oracle.query.cancel'), cancelTooltip: t('modules.oracle.query.cancel'), format: t('modules.oracle.query.format'), formatTooltip: t('modules.oracle.query.formatTooltip'), explain: t('modules.oracle.query.explain'), explainTooltip: t('modules.oracle.query.explainHint'), explainAnalyze: '', explainAnalyzeTooltip: '', history: t('modules.oracle.query.history'), historyEmpty: t('modules.oracle.query.historyEmpty'), historyClear: t('modules.oracle.query.historyClear'), autoCommit: t('modules.oracle.query.autoCommit'), autoCommitTooltip: t('modules.oracle.query.autoCommitTooltip'), commit: t('modules.oracle.query.commit'), commitTooltip: t('modules.oracle.query.commitTooltip'), rollback: t('modules.oracle.query.rollback'), rollbackTooltip: t('modules.oracle.query.rollbackTooltip'), inTransaction: t('modules.oracle.query.inTransaction') }))
   const resultPanelLabels = computed((): QueryResultPanelLabels => ({ messages: t('modules.oracle.query.messages'), messagesEmpty: t('modules.oracle.query.messagesEmpty'), filterPlaceholder: t('modules.oracle.query.filterPlaceholder'), loadMore: t('modules.oracle.query.loadMore'), fetchAll: t('modules.oracle.query.fetchAll'), exportCsv: t('modules.oracle.query.exportCsv'), emptyResult: t('modules.oracle.query.emptyResult'), resultEmpty: t('modules.oracle.query.resultEmpty'), closeResultTab: t('modules.oracle.query.closeResultTab'), batchResultTab: (n) => t('modules.oracle.query.batchResultTab', { n }), tabRowCount: (n) => t('modules.oracle.query.rows', { n }), batchStmtLabel: (n) => `#${n}`, batchStmtSkipped: '', batchStmtRunning: '', batchStmtPending: '', batchOpenResult: '', logColStatus: '', logColTime: '', logColRows: '', msgOk: t('modules.oracle.query.msgOk'), msgError: t('modules.oracle.query.msgError'), cancelled: t('modules.oracle.query.cancelled') }))
-  onMounted(() => { void syncTxState(); if (props.autoRunInitialSql && props.initialSql?.trim()) void runSql() })
+  onMounted(() => { void syncTxState(); if (!restoredFromDraft && props.autoRunInitialSql && props.initialSql?.trim()) void runSql() })
   watch(() => props.sessionId, (sessionId) => { if (sessionId) void syncTxState() })
   onUnmounted(() => { if (props.sessionId) gridTabs.value.forEach((tab) => { if (tab.resultSetId) void oracleApi.queryClose({ sessionId: props.sessionId!, resultSetId: tab.resultSetId }) }) })
   function onContextMenuSelect(key: string): void {

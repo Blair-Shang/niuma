@@ -3,7 +3,7 @@
  * query / browse / ddl / design。
  */
 
-export type SqliteSessionTab = 'query' | 'browse' | 'ddl' | 'design'
+export type SqliteSessionTab = 'query' | 'browse' | 'ddl' | 'design' | 'objectScript'
 
 export interface SqlitePaneScope {
   schema?: string
@@ -12,6 +12,9 @@ export interface SqlitePaneScope {
   /** table | view | index | trigger — 供 meta.ddl 精确匹配 */
   objectType?: string
   designMode?: 'create' | 'alter'
+  objectKind?: 'view' | 'trigger' | 'index'
+  objectName?: string
+  draftSql?: string
 }
 
 export interface SqlitePaneContext extends SqlitePaneScope {
@@ -40,6 +43,8 @@ function queryProps(ctx: SqlitePaneContext): Record<string, unknown> {
     profileId: ctx.profileId,
     schema: ctx.schema,
     initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     sessionLabel: ctx.sessionLabel,
   }
@@ -64,6 +69,21 @@ function designProps(ctx: SqlitePaneContext): Record<string, unknown> {
     schema: ctx.schema ?? 'main',
     table: ctx.table,
     designMode: ctx.designMode ?? 'create',
+    sessionLabel: ctx.sessionLabel,
+  }
+}
+
+function objectScriptProps(ctx: SqlitePaneContext): Record<string, unknown> {
+  return {
+    sessionId: ctx.sessionId,
+    profileId: ctx.profileId,
+    schema: ctx.schema ?? 'main',
+    objectKind: ctx.objectKind ?? (ctx.objectType === 'trigger' || ctx.objectType === 'index' ? ctx.objectType : 'view'),
+    objectName: ctx.objectName ?? ctx.table,
+    designMode: ctx.designMode ?? (ctx.objectName || ctx.table ? 'alter' : 'create'),
+    initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     sessionLabel: ctx.sessionLabel,
   }
 }
@@ -101,10 +121,26 @@ export const sqlitePaneRegistry: Record<SqliteSessionTab, SqliteFeatureDef> = {
       buildProps: designProps,
     }),
   },
+  objectScript: {
+    icon: 'file-code',
+    labelKey: 'modules.sqlite.session.tabObjectScript',
+    resolvePane: () => ({
+      loader: () => import('@/modules/sqlite/components/SqliteObjectScriptPane.vue'),
+      buildProps: objectScriptProps,
+    }),
+  },
 }
 
 export function normalizeSqliteFeature(tab: string | undefined): SqliteSessionTab {
-  if (tab === 'browse' || tab === 'ddl' || tab === 'query' || tab === 'design') return tab
+  if (
+    tab === 'browse' ||
+    tab === 'ddl' ||
+    tab === 'query' ||
+    tab === 'design' ||
+    tab === 'objectScript'
+  ) {
+    return tab
+  }
   return 'query'
 }
 

@@ -5,6 +5,8 @@ import { useSqliteDdlActionStore } from '@/modules/sqlite/stores/ddl-actions'
 import SqliteDdlDangerDialog from './SqliteDdlDangerDialog.vue'
 import SqliteDdlRenameDialog from './SqliteDdlRenameDialog.vue'
 import SqliteDbPropertiesDialog from './SqliteDbPropertiesDialog.vue'
+import SqliteMaintainCheckDialog from './SqliteMaintainCheckDialog.vue'
+import SqliteMaintainConfirmDialog from './SqliteMaintainConfirmDialog.vue'
 
 const store = useSqliteDdlActionStore()
 const { pending } = storeToRefs(store)
@@ -16,4 +18,6 @@ const dialogKind = computed(() => pending.value?.kind ?? 'danger')
   <SqliteDdlRenameDialog v-if="dialogKind === 'rename'" />
   <SqliteDdlDangerDialog v-else-if="pending" />
   <SqliteDbPropertiesDialog />
+  <SqliteMaintainConfirmDialog />
+  <SqliteMaintainCheckDialog />
 </template>

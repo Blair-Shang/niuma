@@ -14,12 +14,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 const (
-	driverName            = "sqlite"
 	defaultBusyTimeoutMs  = 5000
 	defaultTimeoutSeconds = 10
 )
@@ -142,9 +139,10 @@ func Connect(ctx context.Context, params ConnectParams) (*sql.DB, error) {
 	if path == ":memory:" {
 		return nil, fmt.Errorf("sqlite: in-memory databases are not supported for managed connections")
 	}
-	// modernc 无 SQLCipher；口令已存 Vault 但当前驱动无法解密——拒绝静默忽略。
-	if strings.TrimSpace(params.Secret) != "" {
-		return nil, fmt.Errorf("sqlite: encryption password is not supported yet (SQLCipher pending); leave password empty for plain SQLite files")
+	secret := strings.TrimSpace(params.Secret)
+	if secret != "" && !SupportsSQLCipher() {
+		// 默认 modernc 无 SQLCipher；口令已存 Vault 但当前驱动无法解密——拒绝静默忽略。
+		return nil, fmt.Errorf("sqlite: encryption password is not supported in this build (rebuild with -tags sqlcipher); leave password empty for plain SQLite files")
 	}
 
 	abs, err := filepath.Abs(path)
@@ -164,7 +162,7 @@ func Connect(ctx context.Context, params ConnectParams) (*sql.DB, error) {
 		return nil, fmt.Errorf("sqlite: path is a directory: %s", abs)
 	}
 
-	dsn, err := buildDSN(abs, params.Options)
+	dsn, err := buildDSN(abs, params.Options, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -302,8 +300,8 @@ func isSafeIdent(s string) bool {
 	return true
 }
 
-func buildDSN(absPath string, opts ConnectOptions) (string, error) {
-	// modernc URI：file:///abs/path?mode=…（Windows 为 file:///C:/…）
+func buildDSN(absPath string, opts ConnectOptions, secret string) (string, error) {
+	// modernc / go-sqlcipher URI：file:///abs/path?mode=…（Windows 为 file:///C:/…）
 	slash := filepath.ToSlash(absPath)
 	if runtime.GOOS == "windows" && !strings.HasPrefix(slash, "/") {
 		slash = "/" + slash
@@ -318,6 +316,11 @@ func buildDSN(absPath string, opts ConnectOptions) (string, error) {
 		q.Set("mode", "rw")
 	}
 	q.Set("_pragma", fmt.Sprintf("busy_timeout(%d)", opts.busyTimeoutOrDefault()))
+	if secret != "" {
+		// go-sqlcipher：口令经 _pragma_key 注入；禁止静默忽略。
+		q.Set("_pragma_key", secret)
+		q.Set("_pragma_cipher_page_size", "4096")
+	}
 	u := url.URL{
 		Scheme:   "file",
 		Path:     slash,

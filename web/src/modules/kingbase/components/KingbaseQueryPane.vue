@@ -9,6 +9,8 @@ const props = defineProps<{
   database?: string
   schema?: string
   initialSql?: string
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   queryExecMode?: 'paged' | 'batch'
   sessionLabel?: string

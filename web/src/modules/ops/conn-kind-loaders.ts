@@ -77,7 +77,10 @@ export async function ensureConnKind(kind: ConnKind): Promise<void> {
   formLoaded.add(kind)
 }
 
-/** 空闲时预取各协议表单 chunk，减少首次点「新建/编辑」等待。 */
+/**
+ * 可选：空闲时预取表单 chunk。
+ * 默认路径已改为按需 `ensureConnKindForm`（打开新建/编辑时），避免侧栏挂载即拉全协议。
+ */
 export function prefetchConnKindForms(kinds: readonly ConnKind[]): void {
   for (const kind of kinds) {
     void ensureConnKindForm(kind).catch(() => undefined)

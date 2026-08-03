@@ -131,3 +131,27 @@ export const FALLBACK_CLICKHOUSE_LEXICON: SqlLexicon = {
     'row_number', 'rank', 'dense_rank', 'lagInFrame', 'leadInFrame',
   ],
 }
+
+/** SQLite：服务端不可用时的着色兜底（子集；完整词表见 sqliteparser）。 */
+export const FALLBACK_SQLITE_LEXICON: SqlLexicon = {
+  keywords: [
+    'SELECT', 'FROM', 'WHERE', 'HAVING', 'GROUP', 'ORDER', 'BY', 'LIMIT', 'OFFSET',
+    'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'REPLACE',
+    'WITH', 'RECURSIVE', 'DISTINCT', 'ALL', 'AS', 'UNION', 'INTERSECT', 'EXCEPT',
+    'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'CROSS', 'NATURAL', 'ON', 'USING',
+    'CREATE', 'DROP', 'ALTER', 'TABLE', 'VIEW', 'INDEX', 'TRIGGER', 'TEMP', 'TEMPORARY',
+    'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'UNIQUE', 'CHECK', 'DEFAULT', 'AUTOINCREMENT',
+    'BEGIN', 'COMMIT', 'ROLLBACK', 'ATTACH', 'DETACH', 'DATABASE', 'PRAGMA', 'VACUUM',
+    'ANALYZE', 'EXPLAIN', 'QUERY', 'PLAN', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'EXISTS',
+    'BETWEEN', 'LIKE', 'GLOB', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'INTEGER', 'TEXT',
+    'REAL', 'BLOB', 'NUMERIC', 'WITHOUT', 'ROWID', 'STRICT', 'GENERATED', 'ALWAYS', 'STORED',
+    'VIRTUAL', 'BEFORE', 'AFTER', 'INSTEAD', 'OF', 'EACH', 'ROW', 'RETURNING',
+  ],
+  functions: [
+    'abs', 'changes', 'coalesce', 'hex', 'ifnull', 'iif', 'instr', 'length', 'lower', 'upper',
+    'ltrim', 'rtrim', 'trim', 'max', 'min', 'nullif', 'printf', 'quote', 'random', 'replace',
+    'round', 'sqlite_version', 'substr', 'typeof', 'avg', 'count', 'group_concat', 'sum', 'total',
+    'json', 'json_extract', 'json_valid', 'date', 'time', 'datetime', 'julianday', 'strftime',
+    'unixepoch',
+  ],
+}

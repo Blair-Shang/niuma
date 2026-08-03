@@ -30,8 +30,11 @@ const props = defineProps<{
   initialTab?: SqliteSessionTab
   initialSql?: string
   autoRunInitialSql?: boolean
-  /** design：create=新建表；alter=编辑表 */
+  /** design / objectScript：create=新建；alter=编辑 */
   designMode?: 'create' | 'alter'
+  objectKind?: 'view' | 'trigger' | 'index'
+  objectName?: string
+  draftSql?: string
   tabId?: string
 }>()
 
@@ -66,6 +69,9 @@ const pane = featureDef.resolvePane({
   isView: props.isView,
   objectType: props.objectType,
   designMode: props.designMode,
+  objectKind: props.objectKind,
+  objectName: props.objectName ?? props.table,
+  draftSql: props.draftSql,
 })
 const PaneView = defineAsyncComponent(pane.loader)
 
@@ -86,6 +92,9 @@ const paneProps = computed(() => ({
     autoRunInitialSql: props.autoRunInitialSql,
     sessionLabel: sessionLabel.value,
     designMode: props.designMode,
+    objectKind: props.objectKind,
+    objectName: props.objectName ?? props.table,
+    draftSql: props.draftSql,
   }),
   active: paneActive.value,
 }))

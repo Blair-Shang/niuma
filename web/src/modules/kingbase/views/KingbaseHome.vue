@@ -18,6 +18,8 @@ const props = defineProps<{
   database?: string
   initialTab?: KingbaseSessionTab
   initialSql?: string
+  /** 查询正文草稿（随 workspace.tabs 重启恢复） */
+  draftSql?: string
   autoRunInitialSql?: boolean
   queryExecMode?: 'paged' | 'batch'
   tabId?: string
@@ -65,6 +67,7 @@ onMounted(() => {
     :database="props.database"
     :initial-tab="props.initialTab"
     :initial-sql="props.initialSql"
+    :draft-sql="props.draftSql"
     :auto-run-initial-sql="props.autoRunInitialSql"
     :query-exec-mode="props.queryExecMode"
     :tab-id="props.tabId"

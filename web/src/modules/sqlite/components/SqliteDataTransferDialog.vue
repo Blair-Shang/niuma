@@ -61,6 +61,13 @@ const header = ref(true)
 const delimiter = ref(',')
 const nullString = ref('')
 const truncate = ref(false)
+const encoding = ref('utf-8')
+
+const encodingOptions = computed<RsSelectOptions>(() => [
+  { value: 'utf-8', label: t('modules.sqlite.io.encodingUtf8') },
+  { value: 'gbk', label: t('modules.sqlite.io.encodingGbk') },
+  { value: 'gb18030', label: t('modules.sqlite.io.encodingGb18030') },
+])
 
 const tableColumns = ref<string[]>([])
 const sourceColumns = ref<string[]>([])
@@ -214,6 +221,7 @@ watch(
     delimiter.value = ','
     nullString.value = ''
     truncate.value = false
+    encoding.value = 'utf-8'
     resetMap()
     clearLines()
     void loadTableColumns()
@@ -266,6 +274,7 @@ async function onConfirm(): Promise<void> {
       header: header.value,
       delimiter: delimiter.value || ',',
       nullString: nullString.value || undefined,
+      encoding: encoding.value || 'utf-8',
       truncate: !isExport.value && truncate.value,
       ...(columnMap ? { columnMap } : {}),
     }
@@ -366,6 +375,10 @@ async function onCancelTask(): Promise<void> {
               :disabled="busy"
               :placeholder="t('modules.sqlite.io.nullStringPh')"
             />
+          </div>
+          <div class="nm-sqlite-dt__field">
+            <RsLabel>{{ t('modules.sqlite.io.encoding') }}</RsLabel>
+            <RsSelect v-model="encoding" :options="encodingOptions" :disabled="busy" />
           </div>
         </div>
         <div class="nm-sqlite-dt__checks">

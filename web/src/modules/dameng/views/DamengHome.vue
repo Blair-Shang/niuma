@@ -18,6 +18,8 @@ const props = defineProps<{
   table?: string
   initialTab?: DamengSessionTab
   initialSql?: string
+  /** 查询 / 对象脚本草稿（随 workspace.tabs 重启恢复） */
+  draftSql?: string
   autoRunInitialSql?: boolean
   designMode?: 'create' | 'alter'
   tabId?: string
@@ -76,6 +78,7 @@ onMounted(() => {
     :table="props.table"
     :initial-tab="props.initialTab"
     :initial-sql="props.initialSql"
+    :draft-sql="props.draftSql"
     :auto-run-initial-sql="props.autoRunInitialSql"
     :design-mode="props.designMode"
     :tab-id="props.tabId"

@@ -8,6 +8,8 @@ const props = defineProps<{
   profileId?: string
   schema?: string
   initialSql?: string
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   sessionLabel?: string
   active?: boolean

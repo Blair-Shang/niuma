@@ -38,7 +38,8 @@ function resolveObjectKind(ctx?: ConnOpenContext): OracleObjectKind | undefined 
   if (
     ctx?.objectKind === 'view' ||
     ctx?.objectKind === 'procedure' ||
-    ctx?.objectKind === 'function'
+    ctx?.objectKind === 'function' ||
+    ctx?.objectKind === 'package'
   ) {
     return ctx.objectKind
   }
@@ -111,12 +112,12 @@ function buildQueryTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
       normalizeOracleFeature(typeof initialTab === 'string' ? initialTab : undefined) === 'query',
   )
   const queryTitle = i18n.global.t('modules.oracle.session.tabQueryIndexed', { n: queryIndex })
-  const host = item.hostAddress || item.profileName
+  const baseTitle = schema || item.profileName || item.hostAddress
 
   return {
     moduleId: 'oracle',
-    title: `${schema || host} · ${queryTitle}`,
-    tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress, undefined, queryTitle),
+    title: `${baseTitle} · ${queryTitle}`,
+    tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress, schema, queryTitle),
     icon: kindIcon('oracle'),
     props,
   }
@@ -149,13 +150,20 @@ function buildObjectScriptTabSpec(item: ConnItem, ctx?: ConnOpenContext): Connec
     props.initialSql = ctx.initialSql
   }
 
-  const host = item.hostAddress || item.profileName
-  const baseTitle = schema && objectName ? `${schema}.${objectName}` : schema || host
+  const resource =
+    schema && objectName ? `${schema}.${objectName}` : schema || undefined
+  // Tab 只显示对象名；完整 schema.对象放 tip（对齐 MySQL）
+  const title = objectName || featureTitle
 
   return {
     moduleId: 'oracle',
-    title: `${baseTitle} · ${featureTitle}`,
-    tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress, undefined, featureTitle),
+    title,
+    tooltip: buildConnectionTabTooltip(
+      item.profileName,
+      item.hostAddress,
+      resource,
+      featureTitle,
+    ),
     icon: objectKindIcon(objectKind),
     props,
   }
@@ -167,14 +175,15 @@ function buildOracleTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
   if (feature === 'objectScript') return buildObjectScriptTabSpec(item, ctx)
 
   if (feature === 'monitor') {
+    const monitorLabel = featureLabel('monitor')
     return {
       moduleId: 'oracle',
-      title: `${item.hostAddress || item.profileName} · ${featureLabel('monitor')}`,
+      title: monitorLabel,
       tooltip: buildConnectionTabTooltip(
         item.profileName,
         item.hostAddress,
         undefined,
-        featureLabel('monitor'),
+        monitorLabel,
       ),
       icon: kindIcon('oracle'),
       props: {
@@ -188,8 +197,8 @@ function buildOracleTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
     const schema = segmentName(ctx, 'schema')
     const table = segmentName(ctx, 'table')
     const designMode = resolveDesignMode(ctx)
-    const host = item.hostAddress || item.profileName
-    const baseTitle = schema && table ? `${schema}.${table}` : schema || host
+    const resource = schema && table ? `${schema}.${table}` : schema || undefined
+    const designLabel = featureLabel('design')
     const props: Record<string, unknown> = {
       profileId: item.profileId,
       initialTab: 'design',
@@ -199,8 +208,13 @@ function buildOracleTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
     if (table) props.table = table
     return {
       moduleId: 'oracle',
-      title: `${baseTitle} · ${featureLabel('design')}`,
-      tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress),
+      title: table || designLabel,
+      tooltip: buildConnectionTabTooltip(
+        item.profileName,
+        item.hostAddress,
+        resource,
+        designLabel,
+      ),
       icon: kindIcon('oracle'),
       props,
     }
@@ -220,13 +234,20 @@ function buildOracleTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
     props.initialSql = ctx.initialSql
   }
 
-  const host = item.hostAddress || item.profileName
-  const baseTitle = schema && table ? `${schema}.${table}` : schema || host
+  const resource = schema && table ? `${schema}.${table}` : schema || undefined
+  const paneLabel = featureLabel(feature)
+  // 表/视图：Tab 只显示对象名；无对象时回退 schema 或连接名
+  const title = table || schema || item.profileName
 
   return {
     moduleId: 'oracle',
-    title: `${baseTitle} · ${featureLabel(feature)}`,
-    tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress),
+    title,
+    tooltip: buildConnectionTabTooltip(
+      item.profileName,
+      item.hostAddress,
+      resource,
+      paneLabel,
+    ),
     icon: kindIcon('oracle'),
     props,
   }
@@ -234,6 +255,7 @@ function buildOracleTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
 
 /**
  * Oracle：query 可多开；browse/ddl/objectScript/monitor/design 按 profile+资源+feature 去重。
+ * Tab 标题对齐 MySQL：对象短标题，完整路径放 tooltip。
  */
 export const oracleConnectionNavStrategy: ConnectionNavStrategy = {
   kind: 'oracle',

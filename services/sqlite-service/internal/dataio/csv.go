@@ -55,11 +55,17 @@ func exportCsv(
 	cw := &countingWriter{w: f, onProgress: func(n int64) {
 		m.emitProgress(taskID, PhaseRunning, n, 0, fmt.Sprintf("wrote %d bytes", n))
 	}}
-	// UTF-8 BOM：对齐 Excel / Navicat / DBeaver / MySQL 导出，避免中文乱码
-	if _, err := cw.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
-		return fmt.Errorf("sqlite: write csv bom: %w", err)
+	outW, err := encodeFromUTF8Writer(cw, opts.Encoding)
+	if err != nil {
+		return err
 	}
-	w := csv.NewWriter(cw)
+	// UTF-8 BOM：对齐 Excel / Navicat / DBeaver / MySQL 导出，避免中文乱码
+	if isUTF8Encoding(opts.Encoding) {
+		if _, err := outW.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+			return fmt.Errorf("sqlite: write csv bom: %w", err)
+		}
+	}
+	w := csv.NewWriter(outW)
 	delim := []rune(opts.Delimiter)
 	if len(delim) > 0 {
 		w.Comma = delim[0]
@@ -157,7 +163,13 @@ func importCsv(
 		m.emitProgress(taskID, PhaseRunning, 0, 0, "truncated")
 	}
 
-	baseReader, err := skipUTF8BOM(cr)
+	decoded, err := decodeToUTF8Reader(cr, opts.Encoding)
+	if err != nil {
+		return err
+	}
+	defer decoded.Close()
+
+	baseReader, err := skipUTF8BOM(decoded)
 	if err != nil {
 		return fmt.Errorf("sqlite: skip csv bom: %w", err)
 	}

@@ -17,15 +17,15 @@ import {
 } from '@/modules/sql-editor/capabilities'
 import { useVastSqlEditor } from '@/modules/vastbase/composables/useVastSqlEditor'
 import { seedSqlForFeature, type VastSessionTab } from '@/modules/vastbase/sql-seed'
-import {
-  alignForValueType,
-  resolveSqlValueType,
-} from '@/modules/vastbase/utils/column-value-type'
 import { exportQueryResultAsCsv } from '@/modules/vastbase/utils/export-csv'
 import { prepareDialectExecSql } from '@/modules/vastbase/utils/oracle-terminator'
 import { parsePrimaryFromRelation, type ParsedFromRelation } from '@/modules/vastbase/utils/parse-query-from'
 import {
+  alignForValueType,
   buildSqlQueryContextMenuItems,
+  hasQueryDraft,
+  resolveSqlValueType,
+  useQueryDraftPersist,
   type QueryResultPanelLabels,
   type SqlQueryToolbarLabels,
 } from '@/modules/database'
@@ -75,6 +75,8 @@ export interface VastQueryPaneProps {
   oid?: number
   feature: VastSessionTab
   initialSql?: string
+  draftSql?: string
+  tabId?: string
   /** 打开时若带 initialSql，是否自动执行（生成 SELECT/COUNT 等） */
   autoRunInitialSql?: boolean
   sessionLabel?: string
@@ -99,7 +101,12 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
   const toast = useRsToast()
   const mem = createMemoryMonitor('VastQuery')
 
-  const sqlText = ref('SELECT 1')
+  const { sqlText, replaceSqlText } = useQueryDraftPersist({
+    tabId: () => props.tabId,
+    draftSql: () => props.draftSql,
+    initialSql: () => props.initialSql,
+    defaultSql: 'SELECT 1',
+  })
   const running = ref(false)
   const cancelling = ref(false)
   /** 用户主动终止：用于区分取消与真正执行失败。 */
@@ -1016,8 +1023,13 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
   }
 
   function applySeed(): boolean {
+    // 已落盘草稿按 tabId 恢复；连接/scope 变更时也不覆盖，避免多 Tab 串台与丢编辑
+    if (hasQueryDraft(props.draftSql)) {
+      replaceSqlText(props.draftSql ?? '')
+      return false
+    }
     if (props.initialSql?.trim()) {
-      sqlText.value = props.initialSql
+      replaceSqlText(props.initialSql)
       return Boolean(props.autoRunInitialSql)
     }
     const seed = seedSqlForFeature(props.feature, {
@@ -1029,7 +1041,7 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
       args: props.args,
       oid: props.oid,
     })
-    sqlText.value = seed.sql
+    replaceSqlText(seed.sql)
     return seed.autoRun
   }
 

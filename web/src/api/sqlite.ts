@@ -2,6 +2,15 @@ import { bridgeInvoke } from '@/api/client'
 import type {
   SqliteBackupCopyParams,
   SqliteBackupCopyResult,
+  SqliteLspCloseParams,
+  SqliteLspLexiconParams,
+  SqliteLspLexiconResult,
+  SqliteLspOpenParams,
+  SqliteLspOpenResult,
+  SqliteLspRpcParams,
+  SqliteLspRpcResult,
+  SqliteObjectScriptParams,
+  SqliteObjectScriptResult,
   SqliteCatalogColumnsResult,
   SqliteCatalogListParams,
   SqliteCatalogSchemasResult,
@@ -203,7 +212,31 @@ export const sqliteApi = {
     return bridgeInvoke<SqliteDdlCreateTableResult>('sqlite.ddl.createTablePreview', params)
   },
 
+  ddlObjectScriptPreview(params: SqliteObjectScriptParams): Promise<SqliteObjectScriptResult> {
+    return bridgeInvoke<SqliteObjectScriptResult>('sqlite.ddl.objectScriptPreview', params)
+  },
+
+  ddlObjectScriptApply(params: SqliteObjectScriptParams): Promise<SqliteObjectScriptResult> {
+    return bridgeInvoke<SqliteObjectScriptResult>('sqlite.ddl.objectScriptApply', params)
+  },
+
   backupCopy(params: SqliteBackupCopyParams): Promise<SqliteBackupCopyResult> {
     return bridgeInvoke<SqliteBackupCopyResult>('sqlite.backup.copy', params)
+  },
+
+  lspOpen(params: SqliteLspOpenParams): Promise<SqliteLspOpenResult> {
+    return bridgeInvoke<SqliteLspOpenResult>('sqlite.lsp.open', params)
+  },
+
+  lspRpc(params: SqliteLspRpcParams): Promise<SqliteLspRpcResult> {
+    return bridgeInvoke<SqliteLspRpcResult>('sqlite.lsp.rpc', params)
+  },
+
+  lspClose(params: SqliteLspCloseParams): Promise<{ closed: boolean }> {
+    return bridgeInvoke<{ closed: boolean }>('sqlite.lsp.close', params)
+  },
+
+  lspLexicon(params: SqliteLspLexiconParams = {}): Promise<SqliteLspLexiconResult> {
+    return bridgeInvoke<SqliteLspLexiconResult>('sqlite.lsp.lexicon', params)
   },
 }

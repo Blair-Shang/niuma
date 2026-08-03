@@ -9,14 +9,26 @@ import type { ConnItem } from '@/modules/ops/types'
 import type { SqliteIoTaskKind } from '@/modules/sqlite/data-tasks'
 import { useSqliteDdlActionStore, type SqliteDdlAction } from '@/modules/sqlite/stores/ddl-actions'
 import { useSqliteDbPropertiesStore } from '@/modules/sqlite/stores/db-properties'
+import {
+  useSqliteMaintainActionStore,
+  type SqliteMaintainCheckAction,
+  type SqliteMaintainConfirmAction,
+} from '@/modules/sqlite/stores/maintain-actions'
+import { execSqliteSqlPreferred } from '@/modules/sqlite/composables/useSqliteSessionSql'
 import { selectSeed } from '@/modules/sqlite/sql-seed'
 import {
   analyzeSql,
-  integrityCheckSql,
-  quickCheckSql,
-  vacuumSql,
-  walCheckpointSql,
+  countSql,
+  deleteTemplateSql,
+  insertTemplateSql,
+  selectAllSql,
+  updateTemplateSql,
+  type ScriptColumn,
 } from '@/modules/sqlite/utils/script-templates'
+import {
+  objectKindToCategory,
+  type SqliteObjectKind,
+} from '@/modules/sqlite/types/object-script'
 import { useSessionRegistry } from '@/stores/session-registry'
 import { i18n } from '@/locale'
 
@@ -55,24 +67,68 @@ function categoryRefreshPath(path: ConnResourcePath): ConnResourcePath | undefin
 function openFeature(
   conn: ConnItem,
   path: ConnResourcePath | undefined,
-  initialTab: 'query' | 'browse' | 'ddl' | 'design',
+  initialTab: 'query' | 'browse' | 'ddl' | 'design' | 'objectScript',
   initialSql?: string,
-  options?: { autoRun?: boolean; designMode?: 'create' | 'alter' },
+  options?: {
+    autoRun?: boolean
+    designMode?: 'create' | 'alter'
+    objectKind?: SqliteObjectKind
+  },
 ): void {
   const ctx: ConnOpenContext = { resourcePath: path, initialTab }
   if (initialSql?.trim()) ctx.initialSql = initialSql
   if (options?.autoRun) ctx.autoRunInitialSql = true
   if (options?.designMode) ctx.designMode = options.designMode
+  if (options?.objectKind) ctx.objectKind = options.objectKind
   useConnectionNavigation().connect(conn, ctx)
 }
 
-function openQuery(
+/** 新建视图 / 索引 / 触发器：打开对象脚本（create），并带上正确的 category + objectKind。 */
+function openCreateObjectScript(
   conn: ConnItem,
-  path: ConnResourcePath | undefined,
-  sql: string,
-  autoRun = true,
+  schema: string,
+  kind: SqliteObjectKind,
 ): void {
-  openFeature(conn, path, 'query', sql, { autoRun })
+  const path: ConnResourcePath = {
+    segments: [
+      { kind: 'schema', name: schema },
+      { kind: 'category', name: objectKindToCategory(kind) },
+    ],
+  }
+  openFeature(conn, path, 'objectScript', undefined, {
+    designMode: 'create',
+    objectKind: kind,
+  })
+}
+
+function openQuery(conn: ConnItem, path: ConnResourcePath | undefined, sql?: string): void {
+  openFeature(conn, path, 'query', sql)
+}
+
+async function loadTableScriptMeta(
+  conn: ConnItem,
+  schema: string,
+  table: string,
+): Promise<{ columns: ScriptColumn[]; pkColumns: string[] }> {
+  try {
+    const { withPreferredSqliteSession } = await import(
+      '@/modules/sqlite/composables/useSqliteSessionSql'
+    )
+    return await withPreferredSqliteSession(conn.profileId, async (sessionId) => {
+      const cols = await sqliteApi.metaColumns({ sessionId, schema, table })
+      const columns: ScriptColumn[] = (cols.columns ?? []).map((c) => ({
+        name: c.name,
+        dataType: c.dataType,
+      }))
+      const pkColumns = (cols.columns ?? [])
+        .filter((c) => c.primaryKey)
+        .sort((a, b) => (a.pkOrdinal ?? 0) - (b.pkOrdinal ?? 0))
+        .map((c) => c.name)
+      return { columns, pkColumns }
+    })
+  } catch {
+    return { columns: [], pkColumns: [] }
+  }
 }
 
 function requestDanger(
@@ -145,6 +201,134 @@ function openDbProperties(conn: ConnItem): void {
     sessionId,
     title: t('modules.sqlite.properties.title'),
   })
+}
+
+function schemaLabel(schema?: string): string {
+  const s = schema?.trim()
+  return s && s.length > 0 ? s : 'main'
+}
+
+const MAINTAIN_CONFIRM_COPY: Record<
+  SqliteMaintainConfirmAction,
+  { titleKey: string; descKey: string }
+> = {
+  vacuum: {
+    titleKey: 'modules.sqlite.tree.vacuum',
+    descKey: 'modules.sqlite.maintain.vacuumDesc',
+  },
+  wal_checkpoint: {
+    titleKey: 'modules.sqlite.tree.walCheckpoint',
+    descKey: 'modules.sqlite.maintain.walCheckpointDesc',
+  },
+  reindex: {
+    titleKey: 'modules.sqlite.tree.reindex',
+    descKey: 'modules.sqlite.maintain.reindexDesc',
+  },
+}
+
+function requestMaintainConfirm(
+  conn: ConnItem,
+  action: SqliteMaintainConfirmAction,
+  schema: string,
+  table?: string,
+): void {
+  const schemaName = schemaLabel(schema)
+  const tableName = table?.trim()
+  const target = tableName ? `${schemaName}.${tableName}` : schemaName
+  const copy = MAINTAIN_CONFIRM_COPY[action]
+
+  useSqliteMaintainActionStore().request({
+    conn,
+    profileId: conn.profileId,
+    schema: schemaName,
+    table: tableName || undefined,
+    action,
+    title: t(copy.titleKey),
+    description: t(copy.descKey, {
+      schema: schemaName,
+      target,
+    }),
+    kind: 'confirm',
+  })
+}
+
+function requestMaintainCheck(
+  conn: ConnItem,
+  action: SqliteMaintainCheckAction,
+  schema: string,
+): void {
+  const schemaName = schemaLabel(schema)
+  useSqliteMaintainActionStore().request({
+    conn,
+    profileId: conn.profileId,
+    schema: schemaName,
+    action,
+    title: t(
+      action === 'integrity'
+        ? 'modules.sqlite.tree.integrity'
+        : 'modules.sqlite.tree.quickCheck',
+    ),
+    description: t(
+      action === 'integrity'
+        ? 'modules.sqlite.maintain.integrityDesc'
+        : 'modules.sqlite.maintain.quickCheckDesc',
+      { schema: schemaName },
+    ),
+    kind: 'check',
+  })
+}
+
+function runAnalyze(conn: ConnItem, schema?: string, table?: string): void {
+  const schemaName = schemaLabel(schema)
+  const sql = table
+    ? analyzeSql(schemaName, table)
+    : analyzeSql(schemaName === 'main' ? undefined : schemaName)
+  void execSqliteSqlPreferred(
+    conn.profileId,
+    sql,
+    schemaName === 'main' ? undefined : schemaName,
+    20,
+  )
+    .then(() => {
+      toast.success(t('modules.sqlite.maintain.analyzeDone'))
+    })
+    .catch((e: unknown) => {
+      toast.error(e instanceof Error ? e.message : t('modules.sqlite.maintain.execError'))
+    })
+}
+
+function handleMaintainKey(
+  conn: ConnItem,
+  key: string,
+  schema?: string,
+  table?: string,
+): boolean {
+  const schemaName = schemaLabel(schema)
+  switch (key) {
+    case 'vacuum':
+      requestMaintainConfirm(conn, 'vacuum', schemaName)
+      return true
+    case 'analyze':
+      runAnalyze(conn, schemaName, table)
+      return true
+    case 'reindex':
+      requestMaintainConfirm(conn, 'reindex', schemaName, table)
+      return true
+    case 'integrity':
+      requestMaintainCheck(conn, 'integrity', schemaName)
+      return true
+    case 'quickCheck':
+      requestMaintainCheck(conn, 'quick_check', schemaName)
+      return true
+    case 'walCheckpoint':
+      requestMaintainConfirm(conn, 'wal_checkpoint', schemaName)
+      return true
+    case 'dbInfo':
+      openDbProperties(conn)
+      return true
+    default:
+      return false
+  }
 }
 
 async function copyText(text: string): Promise<void> {
@@ -327,36 +511,14 @@ export function onConnMenuSelect(conn: ConnItem, key: string): void {
     void runBackupCopy(conn)
     return
   }
-  if (key === 'vacuum') {
-    openQuery(conn, undefined, vacuumSql())
-    return
-  }
-  if (key === 'analyze') {
-    openQuery(conn, undefined, analyzeSql())
-    return
-  }
-  if (key === 'integrity') {
-    openQuery(conn, undefined, integrityCheckSql())
-    return
-  }
-  if (key === 'quickCheck') {
-    openQuery(conn, undefined, quickCheckSql())
-    return
-  }
-  if (key === 'walCheckpoint') {
-    openQuery(conn, undefined, walCheckpointSql())
-    return
-  }
-  if (key === 'dbInfo') {
-    openDbProperties(conn)
-  }
+  handleMaintainKey(conn, key, 'main')
 }
 
-export function onResourceMenuSelect(
+export async function onResourceMenuSelect(
   conn: ConnItem,
   path: ConnResourcePath,
   key: string,
-): void {
+): Promise<void> {
   const schema = segmentName(path, 'schema')
   const table = segmentName(path, 'table')
   const objectName = segmentName(path, 'object')
@@ -373,9 +535,37 @@ export function onResourceMenuSelect(
       const sql = table
         ? (schema ? selectSeed(schema, table) : selectSeed(undefined, table))
         : undefined
-      openFeature(conn, path, 'query', sql)
+      openQuery(conn, path, sql)
       break
     }
+    case 'genSelect':
+      if (table) openQuery(conn, path, selectAllSql(schemaName, table))
+      break
+    case 'genCount':
+      if (table) openQuery(conn, path, countSql(schemaName, table))
+      break
+    case 'genInsert':
+      if (table && !isView) {
+        const meta = await loadTableScriptMeta(conn, schemaName, table)
+        openQuery(conn, path, insertTemplateSql(schemaName, table, meta.columns))
+      }
+      break
+    case 'genUpdate':
+      if (table && !isView) {
+        const meta = await loadTableScriptMeta(conn, schemaName, table)
+        openQuery(
+          conn,
+          path,
+          updateTemplateSql(schemaName, table, meta.columns, meta.pkColumns),
+        )
+      }
+      break
+    case 'genDelete':
+      if (table && !isView) {
+        const meta = await loadTableScriptMeta(conn, schemaName, table)
+        openQuery(conn, path, deleteTemplateSql(schemaName, table, meta.pkColumns))
+      }
+      break
     case 'ddl': {
       const canDdl =
         !!table ||
@@ -388,6 +578,29 @@ export function onResourceMenuSelect(
         openFeature(conn, path, 'design', undefined, { designMode: 'alter' })
       }
       break
+    case 'editView':
+    case 'editScript':
+      if (isView && table) {
+        openFeature(conn, path, 'objectScript', undefined, { designMode: 'alter' })
+      } else if (
+        key === 'editScript' &&
+        objectName &&
+        (category === 'indexes' || category === 'triggers')
+      ) {
+        openFeature(conn, path, 'objectScript', undefined, { designMode: 'alter' })
+      }
+      break
+    case 'createView':
+    case 'createTrigger':
+    case 'createIndex': {
+      const createKind: Record<'createView' | 'createTrigger' | 'createIndex', SqliteObjectKind> = {
+        createView: 'view',
+        createTrigger: 'trigger',
+        createIndex: 'index',
+      }
+      openCreateObjectScript(conn, schemaName, createKind[key])
+      break
+    }
     case 'create':
     case 'createDesign':
       if (schema || last?.kind === 'schema' || category === 'tables') {
@@ -397,13 +610,14 @@ export function onResourceMenuSelect(
     case 'rename':
       if (table && !isView) requestRenameTable(conn, path)
       break
+    case 'truncate':
     case 'empty':
       if (table && !isView) {
         requestDanger(
           conn,
           path,
           'empty_table',
-          'modules.sqlite.tree.emptyTable',
+          'modules.sqlite.tree.truncate',
           'modules.sqlite.ddl.emptyTableDesc',
           table,
           schemaName,
@@ -462,25 +676,24 @@ export function onResourceMenuSelect(
     }
     case 'analyze':
       if (table && !isView) {
-        openQuery(conn, path, analyzeSql(schemaName, table))
+        handleMaintainKey(conn, 'analyze', schemaName, table)
       } else if (last?.kind === 'schema' || schema) {
-        openQuery(conn, path, analyzeSql(schemaName))
+        handleMaintainKey(conn, 'analyze', schemaName)
+      }
+      break
+    case 'reindex':
+      if (table && !isView) {
+        handleMaintainKey(conn, 'reindex', schemaName, table)
+      } else {
+        handleMaintainKey(conn, 'reindex', schemaName)
       }
       break
     case 'vacuum':
-      openQuery(conn, path, vacuumSql(schemaName === 'main' ? undefined : schemaName))
-      break
     case 'integrity':
-      openQuery(conn, path, integrityCheckSql())
-      break
     case 'quickCheck':
-      openQuery(conn, path, quickCheckSql())
-      break
     case 'walCheckpoint':
-      openQuery(conn, path, walCheckpointSql())
-      break
     case 'dbInfo':
-      openDbProperties(conn)
+      handleMaintainKey(conn, key, schemaName)
       break
     case 'detach':
       if (schemaName && schemaName !== 'main' && schemaName !== 'temp') {

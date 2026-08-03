@@ -198,10 +198,15 @@ func buildCreateIndex(schema, table string, op DesignOp) (string, error) {
 	if op.Unique != nil && *op.Unique {
 		unique = "UNIQUE "
 	}
-	return fmt.Sprintf(
+	// SQLite：schema 挂在索引名上，ON 后只能是裸表名（不能 schema.table）。
+	sql := fmt.Sprintf(
 		"CREATE %sINDEX IF NOT EXISTS %s ON %s (%s)",
-		unique, quoteIdent(name), qualified(schema, table), cols,
-	), nil
+		unique, qualified(schema, name), quoteIdent(table), cols,
+	)
+	if wh := strings.TrimSpace(op.PartialWhere); wh != "" {
+		sql += " WHERE " + wh
+	}
+	return sql, nil
 }
 
 type colState struct {

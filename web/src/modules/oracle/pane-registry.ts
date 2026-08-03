@@ -40,7 +40,7 @@ export interface OraclePaneDescriptor {
 export interface OracleFeatureDef {
   icon: string
   labelKey: string
-  resolvePane: (scope: OraclePaneScope) => OraclePaneDescriptor
+  resolvePane: (scope?: OraclePaneScope) => OraclePaneDescriptor
 }
 
 function queryProps(ctx: OraclePaneContext): Record<string, unknown> {
@@ -49,6 +49,8 @@ function queryProps(ctx: OraclePaneContext): Record<string, unknown> {
     profileId: ctx.profileId,
     schema: ctx.schema,
     initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     sessionLabel: ctx.sessionLabel,
   }
@@ -183,7 +185,6 @@ export function normalizeOracleFeature(tab: string | undefined): OracleSessionTa
   ) {
     return tab
   }
-  if (tab === 'source') return 'objectScript'
   return 'query'
 }
 

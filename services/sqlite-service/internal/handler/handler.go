@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"strings"
 
+	"niuma/pkg/sqllsp"
+
 	"niuma/services/sqlite-service/internal/dataio"
 	"niuma/services/sqlite-service/internal/eventpub"
 	"niuma/services/sqlite-service/internal/idgen"
 	"niuma/services/sqlite-service/internal/session"
+	"niuma/services/sqlite-service/internal/sqliteparser"
 )
 
 const (
@@ -51,10 +54,12 @@ const (
 	MethodIOExecSqlFile = "io.execSqlFile"
 	MethodIOCancel      = "io.cancel"
 
-	MethodDDLDesignPreview      = "ddl.designPreview"
-	MethodDDLDesignApply        = "ddl.designApply"
-	MethodDDLCreateTable        = "ddl.createTable"
-	MethodDDLCreateTablePreview = "ddl.createTablePreview"
+	MethodDDLDesignPreview         = "ddl.designPreview"
+	MethodDDLDesignApply           = "ddl.designApply"
+	MethodDDLCreateTable           = "ddl.createTable"
+	MethodDDLCreateTablePreview    = "ddl.createTablePreview"
+	MethodDDLObjectScriptPreview   = "ddl.objectScriptPreview"
+	MethodDDLObjectScriptApply     = "ddl.objectScriptApply"
 
 	MethodBackupCopy = "backup.copy"
 
@@ -83,10 +88,13 @@ type Response struct {
 
 // Dispatcher 管理会话并分发 IPC 方法。
 type Dispatcher struct {
-	ids      idgen.Generator
-	sessions *session.Manager
-	events   *eventpub.Async
-	io       *dataio.Manager
+	ids          idgen.Generator
+	sessions     *session.Manager
+	events       *eventpub.Async
+	io           *dataio.Manager
+	lsp          *sqllsp.Server
+	lspConns     *sqllsp.Manager
+	sqliteParser *sqliteparser.Parser
 }
 
 // New 创建 Dispatcher。
@@ -196,12 +204,24 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.ddlCreateTablePreview(ctx, req)
 	case MethodDDLCreateTable:
 		return d.ddlCreateTable(ctx, req)
+	case MethodDDLObjectScriptPreview:
+		return d.ddlObjectScriptPreview(ctx, req)
+	case MethodDDLObjectScriptApply:
+		return d.ddlObjectScriptApply(ctx, req)
 	case MethodBackupCopy:
 		return d.backupCopy(ctx, req)
 	case MethodSessionAttach:
 		return d.sessionAttach(ctx, req)
 	case MethodSessionDetach:
 		return d.sessionDetach(ctx, req)
+	case MethodLspOpen:
+		return d.lspOpen(ctx, req)
+	case MethodLspRpc:
+		return d.lspRpc(ctx, req)
+	case MethodLspClose:
+		return d.lspClose(ctx, req)
+	case MethodLspLexicon:
+		return d.lspLexicon(ctx, req)
 	default:
 		return errorResponse(req.ID, "method not found: "+req.Method)
 	}

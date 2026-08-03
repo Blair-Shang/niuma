@@ -1,7 +1,13 @@
 /**
  * SQLite 表设计器状态与 RPC（供 SqliteDesignPane 挂载）。
  */
-import { useRsToast, type RsSelectOptions, type RsTableColumn } from '@niuma/ui'
+import {
+  reorderTableRows,
+  useRsToast,
+  type RsSelectOptions,
+  type RsTableColumn,
+  type RsTableRowDropPosition,
+} from '@niuma/ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { sqliteApi } from '@/api'
@@ -72,6 +78,9 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
   const localDesignMode = ref<'create' | 'alter' | null>(null)
   const localTable = ref<string | null>(null)
   const tableName = ref(props.table ?? '')
+  /** 新建表：STRICT / WITHOUT ROWID（仅 create 模式） */
+  const createStrict = ref(false)
+  const createWithoutRowid = ref(false)
 
   const columns = ref<DesignColumnDraft[]>([])
   const indexes = ref<DesignIndexDraft[]>([])
@@ -134,10 +143,21 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
     },
   ])
 
-  const typeBaseSelectOptions = SQLITE_BASE_TYPE_OPTIONS.map((o) => ({
-    value: o.base,
-    label: o.base,
-  }))
+  const typeBaseSelectOptions = computed(() => {
+    const opts = SQLITE_BASE_TYPE_OPTIONS.map((o) => ({
+      value: o.base,
+      label: o.base,
+    }))
+    const seen = new Set(opts.map((o) => o.value.toUpperCase()))
+    for (const c of columns.value) {
+      const base = c.typeBase.trim().toUpperCase()
+      if (base && !seen.has(base)) {
+        seen.add(base)
+        opts.push({ value: base, label: base })
+      }
+    }
+    return opts
+  })
   const fkActionOptions = SQLITE_FK_ACTIONS.map((v) => ({ value: v, label: v }))
 
   const draftColumnSelectOptions = computed(() =>
@@ -200,7 +220,11 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
         minWidth: 110,
         editable: true,
         valueType: 'select',
-        editorOptions: { options: typeBaseSelectOptions, searchable: true, creatable: true },
+        editorOptions: {
+          options: typeBaseSelectOptions.value,
+          searchable: true,
+          creatable: true,
+        },
       },
       {
         key: 'typeLength',
@@ -208,7 +232,18 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
         width: 72,
         align: 'center',
         valueType: 'number',
-        editable: (row) => dataTypeParamKind(row.typeBase) === 'length',
+        editable: (row) => {
+          const kind = dataTypeParamKind(row.typeBase)
+          return kind === 'length' || kind === 'precision'
+        },
+      },
+      {
+        key: 'typeScale',
+        title: t('modules.sqlite.design.colScale'),
+        width: 64,
+        align: 'center',
+        valueType: 'number',
+        editable: (row) => dataTypeParamKind(row.typeBase) === 'precision',
       },
       {
         key: 'primaryKey',
@@ -365,14 +400,28 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
         const kind = dataTypeParamKind(nextBase)
         const opt = SQLITE_BASE_TYPE_OPTIONS.find((o) => o.base === nextBase)
         let typeLength = r.typeLength
-        if (kind === 'none') typeLength = undefined
-        else if (kind === 'length' && typeLength == null) typeLength = opt?.defaultLength ?? 255
-        const next = { ...r, typeBase: nextBase, typeLength }
+        let typeScale = r.typeScale
+        if (kind === 'none') {
+          typeLength = undefined
+          typeScale = undefined
+        } else if (kind === 'length') {
+          typeScale = undefined
+          if (typeLength == null) typeLength = opt?.defaultLength ?? 255
+        } else if (kind === 'precision') {
+          if (typeLength == null) typeLength = opt?.defaultPrecision ?? 10
+          if (typeScale == null) typeScale = opt?.defaultScale ?? 2
+        }
+        const next = { ...r, typeBase: nextBase, typeLength, typeScale }
         return { ...next, dataType: syncColumnDataType(next) }
       }
       if (key === 'typeLength') {
         const n = draft === '' ? undefined : Number(draft)
         const next = { ...r, typeLength: Number.isFinite(n) ? n : undefined }
+        return { ...next, dataType: syncColumnDataType(next) }
+      }
+      if (key === 'typeScale') {
+        const n = draft === '' ? undefined : Number(draft)
+        const next = { ...r, typeScale: Number.isFinite(n) ? n : undefined }
         return { ...next, dataType: syncColumnDataType(next) }
       }
       if (key === 'defaultExpr') return { ...r, defaultExpr: draft }
@@ -422,6 +471,7 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
         return { ...r, name, columnsText }
       }
       if (key === 'unique') return { ...r, unique: asBool(value, r.unique) }
+      if (key === 'partialWhere') return { ...r, partialWhere: String(value ?? '') }
       return r
     })
   }
@@ -455,6 +505,7 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
       )
     }
     indexes.value = syncPrimaryIndexFromColumns(indexes.value, columns.value)
+    if (editingColKey.value === key) editingColKey.value = null
   }
 
   function removeIdx(key: string): void {
@@ -462,14 +513,15 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
     if (!target) return
     if (target.primary) {
       columns.value = applyPrimaryIndexToColumns(columns.value, '')
-    }
-    if (!target.originalName) {
+      indexes.value = syncPrimaryIndexFromColumns(indexes.value, columns.value)
+    } else if (!target.originalName) {
       indexes.value = indexes.value.filter((i) => i.__rowKey !== key)
-      return
+    } else {
+      indexes.value = indexes.value.map((i) =>
+        i.__rowKey === key ? { ...i, removed: true } : i,
+      )
     }
-    indexes.value = indexes.value.map((i) =>
-      i.__rowKey === key ? { ...i, removed: true } : i,
-    )
+    if (editingIdxKey.value === key) editingIdxKey.value = null
   }
 
   function removeFk(key: string): void {
@@ -477,23 +529,60 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
     if (!target) return
     if (!target.originalName) {
       foreignKeys.value = foreignKeys.value.filter((f) => f.__rowKey !== key)
-      return
+    } else {
+      foreignKeys.value = foreignKeys.value.map((f) =>
+        f.__rowKey === key ? { ...f, removed: true } : f,
+      )
     }
-    foreignKeys.value = foreignKeys.value.map((f) =>
-      f.__rowKey === key ? { ...f, removed: true } : f,
-    )
+    if (editingFkKey.value === key) editingFkKey.value = null
   }
 
   function onAddCurrent(): void {
     if (activeSection.value === 'indexes') {
-      indexes.value = [...indexes.value, newEmptyIndex()]
+      const idx = newEmptyIndex()
+      indexes.value = [...indexes.value, idx]
+      editingIdxKey.value = idx.__rowKey
+      editingColKey.value = null
+      editingFkKey.value = null
       return
     }
     if (activeSection.value === 'foreignKeys') {
-      foreignKeys.value = [...foreignKeys.value, newEmptyForeignKey()]
+      const fk = newEmptyForeignKey()
+      foreignKeys.value = [...foreignKeys.value, fk]
+      editingFkKey.value = fk.__rowKey
+      editingColKey.value = null
+      editingIdxKey.value = null
+      void ensureRefTables()
       return
     }
-    columns.value = [...columns.value, newEmptyColumn()]
+    const col = newEmptyColumn()
+    col.name = `col_${columns.value.filter((c) => !c.removed).length + 1}`
+    columns.value = [...columns.value, col]
+    editingColKey.value = col.__rowKey
+    editingIdxKey.value = null
+    editingFkKey.value = null
+  }
+
+  function onColumnRowDrop(
+    dragKeys: string[],
+    dropKey: string,
+    position: RsTableRowDropPosition,
+  ): void {
+    const dragKey = dragKeys[0]
+    if (!dragKey || dragKey === dropKey) return
+    const visible = columns.value.filter((c) => !c.removed)
+    const dragIndex = visible.findIndex((c) => c.__rowKey === dragKey)
+    const dropIndex = visible.findIndex((c) => c.__rowKey === dropKey)
+    if (dragIndex < 0 || dropIndex < 0) return
+    const reordered = reorderTableRows(visible, dragIndex, dropIndex, position)
+    const removed = columns.value.filter((c) => c.removed)
+    columns.value = [...reordered, ...removed]
+  }
+
+  function onFkEditStart(row: FkRow, column: RsTableColumn<FkRow>): void {
+    const key = String(column.key)
+    if (key === 'refTable') void ensureRefTables()
+    if (key === 'refColumnsText' && row.refTable) void loadRefColumns(row.refTable)
   }
 
   const editingCol = computed(
@@ -527,15 +616,27 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
   ): void {
     patchColumn(key, (c) => {
       const updated = { ...c, [field]: value }
-      if (field === 'typeBase' || field === 'typeLength') {
+      if (field === 'typeBase' || field === 'typeLength' || field === 'typeScale') {
         if (field === 'typeBase') {
           const nextBase = String(value).toUpperCase()
           const kind = dataTypeParamKind(nextBase)
           const opt = SQLITE_BASE_TYPE_OPTIONS.find((o) => o.base === nextBase)
           updated.typeBase = nextBase
-          if (kind === 'none') updated.typeLength = undefined
-          else if (kind === 'length' && updated.typeLength == null) {
-            updated.typeLength = opt?.defaultLength ?? 255
+          if (kind === 'none') {
+            updated.typeLength = undefined
+            updated.typeScale = undefined
+          } else if (kind === 'length') {
+            updated.typeScale = undefined
+            if (updated.typeLength == null) {
+              updated.typeLength = opt?.defaultLength ?? 255
+            }
+          } else if (kind === 'precision') {
+            if (updated.typeLength == null) {
+              updated.typeLength = opt?.defaultPrecision ?? 10
+            }
+            if (updated.typeScale == null) {
+              updated.typeScale = opt?.defaultScale ?? 2
+            }
           }
         }
         updated.dataType = syncColumnDataType(updated)
@@ -575,7 +676,7 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
 
   function updateIdxSideField(
     key: string,
-    field: 'name' | 'columnsText' | 'unique',
+    field: 'name' | 'columnsText' | 'unique' | 'partialWhere',
     value: string | boolean,
   ): void {
     const current = indexes.value.find((r) => r.__rowKey === key)
@@ -591,6 +692,7 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
         return { ...r, name, columnsText }
       }
       if (field === 'unique') return { ...r, unique: Boolean(value) }
+      if (field === 'partialWhere') return { ...r, partialWhere: String(value) }
       return r
     })
   }
@@ -693,6 +795,8 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
         const fks = buildCreateForeignKeys(foreignKeys.value)
         return fks.length ? fks : undefined
       })(),
+      ...(createStrict.value ? { strict: true } : {}),
+      ...(createWithoutRowid.value ? { withoutRowid: true } : {}),
     }
   }
 
@@ -821,7 +925,22 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
     if (tabId) {
       tabs.updateTabProps(tabId, { designMode: 'alter', table: name })
       const designLabel = t('modules.sqlite.session.tabDesign')
-      tabs.updateTitle(tabId, `${schemaName.value}.${name} · ${designLabel}`)
+      const base = `${schemaName.value}.${name}`
+      // Tab 只显示表名；完整路径放 tip（对齐 MySQL）
+      tabs.updateTitle(tabId, name)
+      const tab = tabs.allTabs.find((x) => x.tabId === tabId)
+      if (tab) {
+        const resourcePrefix = `${t('workspace.tabTipResource')}:`
+        const featurePrefix = `${t('workspace.tabTipFeature')}:`
+        const head = (tab.tooltip ?? '')
+          .split('\n')
+          .filter(Boolean)
+          .filter((line) => !line.startsWith(resourcePrefix) && !line.startsWith(featurePrefix))
+        const next = [...head]
+        if (base) next.push(`${resourcePrefix} ${base}`)
+        next.push(`${featurePrefix} ${designLabel}`)
+        tab.tooltip = next.join('\n')
+      }
     }
   }
 
@@ -890,6 +1009,8 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
     if (columns.value.length === 0) {
       columns.value = defaultCreateTableColumns()
       indexes.value = syncPrimaryIndexFromColumns([], columns.value)
+      createStrict.value = false
+      createWithoutRowid.value = false
     }
   }
 
@@ -924,6 +1045,8 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
     designStrategy,
     designWarning,
     tableName,
+    createStrict,
+    createWithoutRowid,
     modeCreate,
     effectiveTable,
     designMode,
@@ -953,6 +1076,8 @@ export function useSqliteDesignPane(props: SqliteDesignPaneProps) {
     onColCommit,
     onIdxCommit,
     onFkCommit,
+    onFkEditStart,
+    onColumnRowDrop,
     removeCol,
     removeIdx,
     removeFk,

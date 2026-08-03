@@ -50,6 +50,8 @@ function queryProps(ctx: DamengPaneContext): Record<string, unknown> {
     profileId: ctx.profileId,
     schema: ctx.schema,
     initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     sessionLabel: ctx.sessionLabel,
   }
@@ -210,7 +212,6 @@ export function normalizeDamengFeature(tab: string | undefined): DamengSessionTa
   ) {
     return tab
   }
-  if (tab === 'source') return 'objectScript'
   return 'query'
 }
 

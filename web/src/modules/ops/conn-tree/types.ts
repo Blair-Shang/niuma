@@ -32,7 +32,7 @@ export interface ConnOpenContext {
   queryExecMode?: 'paged' | 'batch'
   /** 表设计 / 对象脚本：create 打开新建；alter 打开编辑。 */
   designMode?: 'create' | 'alter'
-  /** 对象脚本种类（各协议扩展；达梦含 package/trigger/synonym/sequence） */
+  /** 对象脚本种类（各协议扩展；达梦含 package/trigger/synonym/sequence；SQLite 含 index） */
   objectKind?:
     | 'view'
     | 'procedure'
@@ -43,5 +43,6 @@ export interface ConnOpenContext {
     | 'trigger'
     | 'synonym'
     | 'sequence'
+    | 'index'
 }
 

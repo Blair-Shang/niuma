@@ -32,6 +32,7 @@ const props = defineProps<{
   oid?: number
   initialTab?: VastSessionTab
   initialSql?: string
+  draftSql?: string
   autoRunInitialSql?: boolean
   designMode?: 'create' | 'alter'
   tabId?: string
@@ -139,6 +140,8 @@ const paneProps = computed(() => ({
     oid: props.oid,
     designMode: props.designMode,
     initialSql: props.initialSql,
+    draftSql: props.draftSql,
+    tabId: props.tabId,
     autoRunInitialSql: props.autoRunInitialSql,
     sessionLabel: sessionLabel.value,
   }),

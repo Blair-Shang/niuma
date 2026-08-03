@@ -354,6 +354,8 @@ export interface SqliteIoCsvOptions {
   delimiter?: string
   nullString?: string
   truncate?: boolean
+  /** utf-8 | gbk | gb18030；默认 utf-8 */
+  encoding?: string
   /** CSV 表头（或 col1…）→ 表列名；空映射跳过该源列 */
   columnMap?: Record<string, string>
 }
@@ -457,6 +459,8 @@ export interface SqliteDesignIndexSpec {
   columns: string[]
   unique?: boolean
   primary?: boolean
+  /** CREATE INDEX … WHERE 表达式 */
+  partialWhere?: string
 }
 
 export interface SqliteDesignForeignKeySpec {
@@ -489,6 +493,8 @@ export type SqliteDesignOp = {
   check?: string
   generatedExpr?: string
   generatedType?: string
+  /** CREATE INDEX … WHERE */
+  partialWhere?: string
 }
 
 export interface SqliteDdlDesignPreviewParams {
@@ -531,6 +537,10 @@ export interface SqliteDdlCreateTableParams {
   indexes?: SqliteDesignIndexSpec[]
   foreignKeys?: SqliteDesignForeignKeySpec[]
   ifNotExists?: boolean
+  /** SQLite STRICT 表 */
+  strict?: boolean
+  /** WITHOUT ROWID 表 */
+  withoutRowid?: boolean
 }
 
 export interface SqliteDdlCreateTableResult {
@@ -565,4 +575,61 @@ export interface SqliteBackupDoneEvent {
   outputPath?: string
   pages?: number
   message?: string
+}
+
+/** SQL Language Server（Bridge 隧道 LSP） */
+export interface SqliteLspOpenParams {
+  sessionId: string
+  clientId: string
+  /** schema（main / ATTACH 别名）；可空 */
+  database?: string
+}
+
+export interface SqliteLspOpenResult {
+  connectionId: string
+}
+
+export interface SqliteLspRpcParams {
+  connectionId: string
+  sessionId: string
+  message: Record<string, unknown>
+}
+
+export interface SqliteLspRpcResult {
+  ok?: boolean
+  message?: Record<string, unknown>
+}
+
+export interface SqliteLspCloseParams {
+  connectionId: string
+  sessionId?: string
+}
+
+export interface SqliteLspLexiconParams {
+  sessionId?: string
+}
+
+export interface SqliteLspLexiconResult {
+  keywords: string[]
+  functions: string[]
+}
+
+export type SqliteObjectKind = 'view' | 'trigger' | 'index'
+
+export interface SqliteObjectScriptParams {
+  sessionId?: string
+  kind: SqliteObjectKind | string
+  sql: string
+  schema?: string
+  database?: string
+  existingName?: string
+  mode?: 'create' | 'alter' | string
+  selectionOnly?: boolean
+  preferFallback?: boolean
+}
+
+export interface SqliteObjectScriptResult {
+  sql: string[]
+  strategy: string
+  durationMs?: number
 }

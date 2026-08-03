@@ -35,15 +35,14 @@ import {
   type BrowseDataFormat,
 } from '@/modules/vastbase/utils/browse-io'
 import {
+  alignForValueType,
+  formatBrowseCellValue,
   formatRowsAsTsv,
+  isBrowseFilterCompletionOpen,
   mapPasteToColumnRecords,
   parseClipboardMatrix,
-} from '@/modules/vastbase/utils/browse-clipboard'
-import { formatBrowseCellValue, isBrowseFilterCompletionOpen } from '@/modules/database'
-import {
-  alignForValueType,
   resolveSqlValueType,
-} from '@/modules/vastbase/utils/column-value-type'
+} from '@/modules/database'
 import { parseEditValue, toSqlLiteral } from '@/modules/vastbase/utils/sql-literal'
 import { openVastbaseDataTask } from '@/modules/vastbase/data-tasks'
 

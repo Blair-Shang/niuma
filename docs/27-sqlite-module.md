@@ -1,7 +1,7 @@
 # 27 — SQLite 管理模块（Layer-1 能力服务 + Web 模块）
 
 > 版本：v0.9 · 日期：2026-07-26  
-> 状态：**模块闭环**（P0–P4 + 专业化：设计器 CHECK/GENERATED、ATTACH 文件选择器、DETACH/库属性、CSV BOM；SQLCipher 策略见 §4.1，仍未实现）  
+> 状态：**模块闭环**（P0–P4 已齐；可选 `-tags sqlcipher`；Bridge LSP / ObjectScript / CSV 多编码 / STRICT·部分索引已落地）  
 > **隔离**：**独立进程 / 独立 kind / 独立 Web 模块 / 独立实现**；禁止与其它库服务混用代码或运行时互调  
 > 关联：[13](./13-service-layout.md) · [14](./14-capability-connection-framework.md) · [18](./18-ops-connection-tree.md) · [21](./21-session-registry.md) · [23](./23-sql-dialect-completion.md) · [25 — MySQL](./25-mysql-module.md)（**节奏对照，非实现依赖**） · [database-schema.md](./database-schema.md)（平台元库，**非**本模块）
 
@@ -117,6 +117,8 @@
       "sqlite.pragma",
       "format.sqlite",
       "editor.builtin_sql",
+      "editor.sql_lsp",
+      "split.sqlite_trigger",
       "ddl.if_not_exists",
       "json.functions",
       "cte.window"
@@ -135,14 +137,18 @@
 | `sqlite.bracket_ident` | 标识符方括号 `[name]`（兼容） | ✓ | P0 |
 | `sqlite.pragma` | PRAGMA 元数据 / 设置 | ✓ | P0 |
 | `format.sqlite` | 格式化方言 `sqlite` | ✓ | P0 |
-| `editor.builtin_sql` | Monaco 内置 / genericsql（无专用 Worker） | ✓ | P0 |
+| `editor.builtin_sql` | Monaco 内置 SQL 语言基线 | ✓ | P0 |
+| `editor.sql_lsp` | Bridge 隧道 LSP（`sqliteparser`） | ✓ | 缺口排期 |
+| `split.sqlite_trigger` | 触发器 BEGIN…END 安全拆句 | ✓ | 缺口排期 |
 | `ddl.if_not_exists` | `CREATE … IF NOT EXISTS` | ✓ | P2 |
+| `ddl.create_or_replace_view` | `CREATE OR REPLACE VIEW`（版本足够时） | 按版本 | 缺口排期 |
 | `json.functions` | `json_*` 函数（版本足够时） | 按版本 | P2 |
 | `cte.window` | CTE / 窗口函数 | ✓（现代 SQLite） | P0/P2 |
 | `sqlite.wal` | 文件以 WAL 模式打开（连接选项） | 按选项 | P0 |
 | `sqlite.readonly` | 只读打开 | 按选项 | P0 |
 | `sqlite.attach` | 支持 ATTACH 附加库（树展示） | ✓ | P3 |
-| `io.csv` | CSV 旁路导入导出 | ✓ | P3 |
+| `sqlite.sqlcipher` | 可选 `-tags sqlcipher` 加密打开 | 仅 cipher 构建 | 缺口排期 |
+| `io.csv` | CSV 旁路导入导出（utf-8 / gbk / gb18030） | ✓ | P3 |
 | `io.sql_file` | SQL 转储 / 执行文件 | ✓ | P3 |
 | `io.backup_api` | 使用 Backup API 做安全拷贝 | ✓ | P4 |
 | `ddl.design` | 表设计器 Preview/Apply（含重建表） | ✓ | P4 |
@@ -266,16 +272,17 @@ SQLite 的 session/query/tree/meta/IO **适配代码只写在** `modules/sqlite/
 
 P0 验收：本地存在文件 `session.test` 成功；坏路径 / 无权限明确失败；只读打开后写语句失败信息可读。
 
-### 4.1 SQLCipher 策略（明确未支持）
+### 4.1 SQLCipher 策略（可选构建）
 
 | 项 | 决策 |
 |----|------|
-| 当前驱动 | **仅** `modernc.org/sqlite`（纯 Go，无 CGO） |
-| 口令非空 | **连接失败**（禁止静默忽略，避免用户以为已加密打开） |
-| 表单 | 高级 Tab 保留口令字段 + 禁用说明；口令仍可写入 Vault 以便未来启用 |
-| 若引入 SQLCipher | 仍只在 `sqlite-service` 内实现；用 Capability / 可选构建标签切换；**禁止**编进 platform-core |
-| 备选路径 | CGO `mattn/go-sqlite3`+SQLCipher **不作为默认**；若评估，须独立二进制或 build tag，且文档/Cap 明示 |
-| 验收红线 | 明文库空口令可连；填口令必失败且错误可读；无「假成功」 |
+| 默认驱动 | **`modernc.org/sqlite`**（纯 Go，无 CGO）；默认发布包 **不含** SQLCipher |
+| 可选构建 | `-tags sqlcipher` + `CGO_ENABLED=1`，驱动换 `github.com/mutecomm/go-sqlcipher/v4`；构建脚本：`build-services.ps1 -SqlCipher` / `build-services.sh --sqlcipher` |
+| Cap | 仅 cipher 构建在 Probe 下发 `sqlite.sqlcipher` |
+| 口令非空（默认构建） | **连接失败**（禁止静默忽略） |
+| 口令非空（cipher 构建） | 经 `_pragma_key` 打开；失败返回可读错误 |
+| 表单 | 高级 Tab 保留口令字段；口令走 Vault；**禁止**编进 platform-core |
+| 验收红线 | 默认构建：明文可连、填口令失败；cipher 构建：正确口令可开加密库，错误口令失败 |
 
 ---
 
@@ -360,12 +367,14 @@ res:{profileId}:schema:main:view:{view}
 
 | 方法 | 阶段 |
 |------|------|
-| `ddl.designPreview` / `ddl.designApply` / `ddl.createTable*` | P4（`strategy: alter|rebuild`；类型/空约束/PK/FK 等走重建表） |
+| `ddl.designPreview` / `ddl.designApply` / `ddl.createTable*` | P4（`strategy: alter|rebuild`；STRICT / WITHOUT ROWID / 部分索引） |
+| `ddl.objectScriptPreview` / `ddl.objectScriptApply` | 视图 / 触发器 / 索引脚本（默认 drop_create） |
+| `lsp.open` / `lsp.rpc` / `lsp.close` / `lsp.lexicon` | Bridge LSP（`sqliteparser`） |
 | `backup.copy` | P4（modernc Online Backup API） |
-| `io.exportCsv` / `io.importCsv` / `io.dumpSql` / `io.execSqlFile` / `io.cancel` | P3 |
+| `io.exportCsv` / `io.importCsv` / `io.dumpSql` / `io.execSqlFile` / `io.cancel` | P3（CSV `encoding`: utf-8 / gbk / gb18030） |
 
 Dump：纯 Go 生成 `CREATE` + `INSERT`；可选 `.dump` 风格。导入大批量建议事务批提交。  
-全表 CSV 导出写 **UTF-8 BOM**（Excel 友好），与 MySQL 旁路对齐。
+全表 CSV 默认 **UTF-8 BOM**（Excel 友好）；导入/导出可选 `utf-8` / `gbk` / `gb18030`（`csvOptions.encoding`），与 ClickHouse / MySQL 旁路对齐。
 
 ### 5.7 事务
 
@@ -405,7 +414,9 @@ Dump：纯 Go 生成 `CREATE` + `INSERT`；可选 `.dump` 风格。导入大批�
 ### 6.3.1 表设计器列扩展
 
 - 列级 **CHECK**、**GENERATED ALWAYS AS … VIRTUAL|STORED**（新建 / 重建表路径）  
-- `meta.columns` 从 `table_xinfo` + DDL 解析回填；变更 CHECK/GENERATED 走 rebuild
+- `meta.columns` 从 `table_xinfo` + DDL 解析回填；变更 CHECK/GENERATED 走 rebuild  
+- 新建表可选 **STRICT**、**WITHOUT ROWID**（`CreateTableParams.strict` / `withoutRowid`）  
+- 索引支持 **部分索引** `CREATE … INDEX … WHERE`（`partialWhere`；设计器索引侧栏与 DesignOp `add_index`）
 
 ### 6.4 sql-editor 补齐清单
 
@@ -566,3 +577,4 @@ permissions: []
 | v0.7 | 2026-07-26 | 闭环：sql-editor Cap/AI/单测；BrowseDataShell；口令非空拒绝；13/14/23 索引 |
 | v0.8 | 2026-07-26 | 专业化：Browse 编辑/多格式 IO；树 DDL/诊断；`session.detach`；`meta.databaseInfo`；CSV BOM；tree/meta 短连 resolve |
 | v0.9 | 2026-07-26 | 设计器 CHECK/GENERATED；ATTACH 行编辑+文件选择；§4.1 SQLCipher 策略说明 |
+| v1.0 | 2026-08-02 | 缺口排期落地：可选 SQLCipher；Bridge LSP + 触发器拆句；ObjectScript；CSV 多编码；STRICT / WITHOUT ROWID / 部分索引 |

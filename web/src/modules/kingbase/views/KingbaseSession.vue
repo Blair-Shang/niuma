@@ -36,6 +36,7 @@ const props = defineProps<{
   designMode?: 'create' | 'alter'
   initialTab?: KingbaseSessionTab
   initialSql?: string
+  draftSql?: string
   autoRunInitialSql?: boolean
   queryExecMode?: 'paged' | 'batch'
   tabId?: string
@@ -76,6 +77,7 @@ const pane = kingbasePaneRegistry[feature].resolvePane({
   objectKind: props.objectKind,
   objectName: props.objectName,
   designMode: props.designMode,
+  draftSql: props.draftSql,
 })
 const PaneView = defineAsyncComponent(pane.loader as () => Promise<{ default: Component }>)
 const active = ref(true)
@@ -102,6 +104,7 @@ const paneProps = computed(() => ({
     oid: props.oid,
     designMode: props.designMode,
     initialSql: props.initialSql,
+    draftSql: props.draftSql,
     autoRunInitialSql: props.autoRunInitialSql,
     queryExecMode: props.queryExecMode,
     sessionLabel: sessionLabel.value,

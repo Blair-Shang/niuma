@@ -16,6 +16,8 @@ const props = defineProps<{
   oid?: number
   feature: VastSessionTab
   initialSql?: string
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   sessionLabel?: string
   active: boolean

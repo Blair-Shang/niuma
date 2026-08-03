@@ -24,6 +24,8 @@ export interface KingbasePaneScope {
   args?: string
   oid?: number
   designMode?: 'create' | 'alter'
+  /** 查询正文草稿（随 workspace.tabs 持久化） */
+  draftSql?: string
 }
 
 export interface KingbasePaneContext extends KingbasePaneScope {
@@ -55,6 +57,8 @@ function queryProps(ctx: KingbasePaneContext): Record<string, unknown> {
     database: ctx.database,
     schema: ctx.schema,
     initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     queryExecMode: ctx.queryExecMode === 'batch' ? 'batch' : ctx.queryExecMode === 'paged' ? 'paged' : undefined,
     sessionLabel: ctx.sessionLabel,

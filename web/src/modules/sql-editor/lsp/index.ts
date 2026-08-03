@@ -8,7 +8,13 @@ export type {
   SqlLspBridgeApi,
 } from './types'
 export { buildSqlDocumentUri, parseSqlDocumentUri } from './types'
-export { MYSQL_MONACO_LANGUAGE_ID, DAMENG_MONACO_LANGUAGE_ID, KINGBASE_MONACO_LANGUAGE_ID, CLICKHOUSE_MONACO_LANGUAGE_ID } from './language-ids'
+export {
+  MYSQL_MONACO_LANGUAGE_ID,
+  DAMENG_MONACO_LANGUAGE_ID,
+  KINGBASE_MONACO_LANGUAGE_ID,
+  CLICKHOUSE_MONACO_LANGUAGE_ID,
+  SQLITE_MONACO_LANGUAGE_ID,
+} from './language-ids'
 export { SqlLspClient } from './sql-lsp-client'
 export { subscribeLspEvents, lspRpcRoundTrip } from './bridge-transport'
 export {
@@ -16,10 +22,12 @@ export {
   ensureDamengLspLanguage,
   ensureKingbaseLspLanguage,
   ensureClickHouseLspLanguage,
+  ensureSqliteLspLanguage,
   setMysqlLexiconFetcher,
   setDamengLexiconFetcher,
   setKingbaseLexiconFetcher,
   setClickHouseLexiconFetcher,
+  setSqliteLexiconFetcher,
   attachSqlLsp,
   type AttachSqlLspOptions,
   type EnsureSqlLspLanguageOptions,

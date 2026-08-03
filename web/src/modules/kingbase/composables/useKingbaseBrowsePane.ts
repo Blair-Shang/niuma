@@ -25,9 +25,13 @@ import { useConnectionNavigation } from '@/modules/ops/composables/useConnection
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import type { ConnItem } from '@/modules/ops/types'
 import { qualifiedName, quoteIdent } from '@/modules/kingbase/sql-seed'
+import {
+  formatRowsAsTsv,
+  mapPasteToColumnRecords,
+  parseClipboardMatrix,
+} from '@/modules/database'
 import { parseEditValue, toSqlLiteral } from '@/modules/kingbase/utils/sql-literal'
 import { parseBrowseImport, buildBrowseExportPayload, acceptExtensionsForFormat, type BrowseDataFormat } from '@/modules/kingbase/utils/browse-io'
-import { formatRowsAsTsv, mapPasteToColumnRecords, parseClipboardMatrix } from '@/modules/kingbase/utils/browse-clipboard'
 import { openKingbaseDataTask } from '@/modules/kingbase/data-tasks'
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000] as const

@@ -2,6 +2,7 @@
  * SQLite 连接树 Provider：
  * connection → schema → {Tables|Views|Indexes|Triggers} → object
  *
+ * 右键菜单对齐同仓库 MySQL：分隔分组 + 新建/工具子菜单 + 生成脚本 + 维护子菜单 + 导入导出。
  * 菜单同步定义；激活动作经 dynamic import 加载 conn-tree-actions。
  */
 import type { RsContextMenuItem } from '@niuma/ui'
@@ -35,6 +36,8 @@ function segmentName(path: ConnResourcePath | undefined, kind: string): string |
 function lastSegment(path: ConnResourcePath): { kind: string; name: string } | undefined {
   return path.segments[path.segments.length - 1]
 }
+
+const sep = (key: string): RsContextMenuItem => ({ key, label: '', separator: true })
 
 type SqliteCategoryId = 'tables' | 'views' | 'indexes' | 'triggers'
 
@@ -207,57 +210,73 @@ const CONN_MENU_KEYS = new Set([
   'integrity',
   'quickCheck',
   'walCheckpoint',
+  'reindex',
   'dbInfo',
 ])
 
-function maintainMenus(scope: 'conn' | 'schema' | 'table'): RsContextMenuItem[] {
+function scriptMenus(allowMutating: boolean): RsContextMenuItem {
+  const children: RsContextMenuItem[] = [
+    { key: 'genSelect', label: t('modules.sqlite.tree.genSelect'), icon: 'code-2' },
+    { key: 'genCount', label: t('modules.sqlite.tree.genCount'), icon: 'hash' },
+  ]
+  if (allowMutating) {
+    children.push(
+      { key: 'genInsert', label: t('modules.sqlite.tree.genInsert'), icon: 'square-plus' },
+      { key: 'genUpdate', label: t('modules.sqlite.tree.genUpdate'), icon: 'pencil' },
+      {
+        key: 'genDelete',
+        label: t('modules.sqlite.tree.genDelete'),
+        icon: 'trash-2',
+        danger: true,
+      },
+    )
+  }
+  return {
+    key: 'scripts',
+    label: t('modules.sqlite.tree.scripts'),
+    icon: 'file-text',
+    children,
+  }
+}
+
+/**
+ * 库级维护（VACUUM / ANALYZE / REINDEX / 完整性 / WAL / 属性）。
+ * 表级仅 ANALYZE + REINDEX（对齐 MySQL 表维护子菜单密度）。
+ */
+function maintenanceMenus(scope: 'conn' | 'schema' | 'table'): RsContextMenuItem {
   const children: RsContextMenuItem[] = []
   if (scope === 'table') {
-    children.push({
-      key: 'analyze',
-      label: t('modules.sqlite.tree.analyze'),
-      icon: 'activity',
-    })
+    children.push(
+      { key: 'analyze', label: t('modules.sqlite.tree.analyze'), icon: 'activity' },
+      { key: 'reindex', label: t('modules.sqlite.tree.reindex'), icon: 'refresh-cw' },
+    )
   } else {
     children.push(
       { key: 'vacuum', label: t('modules.sqlite.tree.vacuum'), icon: 'zap' },
       { key: 'analyze', label: t('modules.sqlite.tree.analyze'), icon: 'activity' },
-      { key: 'sep-check', label: '', separator: true },
-      {
-        key: 'integrity',
-        label: t('modules.sqlite.tree.integrity'),
-        icon: 'shield-check',
-      },
-      {
-        key: 'quickCheck',
-        label: t('modules.sqlite.tree.quickCheck'),
-        icon: 'shield-check',
-      },
-      {
-        key: 'walCheckpoint',
-        label: t('modules.sqlite.tree.walCheckpoint'),
-        icon: 'archive',
-      },
-      { key: 'sep-info', label: '', separator: true },
+      { key: 'reindex', label: t('modules.sqlite.tree.reindex'), icon: 'refresh-cw' },
+      sep('sep-check'),
+      { key: 'integrity', label: t('modules.sqlite.tree.integrity'), icon: 'shield-check' },
+      { key: 'quickCheck', label: t('modules.sqlite.tree.quickCheck'), icon: 'shield-check' },
+      { key: 'walCheckpoint', label: t('modules.sqlite.tree.walCheckpoint'), icon: 'archive' },
+      sep('sep-info'),
       { key: 'dbInfo', label: t('modules.sqlite.tree.dbInfo'), icon: 'info' },
     )
   }
-  return [
-    {
-      key: 'maintainMenu',
-      label: t('modules.sqlite.tree.maintainMenu'),
-      icon: 'wrench',
-      children,
-    },
-  ]
+  return {
+    key: 'maintenance',
+    label: t('modules.sqlite.tree.maintenance'),
+    icon: 'wrench',
+    children,
+  }
 }
 
 /**
- * 表/视图导入导出：
+ * 表/视图导入导出（对齐 MySQL）：
  * - 基表：导入 CSV、导出 CSV、转储 SQL
  * - 视图：仅导出 CSV 与转储 SQL（不可导入）
  */
-function dataIoMenus(isView: boolean): RsContextMenuItem[] {
+function dataIoMenus(isView: boolean): RsContextMenuItem {
   const children: RsContextMenuItem[] = []
   if (!isView) {
     children.push({
@@ -278,87 +297,148 @@ function dataIoMenus(isView: boolean): RsContextMenuItem[] {
       icon: 'file-down',
     },
   )
-  return [
-    {
-      key: 'dataIo',
-      label: t('modules.sqlite.tree.dataIo'),
-      icon: 'arrow-left-right',
-      children,
-    },
-  ]
+  return {
+    key: 'dataIo',
+    label: t('modules.sqlite.tree.dataIo'),
+    icon: 'arrow-left-right',
+    children,
+  }
 }
 
-function schemaToolsMenus(): RsContextMenuItem[] {
-  return [
-    {
-      key: 'toolsMenu',
-      label: t('modules.sqlite.tree.toolsMenu'),
-      icon: 'wrench',
-      children: [
-        {
-          key: 'dumpSql',
-          label: t('modules.sqlite.tree.dumpSql'),
-          icon: 'file-down',
-        },
-        {
-          key: 'execSqlFile',
-          label: t('modules.sqlite.tree.execSqlFile'),
-          icon: 'file-up',
-        },
-        { key: 'sep-backup', label: '', separator: true },
-        {
-          key: 'backup',
-          label: t('modules.sqlite.tree.backup'),
-          icon: 'archive',
-        },
-      ],
-    },
-    ...maintainMenus('schema'),
-  ]
+/** schema 级「新建」：表走设计器；视图 / 索引 / 触发器走对象脚本。 */
+function schemaCreateMenus(): RsContextMenuItem {
+  return {
+    key: 'createMenu',
+    label: t('modules.sqlite.tree.createMenu'),
+    icon: 'plus',
+    children: [
+      {
+        key: 'createDesign',
+        label: t('modules.sqlite.tree.create.tables'),
+        icon: 'layout-list',
+      },
+      {
+        key: 'createView',
+        label: t('modules.sqlite.tree.create.views'),
+        icon: 'eye',
+      },
+      {
+        key: 'createIndex',
+        label: t('modules.sqlite.tree.create.indexes'),
+        icon: 'layers',
+      },
+      {
+        key: 'createTrigger',
+        label: t('modules.sqlite.tree.create.triggers'),
+        icon: 'zap',
+      },
+    ],
+  }
 }
 
-function tableMenuItems(isView: boolean): RsContextMenuItem[] {
-  return [
+/** schema 级工具：转储 / 执行 SQL / 备份（对齐 MySQL Dump/Execute SQL File）。 */
+function schemaToolsMenus(): RsContextMenuItem {
+  return {
+    key: 'toolsMenu',
+    label: t('modules.sqlite.tree.toolsMenu'),
+    icon: 'wrench',
+    children: [
+      {
+        key: 'dumpSql',
+        label: t('modules.sqlite.tree.dumpSql'),
+        icon: 'file-down',
+      },
+      {
+        key: 'execSqlFile',
+        label: t('modules.sqlite.tree.execSqlFile'),
+        icon: 'file-up',
+      },
+      sep('sep-backup'),
+      {
+        key: 'backup',
+        label: t('modules.sqlite.tree.backup'),
+        icon: 'archive',
+      },
+    ],
+  }
+}
+
+function clipboardMenus(includeDdl: boolean): RsContextMenuItem[] {
+  const items: RsContextMenuItem[] = [
+    { key: 'copyName', label: t('modules.sqlite.tree.copyName'), icon: 'copy' },
+    {
+      key: 'copyQualified',
+      label: t('modules.sqlite.tree.copyQualified'),
+      icon: 'clipboard-copy',
+    },
+  ]
+  if (includeDdl) {
+    items.push({ key: 'copyDdl', label: t('modules.sqlite.tree.copyDdl'), icon: 'clipboard' })
+  }
+  return items
+}
+
+function tableMenus(isView: boolean): RsContextMenuItem[] {
+  const items: RsContextMenuItem[] = [
     {
       key: 'open',
       label: t(isView ? 'modules.sqlite.tree.viewOpen' : 'modules.sqlite.tree.tableOpen'),
       icon: isView ? 'eye' : 'table',
     },
-    { key: 'sep-query', label: '', separator: true },
+    sep('sep-query'),
     { key: 'query', label: t('modules.sqlite.tree.tableQuery'), icon: 'code-2' },
-    { key: 'ddl', label: t('modules.sqlite.tree.tableDdl'), icon: 'file-code' },
-    ...(!isView
-      ? ([
-          { key: 'design', label: t('modules.sqlite.tree.design'), icon: 'layout-list' },
-          { key: 'rename', label: t('modules.sqlite.tree.rename'), icon: 'pencil' },
-          { key: 'empty', label: t('modules.sqlite.tree.emptyTable'), icon: 'eraser' },
-          ...maintainMenus('table'),
-        ] as RsContextMenuItem[])
-      : []),
-    { key: 'sep-io', label: '', separator: true },
-    ...dataIoMenus(isView),
-    { key: 'sep-danger', label: '', separator: true },
-    {
-      key: 'drop',
-      label: t(isView ? 'modules.sqlite.tree.dropView' : 'modules.sqlite.tree.dropTable'),
-      icon: 'trash-2',
-      danger: true,
-    },
-    { key: 'sep-clipboard', label: '', separator: true },
-    { key: 'copyName', label: t('modules.sqlite.tree.copyName'), icon: 'copy' },
-    { key: 'copyQualified', label: t('modules.sqlite.tree.copyQualified'), icon: 'clipboard' },
-    { key: 'copyDdl', label: t('modules.sqlite.tree.copyDdl'), icon: 'clipboard' },
   ]
+
+  if (isView) {
+    items.push({
+      key: 'editView',
+      label: t('modules.sqlite.tree.editView'),
+      icon: 'file-code',
+    })
+  } else {
+    items.push(
+      { key: 'ddl', label: t('modules.sqlite.tree.tableDdl'), icon: 'file-code' },
+      { key: 'design', label: t('modules.sqlite.tree.design'), icon: 'layout-list' },
+    )
+  }
+
+  items.push(scriptMenus(!isView))
+  if (!isView) {
+    items.push(maintenanceMenus('table'))
+  }
+  items.push(dataIoMenus(isView))
+  items.push(sep('sep-mutate'))
+
+  if (!isView) {
+    items.push(
+      { key: 'rename', label: t('modules.sqlite.tree.rename'), icon: 'pencil' },
+      {
+        key: 'truncate',
+        label: t('modules.sqlite.tree.truncate'),
+        icon: 'eraser',
+        danger: true,
+      },
+    )
+  }
+  items.push({
+    key: 'drop',
+    label: t(isView ? 'modules.sqlite.tree.dropView' : 'modules.sqlite.tree.dropTable'),
+    icon: 'trash-2',
+    danger: true,
+  })
+  items.push(sep('sep-clipboard'), ...clipboardMenus(true))
+  return items
 }
 
-function objectMenuItems(category: 'indexes' | 'triggers'): RsContextMenuItem[] {
+function objectMenus(category: 'indexes' | 'triggers'): RsContextMenuItem[] {
   return [
     { key: 'ddl', label: t('modules.sqlite.tree.tableDdl'), icon: 'file-code' },
-    { key: 'sep-clipboard', label: '', separator: true },
-    { key: 'copyName', label: t('modules.sqlite.tree.copyName'), icon: 'copy' },
-    { key: 'copyQualified', label: t('modules.sqlite.tree.copyQualified'), icon: 'clipboard' },
-    { key: 'copyDdl', label: t('modules.sqlite.tree.copyDdl'), icon: 'clipboard' },
-    { key: 'sep-danger', label: '', separator: true },
+    {
+      key: 'editScript',
+      label: t('modules.sqlite.tree.editScript'),
+      icon: 'file-pen',
+    },
+    sep('sep-mutate'),
     {
       key: 'drop',
       label: t(
@@ -368,6 +448,66 @@ function objectMenuItems(category: 'indexes' | 'triggers'): RsContextMenuItem[] 
       ),
       icon: 'trash-2',
       danger: true,
+    },
+    sep('sep-clipboard'),
+    ...clipboardMenus(true),
+  ]
+}
+
+function schemaMenus(schemaName: string): RsContextMenuItem[] {
+  const canDetach = schemaName !== 'main' && schemaName !== 'temp'
+  const items: RsContextMenuItem[] = [
+    { key: 'query', label: t('modules.sqlite.tree.schemaQuery'), icon: 'code-2' },
+    schemaCreateMenus(),
+    schemaToolsMenus(),
+    maintenanceMenus('schema'),
+  ]
+  if (canDetach) {
+    items.push(
+      sep('sep-mutate'),
+      {
+        key: 'detach',
+        label: t('modules.sqlite.tree.detach'),
+        icon: 'unlink',
+        danger: true,
+      },
+    )
+  }
+  items.push(sep('sep-clipboard'), ...clipboardMenus(false))
+  return items
+}
+
+function categoryCreateItem(category: SqliteCategoryId): RsContextMenuItem {
+  if (category === 'tables') {
+    return {
+      key: 'createDesign',
+      label: t('modules.sqlite.tree.create.tables'),
+      icon: 'layout-list',
+    }
+  }
+  const keyByCategory: Record<Exclude<SqliteCategoryId, 'tables'>, string> = {
+    views: 'createView',
+    indexes: 'createIndex',
+    triggers: 'createTrigger',
+  }
+  return {
+    key: keyByCategory[category],
+    label: t(`modules.sqlite.tree.create.${category}`),
+    icon: 'plus',
+  }
+}
+
+function categoryMenus(category: SqliteCategoryId): RsContextMenuItem[] {
+  // 对齐 MySQL：分类节点先「新建…」，再查询 / 整类转储
+  return [
+    categoryCreateItem(category),
+    sep('sep-query'),
+    { key: 'query', label: t('modules.sqlite.tree.schemaQuery'), icon: 'code-2' },
+    sep('sep-io'),
+    {
+      key: 'dumpSql',
+      label: t('modules.sqlite.tree.dumpSql'),
+      icon: 'file-down',
     },
   ]
 }
@@ -425,12 +565,11 @@ export const sqliteConnTreeProvider: ConnTreeChildProvider = {
   },
 
   connMenuItems(): RsContextMenuItem[] {
+    // 对齐 MySQL 连接节点密度：查询 + 备份 + 维护（壳层另附连接/刷新等）
     return [
-      { key: 'sep-query', label: '', separator: true },
       { key: 'query', label: t('modules.sqlite.tree.connQuery'), icon: 'code-2' },
       { key: 'backup', label: t('modules.sqlite.tree.backup'), icon: 'archive' },
-      { key: 'sep-maintain', label: '', separator: true },
-      ...maintainMenus('conn'),
+      maintenanceMenus('conn'),
     ]
   },
 
@@ -445,75 +584,21 @@ export const sqliteConnTreeProvider: ConnTreeChildProvider = {
     if (!last || last.kind === 'hint') return []
 
     if (last.kind === 'schema') {
-      const schemaName = last.name
-      const canDetach = schemaName !== 'main' && schemaName !== 'temp'
-      return [
-        { key: 'query', label: t('modules.sqlite.tree.schemaQuery'), icon: 'code-2' },
-        {
-          key: 'createDesign',
-          label: t('modules.sqlite.tree.createDesign'),
-          icon: 'layout-list',
-        },
-        { key: 'sep-io', label: '', separator: true },
-        ...schemaToolsMenus(),
-        ...(canDetach
-          ? ([
-              { key: 'sep-detach', label: '', separator: true },
-              {
-                key: 'detach',
-                label: t('modules.sqlite.tree.detach'),
-                icon: 'x',
-                danger: true,
-              },
-            ] as RsContextMenuItem[])
-          : []),
-      ]
+      return schemaMenus(last.name)
     }
 
     if (last.kind === 'category' && isCategoryId(last.name)) {
-      if (last.name === 'tables') {
-        return [
-          { key: 'query', label: t('modules.sqlite.tree.schemaQuery'), icon: 'code-2' },
-          {
-            key: 'createDesign',
-            label: t('modules.sqlite.tree.createDesign'),
-            icon: 'layout-list',
-          },
-          { key: 'sep-io', label: '', separator: true },
-          {
-            key: 'dumpSql',
-            label: t('modules.sqlite.tree.dumpSql'),
-            icon: 'file-down',
-          },
-        ]
-      }
-      // 分类节点：整类转储
-      if (
-        last.name === 'views' ||
-        last.name === 'indexes' ||
-        last.name === 'triggers'
-      ) {
-        return [
-          { key: 'query', label: t('modules.sqlite.tree.schemaQuery'), icon: 'code-2' },
-          { key: 'sep-io', label: '', separator: true },
-          {
-            key: 'dumpSql',
-            label: t('modules.sqlite.tree.dumpSql'),
-            icon: 'file-down',
-          },
-        ]
-      }
+      return categoryMenus(last.name)
     }
 
     if (last.kind === 'table' || segmentName(path, 'table')) {
-      const isView = segmentName(path, 'category') === 'views'
-      return tableMenuItems(isView)
+      return tableMenus(segmentName(path, 'category') === 'views')
     }
 
     if (last.kind === 'object') {
       const cat = segmentName(path, 'category')
       if (cat === 'indexes' || cat === 'triggers') {
-        return objectMenuItems(cat)
+        return objectMenus(cat)
       }
     }
 

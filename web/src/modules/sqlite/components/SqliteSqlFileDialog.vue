@@ -159,7 +159,7 @@ function applyDumpScopeDefaults(): void {
     includeTables.value = true
     includeViews.value = false
     includeTriggers.value = true
-    includeIndexes.value = false
+    includeIndexes.value = true
     mode.value = 'structure_and_data'
     return
   }
@@ -189,9 +189,9 @@ function applyDumpScopeDefaults(): void {
   }
   if (scope === 'table' || ctx.value?.table) {
     includeTables.value = true
-    includeViews.value = true
+    includeViews.value = false
     includeTriggers.value = true
-    includeIndexes.value = false
+    includeIndexes.value = true
     return
   }
   includeTables.value = true
@@ -435,32 +435,41 @@ async function onCancelTask(): Promise<void> {
           </DataTransferSection>
         </div>
 
-        <DataTransferSection
-          v-if="!isSingleObjectScope"
-          :title="t('modules.sqlite.io.sectionObjects')"
-        >
+        <DataTransferSection :title="t('modules.sqlite.io.sectionObjects')">
           <div class="nm-sqlite-sf__chips">
             <DataTransferCheck
+              v-if="!isSingleObjectScope"
               v-model="includeTables"
               variant="chip"
               :label="t('modules.sqlite.io.dumpIncludeTables')"
               :disabled="busy || objectFiltersLocked"
             />
             <DataTransferCheck
+              v-if="!isSingleObjectScope"
               v-model="includeViews"
               variant="chip"
               :label="t('modules.sqlite.io.dumpIncludeViews')"
               :disabled="busy || objectFiltersLocked"
             />
             <DataTransferCheck
-              v-if="isSchemaScope || ctx?.dumpScope === 'triggers' || ctx?.dumpScope === 'tables'"
+              v-if="
+                isSchemaScope ||
+                isSingleObjectScope ||
+                ctx?.dumpScope === 'triggers' ||
+                ctx?.dumpScope === 'tables'
+              "
               v-model="includeTriggers"
               variant="chip"
               :label="t('modules.sqlite.io.dumpIncludeTriggers')"
               :disabled="busy || objectFiltersLocked"
             />
             <DataTransferCheck
-              v-if="isSchemaScope || ctx?.dumpScope === 'indexes'"
+              v-if="
+                isSchemaScope ||
+                isSingleObjectScope ||
+                ctx?.dumpScope === 'indexes' ||
+                ctx?.dumpScope === 'tables'
+              "
               v-model="includeIndexes"
               variant="chip"
               :label="t('modules.sqlite.io.dumpIncludeIndexes')"

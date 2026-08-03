@@ -25,6 +25,8 @@ const props = defineProps<{
   oid?: number
   initialTab?: VastSessionTab
   initialSql?: string
+  /** 查询正文草稿（随 workspace.tabs 重启恢复） */
+  draftSql?: string
   autoRunInitialSql?: boolean
   designMode?: 'create' | 'alter'
   tabId?: string
@@ -104,6 +106,7 @@ onMounted(() => {
     :oid="props.oid"
     :initial-tab="props.initialTab"
     :initial-sql="props.initialSql"
+    :draft-sql="props.draftSql"
     :auto-run-initial-sql="props.autoRunInitialSql"
     :design-mode="props.designMode"
     :tab-id="props.tabId"

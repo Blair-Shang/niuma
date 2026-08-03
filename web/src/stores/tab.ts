@@ -20,8 +20,8 @@
  * 持久化由 **Platform 层**唯一负责（SQLite `nm_app_setting`，键 `workspace.tabs`，
  * 经 `platform.settings.*` 桥接；壳层仅透传不落盘）。桌面端 Platform 进程由壳层
  * 自动拉起、始终可用，故**不设 localStorage 缓存/回退**：应用挂载前 `await hydrate()`
- * 一次即完成首屏恢复。恢复时丢弃已卸载模块、复位 dirty、重算插件 props，并兼容
- * 旧的单组结构。
+ * 一次即完成首屏恢复。恢复时丢弃已卸载模块、复位 dirty、重算插件 props。
+ * 持久化形态仅为 `{ groups, activeGroupId }`（产品未发布，不保留旧单组格式迁移）。
  *
  * @see docs/09-web-app-shell.md 第 6 节「Tab 工作区」
  * @see docs/21-session-registry.md §0「Tab 管理架构总览」
@@ -58,7 +58,52 @@ export interface WorkspaceTab {
   dirty: boolean
   /** 悬浮提示（含完整连接信息，如 host + db），优先于 tabLabel 用于 title 属性 */
   tooltip?: string
-  /** 透传给模块组件的 props（扩展模块含 pluginRoot / pluginUiEntry） */
+  /**
+   * 透传给模块根组件的 props（随 `workspace.tabs` 持久化；运行时由
+   * `ModuleWorkspace` 再注入 `tabId`：`v-bind="{ ...tab.props, tabId }"`）。
+   *
+   * 类型为宽松字典：各模块按需读取；未知键忽略。写入路径：
+   * L3 `conn-nav-strategy` → `openTab`；运行中 `updateTabProps`（如草稿）。
+   *
+   * ### 壳层 / 扩展
+   * - `tabId` — 渲染时注入（亦可被 Session 透传子面板）；草稿写回必须用此 id，勿用 activeTabId
+   * - `pluginRoot` / `pluginUiEntry` / `moduleId` — 扩展模块挂载 UI（`defaultModuleProps`）
+   * - `section` — 设置页初始分区（`openSettings`）：appearance / plugins / components /
+   *   ai-providers / ai-mcp / ai-skills / runtime
+   *
+   * ### 连接会话（运维模块通用）
+   * - `profileId` — 连接站点 id（开会话必备；ssh/ftp 常仅有此字段）
+   * - `database` — 逻辑库名；**Redis 为 number（DB index）**；Mongo 为库名
+   * - `schema` — Schema（sqlite / oracle / dameng / kingbase / vastbase）
+   * - `table` — 表/视图名（browse / design / ddl / objectScript）
+   * - `collection` — MongoDB 集合名
+   * - `initialTab` — 打开后固定功能面板，如 query / browse / design / ddl /
+   *   objectScript / monitor / tools / debug / call（方言子集各异；Mongo 另有
+   *   collections / schema / indexes / live / console 等）
+   * - `initialSql` — 打开时预填 SQL（树生成 SELECT、AI「在查询中打开」等）
+   * - `draftSql` — 查询面板 / 对象脚本未保存正文（`useQueryDraftPersist` 等按 tabId 落盘）
+   * - `autoRunInitialSql` — 有 `initialSql` 且非草稿恢复时是否自动执行
+   * - `designMode` — `'create' | 'alter'`（表设计 / 对象脚本）
+   * - `objectKind` — 对象脚本种类（view / function / procedure / sequence / index / trigger …）
+   * - `objectName` — 对象脚本目标名（保存后常回写）
+   * - `objectType` — SQLite 对象类型（table / view / index / trigger），供 DDL/浏览匹配
+   * - `isView` — 按视图只读处理（browse / design）
+   * - `routine` / `routineKind` — 过程/函数名与 `'function' | 'procedure'`（调试 / 调用）
+   * - `sequence` — 序列名（kingbase / dameng objectScript）
+   * - `args` / `oid` — 例程参数签名 / PG 系 OID（kingbase / vastbase 重载区分）
+   * - `queryExecMode` — `'paged' | 'batch'`（kingbase 查询执行模式）
+   *
+   * ### 其它模块
+   * - `terminalSyncGroupId` / `terminalSyncSlot` — SSH 多终端同步组与槽位 `'A'|'B'|'C'|'D'`
+   *
+   * ### 刻意不进 props
+   * - `sessionId` — 物理会话由 L4 Session Registry 管理，不落盘
+   * - 查询结果集 / 游标 / 事务态 — 仅内存
+   * - 连接凭据 — Keychain / Platform，不进 Tab
+   *
+   * @see docs/09-web-app-shell.md §6
+   * @see docs/21-session-registry.md §0.1（profileId / tabId / sessionId）
+   */
   props: Record<string, unknown>
 }
 
@@ -80,6 +125,10 @@ export interface OpenTabSpec {
   closable?: boolean
   /** 悬浮提示（含完整连接信息），优先于 tabLabel 用于 title 属性 */
   tooltip?: string
+  /**
+   * 初始 props，合并进 {@link WorkspaceTab.props}（扩展默认 plugin* 之后）。
+   * 字段约定见 WorkspaceTab.props 注释；`tabId` 由 Shell 渲染时注入，此处一般不必传。
+   */
   props?: Record<string, unknown>
   /** 指定 tabId（用于持久化恢复），默认随机 */
   tabId?: string
@@ -90,6 +139,7 @@ export interface OpenModuleOptions {
   /** 强制新开一个实例；默认聚焦已存在的同模块 Tab */
   forceNew?: boolean
   title?: string
+  /** 同 {@link OpenTabSpec.props} / {@link WorkspaceTab.props} */
   props?: Record<string, unknown>
 }
 
@@ -166,26 +216,17 @@ function isValidTab(t: WorkspaceTab): boolean {
 }
 
 /**
- * 规整持久化数据：兼容旧单组结构；丢弃已卸载模块与空组；保证至少一个组。
+ * 规整持久化数据：只认 `{ groups, activeGroupId }`；丢弃已卸载模块与空组；保证至少一个组。
  *
  * @param raw - 反序列化后的原始对象
  */
 function normalizeState(raw: unknown): PersistedState {
   const parsed = (raw ?? {}) as {
     groups?: Array<Partial<EditorGroup>>
-    tabs?: WorkspaceTab[]
-    activeTabId?: string | null
     activeGroupId?: string
   }
 
-  let rawGroups: Array<Partial<EditorGroup>> = []
-  if (Array.isArray(parsed.groups)) {
-    rawGroups = parsed.groups
-  } else if (Array.isArray(parsed.tabs)) {
-    // 兼容旧的单组结构（{ tabs, activeTabId }）→ 包成一个编辑组
-    rawGroups = [{ tabs: parsed.tabs, activeTabId: parsed.activeTabId, grow: 1 }]
-  }
-
+  const rawGroups = Array.isArray(parsed.groups) ? parsed.groups : []
   const groups: EditorGroup[] = []
   for (const g of rawGroups) {
     const tabs = (g.tabs ?? []).filter(isValidTab).map(restoreTab)

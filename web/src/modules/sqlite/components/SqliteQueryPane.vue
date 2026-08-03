@@ -8,6 +8,9 @@ const props = defineProps<{
   profileId?: string
   schema?: string
   initialSql?: string
+  /** 随 workspace.tabs 持久化的查询正文草稿 */
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   sessionLabel?: string
   active?: boolean

@@ -9,3 +9,6 @@ export const KINGBASE_MONACO_LANGUAGE_ID = 'kingbase' as const
 
 /** ClickHouse Monaco / Bridge LSP languageId（与 ensureClickHouseLspLanguage 一致）。 */
 export const CLICKHOUSE_MONACO_LANGUAGE_ID = 'clickhouse' as const
+
+/** SQLite Monaco / Bridge LSP languageId（与 ensureSqliteLspLanguage 一致）。 */
+export const SQLITE_MONACO_LANGUAGE_ID = 'sqlite' as const

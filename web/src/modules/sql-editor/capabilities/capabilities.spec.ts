@@ -89,16 +89,17 @@ describe('sql-editor capabilities', () => {
     ).toBe(false)
   })
 
-  it('sqlite silently uses builtin sql until LSP', () => {
+  it('sqlite uses Bridge LSP language id', () => {
     const p = defaultSqliteProfile()
     expect(p.family).toBe('sqlite')
     expect(hasCapability(p, Cap.SqliteDoubleQuoteIdent)).toBe(true)
     expect(hasCapability(p, Cap.FormatSqlite)).toBe(true)
+    expect(hasCapability(p, Cap.EditorSqlLsp)).toBe(true)
     expect(resolveFormatterLanguage(p)).toBe('sqlite')
     const monaco = resolveMonacoLanguageFromProfile(p)
-    expect(monaco.monacoLanguageId).toBe('sql')
+    expect(monaco.monacoLanguageId).toBe('sqlite')
     expect(monaco.monacoSqlLanguages).toBe(false)
-    expect(monaco.useLsp).toBe(false)
+    expect(monaco.useLsp).toBe(true)
   })
 
   it('sqlite ai rules cover identifiers AUTOINCREMENT and affinities', () => {

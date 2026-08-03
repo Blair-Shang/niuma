@@ -224,7 +224,7 @@ interface EditorGroup {
 
 > **持久化（Platform 唯一权威）**：编辑组结构（`{ groups, activeGroupId }`）由 **Platform 层** SQLite（`nm_app_setting`，键 `workspace.tabs`）经 `platform.settings.get/set` 桥接读写；**壳层只透传 gRPC，不落盘、不解析业务**（见 [architecture](./architecture.md) 壳层零业务 / [11-platform-core](./11-platform-core.md)）。Web 侧 `web/src/api/settings.ts` 封装该契约。
 >
-> **不设 localStorage 缓存/回退**：桌面端 Platform 进程由壳层自动拉起、始终可用，故应用在 **`mount()` 前 `await useTabStore().hydrate()`** 一次直接从 Platform 取回状态（无首屏闪动）；此后状态变化即写回 Platform。恢复时统一丢弃已卸载模块、复位 `dirty`、重算插件 `props`，并**兼容旧的单组结构**（自动包成一个编辑组）。纯浏览器 dev（无桥接）下不持久化。
+> **不设 localStorage 缓存/回退**：桌面端 Platform 进程由壳层自动拉起、始终可用，故应用在 **`mount()` 前 `await useTabStore().hydrate()`** 一次直接从 Platform 取回状态（无首屏闪动）；此后状态变化即写回 Platform。恢复时统一丢弃已卸载模块、复位 `dirty`、重算插件 `props`；持久化形态仅为 `{ groups, activeGroupId }`（产品未发布，不保留旧单组格式迁移）。纯浏览器 dev（无桥接）下不持久化。
 
 ### 6.3 渲染与保活（`ModuleWorkspace.vue`）
 

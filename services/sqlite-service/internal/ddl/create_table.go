@@ -23,9 +23,10 @@ type CreateTableColumn struct {
 
 // CreateTableIndex 是新建表时附带的索引定义。
 type CreateTableIndex struct {
-	Name    string   `json:"name"`
-	Columns []string `json:"columns,omitempty"`
-	Unique  bool     `json:"unique,omitempty"`
+	Name         string   `json:"name"`
+	Columns      []string `json:"columns,omitempty"`
+	Unique       bool     `json:"unique,omitempty"`
+	PartialWhere string   `json:"partialWhere,omitempty"` // CREATE INDEX … WHERE
 }
 
 // CreateTableForeignKey 是新建表时附带的外键定义。
@@ -41,13 +42,15 @@ type CreateTableForeignKey struct {
 
 // CreateTableParams 是新建表预览 / 应用入参。
 type CreateTableParams struct {
-	Schema      string                  `json:"schema"`
-	Database    string                  `json:"database"` // 兼容：当作 schema
-	Name        string                  `json:"name"`
-	Columns     []CreateTableColumn     `json:"columns"`
-	Indexes     []CreateTableIndex      `json:"indexes,omitempty"`
-	ForeignKeys []CreateTableForeignKey `json:"foreignKeys,omitempty"`
-	IfNotExists bool                    `json:"ifNotExists,omitempty"`
+	Schema       string                  `json:"schema"`
+	Database     string                  `json:"database"` // 兼容：当作 schema
+	Name         string                  `json:"name"`
+	Columns      []CreateTableColumn     `json:"columns"`
+	Indexes      []CreateTableIndex      `json:"indexes,omitempty"`
+	ForeignKeys  []CreateTableForeignKey `json:"foreignKeys,omitempty"`
+	IfNotExists  bool                    `json:"ifNotExists,omitempty"`
+	Strict       bool                    `json:"strict,omitempty"`
+	WithoutRowid bool                    `json:"withoutRowid,omitempty"`
 }
 
 // CreateTableResult 是新建表预览 / 应用结果。
@@ -145,6 +148,16 @@ func BuildCreateTableSQL(p CreateTableParams) ([]string, error) {
 		qualified(schema, p.Name),
 		strings.Join(lines, ",\n"),
 	)
+	var tableOpts []string
+	if p.WithoutRowid {
+		tableOpts = append(tableOpts, "WITHOUT ROWID")
+	}
+	if p.Strict {
+		tableOpts = append(tableOpts, "STRICT")
+	}
+	if len(tableOpts) > 0 {
+		create += " " + strings.Join(tableOpts, ", ")
+	}
 
 	out := []string{create}
 	for i, idx := range p.Indexes {
@@ -160,10 +173,15 @@ func BuildCreateTableSQL(p CreateTableParams) ([]string, error) {
 		if idx.Unique {
 			unique = "UNIQUE "
 		}
-		out = append(out, fmt.Sprintf(
+		// SQLite：schema 挂在索引名上，ON 后只能是裸表名（不能 schema.table）。
+		idxSQL := fmt.Sprintf(
 			"CREATE %sINDEX IF NOT EXISTS %s ON %s (%s)",
-			unique, quoteIdent(name), qualified(schema, p.Name), cols,
-		))
+			unique, qualified(schema, name), quoteIdent(p.Name), cols,
+		)
+		if wh := strings.TrimSpace(idx.PartialWhere); wh != "" {
+			idxSQL += " WHERE " + wh
+		}
+		out = append(out, idxSQL)
 	}
 	return out, nil
 }
@@ -240,21 +258,67 @@ func PreviewCreateTable(params CreateTableParams) (*CreateTableResult, error) {
 	return &CreateTableResult{SQL: sqls}, nil
 }
 
-// ApplyCreateTable 执行建表 SQL。
+// ApplyCreateTable 在事务中执行建表 SQL（含附属索引），避免半成功残留。
 func ApplyCreateTable(ctx context.Context, db *sql.DB, params CreateTableParams) (*CreateTableResult, error) {
 	preview, err := PreviewCreateTable(params)
 	if err != nil {
 		return nil, err
 	}
+	schema := params.schemaName()
+	if !params.IfNotExists {
+		exists, err := objectExists(ctx, db, schema, params.Name)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, fmt.Errorf("sqlite: table %s.%s already exists", quoteIdent(schema), quoteIdent(params.Name))
+		}
+	}
+
 	start := time.Now()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: begin create table tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	for i, s := range preview.SQL {
-		if _, err := db.ExecContext(ctx, s); err != nil {
+		if _, err := tx.ExecContext(ctx, s); err != nil {
 			return nil, fmt.Errorf("sqlite: create table failed at statement %d/%d: %w\nSQL: %s",
 				i+1, len(preview.SQL), err, s)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("sqlite: commit create table tx: %w", err)
 	}
 	return &CreateTableResult{
 		SQL:        preview.SQL,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+// objectExists 检查 schema 下是否已有同名 table/view。
+func objectExists(ctx context.Context, db *sql.DB, schema, name string) (bool, error) {
+	schema = strings.TrimSpace(schema)
+	name = strings.TrimSpace(name)
+	if schema == "" || name == "" {
+		return false, nil
+	}
+	master := quoteIdent(schema) + ".sqlite_master"
+	if strings.EqualFold(schema, "temp") {
+		master = "sqlite_temp_master"
+	}
+	q := fmt.Sprintf(
+		`SELECT 1 FROM %s WHERE type IN ('table','view') AND name = ? COLLATE NOCASE LIMIT 1`,
+		master,
+	)
+	var one int
+	err := db.QueryRowContext(ctx, q, name).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("sqlite: check table exists: %w", err)
+	}
+	return true, nil
 }

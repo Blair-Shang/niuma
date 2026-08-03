@@ -101,8 +101,6 @@ async function browseAttachFile(index: number): Promise<void> {
           autocomplete="new-password"
           :placeholder="t('modules.sqlite.form.encryptionPasswordPlaceholder')"
         />
-        <p class="nm-conn-form__field-hint">{{ t('modules.sqlite.form.encryptionPasswordDisabled') }}</p>
-        <p class="nm-conn-form__field-hint">{{ t('modules.sqlite.form.encryptionPasswordStrategy') }}</p>
       </div>
     </div>
 
@@ -159,7 +157,6 @@ async function browseAttachFile(index: number): Promise<void> {
             {{ t('modules.sqlite.form.attachAdd') }}
           </RsButton>
         </div>
-        <p class="nm-sqlite-attach__hint">{{ t('modules.sqlite.form.attachListHint') }}</p>
       </div>
     </div>
 
@@ -272,14 +269,6 @@ async function browseAttachFile(index: number): Promise<void> {
 .nm-sqlite-attach__actions {
   display: flex;
   margin-top: 0.15rem;
-}
-
-.nm-sqlite-attach__hint,
-.nm-conn-form__field-hint {
-  margin: 0;
-  font-size: var(--rs-font-size-xs, 12px);
-  color: var(--rs-fg-muted, #64748b);
-  line-height: 1.35;
 }
 
 @media (max-width: 720px) {

@@ -140,8 +140,21 @@ export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
         delimiterBlocks: false,
         mysqlCompoundBlocks: false,
       }
-    case 'sqlserver':
     case 'sqlite':
+      return {
+        dollarQuotes: false,
+        backticks: false,
+        hashLineComments: false,
+        nestedBlockComments: false,
+        oracleQQuotes: false,
+        backslashStringEscapes: false,
+        postgresEscapeStringPrefix: false,
+        plsqlBlocks: false,
+        delimiterBlocks: false,
+        // CREATE TRIGGER … BEGIN…END 体内不分句（对齐 docs/27 split.sqlite_trigger）
+        mysqlCompoundBlocks: true,
+      }
+    case 'sqlserver':
     case 'generic':
     default:
       return {

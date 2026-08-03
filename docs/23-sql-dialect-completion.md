@@ -45,7 +45,8 @@
 | Dameng | Bridge LSP + `dmparser`（分类/DML/例程诊断 + 工作 AST；`editor.sql_lsp`） |
 | **Kingbase** | Bridge LSP + `kingbaseparser`（工作 AST + 兼容模式隔离；`editor.sql_lsp`） |
 | **ClickHouse** | Bridge LSP + `clickhouseparser`（启发式 + 反引号；`editor.sql_lsp`） |
-| 其余（Vastbase / PG / SQLite / Oracle…） | **静默**内置 Monaco `sql`（无 sql-languages Worker）；对象补全等 LSP 落地后再开 |
+| **SQLite** | Bridge LSP + `sqliteparser`（启发式 + 双引号；`editor.sql_lsp`） |
+| 其余（Vastbase / PG / Oracle…） | **静默**内置 Monaco `sql`（无 sql-languages Worker）；对象补全等 LSP 落地后再开 |
 
 ---
 

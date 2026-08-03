@@ -67,7 +67,7 @@ function objectScriptFeatureLabel(
 }
 
 function featureLabel(tab: MysqlSessionTab, routineKind?: 'function' | 'procedure'): string {
-  if (tab === 'source' || tab === 'objectScript') {
+  if (tab === 'objectScript') {
     return i18n.global.t(
       routineKind === 'procedure'
         ? 'modules.mysql.session.tabProcedure'
@@ -79,10 +79,7 @@ function featureLabel(tab: MysqlSessionTab, routineKind?: 'function' | 'procedur
 
 function resolveFeature(ctx?: ConnOpenContext): MysqlSessionTab {
   if (ctx?.initialTab) {
-    const tab = normalizeMysqlFeature(ctx.initialTab)
-    // 旧 source 入口统一到 objectScript
-    if (tab === 'source') return 'objectScript'
-    return tab
+    return normalizeMysqlFeature(ctx.initialTab)
   }
   if (segmentName(ctx, 'routine')) return 'objectScript'
   if (segmentName(ctx, 'table')) return 'browse'
@@ -333,10 +330,9 @@ export const mysqlConnectionNavStrategy: ConnectionNavStrategy = {
       if (tab.moduleId !== 'mysql' || tab.props.profileId !== item.profileId) {
         return false
       }
-      let tabFeature = normalizeMysqlFeature(
+      const tabFeature = normalizeMysqlFeature(
         typeof tab.props.initialTab === 'string' ? tab.props.initialTab : undefined,
       )
-      if (tabFeature === 'source') tabFeature = 'objectScript'
       if (tabFeature !== feature) return false
       if (feature === 'monitor') return true
       if (feature === 'tools') {

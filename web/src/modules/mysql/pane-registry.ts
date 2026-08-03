@@ -1,6 +1,6 @@
 /**
  * MySQL Session 功能面板标识。
- * query / browse / ddl / source / objectScript / monitor / design / tools / debug。
+ * query / browse / ddl / objectScript / monitor / design / tools / debug。
  */
 import type { MysqlObjectKind, MysqlObjectScriptMode } from '@/modules/mysql/types/object-script'
 
@@ -8,7 +8,6 @@ export type MysqlSessionTab =
   | 'query'
   | 'browse'
   | 'ddl'
-  | 'source'
   | 'objectScript'
   | 'monitor'
   | 'design'
@@ -57,6 +56,8 @@ function queryProps(ctx: MysqlPaneContext): Record<string, unknown> {
     profileId: ctx.profileId,
     database: ctx.database,
     initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     sessionLabel: ctx.sessionLabel,
   }
@@ -81,18 +82,6 @@ function debugProps(ctx: MysqlPaneContext): Record<string, unknown> {
     routineKind: ctx.routineKind,
     sessionLabel: ctx.sessionLabel,
   }
-}
-
-function routineProps(ctx: MysqlPaneContext): Record<string, unknown> {
-  // 兼容旧 source 入口：映射到对象脚本面板
-  const objectKind: MysqlObjectKind =
-    ctx.objectKind ?? (ctx.routineKind === 'function' ? 'function' : 'procedure')
-  return objectScriptProps({
-    ...ctx,
-    objectKind,
-    objectName: ctx.objectName ?? ctx.routine,
-    designMode: ctx.designMode ?? 'alter',
-  })
 }
 
 function objectScriptProps(ctx: MysqlPaneContext): Record<string, unknown> {
@@ -162,14 +151,6 @@ export const mysqlPaneRegistry: Record<MysqlSessionTab, MysqlFeatureDef> = {
       buildProps: relationProps,
     }),
   },
-  source: {
-    icon: 'workflow',
-    labelKey: 'modules.mysql.session.tabSource',
-    resolvePane: () => ({
-      loader: () => import('@/modules/mysql/components/MysqlObjectScriptPane.vue'),
-      buildProps: routineProps,
-    }),
-  },
   objectScript: {
     icon: 'file-code',
     labelKey: 'modules.mysql.session.tabObjectScript',
@@ -217,7 +198,6 @@ export function normalizeMysqlFeature(tab: string | undefined): MysqlSessionTab 
     tab === 'browse' ||
     tab === 'ddl' ||
     tab === 'query' ||
-    tab === 'source' ||
     tab === 'objectScript' ||
     tab === 'monitor' ||
     tab === 'design' ||
@@ -235,7 +215,6 @@ export function mysqlFeatureEmbedsChrome(tab: MysqlSessionTab): boolean {
     tab === 'query' ||
     tab === 'browse' ||
     tab === 'ddl' ||
-    tab === 'source' ||
     tab === 'objectScript' ||
     tab === 'monitor' ||
     tab === 'design' ||

@@ -88,6 +88,13 @@ export type { ObjectScriptContextMenuState } from './utils/object-script-context
 export { useSqlQueryEditor } from './composables/useSqlQueryEditor'
 export type { SqlQueryEditorPrepareContext } from './composables/useSqlQueryEditor'
 export { useSqlQueryHistory } from './composables/useSqlQueryHistory'
+export {
+  hasQueryDraft,
+  QUERY_DRAFT_MAX_CHARS,
+  QUERY_DRAFT_PERSIST_MS,
+  resolveQueryDraftSql,
+  useQueryDraftPersist,
+} from './composables/useQueryDraftPersist'
 export { useDataTransferPresentation } from './composables/useDataTransferPresentation'
 
 export { default as QueryResultPanel } from './components/QueryResultPanel.vue'
@@ -100,8 +107,6 @@ export { default as DataTransferFileField } from './components/DataTransferFileF
 export { default as DataTransferCheck } from './components/DataTransferCheck.vue'
 export { default as TableDesignShell } from './components/TableDesignShell.vue'
 export { default as TableDesignPreviewPopover } from './components/TableDesignPreviewPopover.vue'
-/** @deprecated 已更名为 TableDesignPreviewPopover；保留别名避免 HMR 旧 chunk 崩溃 */
-export { default as TableDesignPreviewDialog } from './components/TableDesignPreviewPopover.vue'
 export { default as ObjectScriptShell } from './components/ObjectScriptShell.vue'
 export { default as DebugShell } from './components/DebugShell.vue'
 export { default as DebugParamsGrid } from './components/DebugParamsGrid.vue'

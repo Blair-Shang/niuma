@@ -51,6 +51,8 @@ function queryProps(ctx: ClickHousePaneContext): Record<string, unknown> {
     profileId: ctx.profileId,
     database: ctx.database,
     initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     sessionLabel: ctx.sessionLabel,
   }

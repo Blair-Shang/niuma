@@ -10,15 +10,21 @@ BIN_DIR="$REPO_ROOT/services/bin"
 PLATFORM="$(nm_detect_platform)"
 ARCH="$(nm_detect_arch)"
 CONFIGURATION="Release"
+SQLCIPHER_FLAG=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --platform) PLATFORM="$2"; shift 2 ;;
     --arch) ARCH="$2"; shift 2 ;;
     --configuration) CONFIGURATION="$2"; shift 2 ;;
+    --sqlcipher) SQLCIPHER_FLAG=1; shift ;;
     *) nm_die "unknown argument: $1" ;;
   esac
 done
+# 环境变量 SQLCIPHER=1 亦可开启（可选 CGO SQLCipher 构建）
+if [[ "$SQLCIPHER_FLAG" == "1" || "${SQLCIPHER:-0}" == "1" ]]; then
+  SQLCIPHER_FLAG=1
+fi
 
 TARGET_BIN_DIR="$BIN_DIR/$PLATFORM-$ARCH"
 GO_LDFLAGS="$(nm_go_ldflags "$CONFIGURATION" "$REPO_ROOT")"
@@ -67,11 +73,25 @@ build_go_service() {
   local module_dir="$1"
   local pkg="$2"
   local output="$3"
+  local tags="${4:-}"
+  local cgo="${5:-}"
   read -r goos goarch < <(go_target "$PLATFORM" "$ARCH")
-  nm_log "go build $pkg -> $output ($goos/$goarch)"
+  local tag_info=""
+  if [[ -n "$tags" ]]; then
+    tag_info=" tags=$tags"
+  fi
+  nm_log "go build $pkg -> $output ($goos/$goarch$tag_info)"
   (
     cd "$module_dir"
-    GOOS="$goos" GOARCH="$goarch" go build -ldflags "$GO_LDFLAGS" -o "$output" "$pkg"
+    export GOOS="$goos" GOARCH="$goarch"
+    if [[ -n "$cgo" ]]; then
+      export CGO_ENABLED="$cgo"
+    fi
+    if [[ -n "$tags" ]]; then
+      go build -tags "$tags" -ldflags "$GO_LDFLAGS" -o "$output" "$pkg"
+    else
+      go build -ldflags "$GO_LDFLAGS" -o "$output" "$pkg"
+    fi
   )
 }
 
@@ -125,7 +145,11 @@ build_go_service "$REPO_ROOT/services/ftp-service" "./cmd/ftp-service" "$ftp_out
 build_go_service "$REPO_ROOT/services/mongodb-service" "./cmd/mongodb-service" "$mongo_out"
 build_go_service "$REPO_ROOT/services/vastbase-service" "./cmd/vastbase-service" "$vastbase_out"
 build_go_service "$REPO_ROOT/services/mysql-service" "./cmd/mysql-service" "$mysql_out"
-build_go_service "$REPO_ROOT/services/sqlite-service" "./cmd/sqlite-service" "$sqlite_out"
+if [[ "$SQLCIPHER_FLAG" == "1" ]]; then
+  build_go_service "$REPO_ROOT/services/sqlite-service" "./cmd/sqlite-service" "$sqlite_out" "sqlcipher" "1"
+else
+  build_go_service "$REPO_ROOT/services/sqlite-service" "./cmd/sqlite-service" "$sqlite_out"
+fi
 build_go_service "$REPO_ROOT/services/dameng-service" "./cmd/dameng-service" "$dameng_out"
 build_go_service "$REPO_ROOT/services/clickhouse-service" "./cmd/clickhouse-service" "$clickhouse_out"
 build_go_service "$REPO_ROOT/services/kingbase-service" "./cmd/kingbase-service" "$kingbase_out"

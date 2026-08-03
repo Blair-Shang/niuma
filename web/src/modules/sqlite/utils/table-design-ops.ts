@@ -46,6 +46,7 @@ export function toDesignRows(cols: SqliteColumnInfo[], pkCols: string[]): Design
       dataType: parts.dataType,
       typeBase: parts.typeBase,
       typeLength: parts.typeLength,
+      typeScale: parts.typeScale,
       nullable: c.nullable !== false,
       defaultExpr: c.default ?? '',
       primaryKey,
@@ -75,10 +76,12 @@ export function toIndexDrafts(indexes: SqliteIndexInfo[], pkCols: string[]): Des
         columnsText,
         unique: idx.unique,
         primary: false,
+        partialWhere: '',
         removed: false,
         snapName: idx.name,
         snapColumnsText: columnsText,
         snapUnique: idx.unique,
+        snapPartialWhere: '',
       }
     })
 
@@ -99,10 +102,12 @@ export function makePrimaryIndexDraft(pkCols: string[], existing: boolean): Desi
     columnsText,
     unique: true,
     primary: true,
+    partialWhere: '',
     removed: false,
     snapName: existing ? 'PRIMARY' : '',
     snapColumnsText: existing ? columnsText : '',
     snapUnique: true,
+    snapPartialWhere: '',
   }
 }
 
@@ -201,11 +206,13 @@ function columnSpecFromDraft(col: DesignColumnDraft): SqliteDesignColumnSpec {
 function indexSpecFromDraft(idx: DesignIndexDraft): SqliteDesignIndexSpec {
   const columns = parseColumnList(idx.columnsText)
   const name = idx.name.trim() || suggestIndexName(idx.columnsText, `idx_${columns[0] ?? 'col'}`)
+  const partialWhere = idx.partialWhere.trim()
   return {
     name,
     columns,
     unique: idx.unique,
     primary: false,
+    ...(partialWhere ? { partialWhere } : {}),
   }
 }
 
@@ -227,6 +234,7 @@ function flatAddIndex(idx: DesignIndexDraft): SqliteDesignOp {
     name: spec.name,
     columns: spec.columns,
     unique: spec.unique,
+    ...(spec.partialWhere ? { partialWhere: spec.partialWhere } : {}),
   }
 }
 
@@ -352,9 +360,15 @@ export function buildAlterDesignOps(
     const changed =
       idx.name !== orig.snapName ||
       idx.columnsText !== orig.snapColumnsText ||
-      idx.unique !== orig.snapUnique
+      idx.unique !== orig.snapUnique ||
+      idx.partialWhere !== orig.snapPartialWhere
     if (changed) {
-      if (idx.name !== orig.snapName && idx.columnsText === orig.snapColumnsText && idx.unique === orig.snapUnique) {
+      if (
+        idx.name !== orig.snapName &&
+        idx.columnsText === orig.snapColumnsText &&
+        idx.unique === orig.snapUnique &&
+        idx.partialWhere === orig.snapPartialWhere
+      ) {
         ops.push({ op: 'rename_index', name: idx.originalName, newName: idx.name })
       } else {
         ops.push({ op: 'drop_index', name: idx.originalName })

@@ -10,13 +10,15 @@ const open = defineModel<boolean>('open', { default: false })
 
 const props = withDefaults(
   defineProps<{
-    title: string
+    /** 为空则不渲染外层标题栏（RsCodeBlock 自带 lang/复制） */
+    title?: string
     sql: string[]
     loading?: boolean
     copyLabel?: string
     emptyLabel?: string
   }>(),
   {
+    title: '',
     loading: false,
     copyLabel: '',
     emptyLabel: '',
@@ -32,6 +34,8 @@ const code = computed(() => {
   if (!body) return ''
   return body.endsWith(';') ? body : `${body};`
 })
+
+const showHead = computed(() => Boolean(props.title || props.copyLabel))
 </script>
 
 <template>
@@ -39,8 +43,8 @@ const code = computed(() => {
     <slot />
     <template #content>
       <div class="nm-table-design-preview">
-        <div class="nm-table-design-preview__head">
-          <span class="nm-table-design-preview__title">{{ title }}</span>
+        <div v-if="showHead" class="nm-table-design-preview__head">
+          <span v-if="title" class="nm-table-design-preview__title">{{ title }}</span>
           <div class="nm-table-design-preview__actions">
             <RsButton
               v-if="copyLabel"

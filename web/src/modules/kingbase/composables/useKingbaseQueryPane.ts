@@ -22,6 +22,7 @@ import {
   MAX_RESULT_GRID_TABS,
   resolveSqlValueType,
   resultHasGrid,
+  useQueryDraftPersist,
   useSqlQueryHistory,
   yieldToEventLoop,
   type QueryResultMessageItem,
@@ -38,6 +39,8 @@ export type KingbaseQueryPaneProps = {
   database?: string
   schema?: string
   initialSql?: string
+  draftSql?: string
+  tabId?: string
   autoRunInitialSql?: boolean
   /** 产品入口传入的执行模式；与 SQL 标识共同决定本次运行路径 */
   queryExecMode?: KingbaseQueryExecMode
@@ -67,7 +70,12 @@ export function useKingbaseQueryPane(props: KingbaseQueryPaneProps) {
   const toast = useRsToast()
   const sessions = useSessionRegistry()
 
-  const sqlText = ref(props.initialSql?.trim() || 'SELECT 1;\n')
+  const { sqlText, restoredFromDraft } = useQueryDraftPersist({
+    tabId: () => props.tabId,
+    draftSql: () => props.draftSql,
+    initialSql: () => props.initialSql,
+    defaultSql: 'SELECT 1;\n',
+  })
   const running = ref(false)
   const cancelling = ref(false)
   const loadingMore = ref(false)
@@ -719,7 +727,7 @@ export function useKingbaseQueryPane(props: KingbaseQueryPaneProps) {
   }))
 
   onMounted(() => {
-    if (props.autoRunInitialSql && props.initialSql?.trim()) {
+    if (!restoredFromDraft && props.autoRunInitialSql && props.initialSql?.trim()) {
       void runSql()
     }
   })

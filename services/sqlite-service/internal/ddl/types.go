@@ -51,6 +51,7 @@ type DesignOp struct {
 	Check         string `json:"check,omitempty"`
 	GeneratedExpr string `json:"generatedExpr,omitempty"`
 	GeneratedType string `json:"generatedType,omitempty"` // VIRTUAL | STORED
+	PartialWhere  string `json:"partialWhere,omitempty"`  // CREATE INDEX … WHERE
 }
 
 // DesignPreviewParams 预览入参。

@@ -70,9 +70,11 @@ watch(
     width="md"
     layout="window"
     tone="default"
+    :modal="false"
+    :draggable="true"
     :show-overlay="false"
     :show-close="true"
-    :close-on-overlay-click="true"
+    :close-on-overlay-click="false"
   >
     <template #body>
       <div v-if="busy" class="nm-sqlite-props__status">

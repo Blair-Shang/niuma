@@ -11,7 +11,10 @@ param(
     [string]$Arch = 'x64',
 
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+
+    # 可选：为 sqlite-service 启用 SQLCipher（CGO + -tags sqlcipher）；默认关闭以免拖垮 CI
+    [switch]$SqlCipher
 )
 
 $ErrorActionPreference = 'Stop'
@@ -161,22 +164,40 @@ function Build-GoService {
     param(
         [string]$ModuleDir,
         [string]$Package,
-        [string]$Output
+        [string]$Output,
+        [string]$Tags = '',
+        [Nullable[bool]]$CgoEnabled = $null
     )
     $target = Get-GoTarget -PlatformName $Platform -ArchName $Arch
-    Write-Host "==> go build $Package -> $Output ($($target.GOOS)/$($target.GOARCH))" -ForegroundColor Cyan
+    $tagInfo = if ($Tags) { " tags=$Tags" } else { '' }
+    Write-Host "==> go build $Package -> $Output ($($target.GOOS)/$($target.GOARCH)$tagInfo)" -ForegroundColor Cyan
     Push-Location $ModuleDir
     try {
-        $args = @('build', '-ldflags', $Ldflags, '-o', $Output, $Package)
+        $args = @('build', '-ldflags', $Ldflags)
+        if ($Tags) {
+            $args += @('-tags', $Tags)
+        }
+        $args += @('-o', $Output, $Package)
         $oldGoos = $env:GOOS
         $oldGoarch = $env:GOARCH
+        $oldCgo = $env:CGO_ENABLED
         $env:GOOS = $target.GOOS
         $env:GOARCH = $target.GOARCH
+        if ($null -ne $CgoEnabled) {
+            $env:CGO_ENABLED = if ($CgoEnabled) { '1' } else { '0' }
+        }
         try {
             & go @args
         } finally {
             $env:GOOS = $oldGoos
             $env:GOARCH = $oldGoarch
+            if ($null -ne $CgoEnabled) {
+                if ($null -eq $oldCgo) {
+                    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+                } else {
+                    $env:CGO_ENABLED = $oldCgo
+                }
+            }
         }
         if ($LASTEXITCODE -ne 0) {
             throw "go build failed ($LASTEXITCODE): $Package"
@@ -273,9 +294,17 @@ Build-GoService -ModuleDir (Join-Path $Root 'services/mysql-service') `
     -Package './cmd/mysql-service' `
     -Output $mysqlOut
 
-Build-GoService -ModuleDir (Join-Path $Root 'services/sqlite-service') `
-    -Package './cmd/sqlite-service' `
-    -Output $sqliteOut
+if ($SqlCipher) {
+    Build-GoService -ModuleDir (Join-Path $Root 'services/sqlite-service') `
+        -Package './cmd/sqlite-service' `
+        -Output $sqliteOut `
+        -Tags 'sqlcipher' `
+        -CgoEnabled $true
+} else {
+    Build-GoService -ModuleDir (Join-Path $Root 'services/sqlite-service') `
+        -Package './cmd/sqlite-service' `
+        -Output $sqliteOut
+}
 
 Build-GoService -ModuleDir (Join-Path $Root 'services/dameng-service') `
     -Package './cmd/dameng-service' `

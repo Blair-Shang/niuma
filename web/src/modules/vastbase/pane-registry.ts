@@ -40,6 +40,9 @@ export interface VastPaneContext extends VastPaneScope {
   /** 站点 ID：异步 IO / 工具在无 sessionId 时由 platform 凭据注入 */
   profileId?: string
   initialSql?: string
+  /** 查询正文草稿（随 workspace.tabs 持久化） */
+  draftSql?: string
+  tabId?: string
   /** 带 initialSql 时是否自动执行 */
   autoRunInitialSql?: boolean
   /** 连接显示名（查询/调用/监控等自带顶栏的面板用） */
@@ -121,6 +124,8 @@ function seedScopeProps(ctx: VastPaneContext, feature: VastSessionTab): Record<s
     oid: ctx.oid,
     feature,
     initialSql: ctx.initialSql,
+    draftSql: ctx.draftSql,
+    tabId: ctx.tabId,
     autoRunInitialSql: ctx.autoRunInitialSql === true,
     sessionLabel: ctx.sessionLabel,
     active: true,
@@ -261,6 +266,3 @@ export function isVastSessionTab(value: string | undefined): value is VastSessio
 export function normalizeVastFeature(tab: string | undefined): VastSessionTab {
   return isVastSessionTab(tab) ? tab : 'query'
 }
-
-/** @deprecated 使用 vastPaneRegistry */
-export const vastFeatureRegistry = vastPaneRegistry
