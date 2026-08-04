@@ -18,6 +18,16 @@ if(NOT DEFINED NIUMA_SERVICEIPC_BUILD_TESTS)
 endif()
 add_subdirectory("${NIUMA_SERVICEIPC_DIR}" "${CMAKE_BINARY_DIR}/niuma_serviceipc")
 
+# 公共代理（对标 packages/go/netproxy、packages/rust/niuma-netproxy）
+set(NIUMA_NETPROXY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../packages/cpp/netproxy")
+if(NOT EXISTS "${NIUMA_NETPROXY_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "packages/cpp/netproxy not found at ${NIUMA_NETPROXY_DIR}")
+endif()
+if(NOT DEFINED NIUMA_NETPROXY_BUILD_TESTS)
+  set(NIUMA_NETPROXY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+endif()
+add_subdirectory("${NIUMA_NETPROXY_DIR}" "${CMAKE_BINARY_DIR}/niuma_netproxy")
+
 set(ODPI_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/odpi/src")
 set(ODPI_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/odpi/include")
 if(NOT EXISTS "${ODPI_INC_DIR}/dpi.h")
@@ -69,7 +79,7 @@ target_include_directories(niuma-oracle-service PRIVATE
   ${ODPI_SRC_DIR}
 )
 
-target_link_libraries(niuma-oracle-service PRIVATE niuma::serviceipc)
+target_link_libraries(niuma-oracle-service PRIVATE niuma::serviceipc niuma::netproxy)
 
 if(WIN32)
   target_compile_definitions(niuma-oracle-service PRIVATE NIUMA_OS_WIN=1 _CRT_SECURE_NO_WARNINGS)

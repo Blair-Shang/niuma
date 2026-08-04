@@ -10,10 +10,9 @@ import {
   RsEmpty,
   RsLoading,
   RsPopover,
-  RsTable,
 } from '@niuma/ui'
 import { computed } from 'vue'
-import { BrowseDataShell, BrowseIoMenu } from '@/modules/database'
+import { BrowseDataGrid, BrowseDataShell, BrowseIoMenu } from '@/modules/database'
 import { useSqliteBrowsePane } from '@/modules/sqlite/composables/useSqliteBrowsePane'
 
 const props = defineProps<{
@@ -81,6 +80,13 @@ const {
   openDesignTable,
   openDdlTab,
 } = useSqliteBrowsePane(props)
+
+const dialogLabels = computed(() => ({
+  apply: t('modules.sqlite.browse.cellApply'),
+  cancel: t('modules.sqlite.browse.cellCancel'),
+  hint: t('modules.sqlite.browse.cellApplyHint'),
+  viewTitle: t('modules.sqlite.browse.cellView'),
+}))
 
 const showMutate = computed(() => !isView.value)
 const importDisabled = computed(() => !canInsert.value || saving.value)
@@ -231,45 +237,24 @@ const deleteCount = computed(
       </div>
     </template>
 
-    <RsTable
+    <BrowseDataGrid
       v-model:selected-row-keys="selectedRowKeys"
       :columns="resultColumns"
       :data="resultRows"
-      row-key="__rowKey"
-      size="sm"
-      striped
-      fill
-      bordered
-      column-bordered
-      :rounded="false"
-      show-index
-      :index-width="BROWSE_GUTTER_WIDTH"
-      :edit-gutter-width="BROWSE_GUTTER_WIDTH"
-      resizable
-      column-layout="fixed"
-      cell-tooltip
-      highlight-row
-      selectable
-      selection-type="row"
+      :loading="loading"
       :editable="tableEditable"
       :allow-null="tableEditable"
-      edit-trigger="dblclick"
       :row-pending="isBrowseRowPending"
       :context-menu-items="contextMenuItems"
-      :loading="loading"
-      :virtual="true"
-      :virtual-auto-threshold="40"
-      :virtual-columns-auto-threshold="40"
       :layout-active="active"
+      :gutter-width="BROWSE_GUTTER_WIDTH"
+      :dialog-labels="dialogLabels"
+      :empty-text="t('modules.sqlite.browse.empty')"
       @cell-edit-commit="onCellEditCommit"
       @row-edit-commit="onBrowseRowEditCommit"
       @row-edit-rollback="onBrowseRowEditRollback"
       @context-menu-select="onContextMenuSelect"
-    >
-      <template #empty>
-        {{ t('modules.sqlite.browse.empty') }}
-      </template>
-    </RsTable>
+    />
 
     <template #dialogs>
       <RsConfirmDialog

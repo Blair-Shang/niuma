@@ -41,6 +41,10 @@ services/
 │   ├── go.mod
 │   ├── cmd/kingbase-service/
 │   └── internal/             # dialect · session · handler（tree/catalog/meta 后续）
+├── sqlserver-service/      # SQL Server（go-mssqldb，见 docs/32；P0 session/query）
+│   ├── go.mod
+│   ├── cmd/sqlserver-service/
+│   └── internal/             # dialect · session · handler（tree/catalog/meta 后续）
 └── …                       # 其它库服务：Go 同构独立 go.mod；Native 见各模块文档
 
 packages/
@@ -71,6 +75,7 @@ packages/
 - `services/dameng-service`
 - `services/clickhouse-service`
 - `services/kingbase-service`
+- `services/sqlserver-service`
 - `packages/go/serviceipc`
 
 本地开发在任意模块目录执行 `go build` / `go test` 均可解析 replace 依赖。

@@ -16,9 +16,8 @@ import (
 const headerSize = 4
 
 // MaxFrameSize 限制单帧 JSON 载荷的最大字节数，防止异常长度前缀触发超大分配。
-//
-// 应用 IPC 只承载控制信令与小报文；超大数据走共享内存/流式通道（见架构文档）。
-const MaxFrameSize = 16 << 20 // 16 MiB
+// 桌面工具查询页可能含大字段，故放宽到 1 GiB（仍低于 uint32 协议上限）。
+const MaxFrameSize = 1 << 30 // 1 GiB
 
 // ErrFrameTooLarge 表示对端声明的帧长度超过 MaxFrameSize。
 var ErrFrameTooLarge = errors.New("protocol: frame exceeds max size")

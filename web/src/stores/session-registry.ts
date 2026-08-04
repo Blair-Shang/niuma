@@ -54,6 +54,7 @@ import {
   oracleApi,
   redisApi,
   sqliteApi,
+  sqlserverApi,
   sshApi,
   vastbaseApi,
 } from '@/api'
@@ -72,6 +73,7 @@ import {
   defaultMySQLProfile,
   defaultOracleProfile,
   defaultSqliteProfile,
+  defaultSqlServerProfile,
   defaultVastbaseProfile,
 } from '@/modules/sql-editor/capabilities'
 
@@ -226,6 +228,13 @@ export const useSessionRegistry = defineStore('session-registry', () => {
           dialect: toSqlServerProfile(r.dialect) ?? defaultKingbaseProfile(),
         }
       }
+      case 'sqlserver': {
+        const r = await sqlserverApi.sessionOpen({ profileId })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultSqlServerProfile(),
+        }
+      }
     }
   }
 
@@ -265,6 +274,9 @@ export const useSessionRegistry = defineStore('session-registry', () => {
           break
         case 'kingbase':
           await kingbaseApi.sessionClose({ sessionId })
+          break
+        case 'sqlserver':
+          await sqlserverApi.sessionClose({ sessionId })
           break
       }
     } catch {

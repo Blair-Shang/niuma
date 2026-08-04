@@ -41,8 +41,26 @@ fi
 [[ -f "$TARGET_BIN_SRC/niuma-platform-core" || -f "$TARGET_BIN_SRC/niuma-platform-core.exe" ]] || nm_die "missing platform-core under $TARGET_BIN_SRC"
 
 mkdir -p "$BIN_DST" "$MAN_DST"
+# 生产 stage 只认矩阵目录，不从平铺 services/bin 回退（避免旧产物污染）
 cp -R "$TARGET_BIN_SRC/." "$BIN_DST/"
+
+# 旁载 runtime：仅同步 README / .gitkeep，不打入厂商 DLL/so
+if [[ -d "$BIN_SRC/runtime" ]]; then
+  while IFS= read -r -d '' file; do
+    base="$(basename "$file")"
+    lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+      readme.txt|readme.md|.gitkeep) ;;
+      *) continue ;;
+    esac
+    rel="${file#"$BIN_SRC/runtime/"}"
+    dest="$BIN_DST/runtime/$rel"
+    mkdir -p "$(dirname "$dest")"
+    cp -f "$file" "$dest"
+  done < <(find "$BIN_SRC/runtime" -type f -print0 2>/dev/null || true)
+fi
+
 cp -R "$MAN_SRC/." "$MAN_DST/"
 chmod 0755 "$BIN_DST"/niuma-* 2>/dev/null || true
 
-nm_log "services staged -> $INSTALL_DIR/services"
+nm_log "services staged -> $INSTALL_DIR/services (matrix-only: $TARGET_BIN_SRC)"

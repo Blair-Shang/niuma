@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { RsBadge, RsButton, RsIcon } from '@niuma/ui'
+import { RsBadge, RsButton, RsIcon, RsTooltip } from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolComponentBundle, ToolComponentEntry } from '@/api/types/components'
 import {
+  browseMode,
+  bundleDownloadTip,
+  bundleTip,
   pathSummary,
   rowKey,
   statusBadgeVariant,
@@ -46,6 +49,16 @@ const installLabel = computed(() => {
 const hasPath = computed(() => !!props.tool.path)
 
 const pathText = computed(() => pathSummary(t, props.tool))
+
+const tip = computed(() => bundleTip(t, te, props.bundle))
+
+const downloadTip = computed(() => bundleDownloadTip(t, te, props.bundle))
+
+const browseLabel = computed(() =>
+  browseMode(props.bundle) === 'folder'
+    ? t('settings.componentsBrowseFolder')
+    : t('settings.componentsBrowse'),
+)
 </script>
 
 <template>
@@ -89,7 +102,7 @@ const pathText = computed(() => pathSummary(t, props.tool))
           :disabled="!!installBusy"
           @click="emit('browse')"
         >
-          {{ t('settings.componentsBrowse') }}
+          {{ browseLabel }}
         </RsButton>
         <RsButton
           v-if="tool.status === 'configured'"
@@ -100,7 +113,20 @@ const pathText = computed(() => pathSummary(t, props.tool))
         >
           {{ t('settings.componentsClearPath') }}
         </RsButton>
+        <RsTooltip v-if="downloadTip" :content="downloadTip" side="top">
+          <RsButton
+            variant="ghost"
+            size="sm"
+            icon="external-link"
+            :loading="busyKey === `dl:${rowKey(bundle.bundleId, tool.toolId)}`"
+            :disabled="!!installBusy"
+            @click="emit('download')"
+          >
+            {{ t('settings.componentsDownload') }}
+          </RsButton>
+        </RsTooltip>
         <RsButton
+          v-else
           variant="ghost"
           size="sm"
           icon="external-link"
@@ -112,6 +138,8 @@ const pathText = computed(() => pathSummary(t, props.tool))
         </RsButton>
       </div>
     </div>
+
+    <p v-if="tip" class="nm-components__tool-tip">{{ tip }}</p>
 
     <div
       class="nm-components__path-bar"
@@ -180,6 +208,13 @@ const pathText = computed(() => pathSummary(t, props.tool))
   line-height: 1.4;
   color: var(--rs-muted);
   font-family: var(--rs-font-mono, ui-monospace, monospace);
+}
+
+.nm-components__tool-tip {
+  margin: 0;
+  font-size: var(--nm-font-caption);
+  line-height: 1.45;
+  color: var(--rs-muted);
 }
 
 .nm-components__tool-actions {

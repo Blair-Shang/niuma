@@ -1,6 +1,7 @@
 import type { ConnectionOptionsBase } from './connection'
 
-export type OracleSSLMode = 'disable' | 'require'
+/** disable=明文 TCP；require=TCPS；verify-full=TCPS + 校验证书（需 Wallet）。 */
+export type OracleSSLMode = 'disable' | 'require' | 'verify-full'
 export type OracleRole = 'normal' | 'sysdba' | 'sysoper'
 
 export interface OracleConnectionOptions extends ConnectionOptionsBase {
@@ -229,45 +230,76 @@ export interface OracleProcessInfo {
   user: string
   host: string
   db?: string | null
+  /** V$SESSION.STATUS（ACTIVE / INACTIVE / KILLED…） */
   command: string
+  /** LAST_CALL_ET（秒） */
   time: number
+  /** V$SESSION.EVENT */
   state?: string | null
   info?: string | null
+  sqlId?: string | null
+  waitClass?: string | null
+  blockingSession?: number | null
 }
 export interface OracleMetaProcesslistParams { sessionId: string }
-export interface OracleMetaProcesslistResult { processes: OracleProcessInfo[] }
+export interface OracleMetaProcesslistResult {
+  processes: OracleProcessInfo[]
+  unavailable?: boolean
+  message?: string
+}
 export interface OracleMetaKillParams {
   sessionId: string
   id: number
   serial?: number
   queryOnly?: boolean
 }
-export interface OracleMetaKillResult { killed: boolean; id: number; queryOnly: boolean }
+export interface OracleMetaKillResult {
+  killed: boolean
+  id: number
+  serial?: number
+  /** false 表示 CANCEL SQL 不可用并已降级为 KILL SESSION */
+  queryOnly: boolean
+}
 export interface OracleMetaInstanceOverviewParams { sessionId: string }
 export interface OracleMetaInstanceOverviewResult {
   version: string
+  /** INSTANCE_NAME */
   versionComment?: string
   currentUser?: string
+  /** PDB / CON_NAME */
   currentDatabase?: string
   currentSchema?: string
   serverAddr?: string
   uptimeSeconds?: number
   databaseCount?: number
   schemaCount?: number
+  /** TYPE='USER' 会话数 */
   threadsConnected?: number
+  /** STATUS='ACTIVE' 的用户会话数 */
+  activeSessions?: number
+  /** sessions 参数（兼容字段，同 maxSessions） */
   maxConnections?: number
-  questions?: number
-  slowQueries?: number
+  maxSessions?: number
+  maxProcesses?: number
+  /** v$sysstat 'execute count' */
+  executeCount?: number
   statusPartial?: boolean
   warnings?: string[]
 }
 export interface OracleLockInfo {
   waitingPid: number
+  waitingSerial?: number
   blockingPid: number
+  blockingSerial?: number
   waitingUser?: string
   blockingUser?: string
   waitingQuery?: string
+  /** 等待事件 EVENT（兼容旧字段名） */
   lockType?: string
+  waitEvent?: string
+  waitClass?: string
+  /** V$LOCK.TYPE（TM/TX…） */
+  enqueueType?: string
   lockMode?: string
   objectName?: string
   waitAgeSeconds?: number

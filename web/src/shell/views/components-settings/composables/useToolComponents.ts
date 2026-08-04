@@ -1,15 +1,18 @@
 import { useRsToast } from '@niuma/ui'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { componentsApi, dialogApi, shellApi, subscribeBridgeEventByPrefix } from '@/api'
+import { componentsApi, dialogApi, fsApi, shellApi, subscribeBridgeEventByPrefix } from '@/api'
 import type {
   ComponentsInstallProgressEvent,
   ToolComponentBundle,
   ToolComponentEntry,
 } from '@/api/types/components'
+import type { LocalEntry } from '@/api/types/fs'
 import { useBridgeStore } from '@/stores/bridge'
 import {
   browseAccept,
+  browseMode,
+  libraryNames,
   rowKey,
   toolDisplayName,
 } from '../utils/presentation'
@@ -25,6 +28,29 @@ export interface ComponentsInstallProgress {
 
 function installBusyKey(bundleId: string, toolId?: string): string {
   return toolId ? `install:${bundleId}:${toolId}` : `install:${bundleId}`
+}
+
+function joinLocalPath(dir: string, name: string): string {
+  const trimmed = dir.replace(/[/\\]+$/, '')
+  const sep = trimmed.includes('\\') ? '\\' : '/'
+  return `${trimmed}${sep}${name}`
+}
+
+/** 在目录条目中按优先名匹配库文件（支持 libclntsh.so*）。 */
+function matchLibraryEntry(entries: LocalEntry[], preferred: string[]): LocalEntry | null {
+  const files = entries.filter((e) => e.kind === 'file')
+  for (const want of preferred) {
+    const lower = want.toLowerCase()
+    const exact = files.find((e) => e.name.toLowerCase() === lower)
+    if (exact) return exact
+    if (lower.endsWith('.so')) {
+      const prefix = files.find(
+        (e) => e.name.toLowerCase() === lower || e.name.toLowerCase().startsWith(`${lower}.`),
+      )
+      if (prefix) return prefix
+    }
+  }
+  return null
 }
 
 export function useToolComponents() {
@@ -126,8 +152,37 @@ export function useToolComponents() {
   }
 
   async function browsePath(bundle: ToolComponentBundle, tool: ToolComponentEntry): Promise<void> {
+    const name = toolDisplayName(t, te, bundle, tool)
+    if (browseMode(bundle) === 'folder') {
+      const result = await dialogApi.openFolder({
+        title: t('settings.componentsBrowseFolderTitle', { name }),
+      })
+      if (result.canceled || !result.filePaths[0]) {
+        return
+      }
+      const dir = result.filePaths[0]
+      const preferred = libraryNames(bundle)
+      try {
+        const listed = await fsApi.listDir({ path: dir })
+        const hit = matchLibraryEntry(listed.entries ?? [], preferred)
+        if (!hit) {
+          toast.error(
+            t('settings.componentsLibraryNotFound', {
+              names: preferred.length ? preferred.join(' / ') : 'oci.dll',
+              dir,
+            }),
+          )
+          return
+        }
+        await savePath(bundle.bundleId, tool.toolId, joinLocalPath(dir, hit.name))
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e))
+      }
+      return
+    }
+
     const result = await dialogApi.openFile({
-      title: t('settings.componentsBrowseTitle', { name: toolDisplayName(t, te, bundle, tool) }),
+      title: t('settings.componentsBrowseTitle', { name }),
       accept: browseAccept(bundle),
     })
     if (result.canceled || !result.filePaths[0]) {

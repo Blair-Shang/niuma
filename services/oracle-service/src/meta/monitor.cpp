@@ -49,24 +49,52 @@ int64_t ToI64(const std::string& s) {
   }
 }
 
+/** Oracle V$LOCK LMODE / REQUEST → 可读模式名。 */
+std::string LockModeName(int64_t mode) {
+  switch (mode) {
+    case 0:
+      return "None";
+    case 1:
+      return "Null";
+    case 2:
+      return "Row-S (SS)";
+    case 3:
+      return "Row-X (SX)";
+    case 4:
+      return "Share (S)";
+    case 5:
+      return "S/Row-X (SSX)";
+    case 6:
+      return "Exclusive (X)";
+    default:
+      return mode > 0 ? std::to_string(mode) : "";
+  }
+}
+
 }  // namespace
 
 nlohmann::json ListProcesslist(session::Session& session, std::string& error) {
-  // SID, SERIAL#, USERNAME, MACHINE, SCHEMANAME, STATUS, LAST_CALL_ET, SQL snippet
+  // SID, SERIAL#, USERNAME, MACHINE, SCHEMANAME, STATUS, LAST_CALL_ET,
+  // SQL_TEXT, EVENT, SQL_ID, WAIT_CLASS, BLOCKING_SESSION
   const char* sql =
       "SELECT s.SID, s.SERIAL#, NVL(s.USERNAME,'(background)'), NVL(s.MACHINE,''), "
       "NVL(s.SCHEMANAME,''), NVL(s.STATUS,''), NVL(s.LAST_CALL_ET,0), "
-      "SUBSTR(NVL(q.SQL_TEXT,''),1,500) "
+      "SUBSTR(NVL((SELECT sq.SQL_TEXT FROM V$SQL sq WHERE sq.SQL_ID = s.SQL_ID AND ROWNUM = 1),''),1,500), "
+      "NVL(s.EVENT,''), NVL(s.SQL_ID,''), NVL(s.WAIT_CLASS,''), s.BLOCKING_SESSION "
       "FROM V$SESSION s "
-      "LEFT JOIN V$SQL q ON q.SQL_ID = s.SQL_ID AND q.CHILD_NUMBER = 0 "
       "WHERE s.TYPE = 'USER' "
       "ORDER BY s.LAST_CALL_ET DESC NULLS LAST";
 
   session::SqlRowsResult rows;
   if (!session::ExecStringRows(session, sql, 2001, rows, error)) {
-    // 权限不足时返回空列表
+    // 无 V$SESSION 权限时明确告知前端，避免被当成「空进程列表」
+    const std::string msg = error.empty()
+                                ? "oracle: processlist unavailable or insufficient privilege"
+                                : error;
     error.clear();
-    return nlohmann::json{{"processes", nlohmann::json::array()}};
+    return nlohmann::json{{"processes", nlohmann::json::array()},
+                          {"unavailable", true},
+                          {"message", msg}};
   }
 
   nlohmann::json processes = nlohmann::json::array();
@@ -74,22 +102,38 @@ nlohmann::json ListProcesslist(session::Session& session, std::string& error) {
     if (row.size() < 2) {
       continue;
     }
+    // command = STATUS（ACTIVE / INACTIVE）；state = 等待事件 EVENT
+    const std::string status = row.size() > 5 && !row[5].empty() ? row[5] : "UNKNOWN";
     nlohmann::json p{
         {"id", ToI64(row[0])},
         {"serial", ToI64(row[1])},
         {"user", row.size() > 2 ? row[2] : ""},
         {"host", row.size() > 3 ? row[3] : ""},
-        {"command", row.size() > 5 ? row[5] : "SESSION"},
+        {"command", status},
         {"time", row.size() > 6 ? ToI64(row[6]) : 0},
     };
     if (row.size() > 4 && !row[4].empty()) {
       p["db"] = row[4];
     }
-    if (row.size() > 5 && !row[5].empty()) {
-      p["state"] = row[5];
+    if (row.size() > 8 && !row[8].empty()) {
+      p["state"] = row[8];
+    } else {
+      p["state"] = status;
     }
     if (row.size() > 7 && !row[7].empty()) {
       p["info"] = row[7];
+    }
+    if (row.size() > 9 && !row[9].empty()) {
+      p["sqlId"] = row[9];
+    }
+    if (row.size() > 10 && !row[10].empty()) {
+      p["waitClass"] = row[10];
+    }
+    if (row.size() > 11 && !row[11].empty()) {
+      const int64_t blocker = ToI64(row[11]);
+      if (blocker > 0) {
+        p["blockingSession"] = blocker;
+      }
     }
     processes.push_back(std::move(p));
   }
@@ -182,13 +226,42 @@ nlohmann::json InstanceOverview(session::Session& session, std::string& error) {
   if (!sessions.empty()) {
     out["threadsConnected"] = static_cast<int>(ToI64(sessions));
   }
+  std::string active = scalar(
+      "SELECT COUNT(*) FROM v$session WHERE TYPE = 'USER' AND STATUS = 'ACTIVE'");
+  if (!active.empty()) {
+    out["activeSessions"] = static_cast<int>(ToI64(active));
+  }
   std::string schemas = scalar("SELECT COUNT(*) FROM ALL_USERS");
   if (!schemas.empty()) {
-    out["databaseCount"] = static_cast<int>(ToI64(schemas));
+    const int n = static_cast<int>(ToI64(schemas));
+    out["databaseCount"] = n;
+    out["schemaCount"] = n;
   }
-  std::string processes = scalar("SELECT VALUE FROM v$parameter WHERE NAME = 'processes'");
-  if (!processes.empty()) {
-    out["maxConnections"] = static_cast<int>(ToI64(processes));
+  // 会话上限优先 sessions；processes 单独给出，避免与 MySQL max_connections 语义混淆
+  std::string max_sessions = scalar("SELECT VALUE FROM v$parameter WHERE NAME = 'sessions'");
+  if (!max_sessions.empty()) {
+    const int n = static_cast<int>(ToI64(max_sessions));
+    out["maxSessions"] = n;
+    out["maxConnections"] = n;
+  }
+  std::string max_processes = scalar("SELECT VALUE FROM v$parameter WHERE NAME = 'processes'");
+  if (!max_processes.empty()) {
+    out["maxProcesses"] = static_cast<int>(ToI64(max_processes));
+    if (!out.contains("maxConnections")) {
+      out["maxConnections"] = static_cast<int>(ToI64(max_processes));
+    }
+  }
+  std::string schema = scalar("SELECT SYS_CONTEXT('USERENV','CURRENT_SCHEMA') FROM dual");
+  if (!schema.empty()) {
+    out["currentSchema"] = schema;
+  }
+  std::string host = scalar("SELECT SYS_CONTEXT('USERENV','SERVER_HOST') FROM dual");
+  if (!host.empty()) {
+    out["serverAddr"] = host;
+  }
+  std::string exec_count = scalar("SELECT VALUE FROM v$sysstat WHERE NAME = 'execute count'");
+  if (!exec_count.empty()) {
+    out["executeCount"] = ToI64(exec_count);
   }
 
   if (!warnings.empty()) {
@@ -203,23 +276,49 @@ nlohmann::json ListLocks(session::Session& session, int limit, std::string& erro
   if (limit <= 0) {
     limit = 200;
   }
-  const std::string sql =
-      "SELECT w.SID, w.SERIAL#, NVL(w.USERNAME,''), b.SID, NVL(b.USERNAME,''), "
-      "NVL(w.EVENT,''), NVL(w.SECONDS_IN_WAIT,0), "
-      "SUBSTR(NVL(wq.SQL_TEXT,''),1,300) "
+
+  // 阻塞会话链 + 可选 enqueue（V$LOCK）与对象名；列：
+  // waiting SID/SERIAL/user, blocking SID/SERIAL/user,
+  // EVENT, WAIT_CLASS, SECONDS_IN_WAIT, SQL,
+  // lock TYPE, request/lmode, object
+  const std::string sql_full =
+      "SELECT w.SID, w.SERIAL#, NVL(w.USERNAME,''), b.SID, b.SERIAL#, NVL(b.USERNAME,''), "
+      "NVL(w.EVENT,''), NVL(w.WAIT_CLASS,''), NVL(w.SECONDS_IN_WAIT,0), "
+      "SUBSTR(NVL((SELECT sq.SQL_TEXT FROM V$SQL sq WHERE sq.SQL_ID = w.SQL_ID AND ROWNUM = 1),''),1,300), "
+      "NVL(l.TYPE,''), "
+      "CASE WHEN NVL(l.REQUEST,0) > 0 THEN l.REQUEST ELSE NVL(l.LMODE,0) END, "
+      "CASE WHEN o.OWNER IS NOT NULL THEN o.OWNER || '.' || o.OBJECT_NAME ELSE '' END "
       "FROM V$SESSION w "
       "JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION "
-      "LEFT JOIN V$SQL wq ON wq.SQL_ID = w.SQL_ID AND wq.CHILD_NUMBER = 0 "
+      "LEFT JOIN V$LOCK l ON l.SID = w.SID AND l.REQUEST > 0 "
+      "LEFT JOIN ALL_OBJECTS o ON l.TYPE = 'TM' AND o.OBJECT_ID = l.ID1 "
+      "WHERE w.BLOCKING_SESSION IS NOT NULL "
+      "FETCH FIRST " +
+      std::to_string(limit + 1) + " ROWS ONLY";
+
+  const std::string sql_basic =
+      "SELECT w.SID, w.SERIAL#, NVL(w.USERNAME,''), b.SID, b.SERIAL#, NVL(b.USERNAME,''), "
+      "NVL(w.EVENT,''), NVL(w.WAIT_CLASS,''), NVL(w.SECONDS_IN_WAIT,0), "
+      "SUBSTR(NVL((SELECT sq.SQL_TEXT FROM V$SQL sq WHERE sq.SQL_ID = w.SQL_ID AND ROWNUM = 1),''),1,300), "
+      "CAST(NULL AS VARCHAR2(10)), CAST(NULL AS NUMBER), CAST(NULL AS VARCHAR2(1)) "
+      "FROM V$SESSION w "
+      "JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION "
       "WHERE w.BLOCKING_SESSION IS NOT NULL "
       "FETCH FIRST " +
       std::to_string(limit + 1) + " ROWS ONLY";
 
   session::SqlRowsResult rows;
-  if (!session::ExecStringRows(session, sql, limit + 1, rows, error)) {
-    error.clear();
-    return nlohmann::json{{"locks", nlohmann::json::array()},
-                          {"unavailable", true},
-                          {"message", "oracle: locks view unavailable or insufficient privilege"}};
+  std::string first_err;
+  if (!session::ExecStringRows(session, sql_full, limit + 1, rows, first_err)) {
+    rows = {};
+    if (!session::ExecStringRows(session, sql_basic, limit + 1, rows, error)) {
+      error.clear();
+      return nlohmann::json{{"locks", nlohmann::json::array()},
+                            {"unavailable", true},
+                            {"message", first_err.empty()
+                                            ? "oracle: locks view unavailable or insufficient privilege"
+                                            : first_err}};
+    }
   }
 
   nlohmann::json locks = nlohmann::json::array();
@@ -236,12 +335,37 @@ nlohmann::json ListLocks(session::Session& session, int limit, std::string& erro
         {"waitingPid", ToI64(row[0])},
         {"blockingPid", row.size() > 3 ? ToI64(row[3]) : 0},
         {"waitingUser", row.size() > 2 ? row[2] : ""},
-        {"blockingUser", row.size() > 4 ? row[4] : ""},
-        {"lockType", row.size() > 5 ? row[5] : ""},
-        {"waitAgeSeconds", row.size() > 6 ? ToI64(row[6]) : 0},
+        {"blockingUser", row.size() > 5 ? row[5] : ""},
+        {"waitAgeSeconds", row.size() > 8 ? ToI64(row[8]) : 0},
     };
+    if (row.size() > 1 && !row[1].empty()) {
+      lock["waitingSerial"] = ToI64(row[1]);
+    }
+    if (row.size() > 4 && !row[4].empty()) {
+      lock["blockingSerial"] = ToI64(row[4]);
+    }
+    // lockType 保留为等待事件（与前端「等待事件」列一致）；enqueue 类型单独给出
+    if (row.size() > 6 && !row[6].empty()) {
+      lock["lockType"] = row[6];
+      lock["waitEvent"] = row[6];
+    }
     if (row.size() > 7 && !row[7].empty()) {
-      lock["waitingQuery"] = row[7];
+      lock["waitClass"] = row[7];
+    }
+    if (row.size() > 9 && !row[9].empty()) {
+      lock["waitingQuery"] = row[9];
+    }
+    if (row.size() > 10 && !row[10].empty()) {
+      lock["enqueueType"] = row[10];
+    }
+    if (row.size() > 11 && !row[11].empty()) {
+      const std::string mode = LockModeName(ToI64(row[11]));
+      if (!mode.empty() && mode != "None") {
+        lock["lockMode"] = mode;
+      }
+    }
+    if (row.size() > 12 && !row[12].empty()) {
+      lock["objectName"] = row[12];
     }
     locks.push_back(std::move(lock));
   }

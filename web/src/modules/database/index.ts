@@ -115,6 +115,8 @@ export { default as DebugMessagesPanel } from './components/DebugMessagesPanel.v
 export { default as DebugHelpPanel } from './components/DebugHelpPanel.vue'
 export { default as BrowseDataShell } from './components/BrowseDataShell.vue'
 export { default as BrowseIoMenu } from './components/BrowseIoMenu.vue'
+export { default as BrowseDataGrid } from './components/BrowseDataGrid.vue'
+export { default as BrowseCellEditorDialog } from './components/BrowseCellEditorDialog.vue'
 export { default as DdlShell } from './components/DdlShell.vue'
 
 export {
@@ -124,12 +126,40 @@ export {
 } from './utils/browse-clipboard'
 export { parseEditValue } from './utils/sql-literal'
 export {
+  formatBrowseCellValue,
+  isBrowseBinCell,
+  formatBrowseBinSummary,
+  formatBrowseBinViewText,
+  truncateBrowsePreview,
+  BROWSE_CELL_PREVIEW_CHARS,
+} from './utils/browse-cell-format'
+export {
   alignForValueType,
   normalizeSqlDataType,
   resolveSqlValueType,
+  isSqlBinaryLobType,
+  isSqlTextLobType,
   type GridCellValueType,
 } from './utils/column-value-type'
-export { formatBrowseCellValue } from './utils/browse-cell-format'
+export { useBrowseCellDialog } from './composables/useBrowseCellDialog'
+export type { BrowseCellEditorDialogLabels } from './composables/useBrowseCellDialog'
+export { useCellViewDialog } from './composables/useCellViewDialog'
+export type { CellViewDialogLabels } from './composables/useCellViewDialog'
+export {
+  useBrowseGridEditing,
+  BROWSE_GRID_EDIT_PROPS,
+} from './composables/useBrowseGridEditing'
+export type { BrowseStageableTable, UseBrowseGridEditingOptions } from './composables/useBrowseGridEditing'
+export {
+  buildBrowseResultColumn,
+  type BuildBrowseResultColumnOptions,
+  type BrowseRowChange,
+} from './utils/browse-result-column'
+export {
+  formatIsoUtcToLocal,
+  looksLikeIsoDateTimeWithTz,
+  parseLocalDateTimeToUtcIso,
+} from './utils/iso-local-datetime'
 export { isBrowseFilterCompletionOpen } from './utils/browse-filter-keydown'
 
 export {

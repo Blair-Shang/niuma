@@ -286,13 +286,14 @@ getStatus(profileId: string): 'disconnected' | 'connected' | 'connecting'
 | `mysql` | `mysql:{profileId}:{tabId}` | **否**（查询/事务隔离） | **立即 close** | — |
 | `kingbase` | `kingbase:{profileId}:{tabId}` | **否**（查询/事务隔离） | **立即 close** | — |
 | `dameng` | `dameng:{profileId}:{tabId}` | **否**（查询/事务隔离） | **立即 close** | — |
+| `oracle` | `oracle:{profileId}:{tabId}` | **否**（查询/事务隔离） | **立即 close** | — |
 | `redis` | `redis:{profileId}:db{database}` | 同 DB 共享 | release，**不立即 close** | idle 60s 后 close |
 | `mongodb` | `mongodb:{profileId}` | **同站点共享** | release，**不立即 close** | idle 60s 后 close |
 | `vastbase` | `vastbase:{profileId}` | **同站点共享** | release，**不立即 close** | idle 60s 后 close |
 
 说明：
 
-- **SSH / FTP / MySQL / Kingbase / Dameng**：`splitGroup` 复制 Tab 会产生第二个 `tabId` → 两条独立 `sessionId`（与今日「分屏=新实例」一致，且关 Tab 能正确断线）。MySQL / Kingbase / Dameng 另需隔离 Auto-commit / 未提交事务，故不用 `per_profile`。
+- **SSH / FTP / MySQL / Kingbase / Dameng / Oracle**：`splitGroup` 复制 Tab 会产生第二个 `tabId` → 两条独立 `sessionId`（与今日「分屏=新实例」一致，且关 Tab 能正确断线）。MySQL / Kingbase / Dameng / Oracle 另需隔离 Auto-commit / 未提交事务，故不用 `per_profile`。
 - **Redis**：不同 DB 不同物理连接（避免多 Tab 抢 `SELECT`）；与 [18 §7.2](./18-ops-connection-tree.md) 去重策略一致。
 - **MongoDB**：同一 `mongo.Client` 可浏览多库，多 Tab 共享一条连接更省资源；Shell / Change Stream 仍挂在同一 `sessionId` 上，由 mongodb-service 内 per-session 限制约束。
 
@@ -304,6 +305,7 @@ const SESSION_POLICY: Record<ConnKind, SessionPolicy> = {
   mysql:    { sharing: 'per_tab',  closeOnRelease: true },
   kingbase: { sharing: 'per_tab',  closeOnRelease: true },
   dameng:   { sharing: 'per_tab',  closeOnRelease: true },
+  oracle:   { sharing: 'per_tab',  closeOnRelease: true },
   redis:    { sharing: 'scoped',   scope: 'database', idleMs: 60_000 },
   mongodb:  { sharing: 'per_profile', idleMs: 60_000 },
   vastbase: { sharing: 'per_profile', idleMs: 60_000 },

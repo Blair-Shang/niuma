@@ -16,6 +16,11 @@ const activities = computed(() => visibleActivityBarItems(moduleStore.items))
 function onCategoryClick(category: (typeof activities.value)[number]['category']) {
   shellStore.selectCategory(category)
 }
+
+/** 显式切换 Primary Side Bar（与 Ctrl+B / 同项再点 Activity 共用 shellStore） */
+function onToggleSidebar() {
+  shellStore.sidebarVisible = !shellStore.sidebarVisible
+}
 </script>
 
 <template>
@@ -40,6 +45,25 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
         </span>
       </button>
     </div>
+    <div class="nm-activitybar__bottom">
+      <button
+        type="button"
+        class="nm-activitybar__toggle"
+        :class="{ 'nm-activitybar__toggle--on': shellStore.sidebarVisible }"
+        :title="t('shell.toggleSidebar')"
+        :aria-label="t('shell.toggleSidebar')"
+        :aria-pressed="shellStore.sidebarVisible"
+        @click="onToggleSidebar"
+      >
+        <span class="nm-activitybar__hit">
+          <RsIcon
+            :name="shellStore.sidebarVisible ? 'chevrons-left' : 'chevrons-right'"
+            :size="16"
+            :stroke-width="2"
+          />
+        </span>
+      </button>
+    </div>
   </nav>
 </template>
 
@@ -55,7 +79,8 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
   border-right: 1px solid var(--rs-border-subtle);
 }
 
-.nm-activitybar__top {
+.nm-activitybar__top,
+.nm-activitybar__bottom {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -63,7 +88,12 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
   padding: var(--rs-space-xs) 0;
 }
 
-.nm-activitybar__item {
+.nm-activitybar__bottom {
+  border-top: 1px solid var(--rs-border-subtle);
+}
+
+.nm-activitybar__item,
+.nm-activitybar__toggle {
   position: relative;
   display: flex;
   align-items: center;
@@ -76,7 +106,9 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
   color: var(--nm-activity-icon, var(--rs-muted));
   cursor: pointer;
   -webkit-app-region: no-drag;
-  transition: opacity var(--rs-transition-fast);
+  transition:
+    opacity var(--rs-transition-fast),
+    color var(--rs-transition-fast);
 }
 
 /*
@@ -114,5 +146,27 @@ function onCategoryClick(category: (typeof activities.value)[number]['category']
   width: 2px;
   border-radius: 2px 0 0 2px;
   background: var(--rs-primary);
+}
+
+/* 侧栏开关：工具控件，不用领域色条，仅弱强调 */
+.nm-activitybar__toggle {
+  color: var(--rs-muted);
+  height: 2.25rem;
+}
+
+.nm-activitybar__toggle:hover {
+  color: var(--rs-text);
+}
+
+.nm-activitybar__toggle:hover .nm-activitybar__hit {
+  background: var(--rs-item-hover);
+}
+
+.nm-activitybar__toggle--on {
+  color: var(--rs-text);
+}
+
+.nm-activitybar__toggle--on .nm-activitybar__hit {
+  background: color-mix(in srgb, var(--rs-text) 8%, transparent);
 }
 </style>

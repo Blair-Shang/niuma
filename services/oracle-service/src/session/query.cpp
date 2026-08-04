@@ -284,6 +284,14 @@ nlohmann::json ExecQuery(Session& session, const QueryExecParams& params, std::s
   while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.back()))) {
     sql.pop_back();
   }
+  // ODPI/OCI 不接受语句分隔符 `;`（客户端约定）；带着会报 ORA-00922 / ORA-00911。
+  // 查询页拆句会去掉分号，树 DDL / 单条 exec 可能仍带尾 `;`。
+  if (!sql.empty() && sql.back() == ';') {
+    sql.pop_back();
+    while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.back()))) {
+      sql.pop_back();
+    }
+  }
   if (sql.empty()) {
     error = "oracle: sql required";
     return {};

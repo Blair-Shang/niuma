@@ -23,6 +23,7 @@ import { parsePrimaryFromRelation, type ParsedFromRelation } from '@/modules/vas
 import {
   alignForValueType,
   buildSqlQueryContextMenuItems,
+  formatBrowseCellValue,
   hasQueryDraft,
   resolveSqlValueType,
   useQueryDraftPersist,
@@ -588,13 +589,6 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
     )
   }
 
-  /** 共享 formatter，避免每列一个闭包 */
-  function formatQueryCell(value: unknown): string {
-    if (value === null || value === undefined) return 'NULL'
-    if (typeof value === 'object') return JSON.stringify(value)
-    return String(value)
-  }
-
   const resultColumns = computed((): RsTableColumn<VastQueryResultRow>[] => {
     const cols = activeGrid.value?.columns ?? []
     // 依赖主键 meta，PK tip 就绪后刷新 headerTip
@@ -652,7 +646,10 @@ export function useVastQueryPane(props: VastQueryPaneProps) {
         align: alignForValueType(valueType),
         valueType,
         headerTip: tipLines.join('\n'),
-        formatter: valueType === 'boolean' ? undefined : formatQueryCell,
+        formatter:
+          valueType === 'boolean'
+            ? undefined
+            : (value) => formatBrowseCellValue(value, valueType),
       }
     })
   })

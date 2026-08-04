@@ -13,6 +13,7 @@ export const CONN_KIND_DEFS = [
   { kind: 'oracle' as const, label: 'Oracle', icon: 'oracle', defaultPort: 1521 },
   { kind: 'clickhouse' as const, label: 'ClickHouse', icon: 'clickhouse', defaultPort: 9000 },
   { kind: 'kingbase' as const, label: '人大金仓', icon: 'kingbase', defaultPort: 54321 },
+  { kind: 'sqlserver' as const, label: 'SQL Server', icon: 'database', defaultPort: 1433 },
 ] as const
 
 /** macOS 标签色盘（Finder / Terminal 连接标记风格） */

@@ -103,19 +103,34 @@ const scopeLabel = computed(() => {
         v-model="sqlText"
         embedded
         :language="monacoLanguage"
+        height="100%"
+        class="nm-oracle-object-script__editor"
         :options="{
           automaticLayout: active !== false,
           minimap: { enabled: false },
           wordWrap: 'on',
         }"
       />
+      <div v-else class="nm-oracle-object-script__boot">
+        <RsLoading size="sm" />
+      </div>
     </template>
   </ObjectScriptShell>
 </template>
 
 <style scoped>
+.nm-oracle-object-script__editor {
+  flex: 1;
+  min-height: 0;
+  border-radius: 0;
+  border: none;
+}
+
 .nm-oracle-object-script__boot {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 0;
 }
 </style>

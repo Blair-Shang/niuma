@@ -1,0 +1,21 @@
+id: com.niuma.components.oracle-native
+name: Oracle Instant Client
+module: oracle
+# Instant Client 不编进安装包（OTN 再分发 + 国内下载不稳定）。
+# 默认：本机环境变量 / ORACLE_HOME / PATH 探测；此处仅「浏览指定 oci.dll」+ 官方下载页。
+# 不做 optional_download（避免应用内代分发与网络失败）。
+install:
+  mode: detect_only
+tools:
+  - id: instant-client
+    displayName: Instant Client (oci.dll)
+    detect:
+      # Basic 包通常无 sqlplus；有 SQL*Plus 包时可用于 PATH 探测。
+      # 日常请「浏览」选择 Instant Client 目录下的 oci.dll（Windows）或 libclntsh.so*。
+      executables:
+        - sqlplus
+      versionArgs:
+        - -V
+    install:
+      mode: detect_only
+      downloadPage: https://www.oracle.com/database/technologies/instant-client/downloads.html

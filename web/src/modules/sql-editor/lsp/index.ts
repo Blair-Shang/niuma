@@ -14,6 +14,7 @@ export {
   KINGBASE_MONACO_LANGUAGE_ID,
   CLICKHOUSE_MONACO_LANGUAGE_ID,
   SQLITE_MONACO_LANGUAGE_ID,
+  SQLSERVER_MONACO_LANGUAGE_ID,
 } from './language-ids'
 export { SqlLspClient } from './sql-lsp-client'
 export { subscribeLspEvents, lspRpcRoundTrip } from './bridge-transport'
@@ -23,11 +24,13 @@ export {
   ensureKingbaseLspLanguage,
   ensureClickHouseLspLanguage,
   ensureSqliteLspLanguage,
+  ensureSqlServerLspLanguage,
   setMysqlLexiconFetcher,
   setDamengLexiconFetcher,
   setKingbaseLexiconFetcher,
   setClickHouseLexiconFetcher,
   setSqliteLexiconFetcher,
+  setSqlServerLexiconFetcher,
   attachSqlLsp,
   type AttachSqlLspOptions,
   type EnsureSqlLspLanguageOptions,

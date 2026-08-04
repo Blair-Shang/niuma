@@ -11,9 +11,9 @@ import { connectionApi } from '@/api'
 import { damengApi } from '@/api/dameng'
 import type { DamengColumnInfo, DamengQueryExecResult } from '@/api/types/dameng'
 import {
-  alignForValueType, formatBrowseCellValue, formatRowsAsTsv, isBrowseFilterCompletionOpen,
-  mapPasteToColumnRecords, parseClipboardMatrix, parseEditValue, resolveSqlValueType,
-  type BrowseDataRow, type BrowseDataShellLabels,
+  buildBrowseResultColumn, formatRowsAsTsv, isBrowseFilterCompletionOpen,
+  mapPasteToColumnRecords, parseClipboardMatrix, parseEditValue,
+  type BrowseDataRow, type BrowseDataShellLabels, type BrowseRowChange,
 } from '@/modules/database'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
@@ -50,9 +50,6 @@ function parseCount(result: DamengQueryExecResult): number {
 }
 function empty(value: unknown): boolean {
   return value == null || (typeof value === 'string' && !value.trim())
-}
-function blobType(dataType?: string): boolean {
-  return /\b(BLOB|BINARY|VARBINARY|IMAGE)\b/i.test(dataType ?? '')
 }
 
 export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
@@ -126,14 +123,16 @@ export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
   const resultColumns = computed((): RsTableColumn<BrowseDataRow>[] => displayColumnNames.value.map((name) => {
     const meta = columnMeta.value.get(name.toLowerCase())
     const dataType = queryColumns.value.find((column) => column.name === name)?.dataType ?? meta?.dataType
-    const valueType = resolveSqlValueType(dataType)
-    return {
-      key: name, title: name, width: 120, minWidth: 80, ellipsis: true, sortable: true, filterable: true,
-      align: alignForValueType(valueType), valueType, nullable: meta?.nullable !== false, emptyAsNull: true,
+    return buildBrowseResultColumn({
+      name,
+      dataType,
       headerTip: `${t('modules.dameng.browse.colTipField', { name })}${dataType ? `\n${t('modules.dameng.browse.colTipType', { type: dataType })}` : ''}`,
-      editable: (row) => !blobType(dataType) && !isBinCell(row[name]) && (row.__isNew || canEdit.value),
-      formatter: valueType === 'boolean' ? undefined : (value) => formatBrowseCellValue(value, valueType),
-    }
+      width: 120,
+      minWidth: 80,
+      nullable: meta?.nullable !== false,
+      canEdit: canEdit.value,
+      isBinCell,
+    })
   }))
 
   function stableRowKey(row: unknown[], index: number): string {
@@ -220,7 +219,6 @@ export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
     value: unknown,
   ): Promise<void> {
     const name = String(column.key)
-
     if (row.__isNew) {
       const idx = resultRows.value.findIndex((item) => item.__rowKey === row.__rowKey)
       if (idx < 0) return
@@ -229,29 +227,47 @@ export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
       const copy = [...resultRows.value]
       copy[idx] = { ...resultRows.value[idx]!, [name]: nextRaw }
       resultRows.value = copy
+    }
+  }
+
+  async function applyRowChanges(row: BrowseDataRow, changes: BrowseRowChange[]): Promise<void> {
+    if (!changes.length) return
+    if (row.__isNew) {
+      const idx = resultRows.value.findIndex((item) => item.__rowKey === row.__rowKey)
+      if (idx >= 0) {
+        const nextRow: BrowseDataRow = { ...resultRows.value[idx]! }
+        for (const ch of changes) nextRow[ch.colKey] = parseEditValue(ch.value, ch.previous)
+        const copy = [...resultRows.value]
+        copy[idx] = nextRow
+        resultRows.value = copy
+        void flushNewRow(nextRow)
+      }
       return
     }
-
     if (!canEdit.value || !props.table || !props.sessionId) return
     const index = row.__rowIndex
     if (index < 0 || index >= rawRows.value.length) return
-    const columnIndex = queryColumns.value.findIndex((item) => item.name === name)
-    if (columnIndex < 0) return
-
-    const before = rawRows.value[index]![columnIndex]
-    const after = parseEditValue(value, before)
-    if (toSqlLiteral(before) === toSqlLiteral(after)) return
-
     const where = locateWhere(index)
     if (!where) {
       toast.error(t('modules.dameng.browse.locateFailed'))
       return
     }
+    const setParts: string[] = []
+    const applied: Array<{ columnIndex: number; after: unknown; before: unknown }> = []
+    for (const ch of changes) {
+      const columnIndex = queryColumns.value.findIndex((item) => item.name === ch.colKey)
+      if (columnIndex < 0) continue
+      const before = rawRows.value[index]![columnIndex]
+      const after = parseEditValue(ch.value, before)
+      if (toSqlLiteral(before) === toSqlLiteral(after)) continue
+      setParts.push(`${quoteIdent(ch.colKey)} = ${toSqlLiteral(after)}`)
+      applied.push({ columnIndex, after, before })
+    }
+    if (!setParts.length) return
 
-    // 先乐观更新 UI，避免提交后闪回旧值；失败再回滚
     const next = [...rawRows.value]
     const nextRow = [...next[index]!]
-    nextRow[columnIndex] = after
+    for (const item of applied) nextRow[item.columnIndex] = item.after
     next[index] = nextRow
     rawRows.value = next
     rebuildRows()
@@ -263,14 +279,14 @@ export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
         schema: schemaName.value,
         sql:
           `UPDATE ${qualifiedName(schemaName.value, props.table)}\n` +
-          `SET ${quoteIdent(name)} = ${toSqlLiteral(after)}\n` +
+          `SET ${setParts.join(', ')}\n` +
           `WHERE ${where}`,
       })
       toast.success(t('modules.dameng.browse.cellSaved'))
     } catch (error) {
       const rollback = [...rawRows.value]
       const rollbackRow = [...rollback[index]!]
-      rollbackRow[columnIndex] = before
+      for (const item of applied) rollbackRow[item.columnIndex] = item.before
       rollback[index] = rollbackRow
       rawRows.value = rollback
       rebuildRows()
@@ -279,6 +295,7 @@ export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
       saving.value = false
     }
   }
+
   function createDraft(): BrowseDataRow {
     newRowSeq += 1
     return Object.fromEntries([['__rowKey', `new-${newRowSeq}`], ['__rowIndex', -1], ['__isNew', true], ...displayColumnNames.value.map((name) => [name, null])]) as BrowseDataRow
@@ -450,7 +467,13 @@ export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
     finally { saving.value = false }
   }
   function isBrowseRowPending(row: BrowseDataRow): boolean { return Boolean(row.__isNew) }
-  function onBrowseRowEditCommit(row: BrowseDataRow): void { if (row.__isNew) void flushNewRow(row) }
+  function onBrowseRowEditCommit(
+    row: BrowseDataRow,
+    _index: number,
+    changes: BrowseRowChange[] = [],
+  ): void {
+    void applyRowChanges(row, changes)
+  }
   function onBrowseRowEditRollback(row: BrowseDataRow): void { if (row.__isNew) discardNewRow(row.__rowKey) }
 
   function isTypingTarget(target: EventTarget | null): boolean {

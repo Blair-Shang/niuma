@@ -146,6 +146,7 @@ std::string Dispatcher::HandleFrame(const std::string& raw_json) {
       s->ctx = session::SharedContext(err);
       s->params = std::move(cp);
       s->profile = std::move(opened.profile);
+      s->proxy_relay = std::move(opened.proxy_relay);
       sessions_.Put(s);
       return Ok(id, {{"sessionId", s->id}, {"dialect", s->profile.ToJson()}}).dump();
     }

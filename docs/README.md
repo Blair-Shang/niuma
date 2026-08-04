@@ -32,6 +32,7 @@
 | [29-oracle-module.md](./29-oracle-module.md) | **Oracle 管理模块（C++20 + ODPI-C + Instant Client；L3 Native）** |
 | [30-clickhouse-module.md](./30-clickhouse-module.md) | **ClickHouse 管理模块（Go + clickhouse-go/v2；P0–P3 含 ObjectScript/io.*）** |
 | [31-kingbase-module.md](./31-kingbase-module.md) | **人大金仓管理模块（Go + pgx/v5；后端/Web P0 session/query；树待做）** |
+| [32-sqlserver-module.md](./32-sqlserver-module.md) | **SQL Server 管理模块（Go + go-mssqldb；后端 P0 session/query + LSP；Web P0 Query/`GO`/LSP；tree 待 P1）** |
 | [20-tool-components.md](./20-tool-components.md) | **工具组件管理（设置页外部 CLI 检测与路径配置）** |
 | [21-session-registry.md](./21-session-registry.md) | **Tab 四层架构 + Session Registry**（时序速查 §0.5、开发者约定 §0.6） |
 | [17-script-platform-layout.md](./17-script-platform-layout.md) | 脚本平台分层与重构方案 |
@@ -104,3 +105,6 @@ Platform Core ──→ 多语言 Capability Services
 | v0.29 | 2026-07-26 | 新增 31 人大金仓落地方案（锁定 pgx；服务未实现；禁 JVM / 禁并入 Vastbase） |
 | v0.30 | 2026-07-26 | 31：`kingbase-service` 后端 P0（session/query/Probe；go.work + build） |
 | v0.31 | 2026-07-27 | 31：Web P0（表单/Query/Cap/注册；无对象树） |
+| v0.32 | 2026-08-03 | 新增 32 SQL Server 落地方案（锁定 Go + microsoft/go-mssqldb；服务未实现） |
+| v0.33 | 2026-08-03 | 32：`sqlserver-service` 后端 P0（session/query/Probe；go.work + build） |
+| v0.34 | 2026-08-03 | 32：Web P0（ConnKind / Query / `GO` 拆批 / LSP；无对象树） |

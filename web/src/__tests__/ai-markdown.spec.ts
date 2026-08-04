@@ -63,8 +63,24 @@ describe('renderAiMarkdown', () => {
     const html = renderAiMarkdown('```sql\nSELECT 1;\n```')
     expect(html).toContain('nm-ai-md__codeblock')
     expect(html).toContain('data-nm-ai-copy')
+    expect(html).toContain('data-nm-ai-open')
     expect(html).toContain('hljs')
     expect(html).toContain('SELECT')
+  })
+
+  it('renders ordered lists as ol', () => {
+    const html = renderAiMarkdown('1. **one**\n2. **two**\n')
+    expect(html).toContain('<ol>')
+    expect(html).toContain('<li>')
+    expect(html).toContain('one')
+    expect(html).toContain('two')
+  })
+
+  it('default-wraps plain text fences and hides sql-only open action', () => {
+    const html = renderAiMarkdown('```\nThreadPool\n → createMergedStream\n```')
+    expect(html).toContain('is-wrap')
+    expect(html).toContain('data-nm-ai-wrap')
+    expect(html).not.toContain('data-nm-ai-open')
   })
 
   it('collapses long code blocks', () => {

@@ -1,7 +1,7 @@
 /**
  * Oracle 连接树 Provider：
  * connection → schema → {Tables|Views|Procedures|Functions|Packages|Sequences} → object
- * 菜单结构对齐达梦 / Navicat 常用集（无 createSchema / synonym / trigger）。
+ * 菜单结构对齐达梦常用集（含 createSchema；无 synonym / trigger）。
  */
 import type { RsContextMenuItem } from '@niuma/ui'
 import { oracleApi } from '@/api/oracle'
@@ -14,6 +14,7 @@ import {
   openCreateTableDesign,
   openMonitor,
   openQuery,
+  requestCreateSchema,
 } from '@/modules/oracle/conn-tree-actions'
 import { isObjectCategory } from '@/modules/oracle/types/object-script'
 import type { ConnTreeChildProvider } from '@/modules/ops/conn-tree/registry'
@@ -64,7 +65,7 @@ function isSequenceLike(path: ConnResourcePath | undefined): boolean {
   return Boolean(segment(path, 'sequence') && segment(path, 'category') === 'sequences')
 }
 
-/** 生成脚本：对齐 Navicat / DBeaver Generate SQL。 */
+/** 生成脚本：SELECT / COUNT / INSERT 等常用项。 */
 function scriptMenus(allowMutating: boolean): RsContextMenuItem {
   const children: RsContextMenuItem[] = [
     { key: 'genSelect', label: label('genSelect'), icon: 'code-2' },
@@ -92,7 +93,6 @@ function scriptMenus(allowMutating: boolean): RsContextMenuItem {
 
 /**
  * 导入/导出：基表含导入；视图仅导出 CSV + 转储结构。
- * 对齐 DBeaver Export Data / Dump。
  */
 function dataIoMenus(isView: boolean): RsContextMenuItem[] {
   const children: RsContextMenuItem[] = []
@@ -125,7 +125,7 @@ function dataIoMenus(isView: boolean): RsContextMenuItem[] {
   ]
 }
 
-/** Schema 级「新建」：对齐 Navicat New / DBeaver Create New。 */
+/** Schema 级「新建」对象菜单。 */
 function schemaCreateMenus(): RsContextMenuItem {
   return {
     key: 'createMenu',
@@ -376,12 +376,17 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
 
   connMenuItems(): RsContextMenuItem[] {
     return [
+      { key: 'createSchema', label: label('createSchema'), icon: 'database' },
       { key: 'query', label: label('openQuery'), icon: 'code-2' },
       { key: 'monitor', label: label('openMonitor'), icon: 'activity' },
     ]
   },
 
   onConnMenuSelect(conn, key) {
+    if (key === 'createSchema') {
+      requestCreateSchema(conn)
+      return true
+    }
     if (key === 'query') {
       openQuery(conn)
       return true

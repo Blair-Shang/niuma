@@ -15,7 +15,8 @@ import (
 const headerSize = 4
 
 // MaxFrameSize 限制单帧 JSON 载荷的最大字节数。
-const MaxFrameSize = 16 << 20 // 16 MiB
+// 桌面工具查询页可能含大字段，故放宽到 1 GiB（仍低于 uint32 协议上限）。
+const MaxFrameSize = 1 << 30 // 1 GiB
 
 // ErrFrameTooLarge 表示对端声明的帧长度超过 MaxFrameSize。
 var ErrFrameTooLarge = errors.New("serviceipc: frame exceeds max size")

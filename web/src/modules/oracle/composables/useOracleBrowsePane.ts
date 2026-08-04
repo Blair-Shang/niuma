@@ -11,8 +11,8 @@ import { connectionApi } from '@/api'
 import { oracleApi } from '@/api/oracle'
 import type { OracleColumnInfo, OracleQueryExecResult } from '@/api/types/oracle'
 import {
-  alignForValueType, formatBrowseCellValue, formatRowsAsTsv, mapPasteToColumnRecords,
-  parseClipboardMatrix, parseEditValue, resolveSqlValueType,
+  buildBrowseResultColumn, formatRowsAsTsv, mapPasteToColumnRecords,
+  parseClipboardMatrix, parseEditValue,
   type BrowseDataRow, type BrowseDataShellLabels,
 } from '@/modules/database'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
@@ -50,9 +50,6 @@ function parseCount(result: OracleQueryExecResult): number {
 }
 function empty(value: unknown): boolean {
   return value == null || (typeof value === 'string' && !value.trim())
-}
-function blobType(dataType?: string): boolean {
-  return /\b(BLOB|BINARY|VARBINARY|IMAGE)\b/i.test(dataType ?? '')
 }
 
 export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
@@ -126,14 +123,16 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
   const resultColumns = computed((): RsTableColumn<BrowseDataRow>[] => displayColumnNames.value.map((name) => {
     const meta = columnMeta.value.get(name.toLowerCase())
     const dataType = queryColumns.value.find((column) => column.name === name)?.dataType ?? meta?.dataType
-    const valueType = resolveSqlValueType(dataType)
-    return {
-      key: name, title: name, width: 120, minWidth: 80, ellipsis: true, sortable: true, filterable: true,
-      align: alignForValueType(valueType), valueType, nullable: meta?.nullable !== false, emptyAsNull: true,
+    return buildBrowseResultColumn({
+      name,
+      dataType,
       headerTip: `${t('modules.oracle.browse.colTipField', { name })}${dataType ? `\n${t('modules.oracle.browse.colTipType', { type: dataType })}` : ''}`,
-      editable: (row) => !blobType(dataType) && !isBinCell(row[name]) && (row.__isNew || canEdit.value),
-      formatter: valueType === 'boolean' ? undefined : (value) => formatBrowseCellValue(value, valueType),
-    }
+      width: 120,
+      minWidth: 80,
+      nullable: meta?.nullable !== false,
+      canEdit: canEdit.value,
+      isBinCell,
+    })
   }))
 
   function stableRowKey(row: unknown[], index: number): string {
@@ -203,22 +202,54 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
 
   async function onCellEditCommit(row: BrowseDataRow, column: RsTableColumn<BrowseDataRow>, _index: number, value: unknown): Promise<void> {
     const name = String(column.key)
-    if (row.__isNew) { row[name] = parseEditValue(value, row[name]); return }
+    if (row.__isNew) { row[name] = parseEditValue(value, row[name]) }
+  }
+
+  async function applyRowChanges(
+    row: BrowseDataRow,
+    changes: Array<{ colKey: string; value: unknown; previous: unknown }>,
+  ): Promise<void> {
+    if (!changes.length) return
+    if (row.__isNew) {
+      for (const ch of changes) row[ch.colKey] = parseEditValue(ch.value, ch.previous)
+      void flushNewRow(row)
+      return
+    }
     const index = row.__rowIndex
-    const columnIndex = queryColumns.value.findIndex((item) => item.name === name)
-    const before = rawRows.value[index]?.[columnIndex]
-    const after = parseEditValue(value, before)
     const where = locateWhere(index)
-    if (!where || !props.table) { toast.error(t('modules.oracle.browse.locateFailed')); return }
-    if (toSqlLiteral(before) === toSqlLiteral(after)) return
+    if (!where || !props.table || !props.sessionId) {
+      toast.error(t('modules.oracle.browse.locateFailed'))
+      return
+    }
+    const setParts: string[] = []
+    const applied: Array<{ columnIndex: number; after: unknown; before: unknown }> = []
+    for (const ch of changes) {
+      const columnIndex = queryColumns.value.findIndex((item) => item.name === ch.colKey)
+      if (columnIndex < 0) continue
+      const before = rawRows.value[index]?.[columnIndex]
+      const after = parseEditValue(ch.value, before)
+      if (toSqlLiteral(before) === toSqlLiteral(after)) continue
+      setParts.push(`${quoteIdent(ch.colKey)} = ${toSqlLiteral(after)}`)
+      applied.push({ columnIndex, after, before })
+    }
+    if (!setParts.length) return
     saving.value = true
     try {
-      await oracleApi.queryExec({ sessionId: props.sessionId!, schema: schemaName.value, sql: `UPDATE ${qualifiedName(schemaName.value, props.table)}\nSET ${quoteIdent(name)} = ${toSqlLiteral(after)}\nWHERE ${where}` })
-      rawRows.value[index]![columnIndex] = after
-      rebuildRows(); toast.success(t('modules.oracle.browse.cellSaved'))
-    } catch (error) { toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.cellSaveError')) }
-    finally { saving.value = false }
+      await oracleApi.queryExec({
+        sessionId: props.sessionId,
+        schema: schemaName.value,
+        sql: `UPDATE ${qualifiedName(schemaName.value, props.table)}\nSET ${setParts.join(', ')}\nWHERE ${where}`,
+      })
+      for (const item of applied) rawRows.value[index]![item.columnIndex] = item.after
+      rebuildRows()
+      toast.success(t('modules.oracle.browse.cellSaved'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.cellSaveError'))
+    } finally {
+      saving.value = false
+    }
   }
+
   function createDraft(): BrowseDataRow {
     newRowSeq += 1
     return Object.fromEntries([['__rowKey', `new-${newRowSeq}`], ['__rowIndex', -1], ['__isNew', true], ...displayColumnNames.value.map((name) => [name, null])]) as BrowseDataRow
@@ -261,7 +292,13 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
     finally { saving.value = false }
   }
   function isBrowseRowPending(row: BrowseDataRow): boolean { return Boolean(row.__isNew) }
-  function onBrowseRowEditCommit(row: BrowseDataRow): void { if (row.__isNew) void flushNewRow(row) }
+  function onBrowseRowEditCommit(
+    row: BrowseDataRow,
+    _index: number,
+    changes: Array<{ colKey: string; value: unknown; previous: unknown }> = [],
+  ): void {
+    void applyRowChanges(row, changes)
+  }
   function onBrowseRowEditRollback(row: BrowseDataRow): void { if (row.__isNew) discardNewRow(row.__rowKey) }
   function rowsForCopy(row: BrowseDataRow | null, selected: BrowseDataRow[]): BrowseDataRow[] {
     return (selected.length ? selected : row ? [row] : resultRows.value.filter((item) => selectedRowKeys.value.includes(item.__rowKey))).filter((item) => !item.__isNew)
@@ -458,6 +495,6 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
     if (prior && !keys.includes(prior)) { const row = resultRows.value.find((item) => item.__rowKey === prior); if (row) await flushNewRow(row) }
   })
   return {
-    t, BROWSE_GUTTER_WIDTH, loading, saving, page, pageSize, pageSizeOptions: PAGE_SIZE_OPTIONS, totalRows, filterOpen, filterDraft, appliedWhereSql, importMenuOpen, exportMenuOpen, lastDataSql, lastResult, selectedRowKeys, resultRows, resultColumns, deleteConfirm, scopeOk, isView, scopeLabel, shellLabels, statusMeta, statusHint, filterSqlConfig, canInsert, canDeleteSelection, tableEditable, loadData, applyFilters, onFilterKeydown, refresh, importMenuItems, exportMenuItems, onImportMenuSelect, onExportMenuSelect, openInsert, requestDelete, confirmDelete, onCellEditCommit, isBrowseRowPending, onBrowseRowEditCommit, onBrowseRowEditRollback, onBrowseKeydown, contextMenuItems, onContextMenuSelect, ddlMenuOpen, ddlLoading, ddlText, objectType, canOpenDesign, copyBrowseDdl, openDesignTable, openDdlTab,
+    t, BROWSE_GUTTER_WIDTH, loading, saving, page, pageSize, pageSizeOptions: PAGE_SIZE_OPTIONS, totalRows, filterOpen, filterDraft, appliedWhereSql, importMenuOpen, exportMenuOpen, lastDataSql, lastResult, selectedRowKeys, resultRows, resultColumns, deleteConfirm, scopeOk, isView, scopeLabel, shellLabels, statusMeta, statusHint, filterSqlConfig, canInsert, canEdit, canDeleteSelection, tableEditable, loadData, applyFilters, onFilterKeydown, refresh, importMenuItems, exportMenuItems, onImportMenuSelect, onExportMenuSelect, openBrowseIo, openInsert, requestDelete, confirmDelete, onCellEditCommit, isBrowseRowPending, onBrowseRowEditCommit, onBrowseRowEditRollback, onBrowseKeydown, contextMenuItems, onContextMenuSelect, ddlMenuOpen, ddlLoading, ddlText, objectType, canOpenDesign, copyBrowseDdl, openDesignTable, openDdlTab,
   }
 }

@@ -30,6 +30,10 @@ type Manifest struct {
 		ExecutableWindows string `yaml:"executable_windows"`
 		ExecutableUnix    string `yaml:"executable_unix"`
 		Lang              string `yaml:"lang"`
+		NativeRuntime     string `yaml:"native_runtime"`
+		// EnvFromComponent 由工具组件解析出的路径注入子进程环境（标准变量名，如 ORACLE_HOME）。
+		// platform-core 不识别具体厂商；仅按 manifest 声明通用注入。
+		EnvFromComponent []EnvFromComponent `yaml:"env_from_component"`
 	} `yaml:"runtime"`
 	IPC struct {
 		Transport        string `yaml:"transport"`
@@ -44,6 +48,18 @@ type Manifest struct {
 		Startup string `yaml:"startup"`
 	} `yaml:"lifecycle"`
 	Streams []streamspec.Spec `yaml:"streams"`
+}
+
+// EnvFromComponent 将 components 工具有效路径映射为子进程环境变量。
+type EnvFromComponent struct {
+	// Name 标准环境变量名（如 ORACLE_HOME），禁止业务自定义前缀。
+	Name string `yaml:"name"`
+	// BundleID 对应 components/*/manifest.yaml 的 id。
+	BundleID string `yaml:"bundle_id"`
+	// ToolID 对应工具项 id。
+	ToolID string `yaml:"tool_id"`
+	// AsDirectory 为 true 时：若配置的是库文件（如 oci.dll），取其父目录。
+	AsDirectory bool `yaml:"as_directory"`
 }
 
 // LoadManifests 从 servicesDir/manifests 读取全部 *.yaml（不含 platform-core）。

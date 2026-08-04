@@ -82,7 +82,7 @@
 | Dialect `family` | **`"oracle"`** | Web 已预留 |
 | Cap 前缀 | **`oracle.*`**（可另加跨产品稳定 ID：`proc.*` / `split.*` / `format.*`） | **不**复用 `dameng.*` / `vastbase.*` 默认集 |
 | Web 模块 | **`web/src/modules/oracle/`** | 独立注册 |
-| 会话策略 | **`per_profile` + idle** | 见 [21](./21-session-registry.md) |
+| 会话策略 | **`per_tab` + 关 Tab 即断** | 对齐 MySQL；多查询 Tab 事务隔离，见 [21](./21-session-registry.md) |
 | 凭据 | platform Vault 注入 | [14](./14-capability-connection-framework.md) |
 | SSH 隧道 | platform 公共 `tunnel` dialer | 本服务只收展开后的 host/port |
 | IPC | **与 Go 服务同形**：4 字节 LE 长度 + UTF-8 JSON | platform `CapabilityRegistry` 零改动接入 |
@@ -103,10 +103,14 @@
 
 分发约束：
 
-- Instant Client 与 ODPI-C 动态库放在 `services/bin/runtime/oracle/`（或安装包 `components/oracle-native`），**不**链进 platform-core / 壳层。  
-- 构建脚本独立：`scripts/build-oracle-service.ps1`（需本机安装 VS + Instant Client SDK）；常规 `build-services.ps1` **可跳过**本服务。  
+- Instant Client **默认不随安装包分发**（OTN 再分发义务 + 国内下载不稳定）。  
+- 运行时探测顺序：`ORACLE_HOME[/bin]` → 旁载 `services/bin/runtime/oracle/` → PATH 中含 `oci.dll` 的目录。  
+- 用户也可在 **设置 → 工具组件 → Oracle Instant Client**（`components/oracle-native`，`detect_only`）浏览指定 `oci.dll`；`oracle-service` manifest 经 `runtime.env_from_component` 注入标准变量 **`ORACLE_HOME`**（platform **不**硬编码 Oracle）。  
+- **不做**应用内 `optional_download` 代下载；官方下载页由组件「打开下载页」引导。  
+- Instant Client / ODPI **不**链进 platform-core / 壳层。  
+- 构建脚本独立：`scripts/shared/build/build-oracle-service.ps1`；常规 `build-services.ps1` **可跳过**本服务。  
 - CI：无 Instant Client 的 runner 只编 IPC/JSON 单测（mock），集成测打 `oracle` 标签跳过。  
-- 许可证：Instant Client 遵循 Oracle 再分发条款；文档与安装包须附带通知。
+- 许可证：若未来改为随包/代下载，须遵守 OTN Instant Client 再分发条款并更新 EULA / `docs/compliance/NOTICES.txt`。
 
 ### 1.4 已预留（无需重做）
 
@@ -310,8 +314,8 @@ Windows：Named Pipe `\\.\pipe\niuma.oracle`；Unix：UDS `/tmp/niuma.oracle.soc
 | schema | 空 | 默认 `ALTER SESSION SET CURRENT_SCHEMA` |
 | role | `normal` | `normal` / `sysdba` / `sysoper`（ODPI-C auth mode） |
 | appName | `NiuMa` | `dpiConn_setClientInfo` / module |
-| ssl_mode | 按钱包/TCPS | Advanced：`protocol=tcps`、钱包目录；独立 SSL/Wallet Tab |
-| wallet_path / wallet_password | 空 | mTLS / 云库常见 |
+| ssl_mode | `disable` | `disable`（TCP）/ `require`（TCPS）/ `verify-full`（TCPS + Wallet + DN 校验） |
+| wallet_path / wallet_password | 空 | `verify-full` 必填路径；优先自动登录钱包（`cwallet.sso`） |
 | tunnel | SSH 跳板 | 复用 platform 公共 tunnel |
 | excludeSystemSchemas | `true` | 树/catalog 默认排除系统用户 |
 
@@ -476,6 +480,11 @@ runtime:
   lang: cpp
   # Instant Client 旁路目录（相对 services/）；进程启动时设置 OCI DLL 搜索路径
   native_runtime: bin/runtime/oracle
+  env_from_component:
+    - name: ORACLE_HOME
+      bundle_id: com.niuma.components.oracle-native
+      tool_id: instant-client
+      as_directory: true
 ipc:
   transport_windows: named_pipe
   transport_unix: unix_socket
@@ -518,7 +527,8 @@ permissions: []
 - [x] 锁定实现栈：**C++20 + ODPI-C + Instant Client**（本文 §1.2 / §1.3）  
 - [ ] 本机 Instant Client 连通：建连、简单查询、`dpiConn_breakExecution` 取消、CLOB/DATE  
 - [x] 固化版本 SQL（`v$version` banner；树/catalog 系统视图名见 §5，P1 实现）  
-- [ ] 确认 Instant Client 再分发合规文案  
+- [x] Instant Client 默认不随包；`components/oracle-native`（detect_only）+ NOTICES 说明；再分发合规文案待「若改为随包/代下载」时补 EULA  
+
 
 ### 后端 P0
 

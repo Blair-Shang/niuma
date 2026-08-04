@@ -189,6 +189,13 @@ export function normalizeOracleFeature(tab: string | undefined): OracleSessionTa
 }
 
 /** 自带顶栏的面板（Session 不再叠第二行 header）。 */
-export function oracleFeatureEmbedsChrome(_tab: OracleSessionTab): boolean {
-  return true
+export function oracleFeatureEmbedsChrome(tab: OracleSessionTab): boolean {
+  return (
+    tab === 'query' ||
+    tab === 'browse' ||
+    tab === 'ddl' ||
+    tab === 'objectScript' ||
+    tab === 'monitor' ||
+    tab === 'design'
+  )
 }

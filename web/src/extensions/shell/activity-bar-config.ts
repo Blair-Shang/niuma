@@ -58,6 +58,7 @@ const DB_CONN_KINDS = new Set<ConnKind>([
   'oracle',
   'clickhouse',
   'kingbase',
+  'sqlserver',
 ])
 
 const OPS_CONN_KINDS: ConnKind[] = CONN_KIND_DEFS.map((k) => k.kind).filter((k) => !DB_CONN_KINDS.has(k))
@@ -117,6 +118,7 @@ export function categoryModuleActions(category: ModuleCategory): CategoryModuleA
       { key: 'open-module:oracle', labelKey: 'nav.oracle', icon: 'oracle', moduleId: 'oracle' },
       { key: 'open-module:clickhouse', labelKey: 'nav.clickhouse', icon: 'database', moduleId: 'clickhouse' },
       { key: 'open-module:kingbase', labelKey: 'nav.kingbase', icon: 'kingbase', moduleId: 'kingbase' },
+      { key: 'open-module:sqlserver', labelKey: 'nav.sqlserver', icon: 'database', moduleId: 'sqlserver' },
       { key: 'open-module:database', labelKey: 'opsNav.addDatabase', icon: 'database', moduleId: 'database' },
     ]
   }

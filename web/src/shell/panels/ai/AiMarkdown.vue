@@ -82,8 +82,11 @@ function applyCopyLabels(root: HTMLElement): void {
     }
   }
   for (const btn of root.querySelectorAll<HTMLButtonElement>('[data-nm-ai-wrap]')) {
+    const block = btn.closest('.nm-ai-md__codeblock')
+    const wrapped = block?.classList.contains('is-wrap') ?? false
     btn.textContent = t('ai.wrapCode')
     btn.title = t('ai.wrapCode')
+    btn.setAttribute('aria-pressed', wrapped ? 'true' : 'false')
   }
   for (const btn of root.querySelectorAll<HTMLButtonElement>('[data-nm-ai-open]')) {
     btn.textContent = t('ai.openInEditor')
@@ -254,6 +257,7 @@ async function onClick(e: MouseEvent): Promise<void> {
   if (wrapBtn && rootEl.value.contains(wrapBtn)) {
     e.preventDefault()
     wrapBtn.closest('.nm-ai-md__codeblock')?.classList.toggle('is-wrap')
+    applyCopyLabels(rootEl.value)
     return
   }
   const openBtn = target.closest<HTMLButtonElement>('[data-nm-ai-open]')
@@ -261,18 +265,9 @@ async function onClick(e: MouseEvent): Promise<void> {
     e.preventDefault()
     const block = openBtn.closest('.nm-ai-md__codeblock')
     const code = block?.querySelector('code')?.textContent ?? ''
-    const lang = block?.getAttribute('data-nm-ai-lang') || 'sql'
     const active = tabStore.activeTab
     const profileId = typeof active?.props.profileId === 'string' ? active.props.profileId : undefined
-    if (
-      profileId &&
-      (lang === 'sql' ||
-        lang === 'pgsql' ||
-        lang === 'postgres' ||
-        lang === 'mysql' ||
-        lang === 'dameng' ||
-        lang === 'kingbase')
-    ) {
+    if (profileId) {
       tabStore.openTab({
         moduleId: active?.moduleId || 'vastbase',
         title: active?.title,
@@ -443,13 +438,33 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   font-style: italic;
 }
 
-.nm-ai-md :deep(ul),
+/* Tailwind preflight 会 list-style:none；此处必须显式恢复 */
+.nm-ai-md :deep(ul) {
+  list-style: disc outside;
+  padding-inline-start: 1.6em;
+}
+
 .nm-ai-md :deep(ol) {
-  padding-left: 1.35em;
+  list-style: decimal outside;
+  padding-inline-start: 1.85em;
+}
+
+.nm-ai-md :deep(ul ul) {
+  list-style-type: circle;
+}
+
+.nm-ai-md :deep(ol ol) {
+  list-style-type: lower-alpha;
 }
 
 .nm-ai-md :deep(li) {
   margin: 0.2em 0;
+  padding-inline-start: 0.15em;
+}
+
+.nm-ai-md :deep(li::marker) {
+  color: color-mix(in srgb, var(--rs-muted) 92%, var(--rs-text));
+  font-variant-numeric: tabular-nums;
 }
 
 .nm-ai-md :deep(li > p) {
@@ -458,7 +473,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 
 .nm-ai-md :deep(ul:has(input[type='checkbox'])) {
   list-style: none;
-  padding-left: 0.15em;
+  padding-inline-start: 0.15em;
 }
 
 .nm-ai-md :deep(li:has(> input[type='checkbox'])) {
@@ -522,10 +537,13 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 .nm-ai-md :deep(.nm-ai-md__code-actions) {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .nm-ai-md :deep(.nm-ai-md__copy),
+.nm-ai-md :deep(.nm-ai-md__code-wrap),
+.nm-ai-md :deep(.nm-ai-md__code-open),
 .nm-ai-md :deep(.nm-ai-md__code-expand),
 .nm-ai-md :deep(.nm-ai-md__code-more) {
   display: inline-flex;
@@ -540,13 +558,21 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .nm-ai-md :deep(.nm-ai-md__copy:hover),
+.nm-ai-md :deep(.nm-ai-md__code-wrap:hover),
+.nm-ai-md :deep(.nm-ai-md__code-open:hover),
 .nm-ai-md :deep(.nm-ai-md__code-expand:hover),
 .nm-ai-md :deep(.nm-ai-md__code-more:hover) {
   background: color-mix(in srgb, var(--rs-text) 8%, transparent);
+  color: var(--rs-text);
+}
+
+.nm-ai-md :deep(.nm-ai-md__codeblock.is-wrap .nm-ai-md__code-wrap) {
+  background: color-mix(in srgb, var(--rs-text) 10%, transparent);
   color: var(--rs-text);
 }
 
@@ -601,6 +627,14 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   line-height: 1.55;
   text-align: right;
   color: color-mix(in srgb, var(--rs-muted) 80%, transparent);
+}
+
+.nm-ai-md :deep(.nm-ai-md__codeblock.is-wrap .nm-ai-md__gutter) {
+  display: none;
+}
+
+.nm-ai-md :deep(.nm-ai-md__codeblock.is-wrap .nm-ai-md__code-body) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .nm-ai-md :deep(.nm-ai-md__codeblock.is-wrap .nm-ai-md__pre code) {

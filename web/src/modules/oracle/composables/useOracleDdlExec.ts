@@ -11,15 +11,18 @@ import {
 import { execOracleSql } from '@/modules/oracle/composables/useOracleSessionSql'
 import {
   useOracleDdlActionStore,
+  type OracleCreateSchemaOptions,
   type OraclePendingDdlAction,
 } from '@/modules/oracle/stores/ddl-actions'
 import {
+  createSchemaSql,
   dropFunctionSql,
   dropPackageSql,
   dropProcedureSql,
   dropSequenceSql,
   dropTableSql,
   dropViewSql,
+  grantSchemaConnectResourceSql,
   renameSequenceSql,
   renameTableSql,
   renameViewSql,
@@ -62,6 +65,18 @@ function buildDdlSql(req: OraclePendingDdlAction, newName?: string): string {
       if (!to) throw new Error('newName required')
       return renameSequenceSql(schema, req.name, to)
     }
+    case 'create_schema': {
+      const name = (newName ?? req.name ?? '').trim()
+      const opts = req.createOptions
+      const password = opts?.password ?? ''
+      if (!name) throw new Error('name required')
+      if (!password) throw new Error('password required')
+      return createSchemaSql(name, password, {
+        defaultTablespace: opts?.defaultTablespace,
+        temporaryTablespace: opts?.temporaryTablespace,
+        quotaUnlimited: opts?.quotaUnlimited,
+      })
+    }
     default:
       throw new Error(`unsupported action: ${req.action}`)
   }
@@ -95,7 +110,10 @@ export function useOracleDdlExec() {
     await refreshConnTreeRoot(conn, { prunePaths: prune })
   }
 
-  async function exec(opts?: { newName?: string }): Promise<void> {
+  async function exec(opts?: {
+    newName?: string
+    createOptions?: OracleCreateSchemaOptions
+  }): Promise<void> {
     const pending = store.pending
     if (!pending) return
 
@@ -106,14 +124,37 @@ export function useOracleDdlExec() {
     const prunePaths = pending.prunePaths
 
     try {
-      const sql = buildDdlSql(pending, opts?.newName)
-      await execOracleSql(pending.profileId, sql, pending.schema)
-      toast.success(t('modules.oracle.ddl.done'))
+      const req: OraclePendingDdlAction = {
+        ...pending,
+        createOptions: opts?.createOptions ?? pending.createOptions,
+      }
+      const sql = buildDdlSql(req, opts?.newName)
+      // CREATE USER 不绑 CURRENT_SCHEMA
+      const bindSchema = req.action === 'create_schema' ? undefined : req.schema
+      await execOracleSql(req.profileId, sql, bindSchema)
+
+      let grantFailed: string | undefined
+      if (req.action === 'create_schema' && req.createOptions?.grantConnectResource !== false) {
+        const name = (opts?.newName ?? req.name ?? '').trim()
+        try {
+          await execOracleSql(req.profileId, grantSchemaConnectResourceSql(name))
+        } catch (e) {
+          // 用户已创建：刷新树并提示授权失败，避免重复点创建报「用户已存在」
+          grantFailed = e instanceof Error ? e.message : t('modules.oracle.ddl.execError')
+        }
+      }
+
+      if (grantFailed) {
+        toast.warning(t('modules.oracle.ddl.createSchemaGrantFailed', { error: grantFailed }))
+      } else {
+        toast.success(t('modules.oracle.ddl.done'))
+      }
+
       if (conn) {
-        const countDelta = pending.action.startsWith('drop_') ? -1 : 0
+        const countDelta = req.action.startsWith('drop_') ? -1 : 0
         await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
       } else {
-        invalidateConnTreeChildren(pending.profileId)
+        invalidateConnTreeChildren(req.profileId)
       }
       store.clear()
     } catch (e) {

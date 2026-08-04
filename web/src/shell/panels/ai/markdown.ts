@@ -27,6 +27,16 @@ import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 
 const CODE_COLLAPSE_LINES = 28
+const SQL_OPEN_LANGS = new Set(['sql', 'pgsql', 'postgres', 'mysql', 'dameng', 'kingbase'])
+
+function isSqlOpenLang(lang: string): boolean {
+  return SQL_OPEN_LANGS.has(lang)
+}
+
+/** 窄面板下纯文本/无语言围栏默认换行，避免调用链等长行被裁切。 */
+function shouldDefaultWrap(lang: string): boolean {
+  return lang === 'text' || lang === 'plaintext'
+}
 
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('sh', bash)
@@ -211,15 +221,26 @@ function renderCodeBlock(text: string, lang: string | undefined): string {
   const lines = code ? code.split('\n') : ['']
   const lineCount = lines.length
   const collapsed = lineCount > CODE_COLLAPSE_LINES
+  const wrapped = shouldDefaultWrap(language)
+  const showOpen = isSqlOpenLang(language)
   const highlighted = highlightCode(code, language)
   const lineNos = lines.map((_, i) => `<span class="nm-ai-md__ln">${i + 1}</span>`).join('')
+  const blockClass = [
+    'nm-ai-md__codeblock',
+    collapsed ? 'is-collapsed' : '',
+    wrapped ? 'is-wrap' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   return [
-    `<div class="nm-ai-md__codeblock${collapsed ? ' is-collapsed' : ''}" data-nm-ai-lang="${escapeHtml(language)}"${collapsed ? ` data-nm-ai-code-lines="${lineCount}"` : ''}>`,
+    `<div class="${blockClass}" data-nm-ai-lang="${escapeHtml(language)}"${collapsed ? ` data-nm-ai-code-lines="${lineCount}"` : ''}>`,
     `<div class="nm-ai-md__code-head">`,
     `<span class="nm-ai-md__code-lang">${escapeHtml(language)}</span>`,
     `<div class="nm-ai-md__code-actions">`,
-    `<button type="button" class="nm-ai-md__code-wrap" data-nm-ai-wrap title="wrap"></button>`,
-    `<button type="button" class="nm-ai-md__code-open" data-nm-ai-open title="open"></button>`,
+    `<button type="button" class="nm-ai-md__code-wrap" data-nm-ai-wrap title="wrap"${wrapped ? ' aria-pressed="true"' : ' aria-pressed="false"'}></button>`,
+    showOpen
+      ? `<button type="button" class="nm-ai-md__code-open" data-nm-ai-open title="open"></button>`
+      : '',
     collapsed
       ? `<button type="button" class="nm-ai-md__code-expand" data-nm-ai-expand>${escapeHtml('…')}</button>`
       : '',

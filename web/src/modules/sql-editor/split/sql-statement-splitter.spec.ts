@@ -443,3 +443,33 @@ describe('splitSqlTexts · dameng', () => {
     ])
   })
 })
+
+describe('splitSqlTexts · sqlserver GO batches', () => {
+  it('splits on standalone GO and omits GO from batches', () => {
+    expect(
+      splitSqlTexts('SELECT 1\nGO\nSELECT 2\nGO\nSELECT 3', 'sqlserver'),
+    ).toEqual(['SELECT 1', 'SELECT 2', 'SELECT 3'])
+  })
+
+  it('keeps semicolons inside a GO batch as one exec unit', () => {
+    expect(splitSqlTexts('SELECT 1; SELECT 2;\nGO\nSELECT 3', 'sqlserver')).toEqual([
+      'SELECT 1; SELECT 2;',
+      'SELECT 3',
+    ])
+  })
+
+  it('ignores GO inside strings and comments', () => {
+    expect(splitSqlTexts("SELECT 'GO';\nGO\nSELECT 2 -- GO\nGO\nSELECT 3", 'sqlserver')).toEqual([
+      "SELECT 'GO';",
+      'SELECT 2 -- GO',
+      'SELECT 3',
+    ])
+  })
+
+  it('ignores GO inside bracket identifiers', () => {
+    expect(splitSqlTexts('SELECT [GO]\nGO\nSELECT 2', 'sqlserver')).toEqual([
+      'SELECT [GO]',
+      'SELECT 2',
+    ])
+  })
+})

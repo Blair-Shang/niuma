@@ -44,6 +44,13 @@ runtime:
   executable_unix: bin/niuma-oracle-service
   lang: cpp
   native_runtime: bin/runtime/oracle
+  # 标准 Oracle 客户端环境变量；路径来自工具组件（浏览指定 oci.dll）。
+  # platform-core 不硬编码 Oracle，仅按本声明通用注入。
+  env_from_component:
+    - name: ORACLE_HOME
+      bundle_id: com.niuma.components.oracle-native
+      tool_id: instant-client
+      as_directory: true
 ipc:
   transport: named_pipe
   transport_windows: named_pipe

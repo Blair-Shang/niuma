@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   alignForValueType,
+  isSqlBinaryLobType,
+  isSqlTextLobType,
   normalizeSqlDataType,
   resolveSqlValueType,
 } from './column-value-type'
@@ -33,9 +35,13 @@ describe('resolveSqlValueType', () => {
     expect(resolveSqlValueType('binary_float')).toBe('number')
     expect(resolveSqlValueType('binary_double')).toBe('number')
     expect(resolveSqlValueType('clob')).toBe('textarea')
-    expect(resolveSqlValueType('blob')).toBe('textarea')
-    expect(resolveSqlValueType('raw')).toBe('textarea')
-    expect(resolveSqlValueType('tinyint')).toBe('number')
+    expect(resolveSqlValueType('blob')).toBe('text')
+    expect(resolveSqlValueType('raw')).toBe('text')
+    expect(resolveSqlValueType('longtext')).toBe('textarea')
+    expect(resolveSqlValueType('json')).toBe('textarea')
+    expect(isSqlBinaryLobType('blob')).toBe(true)
+    expect(isSqlBinaryLobType('clob')).toBe(false)
+    expect(isSqlTextLobType('longtext')).toBe(true)
     expect(resolveSqlValueType('tinyint', { length: 1 })).toBe('boolean')
     expect(resolveSqlValueType('bit', { length: 1 })).toBe('boolean')
     expect(resolveSqlValueType('bit', { length: 8 })).toBe('text')

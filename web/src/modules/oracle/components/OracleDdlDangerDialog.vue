@@ -14,7 +14,7 @@ const description = computed(() => pending.value?.description ?? '')
 
 async function onConfirm(): Promise<void> {
   const req = pending.value
-  if (!req || req.kind === 'rename') return
+  if (!req || req.kind === 'rename' || req.kind === 'create_schema') return
   await exec()
 }
 </script>

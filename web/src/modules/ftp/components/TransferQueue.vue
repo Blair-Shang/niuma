@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { RsButton, RsIcon } from '@niuma/ui'
+import {
+  RsButton,
+  RsIcon,
+  RsTable,
+  copyTextToClipboard,
+  type RsContextMenuItem,
+  type RsTableColumn,
+} from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FtpTransferTask } from '@/api/types/ftp'
@@ -31,6 +38,27 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+interface TransferQueueRow {
+  taskId: string
+  direction: 'upload' | 'download'
+  source: string
+  name: string
+  remotePath: string
+  localPath: string
+  progress: number
+  progressLabel: string
+  sizeLabel: string
+  speedLabel: string
+  state: string
+  stateLabel: string
+  error?: string
+  canPause: boolean
+  canResume: boolean
+  canCancel: boolean
+  /** 操作列占位，复制行时为空 */
+  actions: string
+}
+
 function taskSortOrder(state: string): number {
   if (state === 'running') return 0
   if (state === 'queued') return 1
@@ -40,16 +68,13 @@ function taskSortOrder(state: string): number {
 }
 
 const activeCount = computed(() =>
-  props.tasks.filter((t) => t.state === 'queued' || t.state === 'running' || t.state === 'paused').length,
+  props.tasks.filter((task) => task.state === 'queued' || task.state === 'running' || task.state === 'paused')
+    .length,
 )
 
 const hasActiveTransfers = computed(() => activeCount.value > 0)
 
-const activeTasks = computed(() =>
-  [...props.tasks].sort((a, b) => taskSortOrder(a.state) - taskSortOrder(b.state)),
-)
-
-/** 是否显示来源列（有 sessions 且多于 1 个，或调用方明确传入） */
+/** 是否显示来源列（有 sessions 且多于 0 个） */
 const showSource = computed(() => !!props.sessions && props.sessions.size > 0)
 
 function sessionLabel(sessionId: string): string {
@@ -63,6 +88,10 @@ function progressPercent(task: FtpTransferTask): number {
 
 function formatSpeed(bps: number): string {
   return bps > 0 ? `${formatFileSize(bps)}/s` : '—'
+}
+
+function formatSize(task: FtpTransferTask): string {
+  return `${formatFileSize(task.transferred)} / ${formatFileSize(task.total)}`
 }
 
 function stateLabel(state: string): string {
@@ -81,10 +110,134 @@ function fileName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-function canPause(task: FtpTransferTask): boolean { return task.state === 'running' }
-function canResume(task: FtpTransferTask): boolean { return task.state === 'paused' }
-function canCancel(task: FtpTransferTask): boolean {
-  return task.state === 'queued' || task.state === 'running' || task.state === 'paused'
+function displayName(task: FtpTransferTask): string {
+  return fileName(task.direction === 'upload' ? task.localPath : task.remotePath)
+}
+
+const tableRows = computed((): TransferQueueRow[] =>
+  [...props.tasks]
+    .sort((a, b) => taskSortOrder(a.state) - taskSortOrder(b.state))
+    .map((task) => {
+      const progress = progressPercent(task)
+      return {
+        taskId: task.taskId,
+        direction: task.direction,
+        source: sessionLabel(task.sessionId),
+        name: displayName(task),
+        remotePath: task.remotePath || '',
+        localPath: task.localPath || '',
+        progress,
+        progressLabel: `${progress}%`,
+        sizeLabel: formatSize(task),
+        speedLabel: formatSpeed(task.speedBps),
+        state: task.state,
+        stateLabel: stateLabel(task.state),
+        error: task.error,
+        canPause: task.state === 'running',
+        canResume: task.state === 'paused',
+        canCancel: task.state === 'queued' || task.state === 'running' || task.state === 'paused',
+        actions: '',
+      }
+    }),
+)
+
+const columns = computed((): RsTableColumn<TransferQueueRow>[] => {
+  const cols: RsTableColumn<TransferQueueRow>[] = [
+    {
+      key: 'direction',
+      title: '',
+      width: 40,
+      align: 'center',
+    },
+  ]
+  if (showSource.value) {
+    cols.push({
+      key: 'source',
+      title: t('modules.ftp.transfer.colSource'),
+      width: 110,
+      ellipsis: true,
+      tooltip: (row) => row.source,
+    })
+  }
+  cols.push(
+    {
+      key: 'name',
+      title: t('modules.ftp.transfer.colName'),
+      minWidth: 120,
+      ellipsis: true,
+      tooltip: (row) => row.name,
+    },
+    {
+      key: 'remotePath',
+      title: t('modules.ftp.transfer.colRemotePath'),
+      minWidth: 160,
+      ellipsis: true,
+      tooltip: (row) => row.remotePath || undefined,
+    },
+    {
+      key: 'progressLabel',
+      title: t('modules.ftp.transfer.colProgress'),
+      width: 120,
+      dataIndex: 'progressLabel',
+    },
+    {
+      key: 'sizeLabel',
+      title: t('modules.ftp.transfer.colSize'),
+      width: 168,
+      align: 'right',
+      ellipsis: true,
+      tooltip: (row) => row.sizeLabel,
+    },
+    {
+      key: 'speedLabel',
+      title: t('modules.ftp.transfer.colSpeed'),
+      width: 88,
+      align: 'right',
+    },
+    {
+      key: 'stateLabel',
+      title: t('modules.ftp.transfer.colState'),
+      width: 80,
+    },
+    {
+      key: 'actions',
+      title: '',
+      width: 88,
+      align: 'right',
+    },
+  )
+  return cols
+})
+
+function buildCtxItems(row: TransferQueueRow | null): RsContextMenuItem[] {
+  if (!row) return []
+  const items: RsContextMenuItem[] = []
+  if (row.remotePath) {
+    items.push({
+      key: 'copyRemotePath',
+      label: t('modules.ftp.transfer.copyRemotePath'),
+      icon: 'copy',
+    })
+  }
+  if (row.localPath) {
+    items.push({
+      key: 'copyLocalPath',
+      label: t('modules.ftp.transfer.copyLocalPath'),
+      icon: 'copy',
+    })
+  }
+  return items
+}
+
+async function onContextMenuSelect(key: string, row: TransferQueueRow | null): Promise<void> {
+  if (!row) return
+  if (key === 'copyRemotePath' && row.remotePath) {
+    await copyTextToClipboard(row.remotePath)
+    return
+  }
+  if (key === 'copyLocalPath' && row.localPath) {
+    await copyTextToClipboard(row.localPath)
+  }
 }
 </script>
 
@@ -117,138 +270,110 @@ function canCancel(task: FtpTransferTask): boolean {
         class="nm-transfer-queue__count"
         :class="{ 'nm-transfer-queue__count--active': hasActiveTransfers }"
       >
-        {{ hasActiveTransfers ? activeCount : activeTasks.length }}
+        {{ hasActiveTransfers ? activeCount : tableRows.length }}
       </span>
     </header>
 
     <div v-show="hideHeader || !collapsed" class="nm-transfer-queue__body">
-      <div class="nm-transfer-queue__scroll">
-        <table class="tq-table">
-          <colgroup>
-            <col class="tq-col-dir">
-            <col v-if="showSource" class="tq-col-src">
-            <col class="tq-col-name">
-            <col class="tq-col-progress">
-            <col class="tq-col-size">
-            <col class="tq-col-speed">
-            <col class="tq-col-state">
-            <col class="tq-col-actions">
-          </colgroup>
-          <thead>
-            <tr>
-              <th />
-              <th v-if="showSource">{{ t('modules.ftp.transfer.colSource') }}</th>
-              <th>{{ t('modules.ftp.transfer.colName') }}</th>
-              <th>{{ t('modules.ftp.transfer.colProgress') }}</th>
-              <th class="tq-right">{{ t('modules.ftp.transfer.colSize') }}</th>
-              <th class="tq-right">{{ t('modules.ftp.transfer.colSpeed') }}</th>
-              <th>{{ t('modules.ftp.transfer.colState') }}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            <template v-if="activeTasks.length">
-              <tr v-for="task in activeTasks" :key="task.taskId">
-                <!-- 方向图标 -->
-                <td class="tq-center">
-                  <span
-                    class="tq-dir"
-                    :class="task.direction === 'upload' ? 'tq-dir--up' : 'tq-dir--down'"
-                  >
-                    <RsIcon
-                      :name="task.direction === 'upload' ? 'upload' : 'download'"
-                      :size="12"
-                    />
-                  </span>
-                </td>
-                <!-- 来源（会话名） -->
-                <td v-if="showSource" class="tq-src" :title="sessionLabel(task.sessionId)">
-                  {{ sessionLabel(task.sessionId) }}
-                </td>
-                <!-- 文件名 -->
-                <td class="tq-name-cell">
-                  <span
-                    class="tq-name"
-                    :title="fileName(task.direction === 'upload' ? task.localPath : task.remotePath)"
-                  >
-                    {{ fileName(task.direction === 'upload' ? task.localPath : task.remotePath) }}
-                  </span>
-                  <span v-if="task.error" class="tq-error" :title="task.error">{{ task.error }}</span>
-                </td>
-                <!-- 进度 -->
-                <td class="tq-progress-cell">
-                  <div class="tq-bar">
-                    <div
-                      class="tq-bar-fill"
-                      :class="{
-                        'tq-bar-fill--done': task.state === 'done',
-                        'tq-bar-fill--failed': task.state === 'failed',
-                      }"
-                      :style="{ width: `${progressPercent(task)}%` }"
-                    />
-                  </div>
-                  <span class="tq-pct">{{ progressPercent(task) }}%</span>
-                </td>
-                <!-- 大小 -->
-                <td class="tq-right tq-meta">
-                  {{ formatFileSize(task.transferred) }} / {{ formatFileSize(task.total) }}
-                </td>
-                <!-- 速度 -->
-                <td class="tq-right tq-meta">{{ formatSpeed(task.speedBps) }}</td>
-                <!-- 状态 -->
-                <td>
-                  <span class="tq-state" :class="stateClass(task.state)">
-                    {{ stateLabel(task.state) }}
-                  </span>
-                </td>
-                <!-- 操作 -->
-                <td class="tq-actions-cell">
-                  <div class="tq-actions">
-                    <RsButton
-                      v-if="canPause(task)"
-                      size="sm"
-                      variant="ghost"
-                      icon="pause"
-                      icon-only
-                      :tooltip="t('modules.ftp.transfer.pause')"
-                      @click="emit('pause', task.taskId)"
-                    />
-                    <RsButton
-                      v-if="canResume(task)"
-                      size="sm"
-                      variant="ghost"
-                      icon="play"
-                      icon-only
-                      :tooltip="t('modules.ftp.transfer.resume')"
-                      @click="emit('resume', task.taskId)"
-                    />
-                    <RsButton
-                      v-if="canCancel(task)"
-                      size="sm"
-                      variant="ghost"
-                      icon="x"
-                      icon-only
-                      :tooltip="t('modules.ftp.transfer.cancel')"
-                      @click="emit('cancel', task.taskId)"
-                    />
-                  </div>
-                </td>
-              </tr>
-            </template>
-            <tr v-else>
-              <td :colspan="showSource ? 8 : 7" class="tq-empty">
-                {{ t('modules.ftp.transfer.empty') }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <RsTable
+        class="nm-transfer-queue__table"
+        :columns="columns"
+        :data="tableRows"
+        row-key="taskId"
+        size="sm"
+        fill
+        :bordered="false"
+        :context-menu-items="buildCtxItems"
+        @context-menu-select="(key, row) => void onContextMenuSelect(key, row)"
+      >
+        <template #direction="{ row }">
+          <span
+            class="tq-dir"
+            :class="row.direction === 'upload' ? 'tq-dir--up' : 'tq-dir--down'"
+          >
+            <RsIcon
+              :name="row.direction === 'upload' ? 'upload' : 'download'"
+              :size="12"
+            />
+          </span>
+        </template>
+
+        <template #name="{ row }">
+          <span class="tq-name" :title="row.name">{{ row.name }}</span>
+          <span v-if="row.error" class="tq-error" :title="row.error">{{ row.error }}</span>
+        </template>
+
+        <template #remotePath="{ row }">
+          <span class="tq-remote" :title="row.remotePath || undefined">
+            {{ row.remotePath || '—' }}
+          </span>
+        </template>
+
+        <template #progressLabel="{ row }">
+          <div class="tq-progress">
+            <div class="tq-bar">
+              <div
+                class="tq-bar-fill"
+                :class="{
+                  'tq-bar-fill--done': row.state === 'done',
+                  'tq-bar-fill--failed': row.state === 'failed',
+                }"
+                :style="{ width: `${row.progress}%` }"
+              />
+            </div>
+            <span class="tq-pct">{{ row.progressLabel }}</span>
+          </div>
+        </template>
+
+        <template #sizeLabel="{ row }">
+          <span class="tq-meta">{{ row.sizeLabel }}</span>
+        </template>
+
+        <template #speedLabel="{ row }">
+          <span class="tq-meta">{{ row.speedLabel }}</span>
+        </template>
+
+        <template #stateLabel="{ row }">
+          <span class="tq-state" :class="stateClass(row.state)">{{ row.stateLabel }}</span>
+        </template>
+
+        <template #actions="{ row }">
+          <div class="tq-actions">
+            <RsButton
+              v-if="row.canPause"
+              size="sm"
+              variant="ghost"
+              icon="pause"
+              icon-only
+              :tooltip="t('modules.ftp.transfer.pause')"
+              @click="emit('pause', row.taskId)"
+            />
+            <RsButton
+              v-if="row.canResume"
+              size="sm"
+              variant="ghost"
+              icon="play"
+              icon-only
+              :tooltip="t('modules.ftp.transfer.resume')"
+              @click="emit('resume', row.taskId)"
+            />
+            <RsButton
+              v-if="row.canCancel"
+              size="sm"
+              variant="ghost"
+              icon="x"
+              icon-only
+              :tooltip="t('modules.ftp.transfer.cancel')"
+              @click="emit('cancel', row.taskId)"
+            />
+          </div>
+        </template>
+      </RsTable>
     </div>
   </section>
 </template>
 
 <style scoped>
-/* ── 容器 ───────────────────────────────────────────────────────── */
 .nm-transfer-queue {
   display: flex;
   flex-direction: column;
@@ -265,7 +390,6 @@ function canCancel(task: FtpTransferTask): boolean {
   width: 100%;
 }
 
-/* ── 标题栏（会话内使用时） ─────────────────────────────────────── */
 .nm-transfer-queue__header {
   display: flex;
   align-items: center;
@@ -356,86 +480,16 @@ function canCancel(task: FtpTransferTask): boolean {
   background: var(--rs-primary);
 }
 
-/* ── 滚动容器 ───────────────────────────────────────────────────── */
 .nm-transfer-queue__body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
-.nm-transfer-queue__scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-x: auto;
-  overflow-y: auto;
+.nm-transfer-queue__table {
+  height: 100%;
 }
 
-/* ── 原生表格 ───────────────────────────────────────────────────── */
-.tq-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--rs-font-size-xs);
-  table-layout: fixed;
-}
-
-/* 列宽 */
-.tq-col-dir     { width: 2.25rem; }
-.tq-col-src     { width: 110px; }
-.tq-col-name    { width: auto; min-width: 120px; }
-.tq-col-progress{ width: 148px; }
-.tq-col-size    { width: 116px; }
-.tq-col-speed   { width: 84px; }
-.tq-col-state   { width: 68px; }
-.tq-col-actions { width: 72px; }
-
-/* 表头 */
-thead tr {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--nm-frame-bg, var(--rs-surface-elevated));
-}
-
-thead th {
-  padding: 0 0.5rem;
-  height: 1.75rem;
-  font-weight: 600;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
-  text-align: left;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--rs-border-subtle);
-  letter-spacing: 0.03em;
-}
-
-/* 表体行 */
-tbody tr {
-  border-bottom: 1px solid var(--rs-border-subtle);
-  transition: background var(--rs-transition-fast);
-}
-
-tbody tr:last-child {
-  border-bottom: none;
-}
-
-tbody tr:hover {
-  background: var(--rs-item-hover);
-}
-
-tbody td {
-  padding: 0.25rem 0.5rem;
-  height: 2.25rem;
-  vertical-align: middle;
-  overflow: hidden;
-}
-
-/* 对齐辅助 */
-.tq-center { text-align: center; }
-.tq-right  { text-align: right; }
-
-/* 方向图标 */
 .tq-dir {
   display: inline-flex;
   align-items: center;
@@ -455,19 +509,6 @@ tbody td {
   background: var(--rs-success-container);
 }
 
-/* 来源列 */
-.tq-src {
-  max-width: 110px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--rs-muted);
-  font-size: var(--rs-font-size-xs);
-}
-
-/* 文件名列 */
-.tq-name-cell { max-width: 0; }
-
 .tq-name {
   display: block;
   overflow: hidden;
@@ -485,9 +526,22 @@ tbody td {
   color: var(--rs-danger);
 }
 
-/* 进度列 */
-.tq-progress-cell {
-  padding-right: 0.75rem;
+.tq-remote {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--rs-muted);
+}
+
+.tq-meta {
+  color: var(--rs-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tq-progress {
+  min-width: 0;
 }
 
 .tq-bar {
@@ -505,8 +559,13 @@ tbody td {
   transition: width 0.3s ease;
 }
 
-.tq-bar-fill--done  { background: var(--rs-success); }
-.tq-bar-fill--failed{ background: var(--rs-danger); }
+.tq-bar-fill--done {
+  background: var(--rs-success);
+}
+
+.tq-bar-fill--failed {
+  background: var(--rs-danger);
+}
 
 .tq-pct {
   font-size: 0.65rem;
@@ -514,37 +573,26 @@ tbody td {
   font-variant-numeric: tabular-nums;
 }
 
-/* 元信息（大小/速度） */
-.tq-meta {
-  color: var(--rs-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* 状态 */
 .tq-state {
   color: var(--rs-muted);
   white-space: nowrap;
 }
 
-.tq-state--running { color: var(--rs-primary); }
-.tq-state--failed  { color: var(--rs-danger); }
-.tq-state--done    { color: var(--rs-success); }
+.tq-state--running {
+  color: var(--rs-primary);
+}
 
-/* 操作按钮 */
-.tq-actions-cell { padding: 0 0.25rem; }
+.tq-state--failed {
+  color: var(--rs-danger);
+}
+
+.tq-state--done {
+  color: var(--rs-success);
+}
 
 .tq-actions {
   display: inline-flex;
   justify-content: flex-end;
   gap: 1px;
-}
-
-/* 空状态 */
-.tq-empty {
-  height: 3rem;
-  text-align: center;
-  color: var(--rs-muted);
-  vertical-align: middle;
 }
 </style>

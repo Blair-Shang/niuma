@@ -31,6 +31,7 @@ export default {
     oracle: 'Oracle',
     clickhouse: 'ClickHouse',
     kingbase: 'Kingbase',
+    sqlserver: 'SQL Server',
     database: 'Database',
     api: 'API Tester',
     settings: 'Settings',
@@ -189,6 +190,7 @@ export default {
   },
   shell: {
     activityBar: 'Activity Bar',
+    toggleSidebar: 'Toggle sidebar (Ctrl+B)',
     windowControls: 'Window controls',
     windowMinimize: 'Minimize',
     windowMaximize: 'Maximize',
@@ -404,9 +406,12 @@ export default {
     componentsEmpty: 'No tool component bundles registered.',
     componentsDetectBundle: 'Detect again',
     componentsBrowse: 'Browse…',
+    componentsBrowseFolder: 'Choose folder…',
     componentsClearPath: 'Clear path',
     componentsDownload: 'Download',
     componentsBrowseTitle: 'Select {name} executable',
+    componentsBrowseFolderTitle: 'Select folder containing {name}',
+    componentsLibraryNotFound: 'Could not find {names} in: {dir}',
     componentsPathSaved: 'Path saved',
     componentsDetectDone: 'Detection complete',
     componentsInstall: 'Download & install',
@@ -465,6 +470,15 @@ export default {
           pg_dump: 'pg_dump',
           pg_restore: 'pg_restore',
           psql: 'psql',
+        },
+      },
+      com_niuma_components_oracle_native: {
+        name: 'Oracle Instant Client',
+        tip: 'Choose the extracted Instant Client folder that contains oci.dll. Prefer Basic or Basic Light for Windows x64; use a release compatible with your database (commonly 19c / 21c).',
+        downloadTip:
+          'Oracle’s download page lists many packages. Pick Windows x64 → Basic / Basic Light ZIP, extract it, then use “Choose folder” here to auto-detect oci.dll. SDK is not required.',
+        tools: {
+          'instant-client': 'Instant Client (oci.dll)',
         },
       },
     },
@@ -607,6 +621,23 @@ export default {
     database: {
       title: 'Database',
       desc: 'Schema tree and SQL editor coming soon.',
+      cellView: {
+        viewTitle: 'View',
+        close: 'Close',
+        copyFull: 'Copy full value',
+        copied: 'Copied',
+      },
+      cellEditor: {
+        editTitle: 'Edit',
+        apply: 'Apply',
+        cancel: 'Cancel',
+        copyFull: 'Copy full value',
+        copied: 'Copied',
+        modePlaintext: 'Text',
+        modeJson: 'JSON',
+        modeXml: 'XML',
+        applyHint: 'Apply stages the value — click row ✓ to write to the database',
+      },
     },
     api: {
       title: 'API Tester',

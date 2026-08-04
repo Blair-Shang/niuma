@@ -84,16 +84,27 @@ export function selectionAttachmentFromWorkspace(): AiContextAttachment | null {
     return null
   }
   const snap = getEditorSelection()
+  const source = snap?.source
+  const language = snap?.language
+  const detailParts = [`${selection.length} chars`]
+  if (source === 'terminal') detailParts.push('terminal')
+  if (language) detailParts.push(language)
   return {
     id: `sel:${hashId(selection)}`,
     kind: 'selection',
-    label: selection.length > 48 ? `${selection.slice(0, 48)}…` : selection,
-    detail: snap?.language
-      ? `${selection.length} chars · ${snap.language}`
-      : `${selection.length} chars`,
+    label:
+      source === 'terminal'
+        ? selection.length > 40
+          ? `终端选区：${selection.slice(0, 40)}…`
+          : `终端选区：${selection}`
+        : selection.length > 48
+          ? `${selection.slice(0, 48)}…`
+          : selection,
+    detail: detailParts.join(' · '),
     payload: {
       text: selection.slice(0, 4000),
-      language: snap?.language,
+      language: language || (source === 'terminal' ? 'text' : undefined),
+      source,
       tabId: snap?.tabId,
     },
   }
@@ -247,7 +258,18 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
   }
   for (const a of attachments) {
     if (a.kind === 'selection' && typeof a.payload.text === 'string') {
-      lines.push(`[selection] ${a.label}\n\`\`\`\n${a.payload.text}\n\`\`\``)
+      const lang =
+        typeof a.payload.language === 'string' && a.payload.language.trim()
+          ? a.payload.language.trim()
+          : ''
+      const src =
+        typeof a.payload.source === 'string' && a.payload.source.trim()
+          ? ` source=${a.payload.source.trim()}`
+          : ''
+      const fence = lang && lang !== 'text' ? lang : ''
+      lines.push(
+        `[selection${src}${lang ? ` language=${lang}` : ''}] ${a.label}\n\`\`\`${fence}\n${a.payload.text}\n\`\`\``,
+      )
       continue
     }
     if (a.kind === 'diagnostic' && typeof a.payload.text === 'string') {

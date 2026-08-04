@@ -36,12 +36,14 @@ import {
 } from '@/modules/vastbase/utils/browse-io'
 import {
   alignForValueType,
+  BrowseCellEditorDialog,
   formatBrowseCellValue,
   formatRowsAsTsv,
   isBrowseFilterCompletionOpen,
   mapPasteToColumnRecords,
   parseClipboardMatrix,
   resolveSqlValueType,
+  useCellViewDialog,
 } from '@/modules/database'
 import { parseEditValue, toSqlLiteral } from '@/modules/vastbase/utils/sql-literal'
 import { openVastbaseDataTask } from '@/modules/vastbase/data-tasks'
@@ -60,6 +62,15 @@ const props = defineProps<{
 const { t } = useI18n()
 const toast = useRsToast()
 const nav = useConnectionNavigation()
+
+const {
+  open: cellViewOpen,
+  draft: cellViewDraft,
+  title: cellViewTitle,
+  labels: cellViewLabels,
+  openCell: openCellView,
+  copyFull: copyCellFull,
+} = useCellViewDialog()
 
 const page = ref(1)
 const pageSize = ref(100)
@@ -1555,6 +1566,7 @@ watch(ddlMenuOpen, (open) => {
           :virtual-columns-auto-threshold="40"
           :layout-active="active"
           @cell-edit-commit="onCellEditCommit"
+          @cell-view="openCellView"
           @row-edit-commit="onBrowseRowEditCommit"
           @row-edit-rollback="onBrowseRowEditRollback"
           @context-menu-select="onContextMenuSelect"
@@ -1563,6 +1575,18 @@ watch(ddlMenuOpen, (open) => {
             {{ t('modules.vastbase.browse.empty') }}
           </template>
         </RsTable>
+
+        <BrowseCellEditorDialog
+          v-model:open="cellViewOpen"
+          v-model:draft="cellViewDraft"
+          :title="cellViewTitle"
+          readonly
+          :cancel-label="cellViewLabels().close"
+          :show-copy-full="true"
+          :copy-full-label="cellViewLabels().copyFull"
+          :copied-label="cellViewLabels().copied"
+          @copy-full="copyCellFull"
+        />
       </div>
     </div>
 

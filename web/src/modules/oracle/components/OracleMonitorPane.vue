@@ -32,8 +32,24 @@ const { t } = useI18n()
 const toast = useRsToast()
 
 type MonitorTab = 'instance' | 'processes' | 'locks'
-type ProcessRow = Record<string, unknown> & { __rowKey: string; id: number; time: number; command: string }
-type LockRow = Record<string, unknown> & { waitingPid: number; blockingPid: number }
+type ProcessRow = Record<string, unknown> & {
+  __rowKey: string
+  id: number
+  serial?: number
+  time: number
+  command: string
+  state?: string
+  sqlId?: string
+  waitClass?: string
+  blockingSession?: number
+}
+type LockRow = Record<string, unknown> & {
+  __rowKey: string
+  waitingPid: number
+  waitingSerial?: number | string
+  blockingPid: number
+  blockingSerial?: number | string
+}
 
 const LONG_RUNNING_SECS = 60
 
@@ -41,6 +57,53 @@ const activeTab = ref<MonitorTab>('instance')
 const autoRefreshSecs = ref('0')
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 const scopeOk = computed(() => Boolean(props.sessionId))
+
+/** Oracle STATUS：INACTIVE 空闲；ACTIVE 等视为活动。兼容 Idle/Sleep。 */
+function isIdleState(p: Pick<OracleProcessInfo, 'command' | 'state'>): boolean {
+  const s = (p.command ?? p.state ?? '').toLowerCase()
+  return s === 'inactive' || s === 'idle' || s === 'sleep'
+}
+
+function processRowKey(p: Pick<OracleProcessInfo, 'id' | 'serial'>): string {
+  return p.serial != null && p.serial > 0 ? `${p.id}:${p.serial}` : String(p.id)
+}
+
+function lockRowKey(
+  l: Pick<
+    OracleLockInfo,
+    'waitingPid' | 'waitingSerial' | 'blockingPid' | 'blockingSerial' | 'enqueueType' | 'objectName'
+  >,
+): string {
+  return [
+    l.waitingPid,
+    l.waitingSerial ?? 0,
+    l.blockingPid,
+    l.blockingSerial ?? 0,
+    l.enqueueType ?? '',
+    l.objectName ?? '',
+  ].join(':')
+}
+
+/** 紧凑时长：65 → 1m 5s；3661 → 1h 1m 1s */
+function formatDuration(secs?: number | null): string {
+  if (secs == null || !Number.isFinite(secs)) return '—'
+  const n = Math.max(0, Math.floor(secs))
+  if (n < 60) return `${n}s`
+  const d = Math.floor(n / 86400)
+  const hrs = Math.floor((n % 86400) / 3600)
+  const m = Math.floor((n % 3600) / 60)
+  const s = n % 60
+  const parts: string[] = []
+  if (d) parts.push(`${d}d`)
+  if (hrs || d) parts.push(`${hrs}h`)
+  if (m || hrs || d) parts.push(`${m}m`)
+  parts.push(`${s}s`)
+  return parts.join(' ')
+}
+
+function formatUptime(secs?: number): string {
+  return formatDuration(secs)
+}
 
 const dialogHostEl = ref<HTMLElement | null>(null)
 const dialogTeleportReady = ref(false)
@@ -94,21 +157,11 @@ async function loadOverview(quiet = false): Promise<void> {
   }
 }
 
-function formatUptime(secs?: number): string {
-  if (secs == null) return '—'
-  const d = Math.floor(secs / 86400)
-  const hrs = Math.floor((secs % 86400) / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = secs % 60
-  const parts: string[] = []
-  if (d) parts.push(`${d}d`)
-  parts.push(`${hrs}h ${m}m ${s}s`)
-  return parts.join(' ')
-}
-
-// ─── Processlist ───────────────────────────────────────────────────────────
+// ─── Sessions (processlist) ────────────────────────────────────────────────
 const processesBusy = ref(false)
 const processes = ref<OracleProcessInfo[]>([])
+const processesUnavailable = ref(false)
+const processesMessage = ref('')
 const processFilter = ref('all')
 const processQuery = ref('')
 const highlightedRowKey = ref<string | undefined>(undefined)
@@ -127,23 +180,38 @@ const killBusy = ref(false)
 const processFilterOptions = computed<RsSelectOptions>(() => [
   { value: 'all', label: t('modules.oracle.monitor.filterAll') },
   { value: 'active', label: t('modules.oracle.monitor.filterActive') },
-  { value: 'sleep', label: t('modules.oracle.monitor.filterSleep') },
+  { value: 'idle', label: t('modules.oracle.monitor.filterIdle') },
   { value: 'query', label: t('modules.oracle.monitor.filterQuery') },
   { value: 'long', label: t('modules.oracle.monitor.filterLong') },
+  { value: 'blocked', label: t('modules.oracle.monitor.filterBlocked') },
 ])
 
 const filteredProcesses = computed(() => {
   const q = processQuery.value.trim().toLowerCase()
   const filter = processFilter.value
   return processes.value.filter((p) => {
-    const cmd = (p.command ?? '').toLowerCase()
+    const idle = isIdleState(p)
     const hasInfo = Boolean(p.info?.trim())
-    if (filter === 'active' && cmd === 'sleep') return false
-    if (filter === 'sleep' && cmd !== 'sleep') return false
+    const blocked = (p.blockingSession ?? 0) > 0
+    if (filter === 'active' && idle) return false
+    if (filter === 'idle' && !idle) return false
     if (filter === 'query' && !hasInfo) return false
-    if (filter === 'long' && (cmd === 'sleep' || (p.time ?? 0) < LONG_RUNNING_SECS)) return false
+    if (filter === 'long' && (idle || (p.time ?? 0) < LONG_RUNNING_SECS)) return false
+    if (filter === 'blocked' && !blocked) return false
     if (!q) return true
-    const hay = [p.user, p.host, p.db, p.command, p.state, p.info, String(p.id)]
+    const hay = [
+      p.user,
+      p.host,
+      p.db,
+      p.command,
+      p.state,
+      p.waitClass,
+      p.sqlId,
+      p.info,
+      String(p.id),
+      p.serial != null ? String(p.serial) : '',
+      p.blockingSession != null ? String(p.blockingSession) : '',
+    ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -151,53 +219,76 @@ const filteredProcesses = computed(() => {
   })
 })
 
-function isLongRunning(p: Pick<OracleProcessInfo, 'command' | 'time'>): boolean {
-  return (p.command ?? '').toLowerCase() !== 'sleep' && (p.time ?? 0) >= LONG_RUNNING_SECS
+function isLongRunning(p: Pick<OracleProcessInfo, 'command' | 'state' | 'time'>): boolean {
+  return !isIdleState(p) && (p.time ?? 0) >= LONG_RUNNING_SECS
 }
 
 const processColumns = computed((): RsTableColumn<ProcessRow>[] => [
   { key: 'id', title: t('modules.oracle.monitor.colId'), width: 72 },
+  { key: 'serial', title: t('modules.oracle.monitor.colSerial'), width: 80 },
   { key: 'user', title: t('modules.oracle.monitor.colUser'), minWidth: 90, ellipsis: true },
-  { key: 'host', title: t('modules.oracle.monitor.colHost'), minWidth: 120, ellipsis: true },
+  { key: 'host', title: t('modules.oracle.monitor.colHost'), minWidth: 110, ellipsis: true },
   { key: 'db', title: t('modules.oracle.monitor.colDb'), minWidth: 90, ellipsis: true },
-  { key: 'command', title: t('modules.oracle.monitor.colCommand'), width: 100 },
+  { key: 'command', title: t('modules.oracle.monitor.colCommand'), width: 96 },
   {
     key: 'time',
     title: t('modules.oracle.monitor.colTime'),
-    width: 88,
+    width: 100,
     render: (row: ProcessRow) => {
       const long = isLongRunning(row)
       return h(
         'span',
         {
           class: long ? 'nm-oracle-monitor__time--long' : undefined,
-          title: long ? t('modules.oracle.monitor.longRunningTip', { n: LONG_RUNNING_SECS }) : undefined,
+          title: long
+            ? t('modules.oracle.monitor.longRunningTip', { n: LONG_RUNNING_SECS })
+            : `${row.time ?? 0}s`,
         },
-        String(row.time ?? ''),
+        formatDuration(row.time),
       ) as unknown as string
     },
   },
-  { key: 'state', title: t('modules.oracle.monitor.colState'), minWidth: 100, ellipsis: true },
+  { key: 'state', title: t('modules.oracle.monitor.colState'), minWidth: 130, ellipsis: true },
+  { key: 'waitClass', title: t('modules.oracle.monitor.colWaitClass'), width: 100, ellipsis: true },
+  { key: 'sqlId', title: t('modules.oracle.monitor.colSqlId'), width: 120, ellipsis: true },
+  {
+    key: 'blockingSession',
+    title: t('modules.oracle.monitor.colBlocking'),
+    width: 88,
+    render: (row: ProcessRow) => {
+      const sid = row.blockingSession
+      if (sid == null || sid <= 0) return ''
+      return h(
+        'span',
+        { class: 'nm-oracle-monitor__blocking', title: `SID ${sid}` },
+        String(sid),
+      ) as unknown as string
+    },
+  },
   { key: 'info', title: t('modules.oracle.monitor.colInfo'), minWidth: 180, ellipsis: true },
 ])
 
 const processRows = computed<ProcessRow[]>(() =>
   filteredProcesses.value.map((p) => ({
-    __rowKey: String(p.id),
+    __rowKey: processRowKey(p),
     id: p.id,
+    serial: p.serial,
     user: p.user,
     host: p.host,
     db: p.db ?? '',
     command: p.command,
     time: p.time,
     state: p.state ?? '',
+    waitClass: p.waitClass ?? '',
+    sqlId: p.sqlId ?? '',
+    blockingSession: p.blockingSession ?? undefined,
     info: p.info ?? '',
   })),
 )
 
 const selectedProcess = computed(() => {
   if (!highlightedRowKey.value) return null
-  return processes.value.find((p) => String(p.id) === highlightedRowKey.value) ?? null
+  return processes.value.find((p) => processRowKey(p) === highlightedRowKey.value) ?? null
 })
 
 const selectedId = computed(() => selectedProcess.value?.id ?? null)
@@ -207,12 +298,32 @@ const detailRows = computed(() => {
   if (!p) return []
   return [
     { key: 'id', label: t('modules.oracle.monitor.colId'), value: String(p.id) },
+    {
+      key: 'serial',
+      label: t('modules.oracle.monitor.colSerial'),
+      value: p.serial != null ? String(p.serial) : '—',
+    },
     { key: 'user', label: t('modules.oracle.monitor.colUser'), value: p.user || '—' },
     { key: 'host', label: t('modules.oracle.monitor.colHost'), value: p.host || '—' },
     { key: 'db', label: t('modules.oracle.monitor.colDb'), value: p.db || '—' },
     { key: 'command', label: t('modules.oracle.monitor.colCommand'), value: p.command || '—' },
-    { key: 'time', label: t('modules.oracle.monitor.colTime'), value: String(p.time ?? 0) },
+    {
+      key: 'time',
+      label: t('modules.oracle.monitor.colTime'),
+      value: `${formatDuration(p.time)} (${p.time ?? 0}s)`,
+    },
     { key: 'state', label: t('modules.oracle.monitor.colState'), value: p.state || '—' },
+    {
+      key: 'waitClass',
+      label: t('modules.oracle.monitor.colWaitClass'),
+      value: p.waitClass || '—',
+    },
+    { key: 'sqlId', label: t('modules.oracle.monitor.colSqlId'), value: p.sqlId || '—' },
+    {
+      key: 'blockingSession',
+      label: t('modules.oracle.monitor.colBlocking'),
+      value: p.blockingSession != null && p.blockingSession > 0 ? String(p.blockingSession) : '—',
+    },
     { key: 'info', label: t('modules.oracle.monitor.colInfo'), value: p.info?.trim() || '—' },
   ]
 })
@@ -221,23 +332,30 @@ async function loadProcesses(quiet = false): Promise<void> {
   if (!props.sessionId) return
   if (!quiet) processesBusy.value = true
   try {
-    const result = await oracleApi.metaProcesslist({ sessionId: props.sessionId })
-    processes.value = result.processes ?? []
-    if (
-      highlightedRowKey.value &&
-      !processes.value.some((p) => String(p.id) === highlightedRowKey.value)
-    ) {
-      highlightedRowKey.value = undefined
-    }
-    if (detailProcess.value) {
-      const next = processes.value.find((p) => p.id === detailProcess.value?.id) ?? null
-      detailProcess.value = next
-      if (!next) detailOpen.value = false
-    }
+    await applyProcesslist(props.sessionId)
   } catch (e) {
     if (!quiet) toast.error(e instanceof Error ? e.message : String(e))
   } finally {
     if (!quiet) processesBusy.value = false
+  }
+}
+
+async function applyProcesslist(sessionId: string): Promise<void> {
+  const result = await oracleApi.metaProcesslist({ sessionId })
+  processes.value = result.processes ?? []
+  processesUnavailable.value = result.unavailable ?? false
+  processesMessage.value = result.message ?? ''
+  if (
+    highlightedRowKey.value &&
+    !processes.value.some((p) => processRowKey(p) === highlightedRowKey.value)
+  ) {
+    highlightedRowKey.value = undefined
+  }
+  if (detailProcess.value) {
+    const key = processRowKey(detailProcess.value)
+    const next = processes.value.find((p) => processRowKey(p) === key) ?? null
+    detailProcess.value = next
+    if (!next) detailOpen.value = false
   }
 }
 
@@ -248,12 +366,13 @@ function onRowClick(row: Record<string, unknown>): void {
 
 function openProcessDetail(row: ProcessRow | null): void {
   if (!row) return
-  const proc = processes.value.find((p) => p.id === row.id)
+  const key = row.__rowKey || processRowKey(row)
+  const proc = processes.value.find((p) => processRowKey(p) === key)
   if (!proc) {
     toast.error(t('modules.oracle.monitor.sessionNotFound'))
     return
   }
-  highlightedRowKey.value = String(proc.id)
+  highlightedRowKey.value = processRowKey(proc)
   detailProcess.value = proc
   detailOpen.value = true
 }
@@ -273,12 +392,21 @@ function askKill(queryOnly: boolean, proc?: OracleProcessInfo | null): void {
 
 function processContextMenuItems(row: ProcessRow | null): RsContextMenuItem[] {
   if (!row) return []
-  return [
+  const items: RsContextMenuItem[] = [
     {
       key: 'process-detail',
       label: t('modules.oracle.monitor.viewDetail'),
       icon: 'info',
     },
+  ]
+  if (row.blockingSession != null && row.blockingSession > 0) {
+    items.push({
+      key: 'jump-blocker',
+      label: `${t('modules.oracle.monitor.jumpToProcess')} (#${row.blockingSession})`,
+      icon: 'arrow-right',
+    })
+  }
+  items.push(
     { key: 'sep-ops', label: '', separator: true },
     {
       key: 'kill-query',
@@ -291,36 +419,38 @@ function processContextMenuItems(row: ProcessRow | null): RsContextMenuItem[] {
       icon: 'unplug',
       danger: true,
     },
-  ]
+  )
+  return items
 }
 
 function onProcessContextMenuSelect(key: string, row: ProcessRow | null): void {
   if (!row) return
+  const rowKey = row.__rowKey || processRowKey(row)
+  const proc = processes.value.find((p) => processRowKey(p) === rowKey) ?? null
   if (key === 'process-detail') openProcessDetail(row)
-  else if (key === 'kill-query') {
-    const proc = processes.value.find((p) => p.id === row.id) ?? null
-    askKill(true, proc)
-  } else if (key === 'kill-conn') {
-    const proc = processes.value.find((p) => p.id === row.id) ?? null
-    askKill(false, proc)
-  }
+  else if (key === 'jump-blocker' && row.blockingSession) jumpToProcess(row.blockingSession)
+  else if (key === 'kill-query') askKill(true, proc)
+  else if (key === 'kill-conn') askKill(false, proc)
 }
 
 async function confirmKill(): Promise<void> {
   if (!props.sessionId || !pendingKill.value) return
+  const intendedQueryOnly = pendingKill.value.queryOnly
   killBusy.value = true
   try {
-    await oracleApi.metaKill({
+    const result = await oracleApi.metaKill({
       sessionId: props.sessionId,
       id: pendingKill.value.id,
       serial: pendingKill.value.serial,
       queryOnly: pendingKill.value.queryOnly,
     })
-    toast.success(
-      pendingKill.value.queryOnly
-        ? t('modules.oracle.monitor.killQueryOk')
-        : t('modules.oracle.monitor.killConnOk'),
-    )
+    if (intendedQueryOnly && result.queryOnly === false) {
+      toast.success(t('modules.oracle.monitor.killFallbackOk'))
+    } else if (result.queryOnly) {
+      toast.success(t('modules.oracle.monitor.killQueryOk'))
+    } else {
+      toast.success(t('modules.oracle.monitor.killConnOk'))
+    }
     confirmOpen.value = false
     pendingKill.value = null
     detailOpen.value = false
@@ -332,35 +462,76 @@ async function confirmKill(): Promise<void> {
   }
 }
 
-// ─── Locks ───────────────────────────────────────────────────────────────────
+const killConfirmDescription = computed(() => {
+  const k = pendingKill.value
+  if (!k) return ''
+  let who = ''
+  if (k.user || k.host) {
+    who = `${k.user ?? ''}${k.host ? `@${k.host}` : ''}`
+  }
+  const key = k.queryOnly
+    ? 'modules.oracle.monitor.killQueryDesc'
+    : 'modules.oracle.monitor.killConnDesc'
+  return t(key, {
+    sid: k.id,
+    serial: k.serial != null && k.serial > 0 ? k.serial : '?',
+    who,
+  })
+})
+
+// ─── Blocking waits ──────────────────────────────────────────────────────────
 const locksLoading = ref(false)
 const locks = ref<OracleLockInfo[]>([])
 const locksTruncated = ref(false)
 const locksUnavailable = ref(false)
 const locksMessage = ref('')
 
-const lockColumns = computed<RsTableColumn<LockRow>[]>(() => [
-  { key: 'waitingPid', title: t('modules.oracle.monitor.lockWaitPid'), width: 80 },
-  { key: 'blockingPid', title: t('modules.oracle.monitor.lockBlockPid'), width: 80 },
-  { key: 'waitingUser', title: t('modules.oracle.monitor.lockWaitUser'), minWidth: 90, ellipsis: true },
-  { key: 'blockingUser', title: t('modules.oracle.monitor.lockBlockUser'), minWidth: 90, ellipsis: true },
-  { key: 'lockType', title: t('modules.oracle.monitor.lockType'), width: 80 },
-  { key: 'lockMode', title: t('modules.oracle.monitor.lockMode'), width: 80 },
-  { key: 'objectName', title: t('modules.oracle.monitor.lockObject'), minWidth: 120, ellipsis: true },
-  { key: 'waitAge', title: t('modules.oracle.monitor.lockWaitAge'), width: 90 },
-  { key: 'waitingQuery', title: t('modules.oracle.monitor.lockWaitQuery'), minWidth: 200, ellipsis: true },
-])
+const lockColumns = computed<RsTableColumn<LockRow>[]>(() => {
+  const cols: RsTableColumn<LockRow>[] = [
+    { key: 'waitingPid', title: t('modules.oracle.monitor.lockWaitPid'), width: 80 },
+    { key: 'waitingSerial', title: t('modules.oracle.monitor.lockWaitSerial'), width: 96 },
+    { key: 'blockingPid', title: t('modules.oracle.monitor.lockBlockPid'), width: 80 },
+    { key: 'blockingSerial', title: t('modules.oracle.monitor.lockBlockSerial'), width: 96 },
+    { key: 'waitingUser', title: t('modules.oracle.monitor.lockWaitUser'), minWidth: 90, ellipsis: true },
+    { key: 'blockingUser', title: t('modules.oracle.monitor.lockBlockUser'), minWidth: 90, ellipsis: true },
+    { key: 'waitEvent', title: t('modules.oracle.monitor.lockType'), minWidth: 120, ellipsis: true },
+    { key: 'waitClass', title: t('modules.oracle.monitor.lockWaitClass'), width: 100, ellipsis: true },
+  ]
+  const hasEnqueue = locks.value.some((l) => l.enqueueType || l.lockMode || l.objectName)
+  if (hasEnqueue) {
+    cols.push(
+      { key: 'enqueueType', title: t('modules.oracle.monitor.lockEnqueue'), width: 80 },
+      { key: 'lockMode', title: t('modules.oracle.monitor.lockMode'), width: 110, ellipsis: true },
+      { key: 'objectName', title: t('modules.oracle.monitor.lockObject'), minWidth: 120, ellipsis: true },
+    )
+  }
+  cols.push(
+    {
+      key: 'waitAge',
+      title: t('modules.oracle.monitor.lockWaitAge'),
+      width: 100,
+    },
+    { key: 'waitingQuery', title: t('modules.oracle.monitor.lockWaitQuery'), minWidth: 200, ellipsis: true },
+  )
+  return cols
+})
 
 const lockRows = computed<LockRow[]>(() =>
   locks.value.map((l) => ({
+    __rowKey: lockRowKey(l),
     waitingPid: l.waitingPid,
+    waitingSerial: l.waitingSerial ?? '',
     blockingPid: l.blockingPid,
+    blockingSerial: l.blockingSerial ?? '',
     waitingUser: l.waitingUser ?? '',
     blockingUser: l.blockingUser ?? '',
-    lockType: l.lockType ?? '',
+    waitEvent: l.waitEvent ?? l.lockType ?? '',
+    waitClass: l.waitClass ?? '',
+    enqueueType: l.enqueueType ?? '',
     lockMode: l.lockMode ?? '',
     objectName: l.objectName ?? '',
-    waitAge: l.waitAgeSeconds != null ? `${l.waitAgeSeconds}s` : '',
+    waitAge:
+      l.waitAgeSeconds != null ? formatDuration(l.waitAgeSeconds) : '',
     waitingQuery: l.waitingQuery ?? '',
   })),
 )
@@ -381,29 +552,39 @@ async function loadLocks(quiet = false): Promise<void> {
   }
 }
 
-function jumpToProcess(pid: number): void {
+function jumpToProcess(pid: number, serial?: number): void {
   if (!Number.isFinite(pid) || pid <= 0) return
   activeTab.value = 'processes'
-  highlightedRowKey.value = String(pid)
-  const proc = processes.value.find((p) => p.id === pid)
-  if (proc) {
+  const apply = (proc: OracleProcessInfo | undefined): void => {
+    if (!proc) return
+    highlightedRowKey.value = processRowKey(proc)
     detailProcess.value = proc
     detailOpen.value = true
+  }
+  const match = (list: OracleProcessInfo[]): OracleProcessInfo | undefined => {
+    if (serial != null && serial > 0) {
+      const exact = list.find((p) => p.id === pid && p.serial === serial)
+      if (exact) return exact
+    }
+    return list.find((p) => p.id === pid)
+  }
+  const proc = match(processes.value)
+  if (proc) {
+    apply(proc)
   } else {
+    highlightedRowKey.value =
+      serial != null && serial > 0 ? `${pid}:${serial}` : String(pid)
     void loadProcesses(true).then(() => {
-      const next = processes.value.find((p) => p.id === pid)
-      if (next) {
-        detailProcess.value = next
-        detailOpen.value = true
-      }
+      apply(match(processes.value))
     })
   }
 }
 
 function onLockRowClick(row: Record<string, unknown>): void {
   const pid = Number(row.waitingPid)
+  const serial = Number(row.waitingSerial)
   if (!Number.isFinite(pid)) return
-  jumpToProcess(pid)
+  jumpToProcess(pid, Number.isFinite(serial) && serial > 0 ? serial : undefined)
 }
 
 function lockContextMenuItems(row: LockRow | null): RsContextMenuItem[] {
@@ -411,14 +592,14 @@ function lockContextMenuItems(row: LockRow | null): RsContextMenuItem[] {
   const items: RsContextMenuItem[] = [
     {
       key: 'jump-waiting',
-      label: `${t('modules.oracle.monitor.jumpToProcess')} (#${row.waitingPid})`,
+      label: `${t('modules.oracle.monitor.jumpToProcess')} (#${row.waitingPid}${row.waitingSerial ? ',' + row.waitingSerial : ''})`,
       icon: 'arrow-right',
     },
   ]
   if (row.blockingPid > 0) {
     items.push({
       key: 'jump-blocking',
-      label: `${t('modules.oracle.monitor.jumpToProcess')} (#${row.blockingPid})`,
+      label: `${t('modules.oracle.monitor.jumpToProcess')} (#${row.blockingPid}${row.blockingSerial ? ',' + row.blockingSerial : ''})`,
       icon: 'arrow-right',
     })
   }
@@ -427,8 +608,17 @@ function lockContextMenuItems(row: LockRow | null): RsContextMenuItem[] {
 
 function onLockContextMenuSelect(key: string, row: LockRow | null): void {
   if (!row) return
-  if (key === 'jump-waiting') jumpToProcess(row.waitingPid)
-  else if (key === 'jump-blocking') jumpToProcess(row.blockingPid)
+  if (key === 'jump-waiting') {
+    jumpToProcess(
+      row.waitingPid,
+      typeof row.waitingSerial === 'number' ? row.waitingSerial : Number(row.waitingSerial) || undefined,
+    )
+  } else if (key === 'jump-blocking') {
+    jumpToProcess(
+      row.blockingPid,
+      typeof row.blockingSerial === 'number' ? row.blockingSerial : Number(row.blockingSerial) || undefined,
+    )
+  }
 }
 
 // ─── Tab switching + loading ───────────────────────────────────────────────
@@ -445,9 +635,9 @@ const loading = computed(() => {
 })
 
 watch(
-  () => [props.sessionId, props.active] as const,
-  ([sid, active]) => {
-    if (sid && active) {
+  () => props.sessionId,
+  (sid) => {
+    if (sid && props.active) {
       void loadCurrentTab()
       setupTimer()
     } else {
@@ -455,6 +645,29 @@ watch(
     }
   },
   { immediate: true },
+)
+
+/** keep-alive 切回：恢复定时器；已有数据则静默刷新，避免整页 loading。 */
+watch(
+  () => props.active,
+  (active) => {
+    if (!props.sessionId) {
+      clearTimer()
+      return
+    }
+    if (!active) {
+      clearTimer()
+      return
+    }
+    const hasData =
+      overview.value != null || processes.value.length > 0 || locks.value.length > 0
+    if (hasData) {
+      void loadCurrentTab(true)
+    } else {
+      void loadCurrentTab()
+    }
+    setupTimer()
+  },
 )
 
 watch(activeTab, (tab) => {
@@ -491,7 +704,8 @@ onBeforeUnmount(() => clearTimer())
       <div class="nm-oracle-monitor__actions">
         <template v-if="activeTab === 'processes'">
           <span v-if="selectedProcess" class="nm-oracle-monitor__selected">
-            #{{ selectedProcess.id }}
+            SID {{ selectedProcess.id }}
+            <template v-if="selectedProcess.serial">,{{ selectedProcess.serial }}</template>
             <template v-if="selectedProcess.user"> · {{ selectedProcess.user }}</template>
             <template v-if="selectedProcess.host">@{{ selectedProcess.host }}</template>
           </span>
@@ -571,9 +785,17 @@ onBeforeUnmount(() => clearTimer())
               <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceComment') }}</span>
               <span class="nm-oracle-monitor__stat-value nm-oracle-monitor__stat-value--muted">{{ overview.versionComment }}</span>
             </div>
+            <div v-if="overview.currentDatabase" class="nm-oracle-monitor__stat">
+              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instancePdb') }}</span>
+              <span class="nm-oracle-monitor__stat-value">{{ overview.currentDatabase }}</span>
+            </div>
             <div v-if="overview.currentUser" class="nm-oracle-monitor__stat">
               <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceUser') }}</span>
               <span class="nm-oracle-monitor__stat-value">{{ overview.currentUser }}</span>
+            </div>
+            <div v-if="overview.currentSchema" class="nm-oracle-monitor__stat">
+              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceSchema') }}</span>
+              <span class="nm-oracle-monitor__stat-value">{{ overview.currentSchema }}</span>
             </div>
             <div v-if="overview.serverAddr" class="nm-oracle-monitor__stat">
               <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceAddr') }}</span>
@@ -590,30 +812,50 @@ onBeforeUnmount(() => clearTimer())
             <div class="nm-oracle-monitor__stat">
               <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceConnected') }}</span>
               <span class="nm-oracle-monitor__stat-value nm-oracle-monitor__stat-value--accent">
-                {{ overview.threadsConnected ?? '—' }}<template v-if="overview.maxConnections"> / {{ overview.maxConnections }}</template>
+                {{ overview.threadsConnected ?? '—' }}<template v-if="overview.maxSessions ?? overview.maxConnections"> / {{ overview.maxSessions ?? overview.maxConnections }}</template>
               </span>
             </div>
-            <div v-if="overview.questions != null" class="nm-oracle-monitor__stat">
-              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceQuestions') }}</span>
-              <span class="nm-oracle-monitor__stat-value">{{ overview.questions }}</span>
+            <div v-if="overview.activeSessions != null" class="nm-oracle-monitor__stat">
+              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceActive') }}</span>
+              <span
+                class="nm-oracle-monitor__stat-value"
+                :class="overview.activeSessions > 0 ? 'nm-oracle-monitor__stat-value--accent' : ''"
+              >{{ overview.activeSessions }}</span>
             </div>
-            <div v-if="overview.slowQueries != null" class="nm-oracle-monitor__stat">
-              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceSlowQueries') }}</span>
-              <span class="nm-oracle-monitor__stat-value" :class="overview.slowQueries > 0 ? 'nm-oracle-monitor__stat-value--warn' : ''">{{ overview.slowQueries }}</span>
+            <div v-if="overview.maxSessions != null" class="nm-oracle-monitor__stat">
+              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceMaxSessions') }}</span>
+              <span class="nm-oracle-monitor__stat-value">{{ overview.maxSessions }}</span>
+            </div>
+            <div v-if="overview.maxProcesses != null" class="nm-oracle-monitor__stat">
+              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceMaxProcesses') }}</span>
+              <span class="nm-oracle-monitor__stat-value">{{ overview.maxProcesses }}</span>
+            </div>
+            <div v-if="overview.executeCount != null" class="nm-oracle-monitor__stat">
+              <span class="nm-oracle-monitor__stat-label">{{ t('modules.oracle.monitor.instanceExecuteCount') }}</span>
+              <span class="nm-oracle-monitor__stat-value">{{ overview.executeCount.toLocaleString() }}</span>
             </div>
           </div>
         </div>
         <RsEmpty v-else radius="none" icon-radius="none" :description="t('modules.oracle.monitor.empty')" />
       </template>
 
-      <!-- 进程列表 -->
+      <!-- 会话列表 -->
       <template v-else-if="activeTab === 'processes'">
-        <RsLoading v-if="processesBusy && processes.length === 0" class="nm-oracle-monitor__loading" />
+        <RsLoading
+          v-if="processesBusy && processes.length === 0 && !processesUnavailable"
+          class="nm-oracle-monitor__loading"
+        />
         <RsEmpty
           v-else-if="!sessionId"
           radius="none"
           icon-radius="none"
           :description="t('modules.oracle.monitor.needSession')"
+        />
+        <RsEmpty
+          v-else-if="processesUnavailable"
+          radius="none"
+          icon-radius="none"
+          :description="t('modules.oracle.monitor.processesUnavailable', { msg: processesMessage || '—' })"
         />
         <RsEmpty
           v-else-if="filteredProcesses.length === 0 && !processesBusy"
@@ -643,7 +885,7 @@ onBeforeUnmount(() => clearTimer())
         />
       </template>
 
-      <!-- 锁等待 -->
+      <!-- 阻塞等待 -->
       <template v-else-if="activeTab === 'locks'">
         <RsLoading v-if="locksLoading && locks.length === 0 && !locksUnavailable" class="nm-oracle-monitor__loading" />
         <RsEmpty
@@ -672,7 +914,7 @@ onBeforeUnmount(() => clearTimer())
           fill
           resizable
           cell-tooltip
-          row-key="waitingPid"
+          row-key="__rowKey"
           :context-menu-items="lockContextMenuItems"
           @row-click="onLockRowClick"
           @row-dblclick="onLockRowClick"
@@ -737,20 +979,7 @@ onBeforeUnmount(() => clearTimer())
           ? t('modules.oracle.monitor.killQueryTitle')
           : t('modules.oracle.monitor.killConnTitle')
       "
-      :description="
-        t(
-          pendingKill?.queryOnly
-            ? 'modules.oracle.monitor.killQueryDesc'
-            : 'modules.oracle.monitor.killConnDesc',
-          {
-            id: pendingKill?.id ?? '',
-            who:
-              pendingKill?.user || pendingKill?.host
-                ? `${pendingKill?.user ?? ''}${pendingKill?.host ? '@' + pendingKill.host : ''}`
-                : '',
-          },
-        )
-      "
+      :description="killConfirmDescription"
       :confirm-text="t('modules.oracle.monitor.killConfirm')"
       tone="danger"
       confirm-variant="danger"
@@ -841,16 +1070,13 @@ onBeforeUnmount(() => clearTimer())
   flex-shrink: 0;
 }
 .nm-oracle-monitor__filter-select {
-  width: 140px;
+  width: 160px;
   flex-shrink: 0;
 }
 .nm-oracle-monitor__filter-input {
-  width: 220px;
+  width: 260px;
   flex-shrink: 1;
   min-width: 120px;
-}
-.nm-oracle-monitor__filter-input--wide {
-  width: 320px;
 }
 .nm-oracle-monitor__filter-meta {
   font-size: 12px;
@@ -915,9 +1141,6 @@ onBeforeUnmount(() => clearTimer())
 .nm-oracle-monitor__stat-value--accent {
   color: var(--rs-accent, #2563eb);
 }
-.nm-oracle-monitor__stat-value--warn {
-  color: var(--rs-fg-warning, #d97706);
-}
 .nm-oracle-monitor__truncated {
   flex-shrink: 0;
   padding: 4px 12px;
@@ -933,7 +1156,7 @@ onBeforeUnmount(() => clearTimer())
 }
 .nm-oracle-monitor__detail-row {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 110px minmax(0, 1fr);
   gap: 8px;
   align-items: start;
 }
@@ -956,5 +1179,10 @@ onBeforeUnmount(() => clearTimer())
 :deep(.nm-oracle-monitor__time--long) {
   color: var(--rs-fg-warning, #d97706);
   font-weight: 600;
+}
+:deep(.nm-oracle-monitor__blocking) {
+  color: var(--rs-fg-warning, #d97706);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 </style>

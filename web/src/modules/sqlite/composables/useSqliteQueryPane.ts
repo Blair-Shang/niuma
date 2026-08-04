@@ -526,6 +526,23 @@ export function useSqliteQueryPane(props: SqliteQueryPaneProps) {
     if (tab) activePaneTab.value = tab.id
   }
 
+  async function askAiAboutSelection(): Promise<void> {
+    const { executeCommand } = await import('@/extensions/contributions/command-registry')
+    editor.syncSelectionFlag()
+    const sql = editor.resolveSql()
+    if (sql) {
+      const { publishEditorSelection } = await import('@/shell/panels/ai/workspace-context')
+      const { useTabStore } = await import('@/stores/tab')
+      publishEditorSelection({
+        tabId: useTabStore().activeTabId || undefined,
+        text: sql,
+        language: 'sql',
+        source: 'monaco',
+      })
+    }
+    await executeCommand('workbench.ai.askSelection')
+  }
+
   const contextMenuItems = computed((): RsContextMenuItem[] =>
     buildSqlQueryContextMenuItems({
       labels: {
@@ -533,11 +550,12 @@ export function useSqliteQueryPane(props: SqliteQueryPaneProps) {
         runSelection: t('modules.sqlite.query.runSelection'),
         cancel: t('modules.sqlite.query.cancel'),
         format: t('modules.sqlite.query.format'),
-        compress: t('modules.sqlite.query.format'),
-        copy: t('modules.sqlite.query.run'),
-        paste: t('modules.sqlite.query.run'),
+        compress: t('modules.sqlite.query.compress'),
+        copy: t('modules.sqlite.query.copy'),
+        paste: t('modules.sqlite.query.paste'),
         explain: t('modules.sqlite.query.explain'),
         explainAnalyze: t('modules.sqlite.query.explain'),
+        askAi: t('modules.sqlite.query.askAi'),
         exportCsv: t('modules.sqlite.query.exportCsv'),
         fetchMore: t('modules.sqlite.query.loadMore'),
         fetchAll: t('modules.sqlite.query.fetchAll'),
@@ -549,7 +567,7 @@ export function useSqliteQueryPane(props: SqliteQueryPaneProps) {
       hasResultRows: Boolean(activeGrid.value?.rows.length),
       hasMore: hasMore.value,
       loadingMore: loadingMore.value,
-      showAskAi: false,
+      showAskAi: true,
     }),
   )
 
@@ -558,12 +576,17 @@ export function useSqliteQueryPane(props: SqliteQueryPaneProps) {
   }
 
   function onContextMenuSelect(key: string): void {
-    switch (key) {
-      case 'run': void runSql(); break
-      case 'explain': void runExplain(); break
-      case 'format': formatEditor(); break
-      default: break
-    }
+    if (key === 'run') void runSql()
+    else if (key === 'cancel') void cancelRun()
+    else if (key === 'format') formatEditor()
+    else if (key === 'compress') void editor.compressSql()
+    else if (key === 'copy') editor.copyEditor()
+    else if (key === 'paste') void editor.pasteEditor()
+    else if (key === 'explain' || key === 'explainAnalyze') void runExplain()
+    else if (key === 'askAi') void askAiAboutSelection()
+    else if (key === 'exportCsv') exportCsv()
+    else if (key === 'fetchMore') void fetchMore()
+    else if (key === 'fetchAll') void fetchAll()
   }
 
   async function syncTxState(): Promise<void> {

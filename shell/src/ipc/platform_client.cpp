@@ -95,8 +95,8 @@ constexpr DWORD kConnectAttempts = 10;
 constexpr DWORD kWaitPipeTimeoutMs = 2000;
 /// 每次连接失败后的退避（毫秒）。
 constexpr DWORD kRetrySleepMs = 150;
-/// 单帧上限，与 Go 端 protocol.MaxFrameSize 对齐，防止异常长度触发超大分配。
-constexpr uint32_t kMaxFrameBytes = 16u * 1024u * 1024u;
+/// 单帧上限，与 Go 端 protocol.MaxFrameSize 对齐（1 GiB）。
+constexpr uint32_t kMaxFrameBytes = 1u << 30;
 /// 长度前缀字节数（uint32 小端）。
 constexpr DWORD kHeaderBytes = 4;
 
@@ -305,7 +305,7 @@ void EventListenerLoop(PlatformEventCallback callback) {
 
 #if !defined(_WIN32)
 
-constexpr uint32_t kMaxFrameBytes = 16u * 1024u * 1024u;
+constexpr uint32_t kMaxFrameBytes = 1u << 30;  // 1 GiB，与 Go MaxFrameSize 对齐
 constexpr size_t kHeaderBytes = 4;
 constexpr int kConnectAttempts = 10;
 constexpr auto kRetrySleep = std::chrono::milliseconds(150);

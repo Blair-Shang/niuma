@@ -10,6 +10,7 @@ export {
   buildAiDialectRules,
   defaultClickHouseProfile,
   defaultKingbaseProfile,
+  defaultSqlServerProfile,
   defaultDamengProfile,
   defaultOracleProfile,
   defaultMySQL57Profile,

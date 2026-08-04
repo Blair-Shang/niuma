@@ -3,7 +3,7 @@ import {
   alignForValueType,
   normalizeSqlDataType,
   resolveSqlValueType,
-} from './column-value-type'
+} from '@/modules/database/utils/column-value-type'
 
 describe('resolveSqlValueType', () => {
   it('maps PG core types', () => {
@@ -33,8 +33,8 @@ describe('resolveSqlValueType', () => {
     expect(resolveSqlValueType('binary_float')).toBe('number')
     expect(resolveSqlValueType('binary_double')).toBe('number')
     expect(resolveSqlValueType('clob')).toBe('textarea')
-    expect(resolveSqlValueType('blob')).toBe('textarea')
-    expect(resolveSqlValueType('raw')).toBe('textarea')
+    expect(resolveSqlValueType('blob')).toBe('text')
+    expect(resolveSqlValueType('raw')).toBe('text')
     expect(resolveSqlValueType('tinyint')).toBe('number')
   })
 

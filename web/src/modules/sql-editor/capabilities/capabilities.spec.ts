@@ -8,6 +8,7 @@ import {
   defaultPostgreSQLProfile,
   defaultSqliteProfile,
   defaultVastbaseProfile,
+  defaultSqlServerProfile,
   hasCapability,
   resolveFormatterLanguage,
   resolveMonacoLanguageFromProfile,
@@ -108,5 +109,22 @@ describe('sql-editor capabilities', () => {
     expect(rules).toContain('AUTOINCREMENT')
     expect(rules).toContain('affinities')
     expect(rules).toContain('ATTACH')
+  })
+
+  it('sqlserver uses Bridge LSP, GO batches and transactsql formatter', () => {
+    const p = defaultSqlServerProfile()
+    expect(p.family).toBe('sqlserver')
+    expect(hasCapability(p, Cap.SplitGoBatches)).toBe(true)
+    expect(hasCapability(p, Cap.EditorSqlLsp)).toBe(true)
+    expect(resolveFormatterLanguage(p)).toBe('transactsql')
+    const monaco = resolveMonacoLanguageFromProfile(p)
+    expect(monaco.monacoLanguageId).toBe('sqlserver')
+    expect(monaco.useLsp).toBe(true)
+    const split = resolveSplitFeaturesFromProfile(p)
+    expect(split.goBatches).toBe(true)
+    expect(split.bracketIdentifiers).toBe(true)
+    const rules = buildAiDialectRules(p)
+    expect(rules).toContain('GO')
+    expect(rules).toContain('brackets')
   })
 })

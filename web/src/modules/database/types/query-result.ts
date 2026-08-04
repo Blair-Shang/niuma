@@ -76,4 +76,12 @@ export interface QueryResultPanelLabels {
   copyMessage?: string
   /** 复制成功短暂提示 */
   copiedHint?: string
+  /** 双击单元格查看标题前缀 */
+  cellViewTitle?: string
+  /** 查看弹窗关闭 */
+  cellViewClose?: string
+  /** 复制单元格全文 */
+  cellViewCopyFull?: string
+  /** 复制成功短暂提示（单元格） */
+  cellViewCopied?: string
 }

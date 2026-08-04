@@ -11,6 +11,8 @@ import {
   type RsTableColumn,
 } from '@niuma/ui'
 import { computed, ref, watch } from 'vue'
+import BrowseCellEditorDialog from './BrowseCellEditorDialog.vue'
+import { useCellViewDialog } from '../composables/useCellViewDialog'
 import type {
   QueryBatchStatementItem,
   QueryResultGridTabSummary,
@@ -65,6 +67,39 @@ const emit = defineEmits<{
   exportCsv: []
   openBatch: [item: QueryBatchStatementItem]
 }>()
+
+const {
+  open: cellViewOpen,
+  draft: cellViewDraft,
+  title: cellViewTitle,
+  labels: cellViewLabels,
+  openCell: openCellView,
+  copyFull: copyCellFull,
+} = useCellViewDialog(() => {
+  // 仅透传方言已配置的文案；缺省由 useCellViewDialog 走 modules.database 多语言
+  const next: Partial<{
+    viewTitle: string
+    close: string
+    copyFull: string
+    copied: string
+  }> = {}
+  if (props.labels.cellViewTitle) next.viewTitle = props.labels.cellViewTitle
+  if (props.labels.cellViewClose) next.close = props.labels.cellViewClose
+  if (props.labels.cellViewCopyFull) next.copyFull = props.labels.cellViewCopyFull
+  if (props.labels.cellViewCopied) next.copied = props.labels.cellViewCopied
+  return next
+})
+
+function onCellView(
+  row: Record<string, unknown>,
+  column: RsTableColumn<Record<string, unknown>>,
+): void {
+  openCellView(row, column)
+}
+
+async function onCellViewCopyFull(): Promise<void> {
+  await copyCellFull()
+}
 
 const messagesLayoutActive = computed(
   () => props.layoutActive && props.activePaneTab === 'messages',
@@ -505,6 +540,7 @@ function plainToneIcon(tone?: QueryResultMessageItem['tone']): string {
               :virtual="true"
               :virtual-columns-auto-threshold="40"
               @load-more="emit('fetchMore')"
+              @cell-view="onCellView"
             >
               <template #empty>
                 {{ labels.resultEmpty }}
@@ -514,6 +550,18 @@ function plainToneIcon(tone?: QueryResultMessageItem['tone']): string {
         </div>
       </template>
     </div>
+
+    <BrowseCellEditorDialog
+      v-model:open="cellViewOpen"
+      v-model:draft="cellViewDraft"
+      :title="cellViewTitle"
+      readonly
+      :cancel-label="cellViewLabels().close"
+      :show-copy-full="true"
+      :copy-full-label="cellViewLabels().copyFull"
+      :copied-label="cellViewLabels().copied"
+      @copy-full="onCellViewCopyFull"
+    />
   </div>
 </template>
 

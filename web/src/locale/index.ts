@@ -25,6 +25,8 @@ import clickhouseZh from '../modules/clickhouse/locale/zh-CN'
 import clickhouseEn from '../modules/clickhouse/locale/en-US'
 import kingbaseZh from '../modules/kingbase/locale/zh-CN'
 import kingbaseEn from '../modules/kingbase/locale/en-US'
+import sqlserverZh from '../modules/sqlserver/locale/zh-CN'
+import sqlserverEn from '../modules/sqlserver/locale/en-US'
 
 const zhMessages = mergeMessages(
   zhCN,
@@ -39,6 +41,7 @@ const zhMessages = mergeMessages(
   oracleZh,
   clickhouseZh,
   kingbaseZh,
+  sqlserverZh,
 ) as typeof zhCN
 
 const enMessages = mergeMessages(
@@ -54,6 +57,7 @@ const enMessages = mergeMessages(
   oracleEn,
   clickhouseEn,
   kingbaseEn,
+  sqlserverEn,
 ) as typeof enUS
 
 export const i18n = createI18n({

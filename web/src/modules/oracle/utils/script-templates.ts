@@ -1,5 +1,5 @@
 /**
- * Oracle 对象脚本新建模板 / 树级 DDL / 生成脚本（对齐 Navicat / DBeaver 常用项）。
+ * Oracle 对象脚本新建模板 / 树级 DDL / 生成脚本。
  */
 import { qualifiedName, quoteIdent } from '@/modules/oracle/sql-seed'
 import type { OracleObjectCategory } from '@/modules/oracle/types/object-script'
@@ -182,4 +182,68 @@ export function compileFunctionSql(schema: string, name: string): string {
 
 export function formatQualified(schema: string, name: string): string {
   return `${quoteIdent(schema)}.${quoteIdent(name)}`
+}
+
+/**
+ * Oracle Schema ≈ 用户：CREATE USER 会创建同名模式。
+ * 常规标识符不引号并转大写（与 ALL_USERS 一致）；密码按需双引号。
+ * 默认带 USERS / TEMP / QUOTA（12c+ RESOURCE 不再含无限表空间配额）。
+ * 经 ODPI 执行时不要带尾 `;`。
+ */
+export function createSchemaSql(
+  name: string,
+  password: string,
+  options?: {
+    defaultTablespace?: string
+    temporaryTablespace?: string
+    quotaUnlimited?: boolean
+  },
+): string {
+  const user = formatOracleUserIdent(name)
+  const pwd = formatOraclePassword(password)
+  const lines = [`CREATE USER ${user} IDENTIFIED BY ${pwd}`]
+
+  const defaultTs = (options?.defaultTablespace ?? 'USERS').trim()
+  if (defaultTs) {
+    lines.push(`  DEFAULT TABLESPACE ${formatOracleUserIdent(defaultTs)}`)
+  }
+
+  const tempTs = (options?.temporaryTablespace ?? 'TEMP').trim()
+  if (tempTs) {
+    lines.push(`  TEMPORARY TABLESPACE ${formatOracleUserIdent(tempTs)}`)
+  }
+
+  if (options?.quotaUnlimited !== false && defaultTs) {
+    lines.push(`  QUOTA UNLIMITED ON ${formatOracleUserIdent(defaultTs)}`)
+  }
+
+  return lines.join('\n')
+}
+
+/** 新建用户后常用基础授权（CONNECT / RESOURCE）。 */
+export function grantSchemaConnectResourceSql(name: string): string {
+  return `GRANT CONNECT, RESOURCE TO ${formatOracleUserIdent(name)}`
+}
+
+/** 常规 Oracle 标识符：字母开头，仅含字母数字 _ $ # → 不引号并大写。 */
+function isSimpleOracleIdent(name: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_$#]*$/.test(name)
+}
+
+function formatOracleUserIdent(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return quoteIdent(trimmed)
+  if (isSimpleOracleIdent(trimmed)) return trimmed.toUpperCase()
+  return quoteIdent(trimmed)
+}
+
+/**
+ * 密码：含非 [A-Za-z0-9_#$] 或以非字母开头时必须双引号；
+ * 一律双引号更稳妥。密码本身禁止含双引号（Oracle 规则）。
+ */
+function formatOraclePassword(password: string): string {
+  if (password.includes('"')) {
+    throw new Error('password must not contain double quote')
+  }
+  return quoteIdent(password)
 }

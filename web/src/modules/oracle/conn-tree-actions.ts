@@ -213,6 +213,26 @@ export function openCreateObjectScript(
   })
 }
 
+/** 连接右键：新建 Schema（CREATE USER + 表空间/配额 + 可选 GRANT）。 */
+export function requestCreateSchema(conn: ConnItem): void {
+  useOracleDdlActionStore().request({
+    conn,
+    action: 'create_schema',
+    profileId: conn.profileId,
+    name: '',
+    title: t('modules.oracle.tree.createSchema'),
+    description: '',
+    kind: 'create_schema',
+    createOptions: {
+      password: '',
+      defaultTablespace: 'USERS',
+      temporaryTablespace: 'TEMP',
+      quotaUnlimited: true,
+      grantConnectResource: true,
+    },
+  })
+}
+
 /** 序列暂无 ObjectScript 面板：用查询 Tab 打开 CREATE SEQUENCE 模板。 */
 export function openCreateSequence(conn: ConnItem, schema: string): void {
   const path: ConnResourcePath = {

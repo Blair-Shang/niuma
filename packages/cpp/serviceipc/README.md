@@ -8,7 +8,7 @@ Layer-1 能力服务应用 IPC 公共库，对标：
 ## 契约
 
 - 传输：Windows Named Pipe / Unix Domain Socket  
-- 分帧：4 字节小端长度 + UTF-8 JSON（`kMaxFrameSize = 16 MiB`）  
+- 分帧：4 字节小端长度 + UTF-8 JSON（`kMaxFrameSize = 1 GiB`）  
 - 信封：`{ method, params, id }` → `{ id, ok, error?, result }`（`result` 为嵌套 JSON 字符串）
 
 ## 使用

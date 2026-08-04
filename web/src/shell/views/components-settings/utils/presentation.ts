@@ -27,6 +27,32 @@ export function browseAccept(bundle: ToolComponentBundle): string[] {
   return resolveBundleHandler(bundle).browseAccept
 }
 
+export function browseMode(bundle: ToolComponentBundle): 'file' | 'folder' {
+  return resolveBundleHandler(bundle).browseMode === 'folder' ? 'folder' : 'file'
+}
+
+export function libraryNames(bundle: ToolComponentBundle): string[] {
+  return resolveBundleHandler(bundle).libraryNames ?? []
+}
+
+/** 组件包说明（`settings.componentBundles.<localeKey>.tip`） */
+export function bundleTip(t: Composer['t'], te: Composer['te'], bundle: ToolComponentBundle): string | null {
+  const handler = resolveBundleHandler(bundle)
+  const key = `settings.componentBundles.${handler.localeKey}.tip`
+  return te(key) ? t(key) : null
+}
+
+/** 官方下载按钮旁说明（`…downloadTip`） */
+export function bundleDownloadTip(
+  t: Composer['t'],
+  te: Composer['te'],
+  bundle: ToolComponentBundle,
+): string | null {
+  const handler = resolveBundleHandler(bundle)
+  const key = `settings.componentBundles.${handler.localeKey}.downloadTip`
+  return te(key) ? t(key) : null
+}
+
 export function statusLabel(t: Composer['t'], status: ToolComponentStatus): string {
   return t(`settings.componentsStatus.${status}`)
 }

@@ -76,7 +76,10 @@ function buildSingleEntryItems(
     } else {
       head.push({ key: 'download', label: t('modules.ftp.session.download'), icon: 'download' })
       if (options?.remoteUpload) {
-        head.push({ key: 'upload', label: t('modules.ftp.session.upload'), icon: 'upload' })
+        head.push(
+          { key: 'upload-pane', label: t('modules.ftp.session.upload'), icon: 'upload' },
+          { key: 'upload-folder-pane', label: t('modules.ftp.session.uploadFolder'), icon: 'folder-up' },
+        )
       }
     }
   } else if (side === 'local') {
@@ -84,7 +87,10 @@ function buildSingleEntryItems(
   } else {
     head.push({ key: 'download', label: t('modules.ftp.session.download'), icon: 'download' })
     if (options?.remoteUpload) {
-      head.push({ key: 'upload', label: t('modules.ftp.session.upload'), icon: 'upload' })
+      head.push(
+        { key: 'upload-pane', label: t('modules.ftp.session.upload'), icon: 'upload' },
+        { key: 'upload-folder-pane', label: t('modules.ftp.session.uploadFolder'), icon: 'folder-up' },
+      )
     }
   }
 

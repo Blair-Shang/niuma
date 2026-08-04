@@ -61,46 +61,50 @@ function onCloseTab(task: DataTask, event: Event): void {
 <template>
   <div class="nm-data-task-dock">
     <div v-if="showTabs" class="nm-data-task-dock__tabs" role="tablist">
-      <button
+      <div
         v-for="task in tasks"
         :key="task.id"
-        type="button"
-        role="tab"
         class="nm-data-task-dock__tab"
         :class="{
           'nm-data-task-dock__tab--active': isTabActive(task.id, task.surface),
           'nm-data-task-dock__tab--float': task.surface === 'float',
           'nm-data-task-dock__tab--busy': task.busy,
         }"
-        :aria-selected="isTabActive(task.id, task.surface)"
-        :title="task.title"
-        @click="onSelectTab(task)"
       >
-        <RsIcon
-          v-if="task.surface === 'float'"
-          name="app-window"
-          :size="12"
-          class="nm-data-task-dock__tab-icon"
-        />
-        <span class="nm-data-task-dock__tab-label">{{ task.title }}</span>
-        <span v-if="task.busy" class="nm-data-task-dock__dot" aria-hidden="true" />
-        <span
+        <button
+          type="button"
+          role="tab"
+          class="nm-data-task-dock__tab-main"
+          :aria-selected="isTabActive(task.id, task.surface)"
+          :title="task.title"
+          @click="onSelectTab(task)"
+        >
+          <RsIcon
+            v-if="task.surface === 'float'"
+            name="app-window"
+            :size="12"
+            class="nm-data-task-dock__tab-icon"
+          />
+          <span class="nm-data-task-dock__tab-label">{{ task.title }}</span>
+          <span v-if="task.busy" class="nm-data-task-dock__dot" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
           class="nm-data-task-dock__tab-close"
-          role="button"
-          tabindex="0"
           :aria-label="t('shell.bottomDock.closeTask')"
           :title="t('shell.bottomDock.closeTask')"
           @click="onCloseTab(task, $event)"
-          @keydown.enter.prevent="onCloseTab(task, $event)"
         >
           <RsIcon name="x" :size="12" />
-        </span>
-      </button>
+        </button>
+      </div>
     </div>
 
     <div class="nm-data-task-dock__body">
       <RsEmpty
         v-if="showEmpty"
+        fill
+        icon-radius="none"
         :title="t('shell.bottomDock.dataTasksEmpty')"
         :description="t('shell.bottomDock.dataTasksEmptyDesc')"
       />
@@ -134,10 +138,8 @@ function onCloseTab(task: DataTask, event: Event): void {
 .nm-data-task-dock__tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   max-width: 16rem;
   height: 1.875rem;
-  padding: 0 0.625rem;
   border: 1px solid transparent;
   border-bottom: none;
   border-radius: var(--rs-radius-xs) var(--rs-radius-xs) 0 0;
@@ -146,7 +148,6 @@ function onCloseTab(task: DataTask, event: Event): void {
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
-  cursor: pointer;
   white-space: nowrap;
   transition:
     background var(--rs-transition-fast),
@@ -180,6 +181,19 @@ function onCloseTab(task: DataTask, event: Event): void {
 .nm-data-task-dock__tab--busy {
   color: var(--rs-primary);
 }
+.nm-data-task-dock__tab-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.25rem 0 0.625rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 .nm-data-task-dock__tab-icon {
   flex-shrink: 0;
   opacity: 0.75;
@@ -194,11 +208,15 @@ function onCloseTab(task: DataTask, event: Event): void {
   justify-content: center;
   width: 1rem;
   height: 1rem;
-  margin-left: 2px;
+  margin-right: 0.375rem;
+  padding: 0;
+  border: none;
   border-radius: var(--rs-radius-xs);
+  background: transparent;
   color: var(--rs-muted);
   flex-shrink: 0;
   opacity: 0.55;
+  cursor: pointer;
 }
 .nm-data-task-dock__tab-close:hover {
   opacity: 1;

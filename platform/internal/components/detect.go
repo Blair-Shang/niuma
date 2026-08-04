@@ -80,3 +80,32 @@ func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
+
+// isVersionProbeable 判断路径是否适合执行 --version（库文件不可执行）。
+func isVersionProbeable(path string) bool {
+	lower := strings.ToLower(filepath.Base(path))
+	if strings.HasSuffix(lower, ".dll") || strings.HasSuffix(lower, ".so") {
+		return false
+	}
+	if strings.Contains(lower, ".so.") {
+		return false
+	}
+	return true
+}
+
+// NormalizeConfiguredDir 将「库文件路径」规范为所在目录；目录则原样返回。
+// 供 manifest env_from_component.as_directory 使用（如 oci.dll → Instant Client 根目录）。
+func NormalizeConfiguredDir(configured string) string {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return ""
+	}
+	info, err := os.Stat(configured)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
+		return configured
+	}
+	return filepath.Dir(configured)
+}

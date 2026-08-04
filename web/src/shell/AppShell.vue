@@ -20,7 +20,12 @@ const paletteStore = useCommandPaletteStore()
 const windowChrome = useWindowChromeStore()
 const shellStore = useShellStore()
 
-const splitRef = ref<InstanceType<typeof RsSplitPane> | null>(null)
+/** 仅取 defineExpose 表面，避免 InstanceType<typeof RsSplitPane> 触发 TS 递归过深 */
+type RsSplitPaneExpose = {
+  collapse: (key: string) => void
+  expand: (key: string, toSize?: number) => void
+}
+const splitRef = ref<RsSplitPaneExpose | null>(null)
 
 /** 默认 AI 面板占比（展开时） */
 const AI_PANEL_SIZE = 26

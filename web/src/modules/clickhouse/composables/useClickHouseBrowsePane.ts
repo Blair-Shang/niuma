@@ -16,16 +16,15 @@ import { connectionApi } from '@/api'
 import { clickhouseApi } from '@/api/clickhouse'
 import type { ClickHouseColumnInfo, ClickHouseQueryExecResult, ClickHouseTableMetaInfo } from '@/api/types/clickhouse'
 import {
-  alignForValueType,
-  formatBrowseCellValue,
+  buildBrowseResultColumn,
   formatRowsAsTsv,
   isBrowseFilterCompletionOpen,
   mapPasteToColumnRecords,
   parseClipboardMatrix,
   parseEditValue,
-  resolveSqlValueType,
   type BrowseDataRow,
   type BrowseDataShellLabels,
+  type BrowseRowChange,
 } from '@/modules/database'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
@@ -223,28 +222,19 @@ export function useClickHouseBrowsePane(props: ClickHouseBrowsePaneProps) {
       const meta = columnMeta.value.get(name.toLowerCase())
       const typeLabel = (meta?.dataType || queryColumns.value.find((c) => c.name === name)?.dataType || '').trim()
       const dataType = typeLabel || undefined
-      const valueType = resolveSqlValueType(dataType)
       const isKey = keyColumns.value.some((c) => c.toLowerCase() === name.toLowerCase())
       const tipLines = [t('modules.clickhouse.browse.colTipField', { name })]
       if (typeLabel) tipLines.push(t('modules.clickhouse.browse.colTipType', { type: typeLabel }))
       if (isKey) tipLines.push(t('modules.clickhouse.browse.colTipKey'))
-      return {
-        key: name,
-        title: name,
+      return buildBrowseResultColumn({
+        name,
+        dataType,
+        headerTip: tipLines.join('\n'),
         width: 120,
         minWidth: 80,
-        ellipsis: true,
-        sortable: true,
-        filterable: true,
-        align: alignForValueType(valueType),
-        valueType,
         nullable: meta?.nullable !== false,
-        emptyAsNull: true,
-        headerTip: tipLines.join('\n'),
-        editable: (row: BrowseDataRow) =>
-          Boolean((row as BrowseDataRow & { __isNew?: boolean }).__isNew || canEdit.value),
-        formatter: valueType === 'boolean' ? undefined : (value) => formatBrowseCellValue(value, valueType),
-      }
+        canEdit: canEdit.value,
+      })
     }),
   )
 
@@ -287,28 +277,68 @@ export function useClickHouseBrowsePane(props: ClickHouseBrowsePaneProps) {
     _index: number,
     value: unknown,
   ): Promise<void> {
+    if (!row.__isNew) return
     const name = String(column.key)
-    if (row.__isNew) {
-      row[name] = parseEditValue(value, row[name])
+    const idx = resultRows.value.findIndex((r) => r.__rowKey === row.__rowKey)
+    if (idx < 0) return
+    const previousRaw = resultRows.value[idx]![name]
+    const nextRaw = parseEditValue(value, previousRaw)
+    const nextRow: BrowseDataRow = { ...resultRows.value[idx]!, [name]: nextRaw }
+    const copy = [...resultRows.value]
+    copy[idx] = nextRow
+    resultRows.value = copy
+  }
+
+  async function applyRowChanges(row: BrowseDataRow, changes: BrowseRowChange[]): Promise<void> {
+    if (!props.sessionId || !props.table || !changes.length) return
+
+    if ((row as BrowseDataRow & { __isNew?: boolean }).__isNew) {
+      const idx = resultRows.value.findIndex((r) => r.__rowKey === row.__rowKey)
+      if (idx >= 0) {
+        const nextRow: BrowseDataRow = { ...resultRows.value[idx]! }
+        for (const ch of changes) {
+          nextRow[ch.colKey] = parseEditValue(ch.value, ch.previous)
+        }
+        const copy = [...resultRows.value]
+        copy[idx] = nextRow
+        resultRows.value = copy
+        void flushNewRow(nextRow)
+      }
       return
     }
-    if (!props.sessionId || !props.table || !canEdit.value) return
+
+    if (!canEdit.value) return
     const rowIndex = row.__rowIndex
-    const colIndex = queryColumns.value.findIndex((item) => item.name === name)
-    const previous = rawRows.value[rowIndex]?.[colIndex]
-    const next = parseEditValue(value, previous)
-    if (toSqlLiteral(previous) === toSqlLiteral(next)) return
+    if (rowIndex < 0 || rowIndex >= rawRows.value.length) return
     const where = keyWhere(row)
     if (!where) return
+
+    const setParts: string[] = []
+    const applied: Array<{ colIdx: number; nextRaw: unknown; previousRaw: unknown }> = []
+    for (const ch of changes) {
+      const colIdx = queryColumns.value.findIndex((item) => item.name === ch.colKey)
+      if (colIdx < 0) continue
+      const previousRaw = rawRows.value[rowIndex]![colIdx]
+      const nextRaw = parseEditValue(ch.value, previousRaw)
+      if (toSqlLiteral(previousRaw) === toSqlLiteral(nextRaw)) continue
+      setParts.push(`${quoteIdent(ch.colKey)} = ${toSqlLiteral(nextRaw)}`)
+      applied.push({ colIdx, nextRaw, previousRaw })
+    }
+    if (!setParts.length) return
+
+    const sql =
+      `ALTER TABLE ${qualifiedName(databaseName.value, props.table)} ` +
+      `UPDATE ${setParts.join(', ')} WHERE ${where}`
+
     const rows = rawRows.value.map((item) => [...item])
-    rows[rowIndex]![colIndex] = next
+    const nextRow = [...rows[rowIndex]!]
+    for (const item of applied) nextRow[item.colIdx] = item.nextRaw
+    rows[rowIndex] = nextRow
     rawRows.value = rows
     rebuildRows()
+
     saving.value = true
     try {
-      const sql =
-        `ALTER TABLE ${qualifiedName(databaseName.value, props.table)} ` +
-        `UPDATE ${quoteIdent(name)} = ${toSqlLiteral(next)} WHERE ${where}`
       await clickhouseApi.queryExec({
         sessionId: props.sessionId,
         database: databaseName.value,
@@ -317,13 +347,31 @@ export function useClickHouseBrowsePane(props: ClickHouseBrowsePaneProps) {
       toast.success(t('modules.clickhouse.browse.cellSaved'))
     } catch (error) {
       const reverted = rawRows.value.map((item) => [...item])
-      reverted[rowIndex]![colIndex] = previous
+      const rollbackRow = [...reverted[rowIndex]!]
+      for (const item of applied) rollbackRow[item.colIdx] = item.previousRaw
+      reverted[rowIndex] = rollbackRow
       rawRows.value = reverted
       rebuildRows()
       toast.error(error instanceof Error ? error.message : t('modules.clickhouse.browse.cellSaveError'))
     } finally {
       saving.value = false
     }
+  }
+
+  function isBrowseRowPending(row: BrowseDataRow): boolean {
+    return Boolean((row as BrowseDataRow & { __isNew?: boolean }).__isNew)
+  }
+
+  function onBrowseRowEditCommit(
+    row: BrowseDataRow,
+    _index: number,
+    changes: BrowseRowChange[] = [],
+  ): void {
+    void applyRowChanges(row, changes)
+  }
+
+  function onBrowseRowEditRollback(row: BrowseDataRow): void {
+    if ((row as BrowseDataRow & { __isNew?: boolean }).__isNew) discardNewRow(row.__rowKey)
   }
 
   function openInsert(): void {
@@ -952,6 +1000,9 @@ export function useClickHouseBrowsePane(props: ClickHouseBrowsePaneProps) {
     requestDelete,
     deleteSelected,
     onCellEditCommit,
+    isBrowseRowPending,
+    onBrowseRowEditCommit,
+    onBrowseRowEditRollback,
     flushNewRow,
     onBrowseKeydown,
     contextMenuItems,

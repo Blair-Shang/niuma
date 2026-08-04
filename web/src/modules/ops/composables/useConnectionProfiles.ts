@@ -369,16 +369,16 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     testing.value = true
     try {
       const params = buildTestParams()
-      const result = await getConnectionFormAdapter(dlgKind.value).callSessionTest(params)
-      testMessage.value = {
-        ok: result.ok,
-        text: result.message || (result.ok ? t('connection.form.testOk') : t('connection.form.testFail')),
-      }
+      const adapter = getConnectionFormAdapter(dlgKind.value)
+      const result = await adapter.callSessionTest(params)
+      let text = result.message || (result.ok ? t('connection.form.testOk') : t('connection.form.testFail'))
+      text = adapter.enrichTestMessage?.(text, result.ok, t) ?? text
+      testMessage.value = { ok: result.ok, text }
     } catch (e) {
-      testMessage.value = {
-        ok: false,
-        text: e instanceof Error ? e.message : t('connection.form.testFail'),
-      }
+      const adapter = getConnectionFormAdapter(dlgKind.value)
+      let text = e instanceof Error ? e.message : t('connection.form.testFail')
+      text = adapter.enrichTestMessage?.(text, false, t) ?? text
+      testMessage.value = { ok: false, text }
     } finally {
       testing.value = false
     }

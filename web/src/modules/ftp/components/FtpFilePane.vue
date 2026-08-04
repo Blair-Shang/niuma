@@ -493,6 +493,7 @@ defineExpose({ resetOnNavigate, clearSelection })
           row-key="id"
           size="sm"
           striped
+          fill
           :bordered="false"
           selectable
           :selected-row-keys="selectedRowKeys"
@@ -506,6 +507,7 @@ defineExpose({ resetOnNavigate, clearSelection })
           :row-drop-target-when="canRowDropTarget"
           :can-row-drop="canRowDrop"
           :context-menu-items="buildCtxItems"
+          :virtual="true"
           @update:sort="tableSort = $event"
           @update:selected-row-keys="selectedRowKeys = $event"
           @row-click="onRowClick"

@@ -50,7 +50,46 @@ int JsonInt(const nlohmann::json& j, std::initializer_list<const char*> keys, in
   return def;
 }
 
+std::string ToLower(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+std::string NormalizeFsPath(std::string path) {
+  for (char& c : path) {
+    if (c == '\\') {
+      c = '/';
+    }
+  }
+  return path;
+}
+
+std::string QuoteEasyConnectValue(const std::string& value) {
+  std::string out = "\"";
+  for (char c : value) {
+    if (c == '"') {
+      out += "\\\"";
+    } else {
+      out.push_back(c);
+    }
+  }
+  out.push_back('"');
+  return out;
+}
+
 }  // namespace
+
+bool ConnectOptions::SslEnabled() const {
+  const std::string mode = ToLower(ssl_mode);
+  return !mode.empty() && mode != "disable" && mode != "false" && mode != "off";
+}
+
+bool ConnectOptions::SslVerify() const {
+  const std::string mode = ToLower(ssl_mode);
+  return mode == "verify-full" || mode == "verify-ca" || mode == "verify";
+}
 
 ConnectParams ConnectParams::FromJson(const nlohmann::json& j) {
   ConnectParams p;
@@ -88,6 +127,23 @@ ConnectParams ConnectParams::FromJson(const nlohmann::json& j) {
   if (p.options.sid.empty()) {
     p.options.sid = JsonString(j, {"sid"});
   }
+  if (opts.contains("proxy") && opts["proxy"].is_object()) {
+    const auto& px = opts["proxy"];
+    p.options.proxy.type = JsonString(px, {"type"});
+    p.options.proxy.host = JsonString(px, {"host"});
+    p.options.proxy.port = JsonInt(px, {"port"}, 0);
+    p.options.proxy.username = JsonString(px, {"username", "user"});
+    p.options.proxy.password = JsonString(px, {"password"});
+  }
+  if (opts.contains("tunnel") && opts["tunnel"].is_object()) {
+    p.options.tunnel.type = JsonString(opts["tunnel"], {"type"});
+  }
+  p.options.ssl_mode = ToLower(JsonString(opts, {"ssl_mode", "sslMode"}));
+  if (p.options.ssl_mode.empty()) {
+    p.options.ssl_mode = "disable";
+  }
+  p.options.wallet_path = JsonString(opts, {"wallet_path", "walletPath"});
+  p.options.wallet_password = JsonString(opts, {"wallet_password", "walletPassword"});
   return p;
 }
 
@@ -101,19 +157,47 @@ std::string ConnectParams::SchemaOrEmpty() const {
 std::string ConnectParams::BuildConnectString() const {
   const int port = port_number > 0 ? port_number : 1521;
   const int timeout = options.connect_timeout_seconds > 0 ? options.connect_timeout_seconds : 30;
+  const bool ssl = options.SslEnabled();
+  const std::string wallet = NormalizeFsPath(options.wallet_path);
+  const bool verify = options.SslVerify();
+
   if (!options.service_name.empty()) {
-    // Easy Connect + connect_timeout（秒）
-    return host_address + ":" + std::to_string(port) + "/" + options.service_name +
-           "?connect_timeout=" + std::to_string(timeout);
-  }
-  if (!options.sid.empty()) {
+    // Easy Connect Plus：tcps://…?wallet_location=…（Oracle Client 19c+）
     std::ostringstream oss;
-    oss << "(DESCRIPTION=(CONNECT_TIMEOUT=" << timeout << ")(ADDRESS=(PROTOCOL=TCP)(HOST=" << host_address
-        << ")(PORT=" << port << "))(CONNECT_DATA=(SID=" << options.sid << ")))";
+    if (ssl) {
+      oss << "tcps://";
+    }
+    oss << host_address << ":" << port << "/" << options.service_name
+        << "?connect_timeout=" << timeout;
+    if (ssl && !wallet.empty()) {
+      oss << "&wallet_location=" << QuoteEasyConnectValue(wallet);
+    }
+    if (ssl && verify) {
+      oss << "&ssl_server_dn_match=yes";
+    } else if (ssl && !verify) {
+      oss << "&ssl_server_dn_match=no";
+    }
     return oss.str();
   }
-  // 默认当 service_name 缺失时仍给 Easy Connect 占位，由驱动报错
-  return host_address + ":" + std::to_string(port) + "/ORCL?connect_timeout=" + std::to_string(timeout);
+
+  if (!options.sid.empty()) {
+    const char* protocol = ssl ? "TCPS" : "TCP";
+    std::ostringstream oss;
+    oss << "(DESCRIPTION=(CONNECT_TIMEOUT=" << timeout << ")(ADDRESS=(PROTOCOL=" << protocol
+        << ")(HOST=" << host_address << ")(PORT=" << port << "))(CONNECT_DATA=(SID=" << options.sid
+        << "))";
+    if (ssl) {
+      oss << "(SECURITY=";
+      if (!wallet.empty()) {
+        oss << "(WALLET_LOCATION=" << wallet << ")";
+      }
+      oss << "(SSL_SERVER_DN_MATCH=" << (verify ? "TRUE" : "FALSE") << ")";
+      oss << ")";
+    }
+    oss << ")";
+    return oss.str();
+  }
+  return {};
 }
 
 ContextPtr SharedContext(std::string& error) {
@@ -129,7 +213,9 @@ ContextPtr SharedContext(std::string& error) {
   dpiErrorInfo err_info{};
   if (dpiContext_createWithParams(DPI_MAJOR_VERSION, DPI_MINOR_VERSION, &params, &ctx, &err_info) < 0) {
     error = DpiError(nullptr, &err_info);
-    error += "; set NIUMA_ORACLE_RUNTIME or place Instant Client under services/bin/runtime/oracle";
+    error += "; install Oracle Instant Client, then set ORACLE_HOME, "
+             "or configure it in Settings → Tool Components (Oracle Instant Client), "
+             "or place oci.dll under services/bin/runtime/oracle";
     return nullptr;
   }
   g_ctx.reset(ctx, DpiContextDeleter{});
@@ -229,16 +315,59 @@ OpenedConnection ConnectAndProbe(const ConnectParams& params, std::string& error
     error = "oracle: login account required";
     return out;
   }
-
-  auto ctx = SharedContext(error);
-  if (!ctx) {
+  if (params.options.service_name.empty() && params.options.sid.empty()) {
+    error = "oracle: service name or SID required";
+    return out;
+  }
+  if (!params.options.service_name.empty() && !params.options.sid.empty()) {
+    error = "oracle: set either service name or SID, not both";
+    return out;
+  }
+  if (params.options.SslVerify() && params.options.wallet_path.empty()) {
+    error = "oracle: wallet path required when SSL mode is verify-full";
+    return out;
+  }
+  // 隧道与代理互斥：都配置时优先隧道（与 MySQL/Redis 一致），但 C++ 侧尚未接入 SSH。
+  if (params.options.tunnel.Enabled()) {
+    error = "oracle: SSH tunnel is not supported yet; use HTTP/SOCKS proxy or connect directly";
     return out;
   }
 
-  const std::string conn_str = params.BuildConnectString();
+  ConnectParams dial = params;
+  if (params.options.proxy.Enabled()) {
+    std::string local_host;
+    uint16_t local_port = 0;
+    auto relay = niuma::netproxy::StartRelay(params.options.proxy, params.host_address,
+                                             static_cast<uint16_t>(params.port_number > 0 ? params.port_number : 1521),
+                                             local_host, local_port, error);
+    if (!relay) {
+      if (error.empty()) {
+        error = "oracle: proxy relay failed";
+      } else {
+        error = "oracle: " + error;
+      }
+      return out;
+    }
+    dial.host_address = local_host;
+    dial.port_number = static_cast<int>(local_port);
+    out.proxy_relay = std::move(relay);
+  }
+
+  auto ctx = SharedContext(error);
+  if (!ctx) {
+    out.proxy_relay.reset();
+    return out;
+  }
+
+  const std::string conn_str = dial.BuildConnectString();
+  if (conn_str.empty()) {
+    error = "oracle: service name or SID required";
+    out.proxy_relay.reset();
+    return out;
+  }
   dpiConnCreateParams create{};
   dpiContext_initConnCreateParams(ctx.get(), &create);
-  create.authMode = AuthMode(params.options.role);
+  create.authMode = AuthMode(dial.options.role);
 
   dpiCommonCreateParams common{};
   dpiContext_initCommonCreateParams(ctx.get(), &common);
@@ -247,21 +376,22 @@ OpenedConnection ConnectAndProbe(const ConnectParams& params, std::string& error
   common.nencoding = "UTF-8";
 
   dpiConn* conn = nullptr;
-  if (dpiConn_create(ctx.get(), params.login_account.c_str(),
-                     static_cast<uint32_t>(params.login_account.size()), params.secret.c_str(),
-                     static_cast<uint32_t>(params.secret.size()), conn_str.c_str(),
+  if (dpiConn_create(ctx.get(), dial.login_account.c_str(),
+                     static_cast<uint32_t>(dial.login_account.size()), dial.secret.c_str(),
+                     static_cast<uint32_t>(dial.secret.size()), conn_str.c_str(),
                      static_cast<uint32_t>(conn_str.size()), &common, &create, &conn) < 0) {
     error = DpiError(ctx.get());
+    out.proxy_relay.reset();
     return out;
   }
   out.conn.reset(conn);
 
-  if (!params.options.app_name.empty()) {
-    dpiConn_setClientInfo(conn, params.options.app_name.c_str(),
-                          static_cast<uint32_t>(params.options.app_name.size()));
+  if (!dial.options.app_name.empty()) {
+    dpiConn_setClientInfo(conn, dial.options.app_name.c_str(),
+                          static_cast<uint32_t>(dial.options.app_name.size()));
   }
 
-  const std::string schema = params.SchemaOrEmpty();
+  const std::string schema = dial.SchemaOrEmpty();
   if (!schema.empty() && util::IsSafeIdent(schema)) {
     const std::string alter = "ALTER SESSION SET CURRENT_SCHEMA = " + util::QuoteIdent(schema);
     util::StmtGuard stmt;
@@ -276,6 +406,7 @@ OpenedConnection ConnectAndProbe(const ConnectParams& params, std::string& error
   out.profile = Probe(ctx.get(), conn, error);
   if (!error.empty()) {
     out.conn.reset();
+    out.proxy_relay.reset();
     return {};
   }
   return out;

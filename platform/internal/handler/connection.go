@@ -643,6 +643,9 @@ func sanitizeConnectionOptionsJSON(raw string) (json.RawMessage, error) {
 		delete(tunnel, "sshProfile")
 		obj["tunnel"] = tunnel
 	}
+	// Oracle Wallet 等可能把口令误存进 options；导出时剥离。
+	delete(obj, "wallet_password")
+	delete(obj, "walletPassword")
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return nil, err

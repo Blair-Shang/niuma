@@ -17,13 +17,16 @@ Layer-1 Oracle 能力服务。设计见 [docs/29-oracle-module.md](../../docs/29
 git clone --depth 1 --branch v5.4.1 https://github.com/oracle/odpi.git third_party/odpi
 ```
 
-将 Oracle Instant Client Basic（或 Basic Light）解压到：
+运行时探测顺序：
 
-```
-services/bin/runtime/oracle/
-```
+1. `ORACLE_HOME` / `ORACLE_HOME/bin`（标准 Oracle 客户端变量；可由工具组件注入）
+2. 旁载 `services/bin/runtime/oracle/`（相对服务 exe，可选）
+3. PATH 中含 `oci.dll` 的目录（Windows）
 
-或设置环境变量 `NIUMA_ORACLE_RUNTIME` / `ORACLE_HOME` 指向该目录。
+开发机可将 Instant Client Basic（或 Basic Light）解压后设置 `ORACLE_HOME`，
+或在应用内 **设置 → 工具组件 → Oracle Instant Client** 浏览选择 `oci.dll`。
+
+产品默认**不**捆绑 Instant Client；亦**不**做应用内代下载（见 `docs/29-oracle-module.md`）。
 
 ## 构建
 
@@ -31,9 +34,11 @@ services/bin/runtime/oracle/
 .\scripts\shared\build\build-oracle-service.ps1
 ```
 
-产物：`services/bin/niuma-oracle-service.exe`（Windows）。
+产物：
+- 矩阵目录：`services/bin/windows-x64/niuma-oracle-service.exe`（供 `stage-services` / `dev:hot` 拷贝）
+- 兼容平铺：`services/bin/niuma-oracle-service.exe`（本机 Windows）
 
-常规 `build-services.ps1` **不**强制构建本服务（避免无 Instant Client / VS 的开发机失败）。
+常规 `build-services.ps1` **不**强制构建本服务（避免无 VS / cmake 的开发机失败）。构建后需再跑一次壳层 stage（或重启 `pnpm run dev:hot`）才会出现在 `build/shell-*/Release/services/bin/`。
 
 ## IPC
 

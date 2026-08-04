@@ -1148,6 +1148,10 @@ export function useMysqlQueryPane(props: MysqlQueryPaneProps) {
     logColRows: t('modules.mysql.query.logColRows'),
     copyMessage: t('modules.mysql.query.copyMessage'),
     copiedHint: t('modules.mysql.query.copiedHint'),
+    cellViewTitle: t('modules.mysql.query.cellViewTitle'),
+    cellViewClose: t('modules.mysql.query.cellViewClose'),
+    cellViewCopyFull: t('modules.mysql.query.cellViewCopyFull'),
+    cellViewCopied: t('modules.mysql.query.cellViewCopied'),
   }))
 
   return {

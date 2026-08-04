@@ -13,8 +13,7 @@
  * - `mysqlCompoundBlocks`：`CREATE PROCEDURE|FUNCTION … BEGIN…END;` 体内 `;` 不拆句
  *   （对齐 Navicat：编辑器可直接写过程，无需手写 DELIMITER）。
  *
- * 已知边界：
- * - T-SQL `GO` 批分隔符不在本扫描器范围
+ * T-SQL：`goBatches` 开启时，独立行 `GO` 为批边界（`GO` 行不输出给服务器）。
  */
 import type { SqlDialect } from '../dialect'
 import {
@@ -508,15 +507,145 @@ function isEndBlockCloser(sql: string, afterEnd: number, features: SqlSplitFeatu
   )
 }
 
+const CHAR_LBRACKET = 91
+const CHAR_RBRACKET = 93
+
+/** 跳过 `[ident]`；`]` 内 `]]` 为转义。返回闭合 `]` 之后下标。 */
+function skipBracketIdent(sql: string, openBracket: number): number {
+  const n = sql.length
+  let i = openBracket + 1
+  while (i < n) {
+    const c = codeAt(sql, i)
+    if (c === CHAR_RBRACKET) {
+      if (i + 1 < n && codeAt(sql, i + 1) === CHAR_RBRACKET) {
+        i += 2
+        continue
+      }
+      return i + 1
+    }
+    i++
+  }
+  return n
+}
+
+/**
+ * 独立行 `GO`（可选 `GO <n>`）：该行除空白外以 GO 开头，其后仅空白或行尾。
+ * @returns 吃掉整行后的下标；不匹配返回 -1
+ */
+function matchStandaloneGoLine(sql: string, i: number): number {
+  const goEnd = matchKeyword(sql, i, 'go')
+  if (goEnd < 0) return -1
+  const n = sql.length
+  let p = goEnd
+  // 可选批次数：GO 5
+  if (p < n && codeAt(sql, p) === CHAR_SPACE) {
+    p++
+    while (p < n) {
+      const c = codeAt(sql, p)
+      if (c >= CHAR_0 && c <= CHAR_9) {
+        p++
+        continue
+      }
+      break
+    }
+  }
+  while (p < n) {
+    const c = codeAt(sql, p)
+    if (c === CHAR_SPACE || c === CHAR_TAB) {
+      p++
+      continue
+    }
+    if (c === CHAR_CR || c === CHAR_LF) break
+    return -1
+  }
+  if (p < n && codeAt(sql, p) === CHAR_CR) p++
+  if (p < n && codeAt(sql, p) === CHAR_LF) p++
+  return p
+}
+
+function isPhysicalLineStart(sql: string, i: number): boolean {
+  if (i <= 0) return true
+  const prev = codeAt(sql, i - 1)
+  return prev === CHAR_LF || prev === CHAR_CR
+}
+
+/**
+ * T-SQL `GO` 批边界：批内不分号；`GO` 行本身不进入可执行切片。
+ */
+function findGoBatchBoundaries(
+  sql: string,
+  features: SqlSplitFeatures,
+  options: Pick<SplitSqlOptions, 'standardConformingStrings'> = {},
+): StatementBoundary[] {
+  const positions: StatementBoundary[] = []
+  const n = sql.length
+  const scs = options.standardConformingStrings !== false
+  let i = 0
+  while (i < n) {
+    const c = codeAt(sql, i)
+    const c1 = i + 1 < n ? codeAt(sql, i + 1) : 0
+    if (c === CHAR_SQUOTE) {
+      const escapePrefixed = features.postgresEscapeStringPrefix && hasPostgresEscapePrefix(sql, i)
+      const backslash = features.backslashStringEscapes || escapePrefixed || !scs
+      i = skipSingleQuoted(sql, i, backslash)
+      continue
+    }
+    if (c === CHAR_DQUOTE) {
+      i = skipQuotedIdent(sql, i, CHAR_DQUOTE)
+      continue
+    }
+    if (features.backticks && c === CHAR_BACKTICK) {
+      i = skipQuotedIdent(sql, i, CHAR_BACKTICK)
+      continue
+    }
+    if (features.bracketIdentifiers && c === CHAR_LBRACKET) {
+      i = skipBracketIdent(sql, i)
+      continue
+    }
+    if (c === CHAR_DASH && c1 === CHAR_DASH) {
+      i = skipLineComment(sql, i + 2)
+      continue
+    }
+    if (c === CHAR_SLASH && c1 === CHAR_STAR) {
+      i = skipBlockComment(sql, i, features.nestedBlockComments)
+      continue
+    }
+    if (features.hashLineComments && c === CHAR_HASH) {
+      i = skipLineComment(sql, i + 1)
+      continue
+    }
+    if (isPhysicalLineStart(sql, i)) {
+      let p = i
+      while (p < n && (codeAt(sql, p) === CHAR_SPACE || codeAt(sql, p) === CHAR_TAB)) p++
+      const goNext = matchStandaloneGoLine(sql, p)
+      if (goNext >= 0) {
+        positions.push({
+          end: i,
+          delimiterIndex: i,
+          delimiterLength: goNext - i,
+        })
+        i = goNext
+        continue
+      }
+    }
+    i++
+  }
+  return positions
+}
+
 /**
  * 扫描语句边界（分号、独立行 `/`、或 MySQL DELIMITER 自定义结束符）。
  * PL/SQL 体结束处的 `;` 会计入切片（`END;` 的分号是过程体语法，不能剥掉）。
+ * `goBatches` 时改走独立行 `GO` 批边界。
  */
 function findStatementBoundaries(
   sql: string,
   features: SqlSplitFeatures,
   options: Pick<SplitSqlOptions, 'standardConformingStrings'> = {},
 ): StatementBoundary[] {
+  if (features.goBatches) {
+    return findGoBatchBoundaries(sql, features, options)
+  }
   const positions: StatementBoundary[] = []
   const n = sql.length
   const scs = options.standardConformingStrings !== false

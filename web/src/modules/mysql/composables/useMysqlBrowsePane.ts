@@ -15,14 +15,13 @@ import { useI18n } from 'vue-i18n'
 import { connectionApi, dialogApi, fsApi, mysqlApi } from '@/api'
 import type { MysqlColumnInfo, MysqlQueryColumn, MysqlQueryExecResult } from '@/api/types/mysql'
 import {
-  alignForValueType,
-  formatBrowseCellValue,
+  buildBrowseResultColumn,
   formatRowsAsTsv,
+  isBrowseBinCell,
   isBrowseFilterCompletionOpen,
   mapPasteToColumnRecords,
   parseClipboardMatrix,
   parseEditValue,
-  resolveSqlValueType,
   type BrowseDataRow,
   type BrowseDataShellLabels,
 } from '@/modules/database'
@@ -197,33 +196,18 @@ export function useMysqlBrowsePane(props: MysqlBrowsePaneProps) {
           }),
         )
       }
-      const valueType = resolveSqlValueType(dataType, {
-        length:
+      return buildBrowseResultColumn({
+        name: c.name,
+        dataType,
+        typeLength:
           typeof c.length === 'number' ? c.length : extractMysqlTypeLength(dataType),
-      })
-      return {
-        key: c.name,
-        title: c.name,
+        headerTip: tipLines.join('\n'),
         width: 120,
         minWidth: 96,
-        ellipsis: true,
-        sortable: true,
-        filterable: true,
-        align: alignForValueType(valueType),
-        valueType,
-        headerTip: tipLines.join('\n'),
-        editable: (row: BrowseDataRow) => {
-          if (row.__isNew) return true
-          return canEdit.value
-        },
         nullable: nullable !== false,
-        emptyAsNull: true,
-        // boolean 交给 RsTable 勾选；date/datetime 走规范展示；其余 NULL / JSON
-        formatter:
-          valueType === 'boolean'
-            ? undefined
-            : (value) => formatBrowseCellValue(value, valueType),
-      }
+        canEdit: canEdit.value,
+        isBinCell: isBrowseBinCell,
+      })
     })
   })
 
@@ -447,18 +431,39 @@ export function useMysqlBrowsePane(props: MysqlBrowsePaneProps) {
     _index: number,
     value: unknown,
   ): Promise<void> {
-    if (!props.sessionId || !props.database || !props.table) return
-    const colName = String(column.key)
-
+    // row-commit 模式下普通单元格走 staged，不应再即时写库
     if (row.__isNew) {
       const idx = resultRows.value.findIndex((r) => r.__rowKey === row.__rowKey)
       if (idx < 0) return
+      const colName = String(column.key)
       const previousRaw = resultRows.value[idx]![colName]
       const nextRaw = coerceBrowseEditValue(value, previousRaw)
       const nextRow: BrowseDataRow = { ...resultRows.value[idx]!, [colName]: nextRaw }
       const copy = [...resultRows.value]
       copy[idx] = nextRow
       resultRows.value = copy
+    }
+  }
+
+  async function applyRowChanges(
+    row: BrowseDataRow,
+    changes: Array<{ colKey: string; value: unknown; previous: unknown }>,
+  ): Promise<void> {
+    if (!props.sessionId || !props.database || !props.table) return
+    if (!changes.length) return
+
+    if (row.__isNew) {
+      const idx = resultRows.value.findIndex((r) => r.__rowKey === row.__rowKey)
+      if (idx >= 0) {
+        const nextRow: BrowseDataRow = { ...resultRows.value[idx]! }
+        for (const ch of changes) {
+          nextRow[ch.colKey] = coerceBrowseEditValue(ch.value, ch.previous)
+        }
+        const copy = [...resultRows.value]
+        copy[idx] = nextRow
+        resultRows.value = copy
+        void flushNewRow(nextRow)
+      }
       return
     }
 
@@ -467,20 +472,27 @@ export function useMysqlBrowsePane(props: MysqlBrowsePaneProps) {
     const res = lastResult.value
     if (!res || rowIdx < 0 || rowIdx >= rawRows.value.length) return
 
-    const colIdx = res.columns.findIndex((c) => c.name === colName)
-    if (colIdx < 0) return
-
-    const previousRaw = rawRows.value[rowIdx]![colIdx]
-    const nextRaw = coerceBrowseEditValue(value, previousRaw)
-    if (toSqlLiteral(previousRaw) === toSqlLiteral(nextRaw)) return
-
     const where = locateWhereForRow(rowIdx)
     if (!where) return
-    const sql = `UPDATE ${qualifiedName(props.database, props.table)}\nSET ${quoteIdent(colName)} = ${toSqlLiteral(nextRaw)}\nWHERE ${where}`
+
+    const setParts: string[] = []
+    const applied: Array<{ colIdx: number; nextRaw: unknown; previousRaw: unknown }> = []
+    for (const ch of changes) {
+      const colIdx = res.columns.findIndex((c) => c.name === ch.colKey)
+      if (colIdx < 0) continue
+      const previousRaw = rawRows.value[rowIdx]![colIdx]
+      const nextRaw = coerceBrowseEditValue(ch.value, previousRaw)
+      if (toSqlLiteral(previousRaw) === toSqlLiteral(nextRaw)) continue
+      setParts.push(`${quoteIdent(ch.colKey)} = ${toSqlLiteral(nextRaw)}`)
+      applied.push({ colIdx, nextRaw, previousRaw })
+    }
+    if (!setParts.length) return
+
+    const sql = `UPDATE ${qualifiedName(props.database, props.table)}\nSET ${setParts.join(', ')}\nWHERE ${where}`
 
     const next = [...rawRows.value]
     const nextRow = [...next[rowIdx]!]
-    nextRow[colIdx] = nextRaw
+    for (const item of applied) nextRow[item.colIdx] = item.nextRaw
     next[rowIdx] = nextRow
     rawRows.value = next
     rebuildDisplayRows()
@@ -496,7 +508,7 @@ export function useMysqlBrowsePane(props: MysqlBrowsePaneProps) {
     } catch (e) {
       const rollback = [...rawRows.value]
       const rollbackRow = [...rollback[rowIdx]!]
-      rollbackRow[colIdx] = previousRaw
+      for (const item of applied) rollbackRow[item.colIdx] = item.previousRaw
       rollback[rowIdx] = rollbackRow
       rawRows.value = rollback
       rebuildDisplayRows()
@@ -937,8 +949,12 @@ export function useMysqlBrowsePane(props: MysqlBrowsePaneProps) {
     return Boolean(row.__isNew)
   }
 
-  function onBrowseRowEditCommit(row: BrowseDataRow): void {
-    if (row.__isNew) void flushNewRow(row)
+  function onBrowseRowEditCommit(
+    row: BrowseDataRow,
+    _index: number,
+    changes: Array<{ colKey: string; value: unknown; previous: unknown }> = [],
+  ): void {
+    void applyRowChanges(row, changes)
   }
 
   function onBrowseRowEditRollback(row: BrowseDataRow): void {

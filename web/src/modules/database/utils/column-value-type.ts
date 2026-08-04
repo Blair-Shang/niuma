@@ -85,25 +85,60 @@ const NUMBER_TYPES = new Set([
 
 const TEXTAREA_TYPES = new Set([
   'text',
+  'tinytext',
+  'mediumtext',
+  'longtext',
   'json',
   'jsonb',
   'xml',
-  'bytea',
   'clob',
   'nclob',
-  'blob',
-  'raw',
-  'long',
-  'long raw',
-  'bfile',
   'citext',
   'tsvector',
   'tsquery',
+  'long',
+])
+
+/** 二进制大对象：网格只读摘要，禁止当文本行内编辑 */
+const BINARY_LOB_TYPES = new Set([
+  'blob',
+  'tinyblob',
+  'mediumblob',
+  'longblob',
+  'bytea',
+  'raw',
+  'long raw',
+  'bfile',
+  'image',
+  'binary',
+  'varbinary',
 ])
 
 export interface ResolveSqlValueTypeOptions {
   /** 列显示宽度（TINYINT(1) / BIT(1) 等） */
   length?: number | null
+}
+
+/** 是否为二进制 LOB / RAW（非 CLOB 文本）。 */
+export function isSqlBinaryLobType(dataType?: string | null): boolean {
+  const t = normalizeSqlDataType(dataType)
+  if (!t) return false
+  if (NUMBER_TYPES.has(t)) return false
+  if (BINARY_LOB_TYPES.has(t)) return true
+  if (t.includes('blob') || t === 'bytea') return true
+  if (t === 'long raw' || t.endsWith(' binary') || t.startsWith('binary(')) return true
+  return false
+}
+
+/** 长文本 / JSON / XML 等：适合弹窗编辑，不宜单元格内撑开。 */
+export function isSqlTextLobType(dataType?: string | null): boolean {
+  const t = normalizeSqlDataType(dataType)
+  if (!t) return false
+  if (isSqlBinaryLobType(t)) return false
+  if (TEXTAREA_TYPES.has(t)) return true
+  if (t.includes('json') || t.includes('clob') || t.includes('xml')) return true
+  if (t.endsWith('text')) return true
+  return false
 }
 
 /** SQL dataType → 表格单元格 valueType。 */
@@ -125,7 +160,8 @@ export function resolveSqlValueType(
   if (DATE_TYPES.has(t)) return 'date'
   if (DATETIME_TYPES.has(t)) return 'datetime'
   if (NUMBER_TYPES.has(t)) return 'number'
-  if (TEXTAREA_TYPES.has(t)) return 'textarea'
+  if (isSqlBinaryLobType(t)) return 'text'
+  if (TEXTAREA_TYPES.has(t) || isSqlTextLobType(t)) return 'textarea'
 
   // VastBase / Oracle 扩展：名称含关键字时兜底
   if (t.includes('timestamp') || t.startsWith('oratime') || t === 'oradate') {
@@ -145,9 +181,10 @@ export function resolveSqlValueType(
   ) {
     return 'number'
   }
-  if (t.includes('json') || t.includes('clob') || t.includes('blob') || t === 'bytea') {
+  if (t.includes('json') || t.includes('clob') || t.includes('xml')) {
     return 'textarea'
   }
+  if (t.includes('blob') || t === 'bytea') return 'text'
   if (t.includes('bool') || t === 'bit') return 'boolean'
 
   // 字符类：varchar / varchar2 / nvarchar2 / char / nchar / bpchar / character varying …

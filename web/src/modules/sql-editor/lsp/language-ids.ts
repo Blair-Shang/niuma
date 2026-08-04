@@ -12,3 +12,6 @@ export const CLICKHOUSE_MONACO_LANGUAGE_ID = 'clickhouse' as const
 
 /** SQLite Monaco / Bridge LSP languageId（与 ensureSqliteLspLanguage 一致）。 */
 export const SQLITE_MONACO_LANGUAGE_ID = 'sqlite' as const
+
+/** SQL Server Monaco / Bridge LSP languageId（与 ensureSqlServerLspLanguage 一致）。 */
+export const SQLSERVER_MONACO_LANGUAGE_ID = 'sqlserver' as const

@@ -5,7 +5,7 @@
  *
  * | sharing | 含义 | 典型协议 |
  * |---------|------|----------|
- * | per_tab | 每 Tab 独立 sessionId | SSH, FTP, MySQL, Kingbase, Dameng（多查询 Tab 事务隔离） |
+ * | per_tab | 每 Tab 独立 sessionId | SSH, FTP, MySQL, Kingbase, Dameng, Oracle（多查询 Tab 事务隔离） |
  * | scoped | 同 profile + scope 字段共享 | Redis（database） |
  * | per_profile | 同站点共享一条连接 | MongoDB, Vastbase |
  *
@@ -38,12 +38,14 @@ export const SESSION_POLICY: Record<ConnKind, SessionPolicy> = {
   sqlite: { sharing: 'per_profile', closeOnRelease: false, idleMs: 60_000 },
   // 每查询/浏览 Tab 独立物理连接，多页签事务隔离（对齐 MySQL / 金仓）。
   dameng: { sharing: 'per_tab', closeOnRelease: true },
-  // Oracle P0 查询 Tab 共享 profile 会话，空闲后释放。
-  oracle: { sharing: 'per_profile', closeOnRelease: false, idleMs: 60_000 },
+  // 每查询/浏览 Tab 独立物理连接，避免多 Tab 共享 session 时事务串号（对齐 MySQL）。
+  oracle: { sharing: 'per_tab', closeOnRelease: true },
   // ClickHouse P0 查询 Tab 共享 profile 会话，空闲后释放（docs/30）。
   clickhouse: { sharing: 'per_profile', closeOnRelease: false, idleMs: 60_000 },
   // 每查询/浏览 Tab 独立物理连接，多页签事务隔离（对齐 MySQL）。
   kingbase: { sharing: 'per_tab', closeOnRelease: true },
+  // SQL Server：每查询 Tab 独立物理连接与事务（docs/32）。
+  sqlserver: { sharing: 'per_tab', closeOnRelease: true },
 }
 
 export interface AcquireOpts {

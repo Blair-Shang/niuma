@@ -67,6 +67,13 @@ export interface SqlSplitFeatures {
    *（对齐 Navicat：编辑器无需手写 DELIMITER；仍兼容 delimiterBlocks）。
    */
   mysqlCompoundBlocks: boolean
+  /**
+   * T-SQL：独立行 `GO` 为批边界（SSMS/Navicat）；`GO` 行不作为可执行语句输出。
+   * 开启时优先按批拆分，批内不再按分号拆句。
+   */
+  goBatches?: boolean
+  /** T-SQL / SQLite：跳过 `[ident]` / `]]` 转义，避免误判分隔符。 */
+  bracketIdentifiers?: boolean
 }
 
 /** 按产品方言解析拆句词法能力。 */
@@ -155,6 +162,20 @@ export function resolveSqlSplitFeatures(dialect: SqlDialect): SqlSplitFeatures {
         mysqlCompoundBlocks: true,
       }
     case 'sqlserver':
+      return {
+        dollarQuotes: false,
+        backticks: false,
+        hashLineComments: false,
+        nestedBlockComments: false,
+        oracleQQuotes: false,
+        backslashStringEscapes: false,
+        postgresEscapeStringPrefix: false,
+        plsqlBlocks: false,
+        delimiterBlocks: false,
+        mysqlCompoundBlocks: false,
+        goBatches: true,
+        bracketIdentifiers: true,
+      }
     case 'generic':
     default:
       return {

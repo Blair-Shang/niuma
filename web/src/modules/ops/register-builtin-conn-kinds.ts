@@ -71,6 +71,12 @@ const BUILTIN_CONN_KIND_LOADERS: Record<
     loadForm: () => import('@/modules/kingbase/register-conn-form').then((m) => m.registerForm()),
     load: () => import('@/modules/kingbase/register-conn-full').then((m) => m.registerFull()),
   },
+  // P0：无对象树；仅表单 + 查询导航
+  sqlserver: {
+    tree: false,
+    loadForm: () => import('@/modules/sqlserver/register-conn-form').then((m) => m.registerForm()),
+    load: () => import('@/modules/sqlserver/register-conn-full').then((m) => m.registerFull()),
+  },
 }
 
 /** 登记全部内置协议 loader（不执行模块加载）。 */

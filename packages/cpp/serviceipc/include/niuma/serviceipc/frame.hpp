@@ -7,7 +7,8 @@
 namespace niuma::serviceipc {
 
 /** 单帧 JSON 载荷上限，与 packages/go/serviceipc 对齐。 */
-inline constexpr std::uint32_t kMaxFrameSize = 16u << 20;  // 16 MiB
+// 桌面工具查询页可能含大字段，故放宽到 1 GiB（仍低于 uint32 协议上限）。
+inline constexpr std::uint32_t kMaxFrameSize = 1u << 30;  // 1 GiB
 
 /**
  * 从字节流缓冲中尝试拆出一帧。

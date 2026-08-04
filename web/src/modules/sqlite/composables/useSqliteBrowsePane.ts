@@ -16,15 +16,14 @@ import { useI18n } from 'vue-i18n'
 import { connectionApi, dialogApi, fsApi, sqliteApi } from '@/api'
 import type { SqliteColumnInfo, SqliteQueryExecResult } from '@/api/types/sqlite'
 import {
-  alignForValueType,
-  formatBrowseCellValue,
+  buildBrowseResultColumn,
   formatRowsAsTsv,
   mapPasteToColumnRecords,
   parseClipboardMatrix,
   parseEditValue,
-  resolveSqlValueType,
   type BrowseDataRow,
   type BrowseDataShellLabels,
+  type BrowseRowChange,
 } from '@/modules/database'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
@@ -84,11 +83,6 @@ function inferAutoIncrement(col: SqliteColumnInfo, pkCols: string[]): boolean {
   if (pkCols.length !== 1 || pkCols[0] !== col.name) return false
   const base = (col.dataType ?? '').trim().toUpperCase().replace(/\(.*\)$/, '')
   return base === 'INTEGER' || base === 'INT'
-}
-
-function isBlobType(dataType?: string): boolean {
-  const t = (dataType ?? '').trim().toUpperCase()
-  return t === 'BLOB' || t.startsWith('BLOB(')
 }
 
 export function useSqliteBrowsePane(props: SqliteBrowsePaneProps) {
@@ -239,32 +233,16 @@ export function useSqliteBrowsePane(props: SqliteBrowsePaneProps) {
           }),
         )
       }
-      const valueType = resolveSqlValueType(dataType)
-      const blobCol = isBlobType(dataType)
-      return {
-        key: name,
-        title: name,
+      return buildBrowseResultColumn({
+        name,
+        dataType,
+        headerTip: tipLines.join('\n'),
         width: 120,
         minWidth: 80,
-        ellipsis: true,
-        sortable: true,
-        filterable: true,
-        align: alignForValueType(valueType),
-        valueType,
-        headerTip: tipLines.join('\n'),
-        editable: (row: BrowseDataRow) => {
-          if (blobCol) return false
-          if (isBinCell(row[name])) return false
-          if (row.__isNew) return true
-          return canEdit.value
-        },
         nullable: meta?.nullable !== false,
-        emptyAsNull: true,
-        formatter:
-          valueType === 'boolean'
-            ? undefined
-            : (value) => formatBrowseCellValue(value, valueType),
-      }
+        canEdit: canEdit.value,
+        isBinCell,
+      })
     })
   })
 
@@ -516,33 +494,60 @@ export function useSqliteBrowsePane(props: SqliteBrowsePaneProps) {
       const copy = [...resultRows.value]
       copy[idx] = nextRow
       resultRows.value = copy
+    }
+  }
+
+  async function applyRowChanges(row: BrowseDataRow, changes: BrowseRowChange[]): Promise<void> {
+    if (!props.sessionId || !props.table || !changes.length) return
+
+    if (row.__isNew) {
+      const idx = resultRows.value.findIndex((r) => r.__rowKey === row.__rowKey)
+      if (idx >= 0) {
+        const nextRow: BrowseDataRow = { ...resultRows.value[idx]! }
+        for (const ch of changes) {
+          if (ch.colKey === ROWID_ALIAS) continue
+          nextRow[ch.colKey] = coerceBrowseEditValue(ch.value, ch.previous)
+        }
+        const copy = [...resultRows.value]
+        copy[idx] = nextRow
+        resultRows.value = copy
+        void flushNewRow(nextRow)
+      }
       return
     }
 
     if (!canEdit.value) return
     const rowIdx = row.__rowIndex
     if (rowIdx < 0 || rowIdx >= rawRows.value.length) return
-    const colIdx = queryColumns.value.findIndex((c) => c.name === colName)
-    if (colIdx < 0) return
-
-    const previousRaw = rawRows.value[rowIdx]![colIdx]
-    if (isBinCell(previousRaw)) return
-    const nextRaw = coerceBrowseEditValue(value, previousRaw)
-    if (toSqlLiteral(previousRaw) === toSqlLiteral(nextRaw)) return
-
     const where = locateWhereForRow(rowIdx)
     if (!where) {
       toast.error(t('modules.sqlite.browse.locateFailed'))
       return
     }
+
+    const setParts: string[] = []
+    const applied: Array<{ colIdx: number; nextRaw: unknown; previousRaw: unknown }> = []
+    for (const ch of changes) {
+      if (ch.colKey === ROWID_ALIAS) continue
+      const colIdx = queryColumns.value.findIndex((c) => c.name === ch.colKey)
+      if (colIdx < 0) continue
+      const previousRaw = rawRows.value[rowIdx]![colIdx]
+      if (isBinCell(previousRaw)) continue
+      const nextRaw = coerceBrowseEditValue(ch.value, previousRaw)
+      if (toSqlLiteral(previousRaw) === toSqlLiteral(nextRaw)) continue
+      setParts.push(`${quoteIdent(ch.colKey)} = ${toSqlLiteral(nextRaw)}`)
+      applied.push({ colIdx, nextRaw, previousRaw })
+    }
+    if (!setParts.length) return
+
     const sql =
       `UPDATE ${qualifiedName(schemaName.value, props.table)}\n` +
-      `SET ${quoteIdent(colName)} = ${toSqlLiteral(nextRaw)}\n` +
+      `SET ${setParts.join(', ')}\n` +
       `WHERE ${where}`
 
     const next = [...rawRows.value]
     const nextRow = [...next[rowIdx]!]
-    nextRow[colIdx] = nextRaw
+    for (const item of applied) nextRow[item.colIdx] = item.nextRaw
     next[rowIdx] = nextRow
     rawRows.value = next
     rebuildDisplayRows()
@@ -558,7 +563,7 @@ export function useSqliteBrowsePane(props: SqliteBrowsePaneProps) {
     } catch (e) {
       const rollback = [...rawRows.value]
       const rollbackRow = [...rollback[rowIdx]!]
-      rollbackRow[colIdx] = previousRaw
+      for (const item of applied) rollbackRow[item.colIdx] = item.previousRaw
       rollback[rowIdx] = rollbackRow
       rawRows.value = rollback
       rebuildDisplayRows()
@@ -955,8 +960,12 @@ export function useSqliteBrowsePane(props: SqliteBrowsePaneProps) {
     return Boolean(row.__isNew)
   }
 
-  function onBrowseRowEditCommit(row: BrowseDataRow): void {
-    if (row.__isNew) void flushNewRow(row)
+  function onBrowseRowEditCommit(
+    row: BrowseDataRow,
+    _index: number,
+    changes: BrowseRowChange[] = [],
+  ): void {
+    void applyRowChanges(row, changes)
   }
 
   function onBrowseRowEditRollback(row: BrowseDataRow): void {

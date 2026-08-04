@@ -4,7 +4,7 @@
  */
 import type * as Monaco from 'monaco-editor'
 
-export type SqlDialect = 'mysql' | 'dameng' | 'kingbase' | 'clickhouse' | 'sqlite'
+export type SqlDialect = 'mysql' | 'dameng' | 'kingbase' | 'clickhouse' | 'sqlite' | 'sqlserver'
 
 export type SqlLexicon = {
   keywords: string[]

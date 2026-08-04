@@ -31,6 +31,7 @@ export default {
     oracle: 'Oracle',
     clickhouse: 'ClickHouse',
     kingbase: '人大金仓',
+    sqlserver: 'SQL Server',
     database: '数据库',
     api: 'API 测试',
     settings: '设置',
@@ -189,6 +190,7 @@ export default {
   },
   shell: {
     activityBar: '活动栏',
+    toggleSidebar: '切换侧栏 (Ctrl+B)',
     windowControls: '窗口控制',
     windowMinimize: '最小化',
     windowMaximize: '最大化',
@@ -403,9 +405,12 @@ export default {
     componentsEmpty: '未发现已注册的工具组件包。',
     componentsDetectBundle: '重新检测',
     componentsBrowse: '浏览…',
+    componentsBrowseFolder: '选择目录…',
     componentsClearPath: '清除路径',
     componentsDownload: '官方下载',
     componentsBrowseTitle: '选择 {name} 可执行文件',
+    componentsBrowseFolderTitle: '选择 {name} 所在目录',
+    componentsLibraryNotFound: '目录中未找到 {names}：{dir}',
     componentsPathSaved: '路径已保存',
     componentsDetectDone: '检测完成',
     componentsInstall: '下载安装',
@@ -464,6 +469,15 @@ export default {
           pg_dump: 'pg_dump',
           pg_restore: 'pg_restore',
           psql: 'psql',
+        },
+      },
+      com_niuma_components_oracle_native: {
+        name: 'Oracle Instant Client',
+        tip: '请选择解压后的 Instant Client 目录（含 oci.dll）。推荐 Basic 或 Basic Light 的 Windows x64 ZIP；版本需与目标库兼容（常用 19c / 21c）。',
+        downloadTip:
+          '官网版本很多：选 Windows x64 → Basic / Basic Light ZIP，解压后在本页「选择目录」自动匹配 oci.dll。无需 SDK。',
+        tools: {
+          'instant-client': 'Instant Client（oci.dll）',
         },
       },
     },
@@ -606,6 +620,23 @@ export default {
     database: {
       title: '数据库',
       desc: 'Schema 树与 SQL 编辑器待实现。',
+      cellView: {
+        viewTitle: '查看',
+        close: '关闭',
+        copyFull: '复制全文',
+        copied: '已复制',
+      },
+      cellEditor: {
+        editTitle: '编辑',
+        apply: '应用',
+        cancel: '取消',
+        copyFull: '复制全文',
+        copied: '已复制',
+        modePlaintext: '文本',
+        modeJson: 'JSON',
+        modeXml: 'XML',
+        applyHint: '应用后请在行首点击 ✓ 提交到数据库',
+      },
     },
     api: {
       title: 'API 测试',

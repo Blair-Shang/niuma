@@ -14,7 +14,7 @@ import type { SqlSplitFeatures } from '../split/types'
  */
 export type ResolvedMonacoLanguageId = Extract<
   SqlMonacoLanguageId,
-  'sql' | 'mysql' | 'dameng' | 'kingbase'
+  'sql' | 'mysql' | 'dameng' | 'kingbase' | 'clickhouse' | 'sqlite' | 'sqlserver'
 >
 
 /** Monaco 语言解析结果（由会话 Capability 决定） */
@@ -119,6 +119,13 @@ export const Cap = {
   KingbaseDoubleQuoteIdent: 'kingbase.double_quote_ident',
   KingbaseDollarQuote: 'kingbase.dollar_quote',
   CompatSqlserver: 'compat.sqlserver',
+  // —— SQL Server（docs/32；与 sqlserver-service/internal/dialect 对齐）——
+  SqlserverBracketIdent: 'sqlserver.bracket_ident',
+  SqlserverAtVariable: 'sqlserver.at_variable',
+  SplitGoBatches: 'split.go_batches',
+  FormatTransactSQL: 'format.transactsql',
+  SqlserverSequence: 'sqlserver.sequence',
+  SqlserverJson: 'sqlserver.json',
 } as const
 
 export type CapabilityId = (typeof Cap)[keyof typeof Cap] | string
@@ -317,6 +324,26 @@ export function defaultKingbaseProfile(): SqlServerProfile {
   }
 }
 
+/** SQL Server 默认能力（探测失败 / 无会话回退；与 sqlserver-service ResolveCapabilities 对齐）。 */
+export function defaultSqlServerProfile(): SqlServerProfile {
+  return {
+    family: 'sqlserver',
+    capabilities: [
+      Cap.SqlserverBracketIdent,
+      Cap.SqlserverAtVariable,
+      Cap.SplitGoBatches,
+      Cap.FormatTransactSQL,
+      Cap.EditorBuiltinSql,
+      Cap.EditorSqlLsp,
+      Cap.RoutineCreateProcedure,
+      Cap.RoutineCreateFunction,
+      Cap.DdlIfNotExists,
+      Cap.SqlserverSequence,
+      Cap.SqlserverJson,
+    ],
+  }
+}
+
 export function defaultProfileForFamily(family: string): SqlServerProfile {
   switch (family) {
     case 'vastbase':
@@ -335,6 +362,8 @@ export function defaultProfileForFamily(family: string): SqlServerProfile {
       return defaultClickHouseProfile()
     case 'kingbase':
       return defaultKingbaseProfile()
+    case 'sqlserver':
+      return defaultSqlServerProfile()
     default:
       return { family, capabilities: [] }
   }
@@ -344,6 +373,7 @@ export function resolveFormatterLanguage(profile: SqlServerProfile | null | unde
   if (hasCapability(profile, Cap.FormatPlsql)) return 'plsql'
   if (hasCapability(profile, Cap.FormatMysql)) return 'mysql'
   if (hasCapability(profile, Cap.FormatSqlite)) return 'sqlite'
+  if (hasCapability(profile, Cap.FormatTransactSQL) || profile?.family === 'sqlserver') return 'transactsql'
   if (hasCapability(profile, Cap.FormatSql) || profile?.family === 'dameng' || profile?.family === 'clickhouse') return 'sql'
   switch (profile?.family) {
     case 'mysql':
@@ -361,7 +391,7 @@ export function resolveFormatterLanguage(profile: SqlServerProfile | null | unde
 }
 
 /**
- * MySQL / Dameng / Kingbase / ClickHouse + EditorSqlLsp → Bridge LSP（按 family 显式映射）。
+ * MySQL / Dameng / Kingbase / ClickHouse / SQLite / SQL Server + EditorSqlLsp → Bridge LSP（按 family 显式映射）。
  * 禁止把未落地 LSP 的方言（如 Vastbase）因 Cap 误路由到 mysql。
  * 其余方言：静默走内置 `sql`。
  */
@@ -379,6 +409,9 @@ export function resolveMonacoLanguageFromProfile(
   }
   if (profile?.family === 'sqlite' && hasCapability(profile, Cap.EditorSqlLsp)) {
     return { monacoLanguageId: 'sqlite', monacoSqlLanguages: false, useLsp: true }
+  }
+  if (profile?.family === 'sqlserver' && hasCapability(profile, Cap.EditorSqlLsp)) {
+    return { monacoLanguageId: 'sqlserver', monacoSqlLanguages: false, useLsp: true }
   }
   if (
     profile?.family === 'mysql' ||
@@ -428,6 +461,11 @@ export function resolveSplitFeaturesFromProfile(
       hasCapability(profile, Cap.SplitSqliteTrigger) ||
       isMysqlFamily ||
       family === 'sqlite',
+    goBatches: hasCapability(profile, Cap.SplitGoBatches) || family === 'sqlserver',
+    bracketIdentifiers:
+      hasCapability(profile, Cap.SqlserverBracketIdent) ||
+      hasCapability(profile, Cap.SqliteBracketIdent) ||
+      family === 'sqlserver',
   }
 }
 
@@ -564,6 +602,19 @@ export function buildAiDialectRules(profile: SqlServerProfile | null | undefined
     }
     if (hasCapability(profile, Cap.CompatSqlserver)) {
       lines.push('SQL Server compatibility mode may be active.')
+    }
+  }
+  if (profile.family === 'sqlserver') {
+    lines.push(
+      'Product: Microsoft SQL Server / Azure SQL. Identifiers prefer brackets [name]; @local / @@global variables are common.',
+      'Client batch separator is a standalone line GO — never send GO to the server; split batches client-side.',
+      'Use TOP (n) or OFFSET/FETCH for row limits; T-SQL CREATE PROCEDURE … AS BEGIN … END (not MySQL DELIMITER or Oracle /).',
+    )
+    if (hasCapability(profile, Cap.SqlserverJson)) {
+      lines.push('JSON functions (OPENJSON / JSON_VALUE / FOR JSON) may be available.')
+    }
+    if (hasCapability(profile, Cap.SqlserverSequence)) {
+      lines.push('SEQUENCE objects and NEXT VALUE FOR are supported.')
     }
   }
   return lines.join('\n')

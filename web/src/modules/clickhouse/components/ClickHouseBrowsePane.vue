@@ -6,10 +6,9 @@ import {
   RsEmpty,
   RsLoading,
   RsPopover,
-  RsTable,
 } from '@niuma/ui'
-import { proxyRefs } from 'vue'
-import { BrowseDataShell, BrowseIoMenu } from '@/modules/database'
+import { computed, proxyRefs } from 'vue'
+import { BrowseDataGrid, BrowseDataShell, BrowseIoMenu } from '@/modules/database'
 import { useClickHouseBrowsePane } from '@/modules/clickhouse/composables/useClickHouseBrowsePane'
 
 const props = defineProps<{
@@ -22,6 +21,13 @@ const props = defineProps<{
   active: boolean
 }>()
 const pane = proxyRefs(useClickHouseBrowsePane(props))
+
+const dialogLabels = computed(() => ({
+  apply: pane.t('modules.clickhouse.browse.cellApply'),
+  cancel: pane.t('modules.clickhouse.browse.cellCancel'),
+  hint: pane.t('modules.clickhouse.browse.cellApplyHint'),
+  viewTitle: pane.t('modules.clickhouse.browse.cellView'),
+}))
 </script>
 
 <template>
@@ -143,41 +149,24 @@ const pane = proxyRefs(useClickHouseBrowsePane(props))
         />
       </div>
     </template>
-    <RsTable
+    <BrowseDataGrid
       v-model:selected-row-keys="pane.selectedRowKeys"
       :columns="pane.resultColumns"
       :data="pane.resultRows"
-      row-key="__rowKey"
-      size="sm"
-      striped
-      fill
-      bordered
-      column-bordered
-      :rounded="false"
-      show-index
-      :index-width="pane.browseGutterWidth"
-      :edit-gutter-width="pane.browseGutterWidth"
-      resizable
-      column-layout="fixed"
-      cell-tooltip
-      highlight-row
-      selectable
-      selection-type="row"
+      :loading="pane.loading"
       :editable="pane.canEdit || pane.resultRows.some((row) => row.__isNew)"
       :allow-null="pane.canEdit"
-      edit-trigger="dblclick"
-      :loading="pane.loading"
-      :virtual="true"
-      :virtual-auto-threshold="40"
-      :virtual-columns-auto-threshold="40"
-      :layout-active="active"
+      :row-pending="pane.isBrowseRowPending"
       :context-menu-items="pane.contextMenuItems"
+      :layout-active="active"
+      :gutter-width="pane.browseGutterWidth"
+      :dialog-labels="dialogLabels"
+      :empty-text="pane.t('modules.clickhouse.browse.empty')"
       @cell-edit-commit="pane.onCellEditCommit"
-      @row-edit-commit="pane.flushNewRow"
+      @row-edit-commit="pane.onBrowseRowEditCommit"
+      @row-edit-rollback="pane.onBrowseRowEditRollback"
       @context-menu-select="pane.onContextMenuSelect"
-    >
-      <template #empty>{{ pane.t('modules.clickhouse.browse.empty') }}</template>
-    </RsTable>
+    />
 
     <template #dialogs>
       <RsConfirmDialog

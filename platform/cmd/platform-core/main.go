@@ -141,6 +141,7 @@ func run() error {
 	} else {
 		componentRegistry = reg
 		slog.Info("tool components registry ready", "dir", componentsDir)
+		components.BindComponentEnv(sup, componentRegistry)
 	}
 
 	aiService := ai.NewService(ai.Deps{

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { RsButton, RsLoading, useRsToast } from '@niuma/ui'
-import { computed, onMounted, toRefs } from 'vue'
+import { computed, onMounted, ref, toRefs } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { connectionApi } from '@/api'
 import ConnectionFormDialog from '@/modules/ops/components/ConnectionFormDialog.vue'
 import ConnectionProfileTable from '@/modules/ops/components/ConnectionProfileTable.vue'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
@@ -32,6 +33,18 @@ const { connect } = useConnectionNavigation()
 const cx = useConnectionProfiles(['oracle'])
 const { profileMap, loading, dlgOpen, dlgMode, dlgKind, dlgProfile, form, formError, saving, deleting, testing, testMessage } = toRefs(cx)
 const profiles = computed(() => profileMap.value.oracle)
+
+const sshProfilesForTunnel = ref<ConnItem[]>([])
+
+async function loadSshProfilesForTunnel(): Promise<void> {
+  try {
+    const result = await connectionApi.list({ kind: 'ssh' })
+    sshProfilesForTunnel.value = (result.profiles ?? []).map((p) => ({ ...p, kind: 'ssh' as const }))
+  } catch {
+    sshProfilesForTunnel.value = []
+  }
+}
+
 function onConnect(profile: ConnItem): void { connect({ ...profile, kind: 'oracle' }) }
 async function onSave(): Promise<void> {
   const ok = await cx.saveConnection()
@@ -41,7 +54,10 @@ async function onDelete(): Promise<void> {
   const ok = await cx.deleteConnection()
   if (!ok && formError.value) toast.error(formError.value)
 }
-onMounted(() => { void cx.loadAll() })
+onMounted(() => {
+  void cx.loadAll()
+  void loadSshProfilesForTunnel()
+})
 </script>
 
 <template>
@@ -67,7 +83,22 @@ onMounted(() => { void cx.loadAll() })
     <p v-if="formError && !dlgOpen" class="nm-oracle-home__error" role="alert">{{ formError }}</p>
     <RsLoading v-if="loading" class="nm-oracle-home__loading" />
     <ConnectionProfileTable v-else :profiles="profiles" :protocol-label="() => 'Oracle'" @connect="onConnect" @edit="cx.openEdit($event)" @delete="cx.openDelete($event)" />
-    <ConnectionFormDialog v-model:open="dlgOpen" :mode="dlgMode" :kind="dlgKind" :profile="dlgProfile" :form="form" :form-error="formError" :saving="saving" :deleting="deleting" :testing="testing" :test-message="testMessage" :tunnel-ssh-profiles="[]" @save="onSave" @delete="onDelete" @test="cx.testConnection()">
+    <ConnectionFormDialog
+      v-model:open="dlgOpen"
+      :mode="dlgMode"
+      :kind="dlgKind"
+      :profile="dlgProfile"
+      :form="form"
+      :form-error="formError"
+      :saving="saving"
+      :deleting="deleting"
+      :testing="testing"
+      :test-message="testMessage"
+      :tunnel-ssh-profiles="sshProfilesForTunnel"
+      @save="onSave"
+      @delete="onDelete"
+      @test="cx.testConnection()"
+    >
       <template #options><OracleConnectionFields :form="form" /></template>
       <template #advanced><OracleAdvancedFields :form="form" /></template>
     </ConnectionFormDialog>

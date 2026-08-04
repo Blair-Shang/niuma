@@ -97,10 +97,11 @@ if (Test-Path $ManSrc) {
 
 $ServicesBinSrc = Get-ServicesBinDir -RepoRoot $Root -Platform $Platform -Arch $Arch
 $ServicesBinDst = Join-Path $Staging 'services/bin'
-if (Test-Path $ServicesBinSrc) {
-    New-Item -ItemType Directory -Force -Path $ServicesBinDst | Out-Null
-    Copy-Item -Recurse -Force "$ServicesBinSrc\*" $ServicesBinDst
+if (-not (Test-Path $ServicesBinSrc)) {
+    throw "services matrix bin missing at $ServicesBinSrc — build services for $Platform/$Arch first (do not fall back to flat services/bin)"
 }
+New-Item -ItemType Directory -Force -Path $ServicesBinDst | Out-Null
+Copy-Item -Recurse -Force "$ServicesBinSrc\*" $ServicesBinDst
 
 $PluginsSrc = Join-Path $Root 'plugins'
 $PluginsDst = Join-Path $Staging 'plugins'

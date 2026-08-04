@@ -494,7 +494,8 @@ impl SessionManager {
             }
 
             let progress = Arc::clone(&on_progress);
-            let total_counter = Arc::clone(&transferred_total);
+            let completed = Arc::clone(&transferred_total);
+            // copy_* 回调的 t 是「当前文件内累计字节」，不是增量；不可对 t 做 fetch_add。
             copy_remote_file_to_local(
                 self,
                 session_id,
@@ -503,12 +504,20 @@ impl SessionManager {
                 cancel.clone(),
                 Arc::clone(&paused),
                 resume.clone(),
-                move |t, tot, speed| {
-                    let sum = total_counter.fetch_add(t, Ordering::Relaxed) + t;
-                    progress(sum, tot, speed);
+                {
+                    let completed = Arc::clone(&completed);
+                    move |t, tot, speed| {
+                        let base = completed.load(Ordering::Relaxed);
+                        progress(base + t, base + tot.max(t), speed);
+                    }
                 },
             )
             .await?;
+            let file_size = fs::metadata(&item.local)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+            transferred_total.fetch_add(file_size, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -573,7 +582,9 @@ impl SessionManager {
             }
 
             let progress = Arc::clone(&on_progress);
-            let total_counter = Arc::clone(&transferred_total);
+            let completed = Arc::clone(&transferred_total);
+            let file_size = meta.len();
+            // copy_* 回调的 t 是「当前文件内累计字节」，不是增量；不可对 t 做 fetch_add。
             copy_local_file_to_remote(
                 self,
                 session_id,
@@ -582,12 +593,16 @@ impl SessionManager {
                 cancel.clone(),
                 Arc::clone(&paused),
                 resume.clone(),
-                move |t, tot, speed| {
-                    let sum = total_counter.fetch_add(t, Ordering::Relaxed) + t;
-                    progress(sum, tot, speed);
+                {
+                    let completed = Arc::clone(&completed);
+                    move |t, tot, speed| {
+                        let base = completed.load(Ordering::Relaxed);
+                        progress(base + t, base + tot.max(t), speed);
+                    }
                 },
             )
             .await?;
+            transferred_total.fetch_add(file_size, Ordering::Relaxed);
         }
         Ok(())
     }

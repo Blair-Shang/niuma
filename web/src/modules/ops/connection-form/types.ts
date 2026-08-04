@@ -8,6 +8,9 @@ import type { MysqlSessionTestParams } from '@/api/types/mysql'
 import type { SqliteSessionTestParams } from '@/api/types/sqlite'
 import type { KingbaseSessionTestParams } from '@/api/types/kingbase'
 import type { ClickHouseSessionTestParams } from '@/api/types/clickhouse'
+import type { DamengSessionTestParams } from '@/api/types/dameng'
+import type { OracleSessionTestParams } from '@/api/types/oracle'
+import type { SqlServerSessionTestParams } from '@/api/types/sqlserver'
 import type { ProxyFormState, TunnelFormState } from '@/modules/connection'
 import type { ConnAccentColor, ConnItem } from '@/modules/ops/types'
 
@@ -67,6 +70,9 @@ export type ConnectionTestParams =
   | SqliteSessionTestParams
   | ClickHouseSessionTestParams
   | KingbaseSessionTestParams
+  | DamengSessionTestParams
+  | OracleSessionTestParams
+  | SqlServerSessionTestParams
 
 /** adapter 构造 connection_options 时可使用的通用上下文。 */
 export interface ConnectionFormAdapterBuildContext {
@@ -109,4 +115,9 @@ export interface ConnectionFormAdapter {
   authRequiredMessage?: (form: ConnectionFormState, t: (key: string) => string) => string
   validate?: (ctx: ConnectionFormAdapterValidateContext) => string | null
   applyLoadedSecret?: (form: ConnectionFormState, secret: string) => void
+  /**
+   * 协议专属测试结果文案增强（如缺客户端库引导）。
+   * ops 壳层只调用；禁止在 useConnectionProfiles 内 import 具体协议模块。
+   */
+  enrichTestMessage?: (message: string, ok: boolean, t: (key: string) => string) => string
 }

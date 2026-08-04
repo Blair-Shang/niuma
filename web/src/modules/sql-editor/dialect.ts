@@ -38,8 +38,15 @@ export type SqlFormatterLanguage =
   | 'redshift'
   | 'n1ql'
 
-/** Monaco languageId（LSP mysql/dameng/kingbase 或内置 sql；不再使用 sql-languages Worker ID） */
-export type SqlMonacoLanguageId = 'mysql' | 'dameng' | 'kingbase' | 'sql'
+/** Monaco languageId（LSP mysql/dameng/kingbase/clickhouse/sqlite/sqlserver 或内置 sql） */
+export type SqlMonacoLanguageId =
+  | 'mysql'
+  | 'dameng'
+  | 'kingbase'
+  | 'clickhouse'
+  | 'sqlite'
+  | 'sqlserver'
+  | 'sql'
 
 export interface SqlDialectProfile {
   /** sql-formatter */
@@ -81,7 +88,7 @@ const PROFILES: Record<SqlDialect, SqlDialectProfile> = {
   },
   clickhouse: {
     formatterLanguage: 'sql',
-    monacoLanguageId: 'sql',
+    monacoLanguageId: 'clickhouse',
     monacoSqlLanguages: false,
   },
   kingbase: {
@@ -91,12 +98,12 @@ const PROFILES: Record<SqlDialect, SqlDialectProfile> = {
   },
   sqlserver: {
     formatterLanguage: 'transactsql',
-    monacoLanguageId: 'sql',
+    monacoLanguageId: 'sqlserver',
     monacoSqlLanguages: false,
   },
   sqlite: {
     formatterLanguage: 'sqlite',
-    monacoLanguageId: 'sql',
+    monacoLanguageId: 'sqlite',
     monacoSqlLanguages: false,
   },
   generic: {

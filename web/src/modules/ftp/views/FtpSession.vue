@@ -36,6 +36,12 @@ import {
   normalizeLocalPath,
   parentLocalPath,
 } from '@/modules/ftp/utils/localPath'
+import {
+  loadLastLocalPath,
+  loadLastRemotePath,
+  saveLastLocalPath,
+  saveLastRemotePath,
+} from '@/modules/ftp/utils/pathMemory'
 import { useSessionActionStore } from '@/stores/session-actions'
 import { useTransferHubStore } from '@/stores/transfer-hub'
 
@@ -61,7 +67,7 @@ const { sessionId, acquireSession, reconnectSession } = useSessionLease({
       provider: 'ftp',
       label: profile.value?.profileName || profile.value?.hostAddress || 'FTP',
     })
-    await refreshRemote()
+    await initRemotePath()
     await refreshTransfers()
     await transferHub.refreshSession(sid)
   },
@@ -387,6 +393,18 @@ const localPaneEntries = computed((): FtpPaneEntry[] =>
 
 const canGoLocalUp = computed(() => canGoUpLocalPath(localPath.value))
 
+function normalizeRemotePath(path: string): string {
+  const trimmed = path.trim()
+  if (!trimmed || trimmed === '/') {
+    return '/'
+  }
+  let normalized = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  while (normalized.length > 1 && normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1)
+  }
+  return normalized
+}
+
 function joinRemotePath(base: string, name: string): string {
   if (base === '/' || base === '') {
     return `/${name}`
@@ -419,6 +437,7 @@ async function refreshLocal(): Promise<void> {
     }
     localPath.value = normalizeLocalPath(result.path || localPath.value)
     localEntries.value = result.entries ?? []
+    saveLastLocalPath(props.profileId, localPath.value)
   } catch (e) {
     if (seq !== localRefreshSeq) {
       return
@@ -444,6 +463,20 @@ async function loadProfile(): Promise<void> {
 }
 
 async function initLocalPath(): Promise<void> {
+  const remembered = loadLastLocalPath(props.profileId)
+  const candidate = remembered ? normalizeLocalPath(remembered) : ''
+  if (candidate) {
+    try {
+      const result = await fsApi.listDir({ path: candidate })
+      const path = normalizeLocalPath(result.path || candidate)
+      localPath.value = path
+      localEntries.value = result.entries ?? []
+      saveLastLocalPath(props.profileId, path)
+      return
+    } catch {
+      // 上次路径失效时静默回退到主目录
+    }
+  }
   const home = await fsApi.homeDir()
   setLocalPath(home.path)
 }
@@ -506,8 +539,9 @@ async function refreshRemote(): Promise<void> {
       sessionId: sessionId.value!,
       path: remotePath.value,
     }))
-    remotePath.value = result.path || remotePath.value
+    remotePath.value = normalizeRemotePath(result.path || remotePath.value)
     entries.value = result.entries ?? []
+    saveLastRemotePath(props.profileId, remotePath.value)
   } catch (e) {
     const message = e instanceof Error ? e.message : ''
     if (message.includes('session busy')) {
@@ -520,8 +554,39 @@ async function refreshRemote(): Promise<void> {
   }
 }
 
+/** 连接成功后恢复上次远程目录；失效时静默回退到 /。 */
+async function initRemotePath(): Promise<void> {
+  if (!sessionId.value) {
+    return
+  }
+  const remembered = loadLastRemotePath(props.profileId)
+  const candidate = remembered ? normalizeRemotePath(remembered) : ''
+  if (candidate && candidate !== '/') {
+    loading.value = true
+    error.value = null
+    try {
+      const result = await withRemoteReconnect(() => ftpApi.dirList({
+        sessionId: sessionId.value!,
+        path: candidate,
+      }))
+      remotePath.value = normalizeRemotePath(result.path || candidate)
+      entries.value = result.entries ?? []
+      saveLastRemotePath(props.profileId, remotePath.value)
+      return
+    } catch {
+      // 上次路径失效时静默回退到根目录
+      remotePath.value = '/'
+    } finally {
+      loading.value = false
+    }
+  } else if (candidate === '/') {
+    remotePath.value = '/'
+  }
+  await refreshRemote()
+}
+
 function navigateRemote(path: string): void {
-  remotePath.value = path
+  remotePath.value = normalizeRemotePath(path)
   remotePaneRef.value?.resetOnNavigate()
   void refreshRemote()
 }

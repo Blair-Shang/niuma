@@ -79,6 +79,7 @@ tools:
 | `vastbase-tools` | vb_dump / vb_restore / vsql（兼认 gs_* / gsql） | `detect_only`（官方无公开便携直链；浏览指定路径或 PATH） |
 | `postgresql-client` | pg_dump / pg_restore / psql | `optional_download`（通用 PG 备选；Vastbase 备份请用 vastbase-tools） |
 | `clickhouse-tools` | clickhouse-client | `detect_only`（PATH / 设置指定路径；官方下载页） |
+| `oracle-native` | Instant Client（`oci.dll`） | `detect_only`（环境变量 / ORACLE_HOME / PATH；浏览指定 `oci.dll`；官方下载页；**不**做应用内代下载） |
 
 新增组件包：在 `components/<name>/manifest.yaml` 声明即可；Web 侧可在 `components-settings/bundles/` 追加展示 handler（图标 / i18n）。
 

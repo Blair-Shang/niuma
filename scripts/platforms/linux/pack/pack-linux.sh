@@ -90,9 +90,8 @@ fi
 if [[ -d "$SERVICES_BIN" ]]; then
   mkdir -p "$PAYLOAD_ROOT/services/bin"
   cp -R "$SERVICES_BIN/." "$PAYLOAD_ROOT/services/bin/" 2>/dev/null || true
-elif [[ -d "$REPO_ROOT/services/bin" ]]; then
-  mkdir -p "$PAYLOAD_ROOT/services/bin"
-  cp -R "$REPO_ROOT/services/bin/." "$PAYLOAD_ROOT/services/bin/" 2>/dev/null || true
+else
+  nm_die "services matrix bin missing at $SERVICES_BIN — build services for $PLATFORM/$ARCH first (do not fall back to flat services/bin)"
 fi
 
 if [[ -f "$SHELL_BIN" ]]; then

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsMonacoEditor, useRsToast } from '@niuma/ui'
+import { RsLoading, RsMonacoEditor, useRsToast } from '@niuma/ui'
 import type { MonacoLanguage } from '@niuma/ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -21,6 +21,8 @@ const toast = useRsToast()
 const loading = ref(false)
 const ddl = ref('')
 const objectType = ref('')
+/** Oracle 使用内置 sql 语言，无需额外 bootstrap；与 MySQL boot 分支结构对齐。 */
+const languageReady = ref(true)
 
 const labels = computed(
   (): DdlShellLabels => ({
@@ -85,13 +87,16 @@ watch(
 watch(
   () => props.active,
   (active) => {
-    if (active && !ddl.value) void loadDDL()
+    if (active && !ddl.value && props.sessionId && props.schema?.trim() && props.table) {
+      void loadDDL()
+    }
   },
 )
 </script>
 
 <template>
   <DdlShell
+    class="nm-oracle-ddl"
     :labels="labels"
     :session-label="sessionLabel || 'Oracle'"
     :scope-label="scopeLabel"
@@ -104,7 +109,10 @@ watch(
     @refresh="loadDDL"
   >
     <RsMonacoEditor
+      v-if="languageReady"
       :model-value="ddl"
+      class="nm-oracle-ddl__editor"
+      height="100%"
       :language="monacoLanguage"
       :options="{
         readOnly: true,
@@ -112,5 +120,25 @@ watch(
         minimap: { enabled: false },
       }"
     />
+    <div v-else class="nm-oracle-ddl__boot">
+      <RsLoading size="sm" />
+    </div>
   </DdlShell>
 </template>
+
+<style scoped>
+.nm-oracle-ddl__editor {
+  flex: 1;
+  min-height: 0;
+  border-radius: 0;
+  border: none;
+}
+
+.nm-oracle-ddl__boot {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+</style>

@@ -66,7 +66,20 @@ const promptOpen = ref(false)
 const promptTitle = ref('')
 const promptPlaceholder = ref('')
 const promptValue = ref('')
-const promptInputRef = ref<InstanceType<typeof RsInput> | null>(null)
+/** 回调 ref，避免 InstanceType<typeof RsInput> / 模板赋值触发 TS 递归过深 */
+let promptInputEl: HTMLElement | null = null
+function bindPromptInput(el: unknown): void {
+  promptInputEl = null
+  if (!el || typeof el !== 'object') return
+  if ('$el' in el) {
+    const host = (el as { $el?: unknown }).$el
+    promptInputEl = host instanceof HTMLElement ? host : null
+    return
+  }
+  if (el instanceof HTMLElement) {
+    promptInputEl = el
+  }
+}
 let resolvePrompt: ((v: string | null) => void) | null = null
 
 const confirmOpen = ref(false)
@@ -91,9 +104,7 @@ watch(promptOpen, async (open) => {
   if (open) {
     await nextTick()
     await nextTick()
-    ;(promptInputRef.value as { $el?: HTMLElement } | null)?.$el
-      ?.querySelector('input')
-      ?.focus()
+    promptInputEl?.querySelector('input')?.focus()
   } else if (resolvePrompt) {
     resolvePrompt(null)
     resolvePrompt = null
@@ -169,6 +180,8 @@ const { sessionId, acquireSession, reconnectSession } = useSessionLease({
 const { enqueue: enqueueTransfer, refresh: refreshTransfers } = useSshTransfer(sessionId)
 
 const remotePath = ref('.')
+/** 路径输入草稿：未回车前不参与上传/删除等操作，避免用错目录 */
+const remotePathDraft = ref('.')
 const entries = ref<SshSftpEntry[]>([])
 const connecting = ref(true)
 const loadingFiles = ref(false)
@@ -471,12 +484,15 @@ async function refreshRemote(): Promise<void> {
   }
   loadingFiles.value = true
   error.value = null
+  const requestPath = remotePathDraft.value
   try {
     const result = await sshApi.sftpDirList({
       sessionId: sessionId.value,
-      path: remotePath.value,
+      path: requestPath,
     })
-    remotePath.value = result.path || remotePath.value
+    const nextPath = result.path || requestPath
+    remotePath.value = nextPath
+    remotePathDraft.value = nextPath
     entries.value = result.entries ?? []
     clearDiagnostic(`ssh-sftp:${props.profileId}`)
   } catch (e) {
@@ -485,7 +501,7 @@ async function refreshRemote(): Promise<void> {
     publishDiagnostic({
       id: `ssh-sftp:${props.profileId}`,
       label: 'SFTP',
-      detail: remotePath.value,
+      detail: requestPath,
       text: error.value,
       kind: 'ssh',
       tabId: useTabStore().activeTabId || undefined,
@@ -497,6 +513,7 @@ async function refreshRemote(): Promise<void> {
 
 function navigateRemote(path: string): void {
   remotePath.value = path
+  remotePathDraft.value = path
   remotePaneRef.value?.resetOnNavigate()
   void refreshRemote()
 }
@@ -609,18 +626,20 @@ async function enqueueUploadPaths(localPaths: string[], remoteDir: string): Prom
 }
 
 async function uploadToCurrentDir(): Promise<void> {
+  const targetDir = remotePath.value
   const localPaths = await resolveUploadLocalPaths(true)
-  await enqueueUploadPaths(localPaths, remotePath.value)
+  await enqueueUploadPaths(localPaths, targetDir)
 }
 
 async function uploadFolderToCurrentDir(): Promise<void> {
+  const targetDir = remotePath.value
   const result = await dialogApi.openFolder({
     title: t('modules.ftp.session.uploadFolder'),
   })
   if (result.canceled || !result.filePaths[0]) {
     return
   }
-  await enqueueUploadPaths([result.filePaths[0]], remotePath.value)
+  await enqueueUploadPaths([result.filePaths[0]], targetDir)
 }
 
 async function enqueueTransferItems(
@@ -661,31 +680,6 @@ async function enqueueDownloadEntry(entry: FtpPaneEntry): Promise<void> {
 
 async function batchDownload(entriesToDownload: FtpPaneEntry[]): Promise<void> {
   await enqueueTransferItems('download', planDownloadItems(entriesToDownload))
-}
-
-async function enqueueUploadEntry(entry: FtpPaneEntry): Promise<void> {
-  if (entry.kind === 'dir') {
-    const localPaths = await resolveUploadLocalPaths(true)
-    await enqueueUploadPaths(localPaths, joinRemotePath(remotePath.value, entry.name))
-    return
-  }
-  const localPaths = await resolveUploadLocalPaths(false)
-  if (!localPaths[0] || !sessionId.value) {
-    return
-  }
-  try {
-    await enqueueTransfer({
-      direction: 'upload',
-      localPath: localPaths[0],
-      remotePath: joinRemotePath(remotePath.value, entry.name),
-      overwrite: 'overwrite',
-    })
-    await transferHub.refreshSession(sessionId.value)
-    shellStore.openBottomDock('transfers')
-    toast.success(t('modules.ftp.session.transferQueued'))
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : t('modules.ftp.session.transferError'))
-  }
 }
 
 async function deleteRemoteEntries(items: FtpPaneEntry[]): Promise<void> {
@@ -953,14 +947,14 @@ watch(
             ref="remotePaneRef"
             side="remote"
             :label="t('modules.ssh.session.remoteFiles')"
-            :path="remotePath"
+            :path="remotePathDraft"
             :entries="remotePaneEntries"
             :loading="loadingFiles"
             :can-go-up="remotePath !== '.' && remotePath !== '/'"
             show-modified
             :draggable-files="false"
             remote-upload
-            @update:path="remotePath = $event"
+            @update:path="remotePathDraft = $event"
             @refresh="refreshRemote"
             @go-up="goRemoteUp"
             @open="onRemoteOpen"
@@ -974,7 +968,7 @@ watch(
             @download-selected="(items) => void batchDownload(items)"
             @upload-pane="() => void uploadToCurrentDir()"
             @upload-folder-pane="() => void uploadFolderToCurrentDir()"
-            @upload="(entry) => void enqueueUploadEntry(entry)"
+            @upload="() => void uploadToCurrentDir()"
           />
 
           <!-- 监控面板 -->
@@ -1052,7 +1046,7 @@ watch(
     >
         <template #body>
         <RsInput
-          ref="promptInputRef"
+          :ref="(el) => bindPromptInput(el)"
           v-model="promptValue"
           :placeholder="promptPlaceholder"
           @press-enter="onPromptConfirm"

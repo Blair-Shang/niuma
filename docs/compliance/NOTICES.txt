@@ -20,5 +20,25 @@ JavaScript, Go, and Rust dependencies are managed via pnpm, go modules, and
 Cargo respectively. Source code for NiuMa application components is available
 under the project repository license.
 
+Oracle Instant Client (optional, not bundled by default)
+--------------------------------------------------------
+NiuMa's Oracle module uses ODPI-C and may load Oracle Instant Client libraries
+when the user connects to Oracle Database. Instant Client is NOT included in
+the default NiuMa installer.
+
+Users may:
+  1. Use an existing Instant Client / Oracle Client via ORACLE_HOME or PATH; or
+  2. Download Instant Client from Oracle and point NiuMa to oci.dll via
+     Settings → Tool Components → Oracle Instant Client
+     (NiuMa injects the standard ORACLE_HOME variable for the oracle-service process).
+
+Redistribution of Instant Client (if a future edition bundles or proxies the
+download) is subject to the Oracle Technology Network Development and
+Distribution License Terms for Instant Client:
+  https://www.oracle.com/downloads/licenses/instant-client-lic.html
+
+ODPI-C is licensed under the Universal Permissive License (UPL) / Apache 2.0;
+see the ODPI-C upstream project.
+
 For the exact CEF build version bundled with this release, see build/version.json
 in the source tree or version metadata embedded in the application.

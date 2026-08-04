@@ -166,7 +166,7 @@ const processColumns = computed<RsTableColumn<ProcessRow>[]>(() => [
     key: 'time',
     title: t('modules.mysql.monitor.colTime'),
     width: 88,
-    render: (row) => {
+    render: (row: ProcessRow) => {
       const long = isLongRunning(row)
       return h(
         'span',
@@ -175,7 +175,7 @@ const processColumns = computed<RsTableColumn<ProcessRow>[]>(() => [
           title: long ? t('modules.mysql.monitor.longRunningTip', { n: LONG_RUNNING_SECS }) : undefined,
         },
         String(row.time ?? ''),
-      )
+      ) as unknown as string
     },
   },
   { key: 'state', title: t('modules.mysql.monitor.colState'), minWidth: 100, ellipsis: true },

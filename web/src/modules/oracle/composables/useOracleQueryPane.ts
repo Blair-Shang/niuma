@@ -6,7 +6,7 @@ import type { OracleQueryColumn, OracleQueryExecResult } from '@/api/types/oracl
 import { defaultOracleProfile, resolveSplitFeaturesFromProfile } from '@/modules/sql-editor/capabilities'
 import { splitSqlStatementsWithFeatures } from '@/modules/sql-editor/split/sql-statement-splitter'
 import { useOracleSqlEditor } from '@/modules/oracle/composables/useOracleSqlEditor'
-import { alignForValueType, buildSqlQueryContextMenuItems, formatBrowseCellValue, resolveSqlValueType, useQueryDraftPersist, useSqlQueryHistory, type QueryResultMessageItem, type QueryResultPanelLabels, type SqlQueryToolbarLabels } from '@/modules/database'
+import { alignForValueType, buildSqlQueryContextMenuItems, formatBrowseCellValue, resolveSqlValueType, useQueryDraftPersist, useSqlQueryHistory, type BatchStatementItem, type QueryResultMessageItem, type QueryResultPanelLabels, type SqlQueryToolbarLabels } from '@/modules/database'
 import { mapResultRowsByName, type QueryResultRow } from '@/modules/database/utils/query-result-tabs'
 import { useSessionRegistry } from '@/stores/session-registry'
 
@@ -67,8 +67,8 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
   const lastExecSummary = ref('')
   const activeRequestId = ref<string | null>(null)
   const gridTabs = shallowRef<GridTab[]>([])
-  const batchItems = shallowRef([])
-  const batchActive = computed(() => false)
+  const batchItems = shallowRef<BatchStatementItem[]>([])
+  const batchActive = computed(() => batchItems.value.length > 1)
   const autoCommit = ref(true)
   const inTransaction = ref(false)
   const txBusy = ref(false)
@@ -101,28 +101,118 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
     : lastExecSummary.value ? [{ key: 'summary', label: t('modules.oracle.query.msgOk'), value: lastExecSummary.value, tone: 'success' }] : [])
   const hasMessages = computed(() => messageItems.value.length > 0)
 
-  function addGrid(result: OracleQueryExecResult, index: number): void {
+  function addGrid(result: OracleQueryExecResult, index: number): GridTab {
     const columns = result.columns ?? []
-    const tab: GridTab = { id: `result-${Date.now()}-${index}`, sqlPreview: `Result ${index + 1}`, columns, rows: mapResultRowsByName(columns, result.rows ?? [], 0), rowCount: result.rowCount, fetchedCount: result.fetchedCount ?? result.rowCount, hasMore: Boolean(result.hasMore), truncated: result.truncated, resultSetId: result.resultSetId, durationMs: result.durationMs, label: t('modules.oracle.query.batchResultTab', { n: index + 1 }), stmtIndex: index }
+    const tab: GridTab = {
+      id: `result-${Date.now()}-${index}`,
+      sqlPreview: `Result ${index + 1}`,
+      columns,
+      rows: mapResultRowsByName(columns, result.rows ?? [], 0),
+      rowCount: result.rowCount,
+      fetchedCount: result.fetchedCount ?? result.rowCount,
+      hasMore: Boolean(result.hasMore),
+      truncated: result.truncated,
+      resultSetId: result.resultSetId,
+      durationMs: result.durationMs,
+      label: t('modules.oracle.query.batchResultTab', { n: index + 1 }),
+      stmtIndex: index,
+    }
     gridTabs.value = [...gridTabs.value, tab]
     activePaneTab.value = tab.id
+    return tab
   }
+
   async function runSql(): Promise<void> {
     if (!props.sessionId || running.value) return
     const sql = editor.resolveSql()
-    if (!sql.trim()) { toast.warning(t('modules.oracle.query.empty')); return }
-    running.value = true; lastError.value = null; lastExecSummary.value = ''; gridTabs.value = []
-    const requestId = `oracle-${Date.now()}`; activeRequestId.value = requestId
-    const statements = splitSqlStatementsWithFeatures(sql, resolveSplitFeaturesFromProfile(profile())).filter((item) => item.sql.trim())
+    if (!sql.trim()) {
+      toast.warning(t('modules.oracle.query.empty'))
+      return
+    }
+    running.value = true
+    lastError.value = null
+    lastExecSummary.value = ''
+    gridTabs.value = []
+    batchItems.value = []
+    const requestId = `oracle-${Date.now()}`
+    activeRequestId.value = requestId
+    const statements = splitSqlStatementsWithFeatures(sql, resolveSplitFeaturesFromProfile(profile())).filter(
+      (item) => item.sql.trim(),
+    )
+    batchItems.value = statements.map((statement, index) => ({
+      index,
+      sqlPreview: statement.sql.trim().slice(0, 120),
+      status: 'pending' as const,
+    }))
     try {
       for (const [index, statement] of statements.entries()) {
-        const result = await oracleApi.queryExec({ sessionId: props.sessionId, schema: props.schema?.trim() || undefined, sql: statement.sql, limit: PAGE_LIMIT, requestId })
-        if (result.columns?.length) addGrid(result, index)
-        else { lastExecSummary.value = result.rowsAffected ? t('modules.oracle.query.affected', { n: result.rowsAffected }) : t('modules.oracle.query.rows', { n: result.rowCount }) }
+        const cur = batchItems.value[index]
+        if (cur) {
+          batchItems.value[index] = { ...cur, status: 'running' }
+          batchItems.value = batchItems.value.slice()
+        }
+        const started = performance.now()
+        try {
+          const result = await oracleApi.queryExec({
+            sessionId: props.sessionId,
+            schema: props.schema?.trim() || undefined,
+            sql: statement.sql,
+            limit: PAGE_LIMIT,
+            requestId,
+          })
+          const durationMs = Math.round(performance.now() - started)
+          if (result.columns?.length) {
+            const tab = addGrid(result, index)
+            batchItems.value[index] = {
+              index,
+              sqlPreview: statement.sql.trim().slice(0, 120),
+              status: 'ok',
+              durationMs,
+              rowCount: result.rowCount,
+              hasMore: Boolean(result.hasMore),
+              hasGrid: true,
+              gridTabId: tab.id,
+            }
+          } else {
+            lastExecSummary.value = result.rowsAffected
+              ? t('modules.oracle.query.affected', { n: result.rowsAffected })
+              : t('modules.oracle.query.rows', { n: result.rowCount })
+            batchItems.value[index] = {
+              index,
+              sqlPreview: statement.sql.trim().slice(0, 120),
+              status: 'ok',
+              durationMs,
+              rowCount: result.rowsAffected ?? result.rowCount,
+              hasGrid: false,
+            }
+          }
+          batchItems.value = batchItems.value.slice()
+        } catch (stmtErr) {
+          const durationMs = Math.round(performance.now() - started)
+          const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr)
+          batchItems.value[index] = {
+            index,
+            sqlPreview: statement.sql.trim().slice(0, 120),
+            status: 'error',
+            durationMs,
+            error: msg,
+            hasGrid: false,
+          }
+          batchItems.value = batchItems.value.slice()
+          lastError.value = msg
+          activePaneTab.value = 'messages'
+          break
+        }
       }
       rememberSql(sql)
-    } catch (error) { lastError.value = error instanceof Error ? error.message : String(error); activePaneTab.value = 'messages' }
-    finally { running.value = false; cancelling.value = false; activeRequestId.value = null }
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error)
+      activePaneTab.value = 'messages'
+    } finally {
+      running.value = false
+      cancelling.value = false
+      activeRequestId.value = null
+    }
   }
   async function cancelRun(): Promise<void> {
     if (!running.value || !props.sessionId) return
@@ -196,31 +286,214 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
   }
   function closeResultGridTab(id: string): void {
     const tab = gridTabs.value.find((item) => item.id === id)
-    if (tab?.resultSetId && props.sessionId) void oracleApi.queryClose({ sessionId: props.sessionId, resultSetId: tab.resultSetId })
+    if (tab?.resultSetId && props.sessionId) {
+      void oracleApi.queryClose({ sessionId: props.sessionId, resultSetId: tab.resultSetId })
+    }
     gridTabs.value = gridTabs.value.filter((item) => item.id !== id)
-    if (activePaneTab.value === id) activePaneTab.value = gridTabs.value.at(-1)?.id ?? 'messages'
-  }
-  function exportCsv(): void {
-    const grid = activeGrid.value
-    if (!grid) { toast.warning(t('modules.oracle.query.noResult')); return }
-    const columns = grid.columns.map((column) => column.name)
-    const blob = new Blob(['\uFEFF' + [columns.join(','), ...grid.rows.map((row) => columns.map((column) => JSON.stringify(row[column] ?? '')).join(','))].join('\n')], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'oracle-export.csv'; link.click(); URL.revokeObjectURL(link.href)
-  }
-  const contextMenuItems = computed((): RsContextMenuItem[] => buildSqlQueryContextMenuItems({ labels: { run: t('modules.oracle.query.run'), runSelection: t('modules.oracle.query.runSelection'), cancel: t('modules.oracle.query.cancel'), format: t('modules.oracle.query.format'), compress: t('modules.oracle.query.format'), copy: t('modules.oracle.query.run'), paste: t('modules.oracle.query.run'), explain: t('modules.oracle.query.explain'), explainAnalyze: '', exportCsv: t('modules.oracle.query.exportCsv'), fetchMore: t('modules.oracle.query.loadMore'), fetchAll: t('modules.oracle.query.fetchAll') }, running: running.value, cancelling: cancelling.value, hasSelection: editor.hasSelection.value, sqlEmpty: !sqlText.value.trim(), hasResultRows: Boolean(resultRows.value.length), hasMore: hasMore.value, loadingMore: loadingMore.value, showAskAi: false }))
-  const toolbarLabels = computed((): SqlQueryToolbarLabels => ({ toolbarAria: 'Oracle', run: t('modules.oracle.query.run'), runSelection: t('modules.oracle.query.runSelection'), runTooltip: t('modules.oracle.query.runHint'), cancel: t('modules.oracle.query.cancel'), cancelTooltip: t('modules.oracle.query.cancel'), format: t('modules.oracle.query.format'), formatTooltip: t('modules.oracle.query.formatTooltip'), explain: t('modules.oracle.query.explain'), explainTooltip: t('modules.oracle.query.explainHint'), explainAnalyze: '', explainAnalyzeTooltip: '', history: t('modules.oracle.query.history'), historyEmpty: t('modules.oracle.query.historyEmpty'), historyClear: t('modules.oracle.query.historyClear'), autoCommit: t('modules.oracle.query.autoCommit'), autoCommitTooltip: t('modules.oracle.query.autoCommitTooltip'), commit: t('modules.oracle.query.commit'), commitTooltip: t('modules.oracle.query.commitTooltip'), rollback: t('modules.oracle.query.rollback'), rollbackTooltip: t('modules.oracle.query.rollbackTooltip'), inTransaction: t('modules.oracle.query.inTransaction') }))
-  const resultPanelLabels = computed((): QueryResultPanelLabels => ({ messages: t('modules.oracle.query.messages'), messagesEmpty: t('modules.oracle.query.messagesEmpty'), filterPlaceholder: t('modules.oracle.query.filterPlaceholder'), loadMore: t('modules.oracle.query.loadMore'), fetchAll: t('modules.oracle.query.fetchAll'), exportCsv: t('modules.oracle.query.exportCsv'), emptyResult: t('modules.oracle.query.emptyResult'), resultEmpty: t('modules.oracle.query.resultEmpty'), closeResultTab: t('modules.oracle.query.closeResultTab'), batchResultTab: (n) => t('modules.oracle.query.batchResultTab', { n }), tabRowCount: (n) => t('modules.oracle.query.rows', { n }), batchStmtLabel: (n) => `#${n}`, batchStmtSkipped: '', batchStmtRunning: '', batchStmtPending: '', batchOpenResult: '', logColStatus: '', logColTime: '', logColRows: '', msgOk: t('modules.oracle.query.msgOk'), msgError: t('modules.oracle.query.msgError'), cancelled: t('modules.oracle.query.cancelled') }))
-  onMounted(() => { void syncTxState(); if (!restoredFromDraft && props.autoRunInitialSql && props.initialSql?.trim()) void runSql() })
-  watch(() => props.sessionId, (sessionId) => { if (sessionId) void syncTxState() })
-  onUnmounted(() => { if (props.sessionId) gridTabs.value.forEach((tab) => { if (tab.resultSetId) void oracleApi.queryClose({ sessionId: props.sessionId!, resultSetId: tab.resultSetId }) }) })
-  function onContextMenuSelect(key: string): void {
-    if (key === 'run') {
-      void runSql()
-    } else if (key === 'explain') {
-      void runExplain()
-    } else if (key === 'format') {
-      void editor.formatSql()
+    if (batchItems.value.length > 0) {
+      batchItems.value = batchItems.value.map((item) =>
+        item.gridTabId === id ? { ...item, gridTabId: undefined, hasMore: false } : item,
+      )
+    }
+    if (activePaneTab.value === id) {
+      activePaneTab.value = gridTabs.value.at(-1)?.id ?? 'messages'
     }
   }
-  return { t, sqlText, running, cancelling, loadingMore, filterText, activePaneTab, lastError, gridTabs, batchItems, batchActive, identityTitle, resultColumns, resultRows, filterKeys, hasMore, resultSummaryText, messageItems, hasMessages, resultPanelLabels, monacoLanguage: computed(() => editor.sqlLanguage.value), languageReady: editor.languageReady, editorRef: editor.editorRef, hasSelection: editor.hasSelection, historyOpen, historyEntries, toolbarLabels, contextMenuItems, autoCommit, inTransaction, txBusy, formatEditor: () => { void editor.formatSql() }, selectResultTab: (id: string) => { activePaneTab.value = id }, closeResultGridTab, openBatchGrid: () => {}, runSql, runExplain, cancelRun, fetchMore, fetchAll, exportCsv, onHistoryPick, setAutoCommit, commitTx, rollbackTx, onContextMenuSelect }
+
+  function openBatchGrid(item: BatchStatementItem): void {
+    if (!item.gridTabId) return
+    if (!gridTabs.value.some((g) => g.id === item.gridTabId)) return
+    activePaneTab.value = item.gridTabId
+    filterText.value = ''
+  }
+
+  function exportCsv(): void {
+    const grid = activeGrid.value
+    if (!grid) {
+      toast.warning(t('modules.oracle.query.noResult'))
+      return
+    }
+    const columns = grid.columns.map((column) => column.name)
+    const blob = new Blob(
+      [
+        '\uFEFF' +
+          [columns.join(','), ...grid.rows.map((row) => columns.map((column) => JSON.stringify(row[column] ?? '')).join(','))].join(
+            '\n',
+          ),
+      ],
+      { type: 'text/csv;charset=utf-8;' },
+    )
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'oracle-export.csv'
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }
+
+  const contextMenuItems = computed((): RsContextMenuItem[] =>
+    buildSqlQueryContextMenuItems({
+      labels: {
+        run: t('modules.oracle.query.run'),
+        runSelection: t('modules.oracle.query.runSelection'),
+        cancel: t('modules.oracle.query.cancel'),
+        format: t('modules.oracle.query.format'),
+        compress: t('modules.oracle.query.compress'),
+        copy: t('modules.oracle.query.copy'),
+        paste: t('modules.oracle.query.paste'),
+        explain: t('modules.oracle.query.explain'),
+        explainAnalyze: '',
+        exportCsv: t('modules.oracle.query.exportCsv'),
+        fetchMore: t('modules.oracle.query.loadMore'),
+        fetchAll: t('modules.oracle.query.fetchAll'),
+      },
+      running: running.value,
+      cancelling: cancelling.value,
+      hasSelection: editor.hasSelection.value,
+      sqlEmpty: !sqlText.value.trim(),
+      hasResultRows: Boolean(resultRows.value.length),
+      hasMore: hasMore.value,
+      loadingMore: loadingMore.value,
+      showAskAi: false,
+      showExplain: true,
+    }),
+  )
+
+  const toolbarLabels = computed((): SqlQueryToolbarLabels => ({
+    toolbarAria: 'Oracle',
+    run: t('modules.oracle.query.run'),
+    runSelection: t('modules.oracle.query.runSelection'),
+    runTooltip: t('modules.oracle.query.runHint'),
+    cancel: t('modules.oracle.query.cancel'),
+    cancelTooltip: t('modules.oracle.query.cancel'),
+    format: t('modules.oracle.query.format'),
+    formatTooltip: t('modules.oracle.query.formatTooltip'),
+    explain: t('modules.oracle.query.explain'),
+    explainTooltip: t('modules.oracle.query.explainHint'),
+    explainAnalyze: '',
+    explainAnalyzeTooltip: '',
+    history: t('modules.oracle.query.history'),
+    historyEmpty: t('modules.oracle.query.historyEmpty'),
+    historyClear: t('modules.oracle.query.historyClear'),
+    autoCommit: t('modules.oracle.query.autoCommit'),
+    autoCommitTooltip: t('modules.oracle.query.autoCommitTooltip'),
+    commit: t('modules.oracle.query.commit'),
+    commitTooltip: t('modules.oracle.query.commitTooltip'),
+    rollback: t('modules.oracle.query.rollback'),
+    rollbackTooltip: t('modules.oracle.query.rollbackTooltip'),
+    inTransaction: t('modules.oracle.query.inTransaction'),
+  }))
+
+  const resultPanelLabels = computed((): QueryResultPanelLabels => ({
+    messages: t('modules.oracle.query.messages'),
+    messagesEmpty: t('modules.oracle.query.messagesEmpty'),
+    filterPlaceholder: t('modules.oracle.query.filterPlaceholder'),
+    loadMore: t('modules.oracle.query.loadMore'),
+    fetchAll: t('modules.oracle.query.fetchAll'),
+    exportCsv: t('modules.oracle.query.exportCsv'),
+    emptyResult: t('modules.oracle.query.emptyResult'),
+    resultEmpty: t('modules.oracle.query.resultEmpty'),
+    closeResultTab: t('modules.oracle.query.closeResultTab'),
+    batchResultTab: (n) => t('modules.oracle.query.batchResultTab', { n }),
+    tabRowCount: (n, hasMoreFlag) =>
+      `${t('modules.oracle.query.rows', { n })}${hasMoreFlag ? '+' : ''}`,
+    batchStmtLabel: (n) => t('modules.oracle.query.batchStmtLabel', { n }),
+    batchStmtSkipped: t('modules.oracle.query.batchStmtSkipped'),
+    batchStmtRunning: t('modules.oracle.query.batchStmtRunning'),
+    batchStmtPending: t('modules.oracle.query.batchStmtPending'),
+    batchOpenResult: t('modules.oracle.query.batchOpenResult'),
+    logColStatus: t('modules.oracle.query.logColStatus'),
+    logColTime: t('modules.oracle.query.logColTime'),
+    logColRows: t('modules.oracle.query.logColRows'),
+    msgOk: t('modules.oracle.query.msgOk'),
+    msgError: t('modules.oracle.query.msgError'),
+    cancelled: t('modules.oracle.query.cancelled'),
+    copyMessage: t('modules.oracle.query.copyMessage'),
+    copiedHint: t('modules.oracle.query.copiedHint'),
+  }))
+
+  onMounted(() => {
+    void syncTxState()
+    if (!restoredFromDraft && props.autoRunInitialSql && props.initialSql?.trim()) void runSql()
+  })
+  watch(
+    () => props.sessionId,
+    (sessionId) => {
+      if (sessionId) void syncTxState()
+    },
+  )
+  onUnmounted(() => {
+    if (props.sessionId) {
+      gridTabs.value.forEach((tab) => {
+        if (tab.resultSetId) {
+          void oracleApi.queryClose({ sessionId: props.sessionId!, resultSetId: tab.resultSetId })
+        }
+      })
+    }
+  })
+
+  function onContextMenuSelect(key: string): void {
+    if (key === 'run') void runSql()
+    else if (key === 'cancel') void cancelRun()
+    else if (key === 'format') void editor.formatSql()
+    else if (key === 'compress') void editor.compressSql()
+    else if (key === 'copy') editor.copyEditor()
+    else if (key === 'paste') void editor.pasteEditor()
+    else if (key === 'explain') void runExplain()
+    else if (key === 'exportCsv') exportCsv()
+    else if (key === 'fetchMore') void fetchMore()
+    else if (key === 'fetchAll') void fetchAll()
+  }
+
+  return {
+    t,
+    sqlText,
+    running,
+    cancelling,
+    loadingMore,
+    filterText,
+    activePaneTab,
+    lastError,
+    gridTabs,
+    batchItems,
+    batchActive,
+    identityTitle,
+    resultColumns,
+    resultRows,
+    filterKeys,
+    hasMore,
+    resultSummaryText,
+    messageItems,
+    hasMessages,
+    resultPanelLabels,
+    monacoLanguage: computed(() => editor.sqlLanguage.value),
+    languageReady: editor.languageReady,
+    editorRef: editor.editorRef,
+    hasSelection: editor.hasSelection,
+    historyOpen,
+    historyEntries,
+    toolbarLabels,
+    contextMenuItems,
+    autoCommit,
+    inTransaction,
+    txBusy,
+    formatEditor: () => {
+      void editor.formatSql()
+    },
+    selectResultTab: (id: string) => {
+      activePaneTab.value = id
+    },
+    closeResultGridTab,
+    openBatchGrid,
+    runSql,
+    runExplain,
+    cancelRun,
+    fetchMore,
+    fetchAll,
+    exportCsv,
+    onHistoryPick,
+    setAutoCommit,
+    commitTx,
+    rollbackTx,
+    onContextMenuSelect,
+  }
 }

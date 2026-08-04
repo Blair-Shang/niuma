@@ -116,6 +116,16 @@ export const builtinModules: ModuleDescriptor[] = [
     load: () => import('@/modules/kingbase/views/KingbaseHome.vue'),
   },
   {
+    id: 'sqlserver',
+    source: 'builtin',
+    labelKey: 'nav.sqlserver',
+    icon: 'database',
+    routePath: '/sqlserver',
+    order: 28,
+    category: 'data',
+    load: () => import('@/modules/sqlserver/views/SqlServerHome.vue'),
+  },
+  {
     id: 'database',
     source: 'builtin',
     labelKey: 'nav.database',

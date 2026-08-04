@@ -31,7 +31,7 @@ SQLite `nm_app_setting`，壳层不读库、不含任何业务分支。
 | 传输（Windows） | 命名管道 `\\.\pipe\niuma.platform` |
 | 传输（其他平台） | Unix Domain Socket `${TMPDIR}/niuma.platform.sock` |
 | 分帧 | **4 字节小端长度前缀** + **UTF-8 JSON 载荷**（前缀值 = 载荷字节数，不含前缀） |
-| 单帧上限 | 16 MiB（`protocol.MaxFrameSize`，与 C++ `kMaxFrameBytes` 对齐） |
+| 单帧上限 | 1 GiB（`protocol.MaxFrameSize`，与 C++ `kMaxFrameBytes` 对齐） |
 | 连接模型 | 每连接一个 goroutine；连接内支持多个**顺序**请求；多连接并发 |
 
 三处地址常量必须一致：Go `main.ipcAddress()`、C++ `platform_client.cpp kPipeName`、

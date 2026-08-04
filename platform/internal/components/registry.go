@@ -235,7 +235,9 @@ func (r *Registry) resolveTool(ctx context.Context, bundleID string, tool ToolSp
 		if fileExists(configured) {
 			dto.Status = ToolStatusConfigured
 			dto.Path = configured
-			dto.Version = probeVersion(ctx, configured, tool.Detect.VersionArgs)
+			if isVersionProbeable(configured) {
+				dto.Version = probeVersion(ctx, configured, tool.Detect.VersionArgs)
+			}
 			return dto
 		}
 	}
@@ -245,7 +247,9 @@ func (r *Registry) resolveTool(ctx context.Context, bundleID string, tool ToolSp
 		if fileExists(candidate) {
 			dto.Status = ToolStatusBundled
 			dto.Path = candidate
-			dto.Version = probeVersion(ctx, candidate, tool.Detect.VersionArgs)
+			if isVersionProbeable(candidate) {
+				dto.Version = probeVersion(ctx, candidate, tool.Detect.VersionArgs)
+			}
 			return dto
 		}
 	}
@@ -253,7 +257,9 @@ func (r *Registry) resolveTool(ctx context.Context, bundleID string, tool ToolSp
 	if path, ok := findOnPath(tool.Detect.Executables); ok {
 		dto.Status = ToolStatusDetected
 		dto.Path = path
-		dto.Version = probeVersion(ctx, path, tool.Detect.VersionArgs)
+		if isVersionProbeable(path) {
+			dto.Version = probeVersion(ctx, path, tool.Detect.VersionArgs)
+		}
 		return dto
 	}
 

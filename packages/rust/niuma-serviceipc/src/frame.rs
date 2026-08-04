@@ -2,8 +2,9 @@ use std::io;
 
 use thiserror::Error;
 
-/// MAX_FRAME_SIZE 限制单帧 JSON 载荷的最大字节数（16 MiB）。
-pub const MAX_FRAME_SIZE: u32 = 16 << 20;
+/// MAX_FRAME_SIZE 限制单帧 JSON 载荷的最大字节数（1 GiB）。
+/// 桌面工具查询页可能含大字段，故放宽到 1 GiB（仍低于 uint32 协议上限）。
+pub const MAX_FRAME_SIZE: u32 = 1 << 30;
 
 /// FrameError 表示分帧读写错误。
 #[derive(Debug, Error)]

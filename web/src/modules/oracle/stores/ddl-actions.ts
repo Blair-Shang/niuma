@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
-export type OracleDdlDialogKind = 'danger' | 'rename'
+export type OracleDdlDialogKind = 'danger' | 'rename' | 'create_schema'
 
 export type OracleDdlAction =
   | 'drop_table'
@@ -16,6 +16,20 @@ export type OracleDdlAction =
   | 'rename_table'
   | 'rename_view'
   | 'rename_sequence'
+  | 'create_schema'
+
+/** 新建 Schema（CREATE USER）表单选项。 */
+export interface OracleCreateSchemaOptions {
+  password: string
+  /** 默认表空间，默认 USERS */
+  defaultTablespace?: string
+  /** 临时表空间，默认 TEMP */
+  temporaryTablespace?: string
+  /** 默认 true：QUOTA UNLIMITED ON 默认表空间 */
+  quotaUnlimited?: boolean
+  /** 默认 true：GRANT CONNECT, RESOURCE */
+  grantConnectResource?: boolean
+}
 
 export interface OraclePendingDdlAction {
   conn: ConnItem
@@ -30,6 +44,7 @@ export interface OraclePendingDdlAction {
   description: string
   kind?: OracleDdlDialogKind
   newName?: string
+  createOptions?: OracleCreateSchemaOptions
 }
 
 /**

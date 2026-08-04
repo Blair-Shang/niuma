@@ -19,7 +19,22 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const terminalRef = ref<InstanceType<typeof RsTerminal> | null>(null)
+
+/** 避免 InstanceType<typeof RsTerminal> 在 Vue 类型上栈溢出 */
+type SshTerminalApi = {
+  write: (data: string) => void
+  clear: () => void
+  fit: () => void | Promise<void>
+  getTerminal: () => {
+    cols?: number
+    rows?: number
+    options?: Record<string, unknown>
+    getSelection?: () => string
+    onSelectionChange?: (cb: () => void) => { dispose: () => void }
+  } | null
+}
+
+const terminalRef = ref<SshTerminalApi | null>(null)
 const terminalReady = ref(false)
 const startupError = ref('')
 let pendingOutput = ''
@@ -178,10 +193,30 @@ async function sendInput(data: string): Promise<void> {
 }
 
 let selectionDisposable: { dispose: () => void } | null = null
+/** 最近一次非空选区；菜单点击失焦后 live selection 常被清空 */
+let lastNonEmptySelection = ''
+let clearSelectionTimer = 0
 
 function unbindSelection(): void {
   selectionDisposable?.dispose()
   selectionDisposable = null
+  if (clearSelectionTimer) {
+    window.clearTimeout(clearSelectionTimer)
+    clearSelectionTimer = 0
+  }
+}
+
+function publishTerminalSelection(text: string): void {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  lastNonEmptySelection = trimmed
+  publishEditorSelection({
+    tabId: useTabStore().activeTabId || undefined,
+    text: trimmed,
+    // 终端缓冲（vim/less 等）多为任意文本，勿标成 shell 以免模型按脚本误解
+    language: 'text',
+    source: 'terminal',
+  })
 }
 
 function bindSelection(): void {
@@ -194,16 +229,31 @@ function bindSelection(): void {
     const text = String(term.getSelection?.() ?? '').trim()
     const tabId = useTabStore().activeTabId || undefined
     if (!text) {
-      clearEditorSelection(tabId)
+      // 右键菜单 / 失焦会短暂清空选区；延迟清除，避免 Ask AI 读到空
+      if (clearSelectionTimer) window.clearTimeout(clearSelectionTimer)
+      clearSelectionTimer = window.setTimeout(() => {
+        clearSelectionTimer = 0
+        clearEditorSelection(tabId)
+      }, 400)
       return
     }
-    publishEditorSelection({
-      tabId,
-      text,
-      language: 'shell',
-      source: 'terminal',
-    })
+    if (clearSelectionTimer) {
+      window.clearTimeout(clearSelectionTimer)
+      clearSelectionTimer = 0
+    }
+    publishTerminalSelection(text)
   })
+}
+
+async function askAiAboutSelection(textFromMenu = ''): Promise<void> {
+  const term = terminalRef.value?.getTerminal?.() ?? null
+  const live = String(term?.getSelection?.() ?? '').trim()
+  const text = (textFromMenu || live || lastNonEmptySelection).trim()
+  if (text) {
+    publishTerminalSelection(text)
+  }
+  const { executeCommand } = await import('@/extensions/contributions/command-registry')
+  await executeCommand('workbench.ai.askSelection')
 }
 
 watch(
@@ -257,6 +307,7 @@ onBeforeUnmount(() => {
   pendingOutput = ''
   cancelScheduledFlush()
   unbindSelection()
+  lastNonEmptySelection = ''
   clearEditorSelection(useTabStore().activeTabId || undefined)
   pane.close().catch(() => undefined)
 })
@@ -272,6 +323,8 @@ defineExpose({
     <RsTerminal
       ref="terminalRef"
       :overlay="overlayText"
+      show-ask-ai
+      :right-click-selects-word="false"
       :snap-viewport-on-tui-write="false"
       wheel-scroll-modifier="shift"
       @ready="async () => {
@@ -284,6 +337,7 @@ defineExpose({
       }"
       @data="(data) => { if (syncBroadcast) { emit('broadcastInput', data) } else { pane.input(data) } }"
       @resize="() => void refreshSize()"
+      @ask-ai="(text) => void askAiAboutSelection(text)"
     />
   </section>
 </template>
