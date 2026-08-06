@@ -1,5 +1,6 @@
 #include "core/window/window_factory.h"
 
+#include "core/window/splash_window.h"
 #include "core/window/window_manager.h"
 #include "core/window/window_registry.h"
 #include "util/win_app_icon.h"
@@ -31,6 +32,7 @@ struct WindowChromeOptions {
   bool minimizable = true;
   bool maximized = false;
   bool frameless = true;
+  bool closable = true;
   int min_width = 400;
   int min_height = 300;
 };
@@ -42,6 +44,7 @@ WindowChromeOptions ToChromeOptions(const WindowCreateOptions& opts) {
   chrome.minimizable = opts.minimizable;
   chrome.maximized = opts.maximized;
   chrome.frameless = opts.frameless;
+  chrome.closable = opts.closable;
   chrome.min_width = opts.min_width > 0 ? opts.min_width : 400;
   chrome.min_height = opts.min_height > 0 ? opts.min_height : 300;
   return chrome;
@@ -81,7 +84,13 @@ class NiuMaWindowDelegate : public CefWindowDelegate {
 
   bool CanClose(CefRefPtr<CefWindow> window) override {
     (void)window;
-    CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
+    CefRefPtr<CefBrowser> browser = browser_view_ ? browser_view_->GetBrowser()
+                                                 : nullptr;
+    // closable=false（Splash）：拒绝用户关闭；仅 SplashWindow::Close 置位后放行。
+    // Views/Alloy 下 CloseBrowser(true) 仍会走到本回调，返回 false 会永久卡住窗口。
+    if (!chrome_.closable && !SplashWindow::Instance().AllowShellClose()) {
+      return false;
+    }
     if (browser) {
       return browser->GetHost()->TryCloseBrowser();
     }
@@ -197,6 +206,26 @@ std::string WindowFactory::ResolveStartupUrl() const {
     }
   }
   return "app://niuma/index.html";
+}
+
+std::string WindowFactory::ResolveSplashUrl() const {
+  // 与主窗同源（dev Vite 或 app://），仅把文档换成静态 splash.html
+  std::string base = ResolveStartupUrl();
+  const auto hash = base.find('#');
+  if (hash != std::string::npos) {
+    base = base.substr(0, hash);
+  }
+
+  static constexpr char kIndex[] = "index.html";
+  static constexpr size_t kIndexLen = sizeof(kIndex) - 1;
+  if (base.size() >= kIndexLen &&
+      base.compare(base.size() - kIndexLen, kIndexLen, kIndex) == 0) {
+    return base.substr(0, base.size() - kIndexLen) + "splash.html";
+  }
+  if (!base.empty() && base.back() == '/') {
+    return base + "splash.html";
+  }
+  return base + "/splash.html";
 }
 
 std::string WindowFactory::BuildWindowUrl(const WindowCreateOptions& opts) const {

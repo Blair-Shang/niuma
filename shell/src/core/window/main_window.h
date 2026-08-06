@@ -34,7 +34,7 @@ class MainWindow {
   void OnAttached(int window_id);
   void OnDetached(int window_id);
 
-  /** 主窗口开始关闭：级联关闭所有辅助窗口 */
+  /** 主窗口开始关闭：级联关闭 Splash 与所有辅助窗口 */
   void OnClosing();
 
   std::string ResolveStartupUrl() const;

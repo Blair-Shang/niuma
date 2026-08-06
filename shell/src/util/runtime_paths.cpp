@@ -91,6 +91,14 @@ std::string GetRuntimePlatformName() {
 #endif
 }
 
+std::string GetRuntimeArchName() {
+#if defined(_M_ARM64) || defined(__aarch64__)
+  return "arm64";
+#else
+  return "x64";
+#endif
+}
+
 std::string GetInstallDir() {
   return ExeDirectory().string();
 }

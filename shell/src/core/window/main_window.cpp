@@ -1,6 +1,7 @@
 #include "core/window/main_window.h"
 
 #include "core/window/auxiliary_window.h"
+#include "core/window/splash_window.h"
 #include "core/window/window_factory.h"
 #include "core/window/window_registry.h"
 
@@ -74,6 +75,8 @@ void MainWindow::OnClosing() {
     return;
   }
   closing_cascade_ = true;
+  // 若用户在主窗尚未 reveal 前异常退出路径走到这里，一并清掉 Splash
+  SplashWindow::Instance().Close();
   AuxiliaryWindowManager::Instance().CloseAll();
 }
 

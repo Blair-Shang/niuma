@@ -5,6 +5,8 @@
 namespace niuma {
 
 std::string GetRuntimePlatformName();
+/** 架构标签：x64 / arm64（供更新检查 query）。 */
+std::string GetRuntimeArchName();
 std::string GetInstallDir();
 std::string GetRuntimeDir();
 std::string GetWebResourcesPath();

@@ -604,6 +604,51 @@ function onResourceCtx(key: string, node: ConnResourceNode): void {
   })()
 }
 
+/* ── 右键菜单：面板级单实例 ──
+ * 逐行套 RsContextMenu 会让虚拟滚动每帧销毁重建十几套 reka 组件实例（Root/Trigger/Portal/Content），
+ * 是万级表场景下最重的一项开销。改为整个面板共用一个菜单：
+ *   右键先由行的冒泡处理器记下目标节点 → items 按节点类型出菜单 → select 再按类型分派。
+ * 面板根节点用捕获阶段先清空目标，因此右键空白区自然回落到根菜单。
+ */
+const ctxTarget = ref<ConnTreeNode | null>(null)
+const ctxMenuOpen = ref(false)
+
+/**
+ * 菜单打开期间树数据刷新时关掉菜单：ctxTarget 持有的节点可能已经不在树里，
+ * 继续用它出菜单或执行动作就是在操作过期引用。
+ * 逐行挂菜单时这由「行卸载连带菜单卸载」天然保证，改成面板级单实例后须显式处理。
+ */
+watch(categoryTreeNodes, () => {
+  if (!ctxMenuOpen.value) return
+  ctxMenuOpen.value = false
+  ctxTarget.value = null
+})
+
+const activeCtxItems = computed<RsContextMenuItem[]>(() => {
+  const target = ctxTarget.value
+  if (!target) return rootCtxItems.value
+  if (target._type === 'folder') return folderCtxItems.value
+  if (target._type === 'conn') return connCtxItemsFor(target._conn)
+  return resourceMenuItemsFor(target)
+})
+
+function onCtxSelect(key: string): void {
+  const target = ctxTarget.value
+  if (!target) {
+    onRootCtx(key)
+    return
+  }
+  if (target._type === 'folder') {
+    onFolderCtx(key, target._folder)
+    return
+  }
+  if (target._type === 'conn') {
+    onConnCtx(key, target)
+    return
+  }
+  onResourceCtx(key, target)
+}
+
 /* ── 保存 / 删除 ── */
 async function onSave(): Promise<void> {
   const wasCreate = dlgMode.value === 'create'
@@ -643,8 +688,9 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
 </script>
 
 <template>
-  <RsContextMenu :items="rootCtxItems" @select="onRootCtx">
-    <div class="nm-ops-conn">
+  <RsContextMenu v-model:open="ctxMenuOpen" :items="activeCtxItems" @select="onCtxSelect">
+    <!-- 捕获阶段先清空目标；行级冒泡处理器随后写入自己，空白区右键即回落到根菜单 -->
+    <div class="nm-ops-conn" @contextmenu.capture="ctxTarget = null">
       <!-- 搜索栏 -->
       <div class="nm-ops-conn__searchbar">
         <RsInput
@@ -686,76 +732,66 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
         >
           <template #title="{ node }">
             <!-- 文件夹节点 -->
-            <RsContextMenu
+            <div
               v-if="(node as ConnTreeNode)._type === 'folder'"
-              :items="folderCtxItems"
-              @select="onFolderCtx($event, asFolderNode(node as ConnTreeNode)._folder)"
+              class="nm-conn-row"
+              @contextmenu="ctxTarget = node as ConnTreeNode"
             >
-              <div class="nm-conn-row">
-                <RsIcon
-                  :name="asFolderNode(node as ConnTreeNode)._folder.expanded ? 'folder-open' : 'folder'"
-                  :size="14"
-                  class="nm-conn-row__icon"
-                  :color="folderAccentColor(asFolderNode(node as ConnTreeNode)._folder)"
-                />
-                <span class="nm-conn-row__label nm-conn-row__label--folder">{{ node.label }}</span>
-              </div>
-            </RsContextMenu>
+              <RsIcon
+                :name="asFolderNode(node as ConnTreeNode)._folder.expanded ? 'folder-open' : 'folder'"
+                :size="14"
+                class="nm-conn-row__icon"
+                :color="folderAccentColor(asFolderNode(node as ConnTreeNode)._folder)"
+              />
+              <span class="nm-conn-row__label nm-conn-row__label--folder">{{ node.label }}</span>
+            </div>
 
             <!-- 连接节点 -->
-            <RsContextMenu
+            <div
               v-else-if="(node as ConnTreeNode)._type === 'conn'"
-              :items="connCtxItemsFor(asLeafNode(node as ConnTreeNode)._conn)"
-              @select="onConnCtx($event, asLeafNode(node as ConnTreeNode))"
+              class="nm-conn-row"
+              :title="`${asLeafNode(node as ConnTreeNode)._conn.hostAddress}:${asLeafNode(node as ConnTreeNode)._conn.portNumber}`"
+              @pointerenter="warmConnKind(asLeafNode(node as ConnTreeNode)._conn.kind)"
+              @contextmenu.capture="onConnKindContextMenu($event, asLeafNode(node as ConnTreeNode)._conn.kind)"
+              @contextmenu="ctxTarget = node as ConnTreeNode"
             >
-              <div
-                class="nm-conn-row"
-                :title="`${asLeafNode(node as ConnTreeNode)._conn.hostAddress}:${asLeafNode(node as ConnTreeNode)._conn.portNumber}`"
-                @pointerenter="warmConnKind(asLeafNode(node as ConnTreeNode)._conn.kind)"
-                @contextmenu.capture="onConnKindContextMenu($event, asLeafNode(node as ConnTreeNode)._conn.kind)"
-              >
-                <RsIcon
-                  :name="kindIcon(asLeafNode(node as ConnTreeNode)._conn.kind)"
-                  :size="14"
-                  class="nm-conn-row__icon"
-                  :color="profileAccentColor(asLeafNode(node as ConnTreeNode)._conn.connectionOptions)"
-                />
-                <span class="nm-conn-row__label">{{ node.label }}</span>
-                <span
-                  v-if="sessionRegistry.isProfileConnected(asLeafNode(node as ConnTreeNode)._conn.profileId, asLeafNode(node as ConnTreeNode)._conn.kind)"
-                  class="nm-conn-row__status"
-                  :title="t('opsNav.connected')"
-                />
-              </div>
-            </RsContextMenu>
+              <RsIcon
+                :name="kindIcon(asLeafNode(node as ConnTreeNode)._conn.kind)"
+                :size="14"
+                class="nm-conn-row__icon"
+                :color="profileAccentColor(asLeafNode(node as ConnTreeNode)._conn.connectionOptions)"
+              />
+              <span class="nm-conn-row__label">{{ node.label }}</span>
+              <span
+                v-if="sessionRegistry.isProfileConnected(asLeafNode(node as ConnTreeNode)._conn.profileId, asLeafNode(node as ConnTreeNode)._conn.kind)"
+                class="nm-conn-row__status"
+                :title="t('opsNav.connected')"
+              />
+            </div>
 
             <!-- 资源子节点（逻辑库 / 集合 / 未来 schema 等） -->
-            <RsContextMenu
+            <div
               v-else-if="(node as ConnTreeNode)._type === 'resource'"
-              :items="resourceMenuItemsFor(asResourceNode(node as ConnTreeNode))"
-              @select="onResourceCtx($event, asResourceNode(node as ConnTreeNode))"
+              class="nm-conn-row nm-conn-row--resource"
+              :title="asResourceNode(node as ConnTreeNode).label"
+              @pointerenter="warmConnKind(asResourceNode(node as ConnTreeNode)._conn.kind)"
+              @contextmenu.capture="onConnKindContextMenu($event, asResourceNode(node as ConnTreeNode)._conn.kind)"
+              @contextmenu="ctxTarget = node as ConnTreeNode"
             >
-              <div
-                class="nm-conn-row nm-conn-row--resource"
-                :title="asResourceNode(node as ConnTreeNode).label"
-                @pointerenter="warmConnKind(asResourceNode(node as ConnTreeNode)._conn.kind)"
-                @contextmenu.capture="onConnKindContextMenu($event, asResourceNode(node as ConnTreeNode)._conn.kind)"
+              <RsIcon
+                :name="asResourceNode(node as ConnTreeNode)._icon ?? 'database'"
+                :size="14"
+                class="nm-conn-row__icon"
+                :color="profileAccentColor(asResourceNode(node as ConnTreeNode)._conn.connectionOptions)"
+              />
+              <span class="nm-conn-row__label">{{ node.label }}</span>
+              <span
+                v-if="asResourceNode(node as ConnTreeNode)._badge"
+                class="nm-conn-row__badge"
               >
-                <RsIcon
-                  :name="asResourceNode(node as ConnTreeNode)._icon ?? 'database'"
-                  :size="14"
-                  class="nm-conn-row__icon"
-                  :color="profileAccentColor(asResourceNode(node as ConnTreeNode)._conn.connectionOptions)"
-                />
-                <span class="nm-conn-row__label">{{ node.label }}</span>
-                <span
-                  v-if="asResourceNode(node as ConnTreeNode)._badge"
-                  class="nm-conn-row__badge"
-                >
-                  {{ asResourceNode(node as ConnTreeNode)._badge }}
-                </span>
-              </div>
-            </RsContextMenu>
+                {{ asResourceNode(node as ConnTreeNode)._badge }}
+              </span>
+            </div>
           </template>
         </RsTree>
       </div>

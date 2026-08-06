@@ -3,7 +3,8 @@
 .SYNOPSIS
   构建 niuma-oracle-service（C++20 + ODPI-C）到 services/bin/<platform>-<arch>/。
   不依赖 Instant Client SDK；运行时需旁载 Instant Client 到 bin/runtime/oracle。
-  常规 build-services.ps1 不强制构建本服务；本脚本产物会写入矩阵目录，供 stage-services 拷贝。
+  默认由 build-services.ps1（含 pnpm dev:hot → stage-services）调用；也可单独执行。
+  产物写入矩阵目录 services/bin/<platform>-<arch>/，供 stage-services 拷贝。
 #>
 param(
     [ValidateSet('windows', 'linux', 'kylin', 'macos')]

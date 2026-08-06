@@ -1,25 +1,11 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { monacoZhNlsPlugin } from '@niuma/ui/vite-plugins/monaco-zh-nls'
 import { silenceAntlrParseConsole } from '@niuma/ui/vite-plugins/silence-antlr-parse-console'
-import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { serveMonorepoPlugins } from './vite-plugins/serve-monorepo-plugins'
-
-function loadBuildInfo(rootDir: string) {
-  const manifest = resolve(rootDir, '../build/version.json')
-  if (existsSync(manifest)) {
-    return JSON.parse(readFileSync(manifest, 'utf8')) as {
-      version: string
-      buildId: string
-      buildDate: string
-    }
-  }
-  const rootPkg = JSON.parse(readFileSync(resolve(rootDir, '../package.json'), 'utf8'))
-  return { version: rootPkg.version ?? 'dev', buildId: 'dev', buildDate: '' }
-}
 
 /**
  * 仅包含 @niuma/web 可直接 resolve 的依赖。
@@ -32,65 +18,51 @@ const CORE_OPTIMIZE_DEPS = ['vue', 'vue-router', 'pinia', 'vue-i18n', 'echarts',
 const require = createRequire(import.meta.url)
 const UI_ROOT = dirname(require.resolve('@niuma/ui/package.json'))
 const UI_SRC = resolve(UI_ROOT, 'src')
-const buildInfo = loadBuildInfo(__dirname)
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, resolve(__dirname, '../build'), 'VITE_')
-  const version = env.VITE_NIUMA_VERSION || buildInfo.version
-  const buildId = env.VITE_NIUMA_BUILD_ID || buildInfo.buildId
-
-  return {
-    plugins: [
-      vue(),
-      tailwindcss(),
-      serveMonorepoPlugins(resolve(__dirname, '../plugins')),
-      // 注入 Monaco 官方中文 NLS，右键菜单/命令面板等 UI 显示中文
-      monacoZhNlsPlugin(),
-      // SQL 补全半成品 parse 不再刷 antlr console.error
-      silenceAntlrParseConsole(),
+export default defineConfig({
+  plugins: [
+    vue(),
+    tailwindcss(),
+    serveMonorepoPlugins(resolve(__dirname, '../plugins')),
+    monacoZhNlsPlugin(),
+    silenceAntlrParseConsole(),
+  ],
+  base: './',
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+    dedupe: ['monaco-editor', 'monaco-sql-languages'],
+  },
+  optimizeDeps: {
+    include: [...CORE_OPTIMIZE_DEPS],
+    entries: [
+      resolve(__dirname, 'index.html'),
+      resolve(UI_SRC, 'dev/vite-codemirror-deps.ts'),
+      resolve(UI_SRC, 'components/RsCodeEditor.vue'),
     ],
-    base: './',
-    define: {
-      __NIUMA_VERSION__: JSON.stringify(version),
-      __NIUMA_BUILD_ID__: JSON.stringify(buildId),
+  },
+  server: {
+    port: 5173,
+    strictPort: true,
+    sourcemapIgnoreList: false,
+    fs: {
+      allow: [resolve(__dirname, '..'), UI_ROOT],
     },
-    resolve: {
-      alias: {
-        '@': resolve(__dirname, 'src'),
-      },
-      // 保证 monaco-editor / monaco-sql-languages filler 共用同一份实例
-      dedupe: ['monaco-editor', 'monaco-sql-languages'],
-    },
-    optimizeDeps: {
-      include: [...CORE_OPTIMIZE_DEPS],
-      entries: [
-        resolve(__dirname, 'index.html'),
+    warmup: {
+      clientFiles: [
         resolve(UI_SRC, 'dev/vite-codemirror-deps.ts'),
         resolve(UI_SRC, 'components/RsCodeEditor.vue'),
+        './src/modules/file-editor/views/FileWorkbenchView.vue',
       ],
     },
-    server: {
-      port: 5173,
-      strictPort: true,
-      sourcemapIgnoreList: false,
-      fs: {
-        allow: [resolve(__dirname, '..'), UI_ROOT],
-      },
-      warmup: {
-        clientFiles: [
-          resolve(UI_SRC, 'dev/vite-codemirror-deps.ts'),
-          resolve(UI_SRC, 'components/RsCodeEditor.vue'),
-          './src/modules/file-editor/views/FileWorkbenchView.vue',
-        ],
-      },
-    },
-    css: {
-      devSourcemap: true,
-    },
-    build: {
-      outDir: 'dist',
-      emptyOutDir: true,
-      sourcemap: true,
-    },
-  }
+  },
+  css: {
+    devSourcemap: true,
+  },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    sourcemap: true,
+  },
 })

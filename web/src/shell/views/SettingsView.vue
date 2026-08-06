@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsDropdown, RsButton, RsIcon } from '@niuma/ui'
+import { RsDropdown, RsButton, RsIcon, RsInput } from '@niuma/ui'
 import type { RsDropdownItems } from '@niuma/ui'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -13,10 +13,13 @@ import ComponentsSettingsPanel from '@/shell/views/ComponentsSettingsPanel.vue'
 import AiProvidersSettingsPanel from '@/shell/views/ai-settings/AiProvidersSettingsPanel.vue'
 import AiMcpSettingsPanel from '@/shell/views/ai-settings/AiMcpSettingsPanel.vue'
 import AiSkillsSettingsPanel from '@/shell/views/ai-settings/AiSkillsSettingsPanel.vue'
+import { useAccountStore } from '@/stores/account'
+import { CloudApiError } from '@/api/cloud/client'
 
 /** 设置分区（VS Code 左右布局：左导航 + 右内容） */
 type SettingsSection =
   | 'appearance'
+  | 'account'
   | 'plugins'
   | 'components'
   | 'ai-providers'
@@ -29,15 +32,17 @@ const props = defineProps<{
   tabId?: string
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const appStore = useAppStore()
 const bridgeStore = useBridgeStore()
+const accountStore = useAccountStore()
 
 const activeSection = ref<SettingsSection>('appearance')
 
 const sections = computed(
   (): { id: SettingsSection; labelKey: string; descKey: string; icon: string }[] => [
     { id: 'appearance', labelKey: 'settings.appearance', descKey: 'settings.appearanceDesc', icon: 'palette' },
+    { id: 'account', labelKey: 'settings.account', descKey: 'settings.accountDesc', icon: 'user' },
     { id: 'plugins', labelKey: 'settings.plugins', descKey: 'settings.pluginsDesc', icon: 'puzzle' },
     { id: 'components', labelKey: 'settings.components', descKey: 'settings.componentsDesc', icon: 'wrench' },
     { id: 'ai-providers', labelKey: 'settings.aiProviders', descKey: 'settings.aiProvidersDesc', icon: 'bot' },
@@ -49,6 +54,7 @@ const sections = computed(
 
 const validSections = new Set<SettingsSection>([
   'appearance',
+  'account',
   'plugins',
   'components',
   'ai-providers',
@@ -74,6 +80,54 @@ const plugins = ref<PluginRecord[]>([])
 const pluginsLoading = ref(false)
 const pluginsError = ref<string | null>(null)
 const togglingId = ref<string | null>(null)
+
+const profileName = ref('')
+const profileBusy = ref(false)
+const profileError = ref('')
+const profileOk = ref(false)
+
+watch(
+  () => accountStore.user?.displayName,
+  (name) => {
+    profileName.value = name ?? ''
+  },
+  { immediate: true },
+)
+
+function accountErrMsg(e: unknown): string {
+  if (e instanceof CloudApiError) {
+    const key = `account.errors.${e.code}`
+    if (te(key)) return t(key)
+    return e.code
+  }
+  if (e instanceof Error) return e.message
+  return t('account.errors.server_error')
+}
+
+async function saveDisplayName(): Promise<void> {
+  const name = profileName.value.trim()
+  if (!name) {
+    profileError.value = t('account.validation.displayNameRequired')
+    profileOk.value = false
+    return
+  }
+  if ([...name].length > 64) {
+    profileError.value = t('account.validation.displayNameLength')
+    profileOk.value = false
+    return
+  }
+  profileBusy.value = true
+  profileError.value = ''
+  profileOk.value = false
+  try {
+    await accountStore.updateDisplayName(name)
+    profileOk.value = true
+  } catch (e) {
+    profileError.value = accountErrMsg(e)
+  } finally {
+    profileBusy.value = false
+  }
+}
 
 function selectSection(id: SettingsSection): void {
   activeSection.value = id
@@ -227,6 +281,70 @@ onMounted(() => {
         </div>
       </section>
 
+      <!-- 账户 -->
+      <section v-else-if="activeSection === 'account'" class="nm-settings__panel">
+        <header class="nm-settings__panel-head">
+          <h1 class="nm-section-title">{{ t('settings.account') }}</h1>
+          <p class="nm-section-desc">{{ t('settings.accountDesc') }}</p>
+        </header>
+        <div class="nm-setting-row">
+          <div class="nm-setting-row__info">
+            <p class="nm-setting-row__label">
+              {{
+                accountStore.isLoggedIn
+                  ? t('account.loggedInAs', { email: accountStore.user?.email })
+                  : t('account.notLoggedIn')
+              }}
+            </p>
+            <p class="nm-setting-row__desc">{{ t('account.sectionDesc') }}</p>
+          </div>
+          <div class="flex gap-2">
+            <RsButton
+              v-if="!accountStore.isLoggedIn"
+              variant="primary"
+              size="sm"
+              @click="accountStore.openAuth('login')"
+            >
+              {{ t('account.openLogin') }}
+            </RsButton>
+            <template v-else>
+              <RsButton variant="secondary" size="sm" @click="accountStore.openPasswordChange()">
+                {{ t('account.changePassword') }}
+              </RsButton>
+              <RsButton variant="secondary" size="sm" @click="accountStore.openFeedback()">
+                {{ t('account.openFeedback') }}
+              </RsButton>
+              <RsButton variant="secondary" size="sm" @click="accountStore.doLogout()">
+                {{ t('account.logout') }}
+              </RsButton>
+            </template>
+          </div>
+        </div>
+
+        <div v-if="accountStore.isLoggedIn" class="nm-setting-row nm-setting-row--stack">
+          <div class="nm-setting-row__info">
+            <p class="nm-setting-row__label">{{ t('account.displayNameEdit') }}</p>
+          </div>
+          <div class="nm-account-profile">
+            <RsInput v-model="profileName" :placeholder="t('account.displayNameEdit')" />
+            <RsButton
+              variant="primary"
+              size="sm"
+              :loading="profileBusy"
+              @click="saveDisplayName"
+            >
+              {{ t('account.displayNameSave') }}
+            </RsButton>
+            <p v-if="profileError" class="nm-caption" style="color: var(--rs-danger)">
+              {{ profileError }}
+            </p>
+            <p v-else-if="profileOk" class="nm-caption" style="color: var(--rs-success, #22c55e)">
+              {{ t('account.displayNameSaved') }}
+            </p>
+          </div>
+        </div>
+      </section>
+
       <!-- 插件 -->
       <section v-else-if="activeSection === 'plugins'" class="nm-settings__panel">
         <header class="nm-settings__panel-head">
@@ -287,6 +405,10 @@ onMounted(() => {
         </header>
 
         <dl class="nm-settings__facts">
+          <dt class="nm-caption">{{ t('settings.appVersion') }}</dt>
+          <dd class="font-mono">{{ bridgeStore.shellVersion || '—' }}</dd>
+          <dt class="nm-caption">{{ t('settings.buildId') }}</dt>
+          <dd class="font-mono">{{ bridgeStore.shellBuildId || '—' }}</dd>
           <dt class="nm-caption">{{ t('settings.bridge') }}</dt>
           <dd>{{ bridgeStore.statusLabel }}</dd>
           <dt class="nm-caption">{{ t('settings.connected') }}</dt>
@@ -296,6 +418,7 @@ onMounted(() => {
             <dd class="break-all font-mono nm-caption">{{ bridgeStore.shellInfo.webPath }}</dd>
           </template>
         </dl>
+        <p class="nm-caption leading-relaxed">{{ t('settings.versionHint') }}</p>
         <p class="nm-caption leading-relaxed">{{ t('settings.devHint') }}</p>
       </section>
     </div>
@@ -427,6 +550,21 @@ onMounted(() => {
 .nm-setting-row__control {
   width: 12rem;
   flex-shrink: 0;
+}
+
+.nm-setting-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.nm-account-profile {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 24rem;
+}
+
+.nm-account-profile .nm-caption {
+  margin: 0;
 }
 
 /* 主题分段控件 */

@@ -6,8 +6,10 @@ import type { OracleQueryColumn, OracleQueryExecResult } from '@/api/types/oracl
 import { defaultOracleProfile, resolveSplitFeaturesFromProfile } from '@/modules/sql-editor/capabilities'
 import { splitSqlStatementsWithFeatures } from '@/modules/sql-editor/split/sql-statement-splitter'
 import { useOracleSqlEditor } from '@/modules/oracle/composables/useOracleSqlEditor'
+import { isOracleConnectionError } from '@/modules/oracle/utils/oracleConnectionError'
 import { alignForValueType, buildSqlQueryContextMenuItems, formatBrowseCellValue, resolveSqlValueType, useQueryDraftPersist, useSqlQueryHistory, type BatchStatementItem, type QueryResultMessageItem, type QueryResultPanelLabels, type SqlQueryToolbarLabels } from '@/modules/database'
 import { mapResultRowsByName, type QueryResultRow } from '@/modules/database/utils/query-result-tabs'
+import { useSessionActionStore } from '@/stores/session-actions'
 import { useSessionRegistry } from '@/stores/session-registry'
 
 export type OracleQueryPaneProps = {
@@ -52,6 +54,17 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
   const { t } = useI18n()
   const toast = useRsToast()
   const sessions = useSessionRegistry()
+  const sessionActions = useSessionActionStore()
+
+  function noteConnectionLost(err: unknown): void {
+    if (!isOracleConnectionError(err)) return
+    if (props.profileId) {
+      toast.warning(t('modules.oracle.session.connectionLost'))
+      sessionActions.requestReconnect(props.profileId)
+    } else {
+      toast.warning(t('modules.oracle.session.reconnectHint'))
+    }
+  }
   const { sqlText, restoredFromDraft } = useQueryDraftPersist({
     tabId: () => props.tabId,
     draftSql: () => props.draftSql,
@@ -201,6 +214,7 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
           batchItems.value = batchItems.value.slice()
           lastError.value = msg
           activePaneTab.value = 'messages'
+          noteConnectionLost(stmtErr)
           break
         }
       }
@@ -208,6 +222,7 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : String(error)
       activePaneTab.value = 'messages'
+      noteConnectionLost(error)
     } finally {
       running.value = false
       cancelling.value = false

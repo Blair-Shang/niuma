@@ -20,6 +20,8 @@ export interface ShellInfo {
   runtime: string
   /** 宿主操作系统标识 */
   platform: string
+  /** CPU 架构：x64 / arm64（更新检查用） */
+  arch?: string
   /** 安装目录绝对路径（可为空） */
   installDir: string
   /** Web 资源根 URL，如 `app://niuma/` */

@@ -1,5 +1,7 @@
 #include "util/local_fs.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -157,6 +159,50 @@ std::string LocalFs::ReadText(const std::string& path, std::string& error) {
   std::ostringstream out;
   out << "{\"path\":\"" << JsonEscape(path) << "\",\"content\":\""
       << JsonEscape(content) << "\"}";
+  return out.str();
+}
+
+std::string LocalFs::ReadTextPrefix(const std::string& path,
+                                    std::size_t max_bytes,
+                                    std::string& error) {
+  if (max_bytes == 0 || max_bytes > kMaxTextPrefixBytes) {
+    error = "maxBytes must be between 1 and " +
+            std::to_string(kMaxTextPrefixBytes);
+    return {};
+  }
+  if (!IsAccessiblePath(path, error)) {
+    return {};
+  }
+
+  std::error_code ec;
+  const fs::path file_path = fs::u8path(path);
+  const std::uintmax_t size = fs::file_size(file_path, ec);
+  if (ec) {
+    error = ec.message();
+    return {};
+  }
+
+  std::ifstream in(file_path, std::ios::binary);
+  if (!in) {
+    error = "failed to open file";
+    return {};
+  }
+
+  const std::size_t read_limit =
+      static_cast<std::size_t>(std::min<std::uintmax_t>(size, max_bytes));
+  std::string content(read_limit, '\0');
+  in.read(content.data(), static_cast<std::streamsize>(read_limit));
+  content.resize(static_cast<std::size_t>(in.gcount()));
+  if (!in && !in.eof()) {
+    error = "failed to read file";
+    return {};
+  }
+
+  std::ostringstream out;
+  out << "{\"path\":\"" << JsonEscape(path) << "\",\"content\":\""
+      << JsonEscape(content) << "\",\"truncated\":"
+      << (size > content.size() ? "true" : "false") << ",\"size\":" << size
+      << "}";
   return out.str();
 }
 
@@ -395,6 +441,80 @@ bool LocalFs::OpenExternalUrl(const std::string& url, std::string& error) {
     return false;
   }
   return true;
+#endif
+}
+
+namespace {
+
+bool PathUnderUpdateDir(const std::string& path, std::string& error) {
+#if defined(_WIN32)
+  char tmp[MAX_PATH];
+  const DWORD n = GetTempPathA(MAX_PATH, tmp);
+  if (n == 0 || n >= MAX_PATH) {
+    error = "temp path unavailable";
+    return false;
+  }
+  std::string root = std::string(tmp) + "niuma-update";
+#else
+  const char* tmp = std::getenv("TMPDIR");
+  if (!tmp || !*tmp) tmp = "/tmp";
+  std::string root = std::string(tmp) + "/niuma-update";
+#endif
+  // 规范化比较：要求 path 以 root + 分隔符开头
+  auto norm = [](std::string s) {
+    for (char& c : s) {
+      if (c == '/') c = '\\';
+#ifdef _WIN32
+      c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+#endif
+    }
+    while (!s.empty() && (s.back() == '\\' || s.back() == '/')) s.pop_back();
+    return s;
+  };
+  const std::string p = norm(path);
+  const std::string r = norm(root);
+  if (p.size() <= r.size() + 1) {
+    error = "path outside update dir";
+    return false;
+  }
+  if (p.compare(0, r.size(), r) != 0 || (p[r.size()] != '\\' && p[r.size()] != '/')) {
+    error = "path outside update dir";
+    return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
+  if (path.empty()) {
+    error = "path required";
+    return false;
+  }
+  if (!PathUnderUpdateDir(path, error)) {
+    return false;
+  }
+  if (!Exists(path)) {
+    error = "installer missing";
+    return false;
+  }
+#if defined(OS_WIN)
+  const std::wstring wide = Utf8ToWide(path);
+  if (wide.empty()) {
+    error = "invalid path encoding";
+    return false;
+  }
+  const HINSTANCE result =
+      ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+  if (reinterpret_cast<intptr_t>(result) <= 32) {
+    error = "launch installer failed";
+    return false;
+  }
+  return true;
+#else
+  // P0 仅 Windows Setup；非 Windows 由 Web 打开下载链，避免半成品 apply
+  error = "apply_unsupported_platform";
+  return false;
 #endif
 }
 

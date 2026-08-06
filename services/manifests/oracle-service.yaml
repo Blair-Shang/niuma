@@ -37,7 +37,7 @@ session:
     - io.importCsv
     - io.dumpSql
     - io.execSqlFile
-    - io.cancel
+    # io.cancel 仅按 taskId 取消，无需注入连接凭据
 runtime:
   executable: bin/niuma-oracle-service.exe
   executable_windows: bin/niuma-oracle-service.exe

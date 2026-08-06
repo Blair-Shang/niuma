@@ -7,19 +7,46 @@ export const ORACLE_DATA_TASK_PROVIDER = 'oracle'
 
 export type OracleIoTaskKind = 'export_csv' | 'import_csv' | 'dump_sql' | 'exec_sql_file'
 
+/** 转储对象范围（树节点 → IO 对话框）。 */
+export type OracleDumpScope =
+  | 'schema'
+  | 'tables'
+  | 'views'
+  | 'procedures'
+  | 'functions'
+  | 'packages'
+  | 'sequences'
+  | 'table'
+  | 'view'
+  | 'procedure'
+  | 'function'
+  | 'package'
+  | 'sequence'
+
+const DUMP_SCOPES = new Set<OracleDumpScope>([
+  'schema',
+  'tables',
+  'views',
+  'procedures',
+  'functions',
+  'packages',
+  'sequences',
+  'table',
+  'view',
+  'procedure',
+  'function',
+  'package',
+  'sequence',
+])
+
 export interface OracleIoTaskContext {
   conn: ConnItem
   profileId: string
   sessionId?: string | null
   schema?: string
+  /** 单对象名称（表/视图/例程/包/序列等共用）。 */
   table?: string
-  /**
-   * 转储对象范围提示（来自树节点）：
-   * - `table`：单个对象
-   * - `tables` / `views` / `procedures` / `functions`：分类节点
-   * - `schema`：整个 schema
-   */
-  dumpScope?: 'schema' | 'tables' | 'views' | 'procedures' | 'functions' | 'table'
+  dumpScope?: OracleDumpScope
 }
 
 export interface OpenOracleIoTaskInput {
@@ -81,13 +108,8 @@ export function readOracleIoContext(context: Record<string, unknown>): OracleIoT
     schema: typeof context.schema === 'string' ? context.schema : undefined,
     table: typeof context.table === 'string' ? context.table : undefined,
     dumpScope:
-      dumpScope === 'schema' ||
-      dumpScope === 'tables' ||
-      dumpScope === 'views' ||
-      dumpScope === 'procedures' ||
-      dumpScope === 'functions' ||
-      dumpScope === 'table'
-        ? dumpScope
+      typeof dumpScope === 'string' && DUMP_SCOPES.has(dumpScope as OracleDumpScope)
+        ? (dumpScope as OracleDumpScope)
         : undefined,
   }
 }

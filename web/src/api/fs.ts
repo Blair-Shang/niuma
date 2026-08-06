@@ -7,6 +7,8 @@ import type {
   FsListDirResult,
   FsMkdirParams,
   FsMkdirResult,
+  FsReadTextPrefixParams,
+  FsReadTextPrefixResult,
   FsReadTextParams,
   FsReadTextResult,
   FsRenameParams,
@@ -46,6 +48,11 @@ export const fsApi = {
   /** 读取本地文本文件（UTF-8 字节原样解码为字符串） */
   readText(params: FsReadTextParams): Promise<FsReadTextResult> {
     return bridgeInvoke<FsReadTextResult>('shell.fs.readText', params)
+  },
+
+  /** 仅读取本地文本文件的指定字节前缀 */
+  readTextPrefix(params: FsReadTextPrefixParams): Promise<FsReadTextPrefixResult> {
+    return bridgeInvoke<FsReadTextPrefixResult>('shell.fs.readTextPrefix', params)
   },
 
   /** 将文本内容写回本地文件 */

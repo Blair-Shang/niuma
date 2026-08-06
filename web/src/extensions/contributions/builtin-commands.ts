@@ -15,6 +15,7 @@ import {
 import { getAllModules } from '@/extensions/registry/extension-registry'
 import { useShellStore } from '@/stores/shell'
 import { useTabStore } from '@/stores/tab'
+import { useAccountStore } from '@/stores/account'
 
 /** 内置命令归属的「扩展 id」，与真实插件区分 */
 const OWNER = 'workbench'
@@ -81,6 +82,15 @@ function registerAll(): void {
   register('workbench.editor.split', tr('command.splitEditor'), 'columns-2', splitEditor)
   register('workbench.ai.toggle', tr('command.toggleAi'), 'bot', toggleAi)
   register('workbench.ai.askSelection', tr('command.askAiSelection'), 'sparkles', askSelection)
+  register('workbench.account.open', tr('command.openAccount'), 'user', () => {
+    useTabStore().openSettings({ section: 'account' })
+  })
+  register('workbench.account.login', tr('command.login'), 'log-in', () => {
+    useAccountStore().openAuth('login')
+  })
+  register('workbench.feedback.open', tr('command.openFeedback'), 'message-square', () => {
+    useAccountStore().openFeedback()
+  })
 
   // 为每个模块（内置 + 已注册扩展）生成「打开模块」命令
   for (const module of getAllModules()) {

@@ -33,6 +33,9 @@ struct Session {
   ConnectParams params;
   dialect::ServerProfile profile;
   std::mutex mu;
+  // ODPI 连接非线程安全：串行化同一 session 上的 prepare/execute/fetch。
+  // query.cancel 不得持有此锁，以便 dpiConn_breakExecution 可打断进行中的调用。
+  std::mutex exec_mu;
   std::unordered_map<std::string, ResultSet> result_sets;
   dpiStmt* cancel_stmt = nullptr;  // 非拥有指针；生命周期由当前查询 StmtGuard / ResultSet 管理
   std::string active_request_id;

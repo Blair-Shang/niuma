@@ -1,5 +1,6 @@
 #include "session/load_lob.hpp"
 
+#include "util/dpi_error.hpp"
 #include "util/ident.hpp"
 #include "util/lob.hpp"
 #include "util/stmt_guard.hpp"
@@ -10,14 +11,7 @@ namespace niuma::oracle::session {
 namespace {
 
 std::string DpiError(dpiContext* ctx) {
-  dpiErrorInfo info{};
-  if (ctx) {
-    dpiContext_getError(ctx, &info);
-  }
-  if (info.message == nullptr) {
-    return "oracle: loadLob error";
-  }
-  return std::string("oracle: ") + info.message;
+  return util::FormatDpiError(ctx, "oracle: lob error");
 }
 
 std::string Trim(std::string s) {

@@ -108,7 +108,7 @@
 - 用户也可在 **设置 → 工具组件 → Oracle Instant Client**（`components/oracle-native`，`detect_only`）浏览指定 `oci.dll`；`oracle-service` manifest 经 `runtime.env_from_component` 注入标准变量 **`ORACLE_HOME`**（platform **不**硬编码 Oracle）。  
 - **不做**应用内 `optional_download` 代下载；官方下载页由组件「打开下载页」引导。  
 - Instant Client / ODPI **不**链进 platform-core / 壳层。  
-- 构建脚本独立：`scripts/shared/build/build-oracle-service.ps1`；常规 `build-services.ps1` **可跳过**本服务。  
+- 构建：`scripts/shared/build/build-oracle-service.ps1`；`build-services.ps1` / `pnpm dev:hot` **默认**编入，无工具链时用 `-SkipOracle`。  
 - CI：无 Instant Client 的 runner 只编 IPC/JSON 单测（mock），集成测打 `oracle` 标签跳过。  
 - 许可证：若未来改为随包/代下载，须遵守 OTN Instant Client 再分发条款并更新 EULA / `docs/compliance/NOTICES.txt`。
 
@@ -403,6 +403,14 @@ res:{profileId}:schema:{schema}:procedure:{name}
 | TableDesign | P4 | 壳用 `TableDesignShell`；Oracle 类型逻辑在本服务 |
 | `io.exportCsv` / `importCsv` / `dumpSql` / `execSqlFile` | P4 | 任务进全局 Dock |
 | `tx.*` | P2 | 与 MySQL 同名事务 API（OCI 事务） |
+
+IO 约束：
+
+- Oracle IO 使用固定 2 worker 队列；取消会设置协作标志并通过 `dpiConn_breakExecution` 尝试打断当前 ODPI 调用。
+- CSV 按 RFC 4180 流式解析，支持列映射和字段内换行；RAW/BLOB 使用 `0x` 十六进制文本。导入“清空”使用事务内 `DELETE`，失败或取消可回滚。
+- CSV 导出和 SQL 转储先写同目录临时文件，完成后原子替换目标；失败或取消不会留下可误认成完整结果的目标文件。
+- SQL 文件按块拆句执行，内存与最大单条语句相关。Oracle DDL 会隐式提交，因此取消或失败只能回滚尚未提交的 DML，不能撤销已经执行的 DDL。
+- SQL 转储遇到无法无损序列化的类型、对象枚举截断、DDL/数据读取失败时必须失败，不允许静默写 `NULL` 或报告成功。
 
 **不做（首期）**：SQL Developer 级调试器；外部 `sqlplus`/`sqlcl` CLI 封装（若后续做，走外部组件注册，不编进 platform）。
 

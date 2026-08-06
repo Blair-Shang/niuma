@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"niuma/platform/internal/appupdate"
 	"niuma/platform/internal/idgen"
 	"niuma/platform/internal/ai"
 	"niuma/platform/internal/components"
@@ -53,6 +54,8 @@ const (
 	MethodComponentsGetDownload = "platform.components.getDownload"
 	// MethodComponentsInstall 下载并安装组件包至 data/components/。
 	MethodComponentsInstall = "platform.components.install"
+	// MethodAppUpdateDownload / Verify / Cancel：本体安装包受限下载（见 appupdate）。
+	// Web/Shell 契约亦接受 shell.update.*，由壳层改写或直达此处。
 	// MethodAIProviderList 列出 LLM Provider。
 	MethodAIProviderList = "platform.ai.provider.list"
 	// MethodAIProviderGet 读取单个 Provider（含模型列表）。
@@ -174,6 +177,7 @@ type Deps struct {
 	Capabilities *CapabilityRegistry
 	FileEditor   *FileEditorCoordinator
 	Components *components.Registry
+	AppUpdate  *appupdate.Manager
 	AI         *ai.Service
 	Events     EventPublisher
 }
@@ -187,9 +191,10 @@ type Dispatcher struct {
 	ids          idgen.Generator
 	capabilities *CapabilityRegistry
 	fileEditor   *FileEditorCoordinator
-	components *components.Registry
-	ai         *ai.Service
-	events     EventPublisher
+	components   *components.Registry
+	appUpdate    *appupdate.Manager
+	ai           *ai.Service
+	events       EventPublisher
 }
 
 // New 依据 deps 创建 Dispatcher。
@@ -203,6 +208,7 @@ func New(deps Deps) *Dispatcher {
 		capabilities: deps.Capabilities,
 		fileEditor:   deps.FileEditor,
 		components:   deps.Components,
+		appUpdate:    deps.AppUpdate,
 		ai:           deps.AI,
 		events:       deps.Events,
 	}
@@ -261,6 +267,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 		return d.componentsGetDownload(ctx, req)
 	case MethodComponentsInstall:
 		return d.componentsInstall(ctx, req)
+	case MethodAppUpdateDownload:
+		return d.appUpdateDownload(ctx, req)
+	case MethodAppUpdateVerify:
+		return d.appUpdateVerify(ctx, req)
+	case MethodAppUpdateCancel:
+		return d.appUpdateCancel(ctx, req)
 	case MethodAIProviderList:
 		return d.aiProviderList(ctx, req)
 	case MethodAIProviderGet:

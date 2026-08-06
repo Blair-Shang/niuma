@@ -16,12 +16,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"niuma/pkg/buildinfo"
 	"niuma/pkg/logutil"
 	"niuma/pkg/serviceipc/event"
 	"niuma/platform/internal/ai"
+	"niuma/platform/internal/appupdate"
 	"niuma/platform/internal/components"
 	"niuma/platform/internal/eventhub"
 	"niuma/platform/internal/handler"
@@ -153,6 +155,8 @@ func run() error {
 		IDs:           idGen,
 		Events:        eventHub,
 	})
+	updateHosts := strings.Split(os.Getenv("NIUMA_UPDATE_DOWNLOAD_HOSTS"), ",")
+	appUpdateMgr := appupdate.New(updateHosts)
 	dispatcher := handler.New(handler.Deps{
 		Settings:     settingStore,
 		Connections:  store.NewConnectionStore(db),
@@ -162,6 +166,7 @@ func run() error {
 		Capabilities: capabilities,
 		FileEditor:   fileEditor,
 		Components:   componentRegistry,
+		AppUpdate:    appUpdateMgr,
 		AI:           aiService,
 		Events:       eventHub,
 	})

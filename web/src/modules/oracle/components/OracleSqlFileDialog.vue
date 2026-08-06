@@ -53,15 +53,30 @@ const ctx = computed(() => (task.value ? readOracleIoContext(task.value.context)
 const isDump = computed(() => task.value?.kind === 'dump_sql')
 const schemaName = computed(() => ctx.value?.schema?.trim() || 'main')
 
+const SINGLE_OBJECT_SCOPES = new Set([
+  'table',
+  'view',
+  'procedure',
+  'function',
+  'package',
+  'sequence',
+])
+const CATEGORY_SCOPES = new Set([
+  'tables',
+  'views',
+  'functions',
+  'procedures',
+  'packages',
+  'sequences',
+])
+
 const isSingleObjectScope = computed(
-  () => !!ctx.value?.table || ctx.value?.dumpScope === 'table',
+  () =>
+    !!ctx.value?.table ||
+    (ctx.value?.dumpScope != null && SINGLE_OBJECT_SCOPES.has(ctx.value.dumpScope)),
 )
 const isCategoryScope = computed(
-  () =>
-    ctx.value?.dumpScope === 'tables' ||
-    ctx.value?.dumpScope === 'views' ||
-    ctx.value?.dumpScope === 'functions' ||
-    ctx.value?.dumpScope === 'procedures',
+  () => ctx.value?.dumpScope != null && CATEGORY_SCOPES.has(ctx.value.dumpScope),
 )
 const isSchemaScope = computed(
   () => isDump.value && !isSingleObjectScope.value && !isCategoryScope.value,
@@ -74,6 +89,8 @@ const includeTables = ref(true)
 const includeViews = ref(true)
 const includeProcedures = ref(true)
 const includeFunctions = ref(true)
+const includePackages = ref(true)
+const includeSequences = ref(true)
 const dropIfExists = ref(true)
 const truncateBeforeData = ref(false)
 const continueOnError = ref(true)
@@ -82,6 +99,7 @@ const objectRows = ref<OracleObjectInfo[]>([])
 const selectedTables = ref<string[]>([])
 const objectsLoading = ref(false)
 const objectsError = ref('')
+const objectsTruncated = ref(false)
 
 const modeOptions = computed<RsSelectOptions>(() => [
   { value: 'structure_and_data', label: t('modules.oracle.io.dumpModeBoth') },
@@ -101,6 +119,7 @@ const allObjectsSelected = computed(
 
 const canConfirm = computed(() => {
   if (!task.value || !filePath.value.trim() || busy.value) return false
+  if (isDump.value && canPickObjects.value && objectsTruncated.value) return false
   if (isDump.value && canPickObjects.value && objectRows.value.length > 0) {
     return selectedTables.value.length > 0
   }
@@ -113,18 +132,16 @@ const scopeLabel = computed(() => {
   const scope = ctx.value
   const schema = schemaName.value
   if (scope?.table) return `${schema}.${scope.table}`
-  if (scope?.dumpScope === 'tables') {
-    return t('modules.oracle.io.dumpScopeTables', { name: schema })
+  const keyByScope: Record<string, string> = {
+    tables: 'modules.oracle.io.dumpScopeTables',
+    views: 'modules.oracle.io.dumpScopeViews',
+    functions: 'modules.oracle.io.dumpScopeFunctions',
+    procedures: 'modules.oracle.io.dumpScopeProcedures',
+    packages: 'modules.oracle.io.dumpScopePackages',
+    sequences: 'modules.oracle.io.dumpScopeSequences',
   }
-  if (scope?.dumpScope === 'views') {
-    return t('modules.oracle.io.dumpScopeViews', { name: schema })
-  }
-  if (scope?.dumpScope === 'functions') {
-    return t('modules.oracle.io.dumpScopeFunctions', { name: schema })
-  }
-  if (scope?.dumpScope === 'procedures') {
-    return t('modules.oracle.io.dumpScopeProcedures', { name: schema })
-  }
+  const key = scope?.dumpScope ? keyByScope[scope.dumpScope] : undefined
+  if (key) return t(key, { name: schema })
   return schema
 })
 
@@ -153,51 +170,70 @@ const fileLabels = computed(
   }),
 )
 
+function resetIncludes(opts: {
+  tables?: boolean
+  views?: boolean
+  procedures?: boolean
+  functions?: boolean
+  packages?: boolean
+  sequences?: boolean
+}): void {
+  includeTables.value = !!opts.tables
+  includeViews.value = !!opts.views
+  includeProcedures.value = !!opts.procedures
+  includeFunctions.value = !!opts.functions
+  includePackages.value = !!opts.packages
+  includeSequences.value = !!opts.sequences
+}
+
 function applyDumpScopeDefaults(): void {
   const scope = ctx.value?.dumpScope
   if (scope === 'tables') {
-    includeTables.value = true
-    includeViews.value = false
-    includeProcedures.value = true
-    includeFunctions.value = false
+    resetIncludes({ tables: true })
     mode.value = 'structure_and_data'
     return
   }
-  if (scope === 'views') {
-    includeTables.value = false
-    includeViews.value = true
-    includeProcedures.value = false
-    includeFunctions.value = false
+  if (scope === 'views' || scope === 'view') {
+    resetIncludes({ views: true })
     mode.value = 'structure_only'
     return
   }
-  if (scope === 'functions') {
-    includeTables.value = false
-    includeViews.value = false
-    includeProcedures.value = false
-    includeFunctions.value = true
+  if (scope === 'functions' || scope === 'function') {
+    resetIncludes({ functions: true })
     mode.value = 'structure_only'
     return
   }
-  if (scope === 'procedures') {
-    includeTables.value = false
-    includeViews.value = false
-    includeProcedures.value = true
-    includeFunctions.value = false
+  if (scope === 'procedures' || scope === 'procedure') {
+    resetIncludes({ procedures: true })
     mode.value = 'structure_only'
     return
   }
-  if (scope === 'table' || ctx.value?.table) {
-    includeTables.value = true
-    includeViews.value = true
-    includeProcedures.value = true
-    includeFunctions.value = false
+  if (scope === 'packages' || scope === 'package') {
+    resetIncludes({ packages: true })
+    mode.value = 'structure_only'
     return
   }
-  includeTables.value = true
-  includeViews.value = true
-  includeProcedures.value = true
-  includeFunctions.value = true
+  if (scope === 'sequences' || scope === 'sequence') {
+    resetIncludes({ sequences: true })
+    mode.value = 'structure_only'
+    return
+  }
+  if (scope === 'table') {
+    resetIncludes({ tables: true })
+    return
+  }
+  if (ctx.value?.table) {
+    resetIncludes({ tables: true, views: true })
+    return
+  }
+  resetIncludes({
+    tables: true,
+    views: true,
+    procedures: true,
+    functions: true,
+    packages: true,
+    sequences: true,
+  })
 }
 
 async function loadObjectRows(): Promise<void> {
@@ -206,6 +242,7 @@ async function loadObjectRows(): Promise<void> {
     objectRows.value = []
     selectedTables.value = []
     objectsError.value = ''
+    objectsTruncated.value = false
     return
   }
   objectsLoading.value = true
@@ -223,10 +260,12 @@ async function loadObjectRows(): Promise<void> {
     })
     objectRows.value = result.objects ?? result.tables ?? []
     selectedTables.value = objectRows.value.map((row) => row.name)
+    objectsTruncated.value = !!result.truncated
   } catch (e) {
     objectsError.value = e instanceof Error ? e.message : t('modules.oracle.io.objectsLoadError')
     objectRows.value = []
     selectedTables.value = []
+    objectsTruncated.value = false
   } finally {
     objectsLoading.value = false
   }
@@ -253,12 +292,15 @@ function reset(): void {
   includeViews.value = true
   includeProcedures.value = true
   includeFunctions.value = true
+  includePackages.value = true
+  includeSequences.value = true
   dropIfExists.value = true
   truncateBeforeData.value = false
   continueOnError.value = true
   objectRows.value = []
   selectedTables.value = []
   objectsError.value = ''
+  objectsTruncated.value = false
   clearLines()
   applyDumpScopeDefaults()
 }
@@ -289,10 +331,16 @@ function dumpDefaultFileName(): string {
   const schema = schemaName.value
   if (!scope) return 'dump.sql'
   if (scope.table) return `${schema}.${scope.table}.sql`
-  if (scope.dumpScope === 'tables') return `${schema}-tables.sql`
-  if (scope.dumpScope === 'views') return `${schema}-views.sql`
-  if (scope.dumpScope === 'functions') return `${schema}-functions.sql`
-  if (scope.dumpScope === 'procedures') return `${schema}-procedures.sql`
+  const suffixByScope: Record<string, string> = {
+    tables: 'tables',
+    views: 'views',
+    functions: 'functions',
+    procedures: 'procedures',
+    packages: 'packages',
+    sequences: 'sequences',
+  }
+  const suffix = scope.dumpScope ? suffixByScope[scope.dumpScope] : undefined
+  if (suffix) return `${schema}-${suffix}.sql`
   return `${schema}.sql`
 }
 
@@ -348,6 +396,8 @@ async function onConfirm(): Promise<void> {
             includeViews: includeViews.value,
             includeProcedures: includeProcedures.value,
             includeFunctions: includeFunctions.value,
+            includePackages: includePackages.value,
+            includeSequences: includeSequences.value,
           },
         })
       : await oracleApi.ioExecSqlFile({
@@ -379,9 +429,14 @@ async function onConfirm(): Promise<void> {
 
 async function onCancelTask(): Promise<void> {
   const backendTaskId = activeTaskId.value
+  const scope = ctx.value
   if (!backendTaskId) return
   try {
-    await oracleApi.ioCancel({ taskId: backendTaskId })
+    await oracleApi.ioCancel({
+      profileId: scope?.profileId,
+      sessionId: scope?.sessionId || undefined,
+      taskId: backendTaskId,
+    })
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t('modules.oracle.io.failed'))
   }
@@ -458,6 +513,20 @@ async function onCancelTask(): Promise<void> {
               :label="t('modules.oracle.io.dumpIncludeFunctions')"
               :disabled="busy || objectFiltersLocked"
             />
+            <DataTransferCheck
+              v-if="isSchemaScope || ctx?.dumpScope === 'packages'"
+              v-model="includePackages"
+              variant="chip"
+              :label="t('modules.oracle.io.dumpIncludePackages')"
+              :disabled="busy || objectFiltersLocked"
+            />
+            <DataTransferCheck
+              v-if="isSchemaScope || ctx?.dumpScope === 'sequences'"
+              v-model="includeSequences"
+              variant="chip"
+              :label="t('modules.oracle.io.dumpIncludeSequences')"
+              :disabled="busy || objectFiltersLocked"
+            />
           </div>
         </DataTransferSection>
 
@@ -494,6 +563,12 @@ async function onCancelTask(): Promise<void> {
           </p>
           <p v-else-if="objectsError" class="nm-oracle-sf__status nm-oracle-sf__status--error">
             {{ objectsError }}
+          </p>
+          <p
+            v-else-if="objectsTruncated"
+            class="nm-oracle-sf__status nm-oracle-sf__status--error"
+          >
+            {{ t('modules.oracle.io.objectsTruncated') }}
           </p>
           <ul v-else class="nm-oracle-sf__objects">
             <li v-for="row in objectRows" :key="row.name" class="nm-oracle-sf__object-item">

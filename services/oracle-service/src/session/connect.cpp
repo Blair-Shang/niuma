@@ -3,6 +3,7 @@
 #include "util/ident.hpp"
 #include "util/paths.hpp"
 #include "util/stmt_guard.hpp"
+#include "util/utf8.hpp"
 
 #include <cctype>
 #include <cstring>
@@ -18,18 +19,22 @@ ContextPtr g_ctx;
 std::string DpiError(const dpiContext* ctx, const dpiErrorInfo* info = nullptr) {
   dpiErrorInfo local{};
   if (info == nullptr && ctx != nullptr) {
-    dpiContext_getError(ctx, &local);
+    dpiContext_getError(const_cast<dpiContext*>(ctx), &local);
     info = &local;
   }
-  if (info == nullptr || info->message == nullptr) {
+  if (info == nullptr || info->message == nullptr || info->messageLength == 0) {
     return "oracle: unknown ODPI error";
   }
-  std::ostringstream oss;
-  oss << "oracle: " << info->message;
-  if (info->code != 0) {
-    oss << " (ORA-" << info->code << ")";
+  std::string raw(info->message, info->messageLength);
+  while (!raw.empty()) {
+    const unsigned char c = static_cast<unsigned char>(raw.back());
+    if (c == 0 || c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+      raw.pop_back();
+      continue;
+    }
+    break;
   }
-  return oss.str();
+  return std::string("oracle: ") + util::EnsureUtf8(raw);
 }
 
 std::string JsonString(const nlohmann::json& j, std::initializer_list<const char*> keys) {

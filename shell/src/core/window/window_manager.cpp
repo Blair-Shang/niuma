@@ -2,6 +2,7 @@
 
 #include "core/window/auxiliary_window.h"
 #include "core/window/main_window.h"
+#include "core/window/splash_window.h"
 #include "core/window/window_factory.h"
 #include "core/window/window_registry.h"
 
@@ -28,10 +29,14 @@ void WindowManager::SetClient(CefRefPtr<CefClient> client) {
   WindowFactory::Instance().SetClient(client);
 }
 
+/** 按 WindowKind 分发给对应单例管理器（Splash 不进 Auxiliary 复用表） */
 void WindowManager::NotifyAttached(const WindowRecord& record) {
   switch (record.kind) {
     case WindowKind::Main:
       MainWindow::Instance().OnAttached(record.id);
+      break;
+    case WindowKind::Splash:
+      SplashWindow::Instance().OnAttached(record.id);
       break;
     case WindowKind::Auxiliary:
       AuxiliaryWindowManager::Instance().OnAttached(record.id);
@@ -45,6 +50,9 @@ void WindowManager::NotifyDetached(int window_id, WindowKind kind) {
   switch (kind) {
     case WindowKind::Main:
       MainWindow::Instance().OnDetached(window_id);
+      break;
+    case WindowKind::Splash:
+      SplashWindow::Instance().OnDetached(window_id);
       break;
     case WindowKind::Auxiliary:
       AuxiliaryWindowManager::Instance().OnDetached(window_id);
@@ -182,6 +190,11 @@ bool WindowManager::Reveal(int window_id) {
     entry->user_revealed = true;
     window->Show();
     window->Activate();
+    // Web 侧 shell.window.reveal 只走这里，不经 NiuMaClient::RevealBrowserWindow；
+    // 主窗首显时必须在此关 Splash，否则小启动窗会一直留在前台。
+    if (entry->kind == WindowKind::Main) {
+      SplashWindow::Instance().Close();
+    }
     return true;
   }
   return false;

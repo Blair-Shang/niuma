@@ -14,7 +14,10 @@ param(
     [string]$Configuration = 'Release',
 
     # 可选：为 sqlite-service 启用 SQLCipher（CGO + -tags sqlcipher）；默认关闭以免拖垮 CI
-    [switch]$SqlCipher
+    [switch]$SqlCipher,
+
+    # 默认编入 oracle-service（CMake/C++）；无 VS/CMake 的机器可传 -SkipOracle
+    [switch]$SkipOracle
 )
 
 $ErrorActionPreference = 'Stop'
@@ -335,6 +338,26 @@ $redisBuilt = Build-RustService -CrateDir (Join-Path $Root 'services/redis-servi
     -BinName 'niuma-redis-service' `
     -Output $redisOut
 
+$oracleOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-oracle-service' -PlatformName $Platform)
+$oracleBuilt = $false
+if (-not $SkipOracle) {
+    $OracleBuildScript = Join-Path $PSScriptRoot 'build-oracle-service.ps1'
+    if (-not (Test-Path $OracleBuildScript)) {
+        throw "oracle build script missing: $OracleBuildScript"
+    }
+    Write-Host "==> cmake build oracle-service -> $oracleOut" -ForegroundColor Cyan
+    & $OracleBuildScript -Platform $Platform -Arch $Arch -Configuration $Configuration -SkipTests
+    if ($LASTEXITCODE -ne 0) {
+        throw "oracle-service build failed ($LASTEXITCODE)"
+    }
+    if (-not (Test-Path $oracleOut)) {
+        throw "oracle-service output not found: $oracleOut"
+    }
+    $oracleBuilt = $true
+} else {
+    Write-Host '==> skip oracle-service (SkipOracle)' -ForegroundColor Gray
+}
+
 if (Should-SyncLegacyBin) {
     $legacyPlatformOut = Join-Path $BinDir 'niuma-platform-core.exe'
     $legacyFtpOut = Join-Path $BinDir 'niuma-ftp-service.exe'
@@ -349,6 +372,7 @@ if (Should-SyncLegacyBin) {
     $legacyKingbaseOut = Join-Path $BinDir 'niuma-kingbase-service.exe'
     $legacySqlserverOut = Join-Path $BinDir 'niuma-sqlserver-service.exe'
     $legacyMcpVastOut = Join-Path $BinDir 'mcp-vastbase-readonly.exe'
+    $legacyOracleOut = Join-Path $BinDir 'niuma-oracle-service.exe'
     Copy-Item -Force $platformOut $legacyPlatformOut
     Copy-Item -Force $ftpOut $legacyFtpOut
     Copy-Item -Force $mongoOut $legacyMongoOut
@@ -365,6 +389,9 @@ if (Should-SyncLegacyBin) {
     }
     if ($redisBuilt -and (Test-Path $redisOut)) {
         Copy-Item -Force $redisOut $legacyRedisOut
+    }
+    if ($oracleBuilt -and (Test-Path $oracleOut)) {
+        Copy-Item -Force $oracleOut $legacyOracleOut
     }
 }
 
@@ -389,6 +416,11 @@ if ($redisBuilt -and (Test-Path $redisOut)) {
     Write-Host "    $redisOut"
 } elseif (Test-Path $redisOut) {
     Write-Host "    $redisOut (existing file, not rebuilt in this run)" -ForegroundColor Yellow
+}
+if ($oracleBuilt -and (Test-Path $oracleOut)) {
+    Write-Host "    $oracleOut"
+} elseif (Test-Path $oracleOut) {
+    Write-Host "    $oracleOut (existing file, not rebuilt in this run)" -ForegroundColor Yellow
 }
 if (Should-SyncLegacyBin) {
     Write-Host "==> legacy flat bin synced for current Windows host: $BinDir" -ForegroundColor DarkGray

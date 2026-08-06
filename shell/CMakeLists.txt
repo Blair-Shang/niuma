@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NiuMaShell VERSION 0.1.0 LANGUAGES CXX)
+project(NiuMaShell VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ add_compile_definitions(
 )
 
 if(NOT DEFINED NIUMMA_APP_VERSION)
-  set(NIUMMA_APP_VERSION "dev")
+  set(NIUMMA_APP_VERSION "1.0.0")
 endif()
 if(NOT DEFINED NIUMMA_BUILD_ID)
   set(NIUMMA_BUILD_ID "dev")
@@ -29,12 +29,14 @@ endif()
 set(SHELL_SOURCES
   src/main.cpp
   src/util/bridge_method.cpp
+  src/core/app_config.cpp
   src/core/cef/niuma_app.cpp
   src/core/cef/niuma_render_process_handler.cpp
   src/core/cef/cef_settings.cpp
   src/core/window/window_registry.cpp
   src/core/window/window_factory.cpp
   src/core/window/main_window.cpp
+  src/core/window/splash_window.cpp
   src/core/window/auxiliary_window.cpp
   src/core/window/window_manager.cpp
   src/core/window/native_dialog.cpp

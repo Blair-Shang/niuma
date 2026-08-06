@@ -20,6 +20,7 @@ import {
   sequenceCurrvalSeed,
   sequenceNextvalSeed,
 } from '@/modules/oracle/sql-seed'
+import { categoryRefreshPath, segmentName } from '@/modules/oracle/conn-tree-shared'
 import {
   categoryToObjectKind,
   isObjectCategory,
@@ -42,43 +43,15 @@ import {
   updateTemplateSql,
   type ScriptColumn,
 } from '@/modules/oracle/utils/script-templates'
+import type { OracleDumpScope } from '@/modules/oracle/data-tasks'
 
 const t = (key: string, params?: Record<string, unknown>) =>
   params ? i18n.global.t(key, params) : i18n.global.t(key)
 
 const toast = useRsToast()
 
-function segmentName(path: ConnResourcePath | undefined, kind: string): string | undefined {
-  return path?.segments.find((segment) => segment.kind === kind)?.name
-}
-
 function isRelationCategory(category: string | undefined): boolean {
   return category === 'tables' || category === 'views'
-}
-
-function isCategoryId(
-  name: string | undefined,
-): name is 'tables' | 'views' | 'procedures' | 'functions' | 'packages' | 'sequences' {
-  return (
-    name === 'tables' ||
-    name === 'views' ||
-    name === 'procedures' ||
-    name === 'functions' ||
-    name === 'packages' ||
-    name === 'sequences'
-  )
-}
-
-function categoryRefreshPath(path: ConnResourcePath): ConnResourcePath | undefined {
-  const schema = segmentName(path, 'schema')
-  const category = segmentName(path, 'category')
-  if (!schema || !isCategoryId(category)) return undefined
-  return {
-    segments: [
-      { kind: 'schema', name: schema },
-      { kind: 'category', name: category },
-    ],
-  }
 }
 
 async function copyText(text: string): Promise<void> {
@@ -252,21 +225,64 @@ export function openCreate(conn: ConnItem, path: ConnResourcePath): void {
   openCreateObjectScript(conn, schema, category)
 }
 
+function resolveDumpScope(
+  category: string | undefined,
+  table: string | undefined,
+  routine: string | undefined,
+  pkg: string | undefined,
+  sequence: string | undefined,
+): { dumpScope: OracleDumpScope; objectName?: string } {
+  if (table && category === 'tables') {
+    return { dumpScope: 'table', objectName: table }
+  }
+  if (table && category === 'views') {
+    return { dumpScope: 'view', objectName: table }
+  }
+  if (routine) {
+    if (category === 'procedures') return { dumpScope: 'procedure', objectName: routine }
+    if (category === 'functions') return { dumpScope: 'function', objectName: routine }
+  }
+  if (pkg && category === 'packages') {
+    return { dumpScope: 'package', objectName: pkg }
+  }
+  if (sequence) return { dumpScope: 'sequence', objectName: sequence }
+  if (
+    category === 'tables' ||
+    category === 'views' ||
+    category === 'procedures' ||
+    category === 'functions' ||
+    category === 'packages' ||
+    category === 'sequences'
+  ) {
+    return { dumpScope: category }
+  }
+  return { dumpScope: 'schema' }
+}
+
 export function openOracleIoTask(
   conn: ConnItem,
   kind: 'export_csv' | 'import_csv' | 'dump_sql' | 'exec_sql_file',
   opts: {
     schema?: string
     table?: string
-    dumpScope?: 'schema' | 'tables' | 'views' | 'procedures' | 'functions' | 'table'
+    dumpScope?: OracleDumpScope
   },
 ): void {
   const { schema, table, dumpScope } = opts
   const objectLabel = schema && table ? `${schema}.${table}` : (table ?? schema ?? conn.profileName)
+  const singleObjectScopes = new Set<OracleDumpScope>([
+    'table',
+    'view',
+    'procedure',
+    'function',
+    'package',
+    'sequence',
+  ])
   const useObjectScope =
     kind === 'export_csv' ||
     kind === 'import_csv' ||
-    (kind === 'dump_sql' && (dumpScope === 'table' || !!table))
+    (kind === 'dump_sql' &&
+      (!!table || (dumpScope != null && singleObjectScopes.has(dumpScope))))
   const scopeLabel = useObjectScope ? objectLabel : (schema ?? conn.profileName)
 
   const titleKey: Record<typeof kind, string> = {
@@ -282,16 +298,20 @@ export function openOracleIoTask(
     exec_sql_file: 'modules.oracle.io.execDesc',
   }
 
+  const categoryScopeDescKey: Partial<Record<OracleDumpScope, string>> = {
+    tables: 'modules.oracle.io.dumpScopeTables',
+    views: 'modules.oracle.io.dumpScopeViews',
+    procedures: 'modules.oracle.io.dumpScopeProcedures',
+    functions: 'modules.oracle.io.dumpScopeFunctions',
+    packages: 'modules.oracle.io.dumpScopePackages',
+    sequences: 'modules.oracle.io.dumpScopeSequences',
+  }
+
   let descName = schema ?? ''
   if (kind === 'dump_sql') {
-    if (dumpScope === 'tables') {
-      descName = t('modules.oracle.io.dumpScopeTables', { name: schema ?? '' })
-    } else if (dumpScope === 'views') {
-      descName = t('modules.oracle.io.dumpScopeViews', { name: schema ?? '' })
-    } else if (dumpScope === 'procedures') {
-      descName = t('modules.oracle.io.dumpScopeProcedures', { name: schema ?? '' })
-    } else if (dumpScope === 'functions') {
-      descName = t('modules.oracle.io.dumpScopeFunctions', { name: schema ?? '' })
+    const catKey = dumpScope ? categoryScopeDescKey[dumpScope] : undefined
+    if (catKey) {
+      descName = t(catKey, { name: schema ?? '' })
     } else if (table) {
       descName = `${schema}.${table}`
     }
@@ -322,10 +342,10 @@ async function loadTableScriptMeta(
   try {
     return await withOracleSession(conn.profileId, async (sessionId) => {
       const { oracleApi } = await import('@/api/oracle')
-      const [cols, pk] = await Promise.all([
-        oracleApi.metaColumns({ sessionId, schema, table }),
-        oracleApi.metaPrimaryKey({ sessionId, schema, table }),
-      ])
+      const cols = await oracleApi.metaColumns({ sessionId, schema, table })
+      const pk = await oracleApi.metaPrimaryKey({ sessionId, schema, table }).catch(() => ({
+        columns: [] as string[],
+      }))
       const columns: ScriptColumn[] = (cols.columns ?? []).map((c) => ({
         name: c.name,
         dataType: c.dataType,
@@ -563,19 +583,11 @@ export async function onResourceMenuSelect(
       return
     case 'dumpSql': {
       if (!schema) return
-      const dumpScope =
-        objectName
-          ? 'table'
-          : category === 'tables' ||
-              category === 'views' ||
-              category === 'procedures' ||
-              category === 'functions'
-            ? category
-            : 'schema'
+      const resolved = resolveDumpScope(category, table, routine, pkg, sequence)
       openOracleIoTask(conn, 'dump_sql', {
         schema,
-        table: objectName,
-        dumpScope,
+        table: resolved.objectName,
+        dumpScope: resolved.dumpScope,
       })
       return
     }

@@ -136,7 +136,8 @@ export interface OracleCatalogColumnsResult {
 }
 
 export interface OracleMetaRelationParams {
-  sessionId: string
+  sessionId?: string
+  profileId?: string
   schema?: string
   database?: string
   table?: string
@@ -359,6 +360,7 @@ export type OracleDesignOp = {
   columns?: string[]
   unique?: boolean
   method?: string
+  autoIncrement?: boolean
   refSchema?: string
   refTable?: string
   refColumns?: string[]
@@ -448,6 +450,7 @@ export interface OracleIoDumpSqlParams {
     includeViews?: boolean
     includeProcedures?: boolean
     includeFunctions?: boolean
+    includePackages?: boolean
     includeSequences?: boolean
   }
 }
@@ -465,6 +468,8 @@ export interface OracleIoTaskResult {
 }
 
 export interface OracleIoCancelParams {
+  /** 供 platform 凭据注入兼容；io.cancel 本身不连库。 */
+  profileId?: string
   sessionId?: string
   taskId: string
 }

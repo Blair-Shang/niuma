@@ -52,7 +52,7 @@ function syncCargoVersion(version) {
 }
 
 const rootPkg = readJson(join(repoRoot, 'package.json'))
-const version = String(rootPkg.version || '0.0.0')
+const version = String(rootPkg.version || '1.0.0')
 const buildId = getGitSha()
 const buildDate = new Date().toISOString()
 
@@ -66,17 +66,6 @@ const info = {
 
 mkdirSync(join(repoRoot, 'build'), { recursive: true })
 writeJson(join(repoRoot, 'build/version.json'), info)
-
-writeFileSync(
-  join(repoRoot, 'build/version.env'),
-  [
-    `VITE_NIUMA_VERSION=${version}`,
-    `VITE_NIUMA_BUILD_ID=${buildId}`,
-    `VITE_NIUMA_BUILD_DATE=${buildDate}`,
-    '',
-  ].join('\n'),
-  'utf8',
-)
 
 syncPackageVersion('web/package.json', version)
 // @niuma/ui 已迁至同级仓库 niuma-ui；存在时同步版本字段便于联调对齐

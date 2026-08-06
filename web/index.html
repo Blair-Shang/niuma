@@ -16,7 +16,11 @@
         background: #181818;
       }
 
-      /* 静态启动层：不依赖 JS bundle，辅助窗 Shell 早显时覆盖 Vite 冷加载 */
+      /*
+       * 主窗/辅助窗内联启动层（不依赖 Vue bundle）。
+       * 冷启动有 Shell Splash 时主窗应保持隐藏至 mount 后 dismiss+reveal，
+       * 用户不应看到本层；本层主要用于辅助窗早显与热重载 Conceal 后再显。
+       */
       #niuma-boot-loader {
         position: fixed;
         inset: 0;

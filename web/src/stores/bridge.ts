@@ -17,6 +17,7 @@ export const useBridgeStore = defineStore('bridge', () => {
   const connected = ref(false)
   const runtimeMode = ref<RuntimeMode>('offline')
   const shellVersion = ref<string | null>(null)
+  const shellBuildId = ref<string | null>(null)
   const shellInfo = ref<ShellInfo | null>(null)
 
   const statusLabel = computed(() => {
@@ -45,10 +46,12 @@ export const useBridgeStore = defineStore('bridge', () => {
     if (!connected.value) return
     try {
       const version = await shellApi.getVersion()
-      shellVersion.value = version.version
+      shellVersion.value = version.version || null
+      shellBuildId.value = version.build || null
       shellInfo.value = await shellApi.getInfo()
     } catch {
       shellVersion.value = null
+      shellBuildId.value = null
       shellInfo.value = null
     }
   }
@@ -63,6 +66,7 @@ export const useBridgeStore = defineStore('bridge', () => {
     connected,
     runtimeMode,
     shellVersion,
+    shellBuildId,
     shellInfo,
     statusLabel,
     ping,

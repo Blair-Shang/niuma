@@ -1,10 +1,10 @@
 #include "handler/dispatcher.hpp"
 #include "util/paths.hpp"
 
+#include <niuma/logutil/logutil.hpp>
 #include <niuma/serviceipc/server.hpp>
 
 #include <csignal>
-#include <iostream>
 #include <memory>
 
 namespace {
@@ -26,9 +26,9 @@ int main(int argc, char** argv) {
     }
   }
 
-  std::cerr << "niuma-oracle-service starting\n"
-            << "  ipc=" << addr << "\n"
-            << "  oracleClientLibDir=" << niuma::oracle::util::OracleClientLibDir() << "\n";
+  niuma::logutil::Init("oracle-service");
+  niuma::logutil::Info("oracle-service starting",
+                       {{"ipc", addr}, {"oracleClientLibDir", niuma::oracle::util::OracleClientLibDir()}});
 
   niuma::oracle::handler::Dispatcher dispatcher;
   g_server = std::make_unique<niuma::serviceipc::Server>(
@@ -38,5 +38,6 @@ int main(int argc, char** argv) {
   std::signal(SIGINT, OnSignal);
   std::signal(SIGTERM, OnSignal);
 
+  niuma::logutil::Info("serving", {{"addr", addr}});
   return g_server->Serve();
 }

@@ -1,6 +1,7 @@
 #include "session/query.hpp"
 
 #include "session/tx.hpp"
+#include "util/dpi_error.hpp"
 #include "util/idgen.hpp"
 #include "util/ident.hpp"
 #include "util/lob.hpp"
@@ -25,14 +26,7 @@ int ClampLimit(int limit) {
 }
 
 std::string DpiError(dpiContext* ctx) {
-  dpiErrorInfo info{};
-  if (ctx) {
-    dpiContext_getError(ctx, &info);
-  }
-  if (info.message == nullptr) {
-    return "oracle: query error";
-  }
-  return std::string("oracle: ") + info.message;
+  return util::FormatDpiError(ctx, "oracle: query error");
 }
 
 std::string TypeName(dpiOracleTypeNum oracle_type) {

@@ -1,6 +1,7 @@
 #include "meta/routines.hpp"
 
 #include "session/sql_rows.hpp"
+#include "util/dpi_error.hpp"
 #include "util/ident.hpp"
 #include "util/lob.hpp"
 #include "util/sql_literal.hpp"
@@ -12,14 +13,7 @@ namespace niuma::oracle::meta {
 namespace {
 
 std::string DpiError(dpiContext* ctx) {
-  dpiErrorInfo info{};
-  if (ctx) {
-    dpiContext_getError(ctx, &info);
-  }
-  if (info.message == nullptr) {
-    return "oracle: meta error";
-  }
-  return std::string("oracle: ") + info.message;
+  return util::FormatDpiError(ctx, "oracle: routines error");
 }
 
 std::string Lower(std::string s) {

@@ -9,8 +9,25 @@
 
 namespace niuma::oracle::dataio {
 
-using CancelFlag = std::shared_ptr<std::atomic<bool>>;
+using CancelFlag = IoCancelFlag;
 using ProgressFn = std::function<void(int64_t bytes, int64_t rows, const std::string& message)>;
+
+class IoCancelRegistration {
+ public:
+  IoCancelRegistration(const CancelFlag& cancel, dpiConn* connection)
+      : cancel_(cancel), connection_(connection) {
+    if (cancel_) cancel_->Attach(connection_);
+  }
+  ~IoCancelRegistration() {
+    if (cancel_) cancel_->Detach(connection_);
+  }
+  IoCancelRegistration(const IoCancelRegistration&) = delete;
+  IoCancelRegistration& operator=(const IoCancelRegistration&) = delete;
+
+ private:
+  CancelFlag cancel_;
+  dpiConn* connection_;
+};
 
 bool RunExportCsv(const session::ConnectParams& connect, const std::string& schema,
                   const std::string& table, const std::string& output_path, const CsvOptions& opts,

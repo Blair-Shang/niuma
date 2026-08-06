@@ -66,6 +66,7 @@ const sourceColumns = ref<string[]>([])
 /** 源列 → 表列；空字符串表示跳过 */
 const columnTargets = ref<Record<string, string>>({})
 const mapLoading = ref(false)
+const CSV_HEADER_PREFIX_BYTES = 64 * 1024
 
 const mappedCount = computed(() =>
   sourceColumns.value.filter((s) => !!columnTargets.value[s]?.trim()).length,
@@ -180,10 +181,8 @@ async function loadColumnMapFromFile(): Promise<void> {
   mapLoading.value = true
   try {
     if (tableColumns.value.length === 0) await loadTableColumns()
-    const result = await fsApi.readText({ path })
-    // 仅用前缀解析表头，避免巨大文件卡 UI
-    const prefix = result.content.slice(0, 64 * 1024)
-    const sources = parseCsvSourceColumns(prefix, {
+    const result = await fsApi.readTextPrefix({ path, maxBytes: CSV_HEADER_PREFIX_BYTES })
+    const sources = parseCsvSourceColumns(result.content, {
       header: header.value,
       delimiter: delimiter.value || ',',
     })
@@ -304,9 +303,14 @@ async function onConfirm(): Promise<void> {
 
 async function onCancelTask(): Promise<void> {
   const backendTaskId = activeTaskId.value
+  const scope = ctx.value
   if (!backendTaskId) return
   try {
-    await oracleApi.ioCancel({ taskId: backendTaskId })
+    await oracleApi.ioCancel({
+      profileId: scope?.profileId,
+      sessionId: scope?.sessionId || undefined,
+      taskId: backendTaskId,
+    })
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t('modules.oracle.io.failed'))
   }

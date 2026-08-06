@@ -1,6 +1,7 @@
 #include "meta/relation.hpp"
 
 #include "session/sql_rows.hpp"
+#include "util/dpi_error.hpp"
 #include "util/ident.hpp"
 #include "util/sql_literal.hpp"
 #include "util/stmt_guard.hpp"
@@ -12,14 +13,7 @@ namespace niuma::oracle::meta {
 namespace {
 
 std::string DpiError(dpiContext* ctx) {
-  dpiErrorInfo info{};
-  if (ctx) {
-    dpiContext_getError(ctx, &info);
-  }
-  if (info.message == nullptr) {
-    return "oracle: meta error";
-  }
-  return std::string("oracle: ") + info.message;
+  return util::FormatDpiError(ctx, "oracle: meta error");
 }
 
 bool RequireRelation(const RelationRef& ref, std::string& error) {

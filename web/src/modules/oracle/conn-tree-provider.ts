@@ -5,7 +5,6 @@
  */
 import type { RsContextMenuItem } from '@niuma/ui'
 import { oracleApi } from '@/api/oracle'
-import { i18n } from '@/locale'
 import {
   activate,
   onResourceMenuSelect as handleResourceMenuSelect,
@@ -16,53 +15,35 @@ import {
   openQuery,
   requestCreateSchema,
 } from '@/modules/oracle/conn-tree-actions'
+import {
+  isCategoryId,
+  loadCategoryChildren,
+  loadSchemaCategories,
+  segmentName,
+  t as treeT,
+  type CategoryId,
+} from '@/modules/oracle/conn-tree-shared'
 import { isObjectCategory } from '@/modules/oracle/types/object-script'
 import type { ConnTreeChildProvider } from '@/modules/ops/conn-tree/registry'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
-type Category = 'tables' | 'views' | 'procedures' | 'functions' | 'packages' | 'sequences'
-
-const categories: Array<{ id: Category; key: string; icon: string }> = [
-  { id: 'tables', key: 'tables', icon: 'table' },
-  { id: 'views', key: 'views', icon: 'eye' },
-  { id: 'procedures', key: 'procedures', icon: 'workflow' },
-  { id: 'functions', key: 'functions', icon: 'square-function' },
-  { id: 'packages', key: 'packages', icon: 'package' },
-  { id: 'sequences', key: 'sequences', icon: 'list-ordered' },
-]
-
-const segment = (path: ConnResourcePath | undefined, kind: string) =>
-  path?.segments.find((item) => item.kind === kind)?.name
-const label = (key: string) => i18n.global.t(`modules.oracle.tree.${key}`)
-
-function isCategoryId(name: string | undefined): name is Category {
-  return categories.some((item) => item.id === name)
-}
-
-function objectIcon(category: Category): string {
-  if (category === 'views') return 'eye'
-  if (category === 'sequences') return 'list-ordered'
-  if (category === 'procedures') return 'workflow'
-  if (category === 'functions') return 'square-function'
-  if (category === 'packages') return 'package'
-  return 'table'
-}
+const label = (key: string) => treeT(`modules.oracle.tree.${key}`)
 
 function isTableLike(path: ConnResourcePath | undefined): boolean {
-  const category = segment(path, 'category')
-  return Boolean(segment(path, 'table') && (category === 'tables' || category === 'views'))
+  const category = segmentName(path, 'category')
+  return Boolean(segmentName(path, 'table') && (category === 'tables' || category === 'views'))
 }
 
 function isRoutineLike(path: ConnResourcePath | undefined): boolean {
-  const category = segment(path, 'category')
+  const category = segmentName(path, 'category')
   return Boolean(
-    (segment(path, 'routine') || segment(path, 'package')) &&
+    (segmentName(path, 'routine') || segmentName(path, 'package')) &&
       (category === 'procedures' || category === 'functions' || category === 'packages'),
   )
 }
 
 function isSequenceLike(path: ConnResourcePath | undefined): boolean {
-  return Boolean(segment(path, 'sequence') && segment(path, 'category') === 'sequences')
+  return Boolean(segmentName(path, 'sequence') && segmentName(path, 'category') === 'sequences')
 }
 
 /** 生成脚本：SELECT / COUNT / INSERT 等常用项。 */
@@ -268,16 +249,18 @@ function sequenceMenus(): RsContextMenuItem[] {
   ]
 }
 
-function categorySupportsDump(category: Category): boolean {
+function categorySupportsDump(category: CategoryId): boolean {
   return (
     category === 'tables' ||
     category === 'views' ||
     category === 'procedures' ||
-    category === 'functions'
+    category === 'functions' ||
+    category === 'packages' ||
+    category === 'sequences'
   )
 }
 
-function categoryCreateKey(category: Category): string | null {
+function categoryCreateKey(category: CategoryId): string | null {
   if (category === 'tables') return 'createTable'
   if (category === 'sequences') return 'createSequence'
   if (category === 'views') return 'createView'
@@ -291,8 +274,8 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
   canExpand: () => true,
 
   async loadChildren(conn, parentPath) {
-    const schema = segment(parentPath, 'schema')
-    const category = segment(parentPath, 'category') as Category | undefined
+    const schema = segmentName(parentPath, 'schema')
+    const category = segmentName(parentPath, 'category') as CategoryId | undefined
     if (!schema) {
       try {
         const result = await oracleApi.treeSchemas({ profileId: conn.profileId, excludeSystem: true })
@@ -307,64 +290,11 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
       }
     }
     if (!category) {
-      return categories.map((item) => ({
-        path: {
-          segments: [
-            { kind: 'schema', name: schema },
-            { kind: 'category', name: item.id },
-          ],
-        },
-        label: label(item.key),
-        icon: item.icon,
-        collapsible: true,
-      }))
+      return loadSchemaCategories(conn, schema)
     }
     if (!isCategoryId(category)) return []
     try {
-      let result
-      if (category === 'tables' || category === 'views') {
-        result = await oracleApi.treeTables({
-          profileId: conn.profileId,
-          schema,
-          types: [category === 'tables' ? 'table' : 'view'],
-          limit: 2000,
-        })
-      } else if (category === 'sequences') {
-        result = await oracleApi.treeSequences({ profileId: conn.profileId, schema, limit: 2000 })
-      } else if (category === 'packages') {
-        result = await oracleApi.treePackages({ profileId: conn.profileId, schema, limit: 2000 })
-      } else {
-        result = await oracleApi.treeRoutines({
-          profileId: conn.profileId,
-          schema,
-          types: [category === 'procedures' ? 'procedure' : 'function'],
-          limit: 2000,
-        })
-      }
-      const items =
-        result.objects ?? result.tables ?? result.routines ?? result.packages ?? result.sequences ?? []
-      return items.map((item) => {
-        const leafKind =
-          category === 'procedures' || category === 'functions'
-            ? 'routine'
-            : category === 'packages'
-              ? 'package'
-              : category === 'sequences'
-                ? 'sequence'
-                : 'table'
-        return {
-          path: {
-            segments: [
-              { kind: 'schema', name: schema },
-              { kind: 'category', name: category },
-              { kind: leafKind, name: item.name },
-            ],
-          },
-          label: item.name,
-          icon: objectIcon(category),
-          collapsible: false,
-        }
-      })
+      return await loadCategoryChildren(conn, schema, category)
     } catch {
       return []
     }
@@ -400,12 +330,12 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
 
   resourceMenuItems(_conn, path): RsContextMenuItem[] {
     const items: RsContextMenuItem[] = []
-    const schema = segment(path, 'schema')
-    const category = segment(path, 'category')
-    const table = segment(path, 'table')
-    const routine = segment(path, 'routine')
-    const pkg = segment(path, 'package')
-    const sequence = segment(path, 'sequence')
+    const schema = segmentName(path, 'schema')
+    const category = segmentName(path, 'category')
+    const table = segmentName(path, 'table')
+    const routine = segmentName(path, 'routine')
+    const pkg = segmentName(path, 'package')
+    const sequence = segmentName(path, 'sequence')
 
     if (schema && !category) {
       items.push(
@@ -463,7 +393,7 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
   },
 
   onResourceMenuSelect(conn, path, key) {
-    const schema = segment(path, 'schema')
+    const schema = segmentName(path, 'schema')
     if (!schema) {
       void handleResourceMenuSelect(conn, path, key)
       return
@@ -489,7 +419,7 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
         openCreateObjectScript(conn, schema, 'packages')
         return
       case 'create': {
-        const category = segment(path, 'category')
+        const category = segmentName(path, 'category')
         if (isObjectCategory(category)) {
           openCreateObjectScript(conn, schema, category)
         }

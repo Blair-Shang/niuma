@@ -1,6 +1,8 @@
 #include "meta/system_users.hpp"
+#include "util/connection_error.hpp"
 #include "util/ident.hpp"
 #include "util/sql_literal.hpp"
+#include "util/utf8.hpp"
 
 #include <iostream>
 
@@ -35,6 +37,18 @@ int main() {
   EXPECT(meta::IsSystemSchema("APEX_040000"));
   EXPECT(!meta::IsSystemSchema("SCOTT"));
   EXPECT(!meta::IsSystemSchema("HR"));
+
+  EXPECT(util::IsValidUtf8("hello"));
+  EXPECT(util::IsValidUtf8("中文OK"));
+  EXPECT(!util::IsValidUtf8("\xff\xfe bad"));
+  EXPECT(util::EnsureUtf8("plain") == "plain");
+  EXPECT(util::IsValidUtf8(util::EnsureUtf8("\xff\xfe")));
+
+  EXPECT(util::IsConnectionLost("oracle: DPI-1080: connection was closed by ORA-03113"));
+  EXPECT(util::IsConnectionLost("ORA-03113: end-of-file on communication channel"));
+  EXPECT(util::IsConnectionLost("session closed, please reconnect"));
+  EXPECT(!util::IsConnectionLost("ORA-00902: invalid datatype"));
+  EXPECT(!util::IsConnectionLost("ORA-04088: error during execution of trigger"));
 
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

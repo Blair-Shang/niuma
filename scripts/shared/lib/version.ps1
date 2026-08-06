@@ -9,11 +9,35 @@ function Invoke-EmitBuildInfo {
     if (-not (Test-Path $script)) {
         throw "version emitter not found: $script"
     }
-    $json = node $script 2>&1 | Where-Object { $_ -is [string] -and $_ -match '^\{' } | Select-Object -Last 1
-    if (-not $json) {
+    # node 的 synced 日志在 stderr；$ErrorActionPreference=Stop 时 2>&1 会变成 NativeCommandError 并中止
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $raw = & node $script 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "emit-build-info.mjs exited with code $LASTEXITCODE"
+        }
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+
+    $jsonLine = $null
+    foreach ($item in @($raw)) {
+        $text = if ($item -is [System.Management.Automation.ErrorRecord]) {
+            $item.ToString()
+        } else {
+            [string]$item
+        }
+        if ($text -match '^\s*\{') {
+            $jsonLine = $text
+        } elseif ($text -match '^synced ') {
+            Write-Host "    $text"
+        }
+    }
+    if (-not $jsonLine) {
         throw 'emit-build-info.mjs produced no JSON output'
     }
-    return $json | ConvertFrom-Json
+    return $jsonLine | ConvertFrom-Json
 }
 
 function Get-BuildInfo {

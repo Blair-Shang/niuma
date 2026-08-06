@@ -1,0 +1,31 @@
+# 本地 Oracle Free，供 oracle-service / 前端联调 DDL、查询等。
+# 首次启动约 1–3 分钟；日志出现 DATABASE IS READY TO USE! 后再连。
+#
+#   docker compose -f services/oracle-service/docker-compose.yml up -d
+#   docker compose -f services/oracle-service/docker-compose.yml logs -f
+#
+# 连接（NiuMa 新建连接）：
+#   Host=127.0.0.1  Port=61521  Service Name=FREEPDB1
+#   User=niuma / Niuma123   （DDL 用；system / Oracle123 为管理员）
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    container_name: niuma-oracle
+    ports:
+      - "61521:1521"
+    environment:
+      ORACLE_PASSWORD: Oracle123
+      APP_USER: niuma
+      APP_USER_PASSWORD: Niuma123
+    volumes:
+      - niuma-oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+volumes:
+  niuma-oracle-data:

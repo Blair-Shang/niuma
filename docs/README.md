@@ -33,6 +33,7 @@
 | [30-clickhouse-module.md](./30-clickhouse-module.md) | **ClickHouse 管理模块（Go + clickhouse-go/v2；P0–P3 含 ObjectScript/io.*）** |
 | [31-kingbase-module.md](./31-kingbase-module.md) | **人大金仓管理模块（Go + pgx/v5；后端/Web P0 session/query；树待做）** |
 | [32-sqlserver-module.md](./32-sqlserver-module.md) | **SQL Server 管理模块（Go + go-mssqldb；后端 P0 session/query + LSP；Web P0 Query/`GO`/LSP；tree 待 P1）** |
+| [33-desktop-app-update.md](./33-desktop-app-update.md) | **桌面端应用内更新（cloud/admin 发布 + 官网/桌面共用 API + 应用内下载 Setup）** |
 | [20-tool-components.md](./20-tool-components.md) | **工具组件管理（设置页外部 CLI 检测与路径配置）** |
 | [21-session-registry.md](./21-session-registry.md) | **Tab 四层架构 + Session Registry**（时序速查 §0.5、开发者约定 §0.6） |
 | [17-script-platform-layout.md](./17-script-platform-layout.md) | 脚本平台分层与重构方案 |
@@ -108,3 +109,4 @@ Platform Core ──→ 多语言 Capability Services
 | v0.32 | 2026-08-03 | 新增 32 SQL Server 落地方案（锁定 Go + microsoft/go-mssqldb；服务未实现） |
 | v0.33 | 2026-08-03 | 32：`sqlserver-service` 后端 P0（session/query/Probe；go.work + build） |
 | v0.34 | 2026-08-03 | 32：Web P0（ConnKind / Query / `GO` 拆批 / LSP；无对象树） |
+| v0.35 | 2026-08-05 | 新增 33 桌面端应用内更新落地设计（cloud 发布 API + Shell 下载安装） |

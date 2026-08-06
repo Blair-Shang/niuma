@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Oracle 表设计器：挂载公共 TableDesignShell，方言负责草稿 / RPC / 类型目录。
- * 对齐 Navicat / DBeaver：默认 id 列、真 CREATE 预览、外键、网格编辑、列拖拽、索引多选。
+ * 默认 id NUMBER IDENTITY、真 CREATE 预览、外键、网格编辑、列拖拽、索引多选。
  */
 import {
   RsButton,
@@ -26,14 +26,16 @@ import {
   type TableDesignShellLabels,
 } from '@/modules/database'
 import {
+  patchCategoryObjectCount,
   refreshResourceIfLoaded,
 } from '@/modules/ops/composables/useConnTreeChildren'
+import { categoryPath } from '@/modules/oracle/conn-tree-shared'
 import type { ConnItem } from '@/modules/ops/types'
 import { useTabStore } from '@/stores/tab'
 import {
   ORACLE_BASE_TYPE_OPTIONS,
   ORACLE_FK_ACTIONS,
-  allowsUnsigned,
+  ORACLE_INDEX_METHODS,
   dataTypeParamKind,
   defaultCreateTableColumns,
   isDefaultIndexName,
@@ -59,6 +61,8 @@ import {
   toForeignKeyDrafts,
   toIndexDrafts,
 } from '@/modules/oracle/utils/table-design-ops'
+import { isOracleConnectionError } from '@/modules/oracle/utils/oracleConnectionError'
+import { useSessionActionStore } from '@/stores/session-actions'
 
 const props = defineProps<{
   sessionId: string | null
@@ -72,6 +76,17 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const toast = useRsToast()
+const sessionActions = useSessionActionStore()
+
+function noteConnectionLost(err: unknown): void {
+  if (!isOracleConnectionError(err)) return
+  if (props.profileId) {
+    toast.warning(t('modules.oracle.session.connectionLost'))
+    sessionActions.requestReconnect(props.profileId)
+  } else {
+    toast.warning(t('modules.oracle.session.reconnectHint'))
+  }
+}
 
 type DesignTab = 'columns' | 'indexes' | 'foreignKeys'
 type ColRow = DesignColumnDraft & Record<string, unknown>
@@ -150,10 +165,10 @@ const sections = computed<TableDesignSectionItem[]>(() => [
   },
 ])
 
-const indexMethodOptions: RsSelectOptions = [
-  { value: 'BTREE', label: 'BTREE' },
-  { value: 'HASH', label: 'HASH' },
-]
+const indexMethodOptions: RsSelectOptions = ORACLE_INDEX_METHODS.map((v) => ({
+  value: v,
+  label: v,
+}))
 
 const typeBaseSelectOptions = ORACLE_BASE_TYPE_OPTIONS.map((o) => ({
   value: o.base,
@@ -184,8 +199,7 @@ const displayColumns = computed((): ColRow[] =>
             c.defaultExpr !== orig.defaultExpr ||
             c.comment !== orig.comment ||
             c.primaryKey !== orig.primaryKey ||
-            c.autoIncrement !== orig.autoIncrement ||
-            c.unsigned !== orig.unsigned)
+            c.autoIncrement !== orig.autoIncrement)
         ) {
           status = t('modules.oracle.design.statusEdit')
         }
@@ -249,14 +263,6 @@ const columnColumns = computed((): RsTableColumn<ColRow>[] => {
     align: 'center',
     valueType: 'number',
     editable: (row) => dataTypeParamKind(row.typeBase) === 'precision',
-  },
-  {
-    key: 'unsigned',
-    title: t('modules.oracle.design.colUnsigned'),
-    width: 72,
-    align: 'center',
-    editable: (row) => allowsUnsigned(row.typeBase),
-    valueType: 'boolean',
   },
   {
     key: 'primaryKey',
@@ -396,14 +402,6 @@ const fkColumns = computed((): RsTableColumn<FkRow>[] => [
     valueType: 'select',
     editorOptions: { options: fkActionOptions },
   },
-  {
-    key: 'onUpdate',
-    title: t('modules.oracle.design.fkOnUpdate'),
-    width: 110,
-    editable: true,
-    valueType: 'select',
-    editorOptions: { options: fkActionOptions },
-  },
 ])
 
 function asBool(value: unknown, fallback: boolean): boolean {
@@ -433,30 +431,23 @@ function onColCommit(row: ColRow, column: RsTableColumn<ColRow>, _i: number, val
     if (key === 'typeBase') {
       const nextBase = (draft || r.typeBase).toUpperCase()
       const kind = dataTypeParamKind(nextBase)
-      const opt = ORACLE_BASE_TYPE_OPTIONS.find((o) => o.base === nextBase)
-      let typeLength = r.typeLength
-      let typeScale = r.typeScale
-      let enumValues = r.enumValues
-      let unsigned = r.unsigned && allowsUnsigned(nextBase)
-      if (kind === 'none') {
-        typeLength = undefined
-        typeScale = undefined
-        enumValues = ''
-      } else if (kind === 'length') {
-        typeScale = undefined
-        enumValues = ''
-        if (typeLength == null && opt?.defaultLength != null) typeLength = opt.defaultLength
+      const opt = ORACLE_BASE_TYPE_OPTIONS.find((o) => o.base.toUpperCase() === nextBase)
+      let typeLength: number | undefined
+      let typeScale: number | undefined
+      if (kind === 'length') {
+        typeLength = opt?.defaultLength
       } else if (kind === 'precision') {
-        enumValues = ''
-        if (typeLength == null) typeLength = opt?.defaultPrecision ?? 10
-        if (typeScale == null) typeScale = opt?.defaultScale ?? 2
-      } else if (kind === 'enum') {
-        typeLength = undefined
-        typeScale = undefined
-        unsigned = false
-        if (!enumValues.trim()) enumValues = "'a','b'"
+        typeLength = opt?.defaultPrecision ?? 38
+        typeScale = opt?.defaultScale ?? 0
       }
-      const next = { ...r, typeBase: nextBase, typeLength, typeScale, enumValues, unsigned }
+      const next = {
+        ...r,
+        typeBase: opt?.base ?? nextBase,
+        typeLength,
+        typeScale,
+        unsigned: false,
+        enumValues: '',
+      }
       return { ...next, dataType: syncColumnDataType(next) }
     }
     if (key === 'typeLength') {
@@ -467,11 +458,6 @@ function onColCommit(row: ColRow, column: RsTableColumn<ColRow>, _i: number, val
     if (key === 'typeScale') {
       const n = draft === '' ? undefined : Number(draft)
       const next = { ...r, typeScale: Number.isFinite(n) ? n : undefined }
-      return { ...next, dataType: syncColumnDataType(next) }
-    }
-    if (key === 'unsigned') {
-      const unsigned = asBool(value, r.unsigned) && allowsUnsigned(r.typeBase)
-      const next = { ...r, unsigned }
       return { ...next, dataType: syncColumnDataType(next) }
     }
     if (key === 'defaultExpr') return { ...r, defaultExpr: draft }
@@ -519,8 +505,8 @@ function onIdxCommit(row: IdxRow, column: RsTableColumn<IdxRow>, _i: number, val
       return { ...r, name, columnsText }
     }
     if (key === 'method') {
-      const method = String(value ?? 'BTREE').toUpperCase()
-      return { ...r, method: method === 'HASH' ? 'HASH' : 'BTREE' }
+      const method = String(value ?? 'NORMAL').toUpperCase()
+      return { ...r, method: method === 'BITMAP' ? 'BITMAP' : 'NORMAL' }
     }
     if (key === 'unique') return { ...r, unique: asBool(value, r.unique) }
     return r
@@ -590,13 +576,6 @@ function onFkCommit(row: FkRow, column: RsTableColumn<FkRow>, _i: number, value:
       return {
         ...r,
         onDelete: (ORACLE_FK_ACTIONS as readonly string[]).includes(upper) ? upper : r.onDelete,
-      }
-    }
-    if (key === 'onUpdate') {
-      const upper = draft.toUpperCase()
-      return {
-        ...r,
-        onUpdate: (ORACLE_FK_ACTIONS as readonly string[]).includes(upper) ? upper : r.onUpdate,
       }
     }
     return r
@@ -724,12 +703,25 @@ function updateColSideField<K extends keyof DesignColumnDraft>(
     if (
       field === 'typeBase' ||
       field === 'typeLength' ||
-      field === 'typeScale' ||
-      field === 'unsigned' ||
-      field === 'enumValues'
+      field === 'typeScale'
     ) {
       if (field === 'typeBase') {
-        updated.unsigned = Boolean(updated.unsigned && allowsUnsigned(String(value)))
+        const nextBase = String(value).toUpperCase()
+        const opt = ORACLE_BASE_TYPE_OPTIONS.find((o) => o.base.toUpperCase() === nextBase)
+        updated.typeBase = opt?.base ?? nextBase
+        updated.unsigned = false
+        updated.enumValues = ''
+        const kind = dataTypeParamKind(updated.typeBase)
+        if (kind === 'none') {
+          updated.typeLength = undefined
+          updated.typeScale = undefined
+        } else if (kind === 'length') {
+          updated.typeLength = opt?.defaultLength
+          updated.typeScale = undefined
+        } else if (kind === 'precision') {
+          updated.typeLength = opt?.defaultPrecision ?? 38
+          updated.typeScale = opt?.defaultScale ?? 0
+        }
       }
       updated.dataType = syncColumnDataType(updated)
     }
@@ -753,12 +745,10 @@ async function load(): Promise<void> {
     const base = props.sessionId
       ? { sessionId: props.sessionId, schema: props.schema, table }
       : { profileId: props.profileId!, schema: props.schema, table }
-    const [colsResult, idxsResult, pkResult, fkResult] = await Promise.all([
-      oracleApi.metaColumns(base),
-      oracleApi.metaIndexes(base),
-      oracleApi.metaPrimaryKey(base),
-      oracleApi.metaForeignKeys(base).catch(() => ({ foreignKeys: [] })),
-    ])
+    const colsResult = await oracleApi.metaColumns(base)
+    const idxsResult = await oracleApi.metaIndexes(base)
+    const pkResult = await oracleApi.metaPrimaryKey(base)
+    const fkResult = await oracleApi.metaForeignKeys(base).catch(() => ({ foreignKeys: [] }))
     const rows = toDesignRows(colsResult.columns, pkResult.columns ?? [])
     const idxDrafts = toIndexDrafts(idxsResult.indexes, pkResult.columns ?? [])
     const fkDrafts = toForeignKeyDrafts(fkResult.foreignKeys ?? [])
@@ -872,16 +862,10 @@ function formatPreviewSqls(sqls: string[]): string[] {
 async function refreshTreeAfterCreate(): Promise<void> {
   if (!props.profileId || !props.schema) return
   const conn = { profileId: props.profileId, kind: 'oracle' } as ConnItem
-  const schemaPath = { segments: [{ kind: 'schema', name: props.schema }] }
-  const tablesPath = {
-    segments: [
-      { kind: 'schema', name: props.schema },
-      { kind: 'category', name: 'tables' },
-    ],
-  }
+  const tablesPath = categoryPath(props.schema, 'tables')
   try {
     await refreshResourceIfLoaded(conn, tablesPath, { deep: true })
-    await refreshResourceIfLoaded(conn, schemaPath, { deep: false })
+    patchCategoryObjectCount(conn, tablesPath, { delta: 1 })
   } catch {
     // 刷树失败不影响创建成功提示
   }
@@ -952,6 +936,7 @@ async function onApply(): Promise<void> {
       await load()
     }
   } catch (e) {
+    noteConnectionLost(e)
     toast.error(e instanceof Error ? e.message : String(e))
   } finally {
     saving.value = false
@@ -1191,30 +1176,38 @@ watch(activeSection, (sec) => {
             />
           </div>
           <div
-            v-if="dataTypeParamKind(editingCol.typeBase) === 'enum'"
+            v-if="
+              dataTypeParamKind(editingCol.typeBase) === 'length' ||
+              dataTypeParamKind(editingCol.typeBase) === 'precision'
+            "
             class="nm-oracle-design__field"
           >
-            <label>{{ t('modules.oracle.design.colEnumValues') }}</label>
+            <label>{{ t('modules.oracle.design.colLength') }}</label>
             <RsInput
-              :model-value="editingCol.enumValues"
+              :model-value="editingCol.typeLength != null ? String(editingCol.typeLength) : ''"
               size="sm"
-              :placeholder="t('modules.oracle.design.colEnumValuesPh')"
               @update:model-value="
-                updateColSideField(editingCol!.__rowKey, 'enumValues', String($event ?? ''))
+                updateColSideField(
+                  editingCol!.__rowKey,
+                  'typeLength',
+                  $event === '' || $event == null ? undefined : Number($event),
+                )
               "
             />
           </div>
-          <div class="nm-oracle-design__field nm-oracle-design__field--check">
-            <label>{{ t('modules.oracle.design.colUnsigned') }}</label>
-            <input
-              type="checkbox"
-              :checked="editingCol.unsigned"
-              :disabled="!allowsUnsigned(editingCol.typeBase)"
-              @change="
+          <div
+            v-if="dataTypeParamKind(editingCol.typeBase) === 'precision'"
+            class="nm-oracle-design__field"
+          >
+            <label>{{ t('modules.oracle.design.colScale') }}</label>
+            <RsInput
+              :model-value="editingCol.typeScale != null ? String(editingCol.typeScale) : ''"
+              size="sm"
+              @update:model-value="
                 updateColSideField(
                   editingCol!.__rowKey,
-                  'unsigned',
-                  ($event.target as HTMLInputElement).checked,
+                  'typeScale',
+                  $event === '' || $event == null ? undefined : Number($event),
                 )
               "
             />
@@ -1280,14 +1273,14 @@ watch(activeSection, (sec) => {
           <div class="nm-oracle-design__field">
             <label>{{ t('modules.oracle.design.idxMethod') }}</label>
             <RsSelect
-              :model-value="editingIdx.method || 'BTREE'"
+              :model-value="editingIdx.method || 'NORMAL'"
               size="sm"
               :disabled="editingIdx.primary"
               :options="indexMethodOptions"
               @update:model-value="
                 indexes = indexes.map((i) =>
                   i.__rowKey === editingIdx!.__rowKey && !i.primary
-                    ? { ...i, method: String($event || 'BTREE') }
+                    ? { ...i, method: String($event || 'NORMAL') }
                     : i,
                 )
               "
@@ -1308,21 +1301,6 @@ watch(activeSection, (sec) => {
                 foreignKeys = foreignKeys.map((f) =>
                   f.__rowKey === editingFk!.__rowKey
                     ? { ...f, onDelete: String($event) }
-                    : f,
-                )
-              "
-            />
-          </div>
-          <div class="nm-oracle-design__field">
-            <label>{{ t('modules.oracle.design.fkOnUpdate') }}</label>
-            <RsSelect
-              :model-value="editingFk.onUpdate"
-              size="sm"
-              :options="fkActionOptions"
-              @update:model-value="
-                foreignKeys = foreignKeys.map((f) =>
-                  f.__rowKey === editingFk!.__rowKey
-                    ? { ...f, onUpdate: String($event) }
                     : f,
                 )
               "

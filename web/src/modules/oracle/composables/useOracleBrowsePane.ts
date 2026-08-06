@@ -161,9 +161,9 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
   async function ensureMeta(): Promise<void> {
     if (!scopeOk.value || metaReady.value) return
     const base = { sessionId: props.sessionId!, schema: schemaName.value, table: props.table! }
-    const [columns, primaryKey] = await Promise.all([
-      oracleApi.metaColumns(base), oracleApi.metaPrimaryKey(base).catch(() => ({ columns: [] })),
-    ])
+    // Oracle 单连接不可并发；元数据查询必须串行。
+    const columns = await oracleApi.metaColumns(base)
+    const primaryKey = await oracleApi.metaPrimaryKey(base).catch(() => ({ columns: [] as string[] }))
     tableColumns.value = columns.columns ?? []
     pkColumns.value = primaryKey.columns ?? []
     metaReady.value = true
@@ -181,10 +181,18 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
       const limit = pageSize.value
       const offset = Math.max(0, (page.value - 1) * limit)
       lastDataSql.value = `SELECT *\nFROM ${from}${where}\nORDER BY ${orderSql()}\nOFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`
-      const [result, counted] = await Promise.all([
-        oracleApi.queryExec({ sessionId: props.sessionId!, schema: schemaName.value, sql: lastDataSql.value, limit }),
-        oracleApi.queryExec({ sessionId: props.sessionId!, schema: schemaName.value, sql: `SELECT COUNT(*) AS cnt\nFROM ${from}${where}` }),
-      ])
+      // Oracle ODPI 同一 session 不可并行执行；并行 SELECT + COUNT 会触发 ORA-01013。
+      const result = await oracleApi.queryExec({
+        sessionId: props.sessionId!,
+        schema: schemaName.value,
+        sql: lastDataSql.value,
+        limit,
+      })
+      const counted = await oracleApi.queryExec({
+        sessionId: props.sessionId!,
+        schema: schemaName.value,
+        sql: `SELECT COUNT(*) AS cnt\nFROM ${from}${where}`,
+      })
       lastResult.value = result
       queryColumns.value = result.columns ?? []
       rawRows.value = (result.rows ?? []).map((row) => [...row])

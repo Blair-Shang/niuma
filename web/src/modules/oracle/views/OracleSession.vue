@@ -21,6 +21,7 @@ import {
   type OracleSessionTab,
 } from '@/modules/oracle/pane-registry'
 import type { OracleObjectKind, OracleObjectScriptMode } from '@/modules/oracle/types/object-script'
+import { useSessionActionStore } from '@/stores/session-actions'
 
 const props = defineProps<{
   profileId: string
@@ -39,6 +40,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const toast = useRsToast()
+const sessionActions = useSessionActionStore()
 
 const feature = normalizeOracleFeature(props.initialTab)
 const featureDef = oraclePaneRegistry[feature]
@@ -129,6 +131,7 @@ async function onReconnect(): Promise<void> {
   error.value = null
   try {
     await reconnectSession()
+    toast.info(t('modules.oracle.session.reconnected'))
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -140,6 +143,13 @@ watch(
   () => props.profileId,
   () => {
     void connectSession()
+  },
+)
+
+watch(
+  () => sessionActions.reconnectSignals[props.profileId],
+  (val) => {
+    if (val) void onReconnect()
   },
 )
 

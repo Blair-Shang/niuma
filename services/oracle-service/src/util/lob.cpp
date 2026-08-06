@@ -1,17 +1,12 @@
 #include "util/lob.hpp"
 
+#include "util/dpi_error.hpp"
+
 namespace niuma::oracle::util {
 namespace {
 
 std::string DpiError(dpiContext* ctx) {
-  dpiErrorInfo info{};
-  if (ctx) {
-    dpiContext_getError(ctx, &info);
-  }
-  if (info.message == nullptr) {
-    return "oracle: lob error";
-  }
-  return std::string("oracle: ") + info.message;
+  return FormatDpiError(ctx, "oracle: lob error");
 }
 
 const char kB64[] =

@@ -4,6 +4,7 @@
 #include "browser/main_browser.h"
 #include "core/cef/niuma_render_process_handler.h"
 #include "core/window/main_window.h"
+#include "core/window/splash_window.h"
 #include "protocol/app_scheme_handler.h"
 #include "include/cef_command_line.h"
 #endif
@@ -44,6 +45,9 @@ CefRefPtr<CefClient> NiuMaApp::GetDefaultClient() {
 void NiuMaApp::OnContextInitialized() {
   RegisterAppScheme();
   main_client_ = new NiuMaClient();
+  // 冷启动顺序固定：Splash 先创建以便尽早可见；Main 后创建并保持隐藏，
+  // 直至 Web 首帧 shell.window.reveal（或 3s 兜底）。热重载不会再次走这里。
+  SplashWindow::Instance().Create(main_client_);
   CreateMainBrowser(main_client_);
 }
 

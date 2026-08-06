@@ -88,7 +88,7 @@ function onDataTasksClick(): void {
       >
         {{ dataTasksLabel }}
       </button>
-      <span class="tabular-nums opacity-80">NiuMa {{ bridgeStore.shellVersion ?? 'v0.1' }}</span>
+      <span class="tabular-nums opacity-80">NiuMa {{ bridgeStore.shellVersion || '—' }}</span>
     </span>
   </footer>
 </template>

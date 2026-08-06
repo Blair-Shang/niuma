@@ -21,8 +21,11 @@ import {
 } from '@/modules/oracle/utils/normalize-object-ddl'
 import { createObjectTemplate } from '@/modules/oracle/utils/script-templates'
 import type { ConnItem } from '@/modules/ops/types'
-import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
-import { refreshResourceIfLoaded } from '@/modules/ops/composables/useConnTreeChildren'
+import {
+  patchCategoryObjectCount,
+  refreshResourceIfLoaded,
+} from '@/modules/ops/composables/useConnTreeChildren'
+import { categoryPath, isCategoryId } from '@/modules/oracle/conn-tree-shared'
 import {
   defaultOracleProfile,
   resolveMonacoLanguageFromProfile,
@@ -48,19 +51,6 @@ export type OracleObjectScriptProps = {
 }
 
 const DRAFT_PERSIST_MS = 400
-
-function categoryPath(schema: string, category: string): ConnResourcePath {
-  return {
-    segments: [
-      { kind: 'schema', name: schema },
-      { kind: 'category', name: category },
-    ],
-  }
-}
-
-function schemaOnlyPath(schema: string): ConnResourcePath {
-  return { segments: [{ kind: 'schema', name: schema }] }
-}
 
 export function useOracleObjectScript(props: OracleObjectScriptProps) {
   const { t } = useI18n()
@@ -296,13 +286,18 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     await execStatements(raw)
   }
 
-  async function refreshTree(): Promise<void> {
+  /** @param updateCounts 新建时就地 patch 分类徽章，不重拉 schema */
+  async function refreshTree(updateCounts: boolean): Promise<void> {
     if (!props.profileId || !schemaName.value) return
     const conn = { profileId: props.profileId, kind: 'oracle' } as ConnItem
     const cat = objectKindToCategory(objectKind.value)
+    if (!isCategoryId(cat)) return
+    const path = categoryPath(schemaName.value, cat)
     try {
-      await refreshResourceIfLoaded(conn, categoryPath(schemaName.value, cat), { deep: true })
-      await refreshResourceIfLoaded(conn, schemaOnlyPath(schemaName.value), { deep: false })
+      await refreshResourceIfLoaded(conn, path, { deep: false })
+      if (updateCounts) {
+        patchCategoryObjectCount(conn, path, { delta: 1 })
+      }
     } catch {
       // 刷树失败不影响保存成功提示
     }
@@ -369,7 +364,7 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
         : t('modules.oracle.objectScript.saveOk')
       lastMessage.value = okMsg
       toast.success(okMsg)
-      await refreshTree()
+      await refreshTree(wasCreate)
 
       if (!selectionOnly) {
         if (objectKind.value === 'view') {

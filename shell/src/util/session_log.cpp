@@ -34,7 +34,7 @@ std::mutex g_log_mu;
 
 /// 保留最近若干次启动的日志目录；更老的会话目录在启动时删除。
 constexpr size_t kMaxSessionDirs = 15;
-constexpr int kMaxSessionAgeDays = 30;
+constexpr int kMaxSessionAgeDays = 15;
 
 bool EnsureDir(const std::string& path) {
   std::error_code ec;

@@ -1,69 +1,36 @@
 #include "dataio/ops.hpp"
 
+#include "dataio/atomic_output.hpp"
+#include "dataio/csv_codec.hpp"
 #include "session/connect.hpp"
 #include "session/manager.hpp"
 #include "session/sql_rows.hpp"
+#include "util/dpi_error.hpp"
 #include "util/ident.hpp"
+#include "util/lob.hpp"
 #include "util/sql_literal.hpp"
 #include "util/stmt_guard.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <cstdio>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <limits>
 #include <sstream>
+#include <unordered_map>
 
 namespace niuma::oracle::dataio {
 namespace {
 
 bool Canceled(const CancelFlag& cancel) { return cancel && cancel->load(); }
 
-std::string CsvEscape(const std::string& s, char delim) {
-  bool need_quote = s.find(delim) != std::string::npos || s.find('"') != std::string::npos ||
-                    s.find('\n') != std::string::npos || s.find('\r') != std::string::npos;
-  if (!need_quote) {
-    return s;
-  }
-  std::string out;
-  out.push_back('"');
-  for (char c : s) {
-    if (c == '"') {
-      out.push_back('"');
-      out.push_back('"');
-    } else {
-      out.push_back(c);
-    }
-  }
-  out.push_back('"');
-  return out;
-}
-
-std::vector<std::string> SplitCsvLine(const std::string& line, char delim) {
-  std::vector<std::string> cells;
-  std::string cur;
-  bool in_quotes = false;
-  for (size_t i = 0; i < line.size(); ++i) {
-    const char c = line[i];
-    if (c == '"') {
-      if (in_quotes && i + 1 < line.size() && line[i + 1] == '"') {
-        cur.push_back('"');
-        ++i;
-      } else {
-        in_quotes = !in_quotes;
-      }
-    } else if (c == delim && !in_quotes) {
-      cells.push_back(cur);
-      cur.clear();
-    } else {
-      cur.push_back(c);
-    }
-  }
-  cells.push_back(cur);
-  return cells;
-}
-
-bool OpenIoSession(const session::ConnectParams& connect, session::Session& out, std::string& error) {
+bool OpenIoSession(const session::ConnectParams& connect, session::Session& out,
+                   std::string& error) {
   auto opened = session::ConnectAndProbe(connect, error);
-  if (!opened.conn) {
-    return false;
-  }
+  if (!opened.conn) return false;
   out.conn = std::move(opened.conn);
   out.ctx = session::SharedContext(error);
   out.params = connect;
@@ -74,20 +41,245 @@ bool OpenIoSession(const session::ConnectParams& connect, session::Session& out,
 bool ExecSimple(session::Session& s, const std::string& sql, std::string& error) {
   util::StmtGuard stmt;
   dpiStmt* raw = nullptr;
-  if (dpiConn_prepareStmt(s.conn.get(), 0, sql.c_str(), static_cast<uint32_t>(sql.size()), nullptr, 0,
-                          &raw) < 0) {
-    dpiErrorInfo info{};
-    dpiContext_getError(s.ctx.get(), &info);
-    error = info.message ? std::string("oracle: ") + info.message : "oracle: exec failed";
+  if (dpiConn_prepareStmt(s.conn.get(), 0, sql.c_str(), static_cast<uint32_t>(sql.size()), nullptr,
+                          0, &raw) < 0) {
+    error = util::FormatDpiError(s.ctx.get(), "oracle: exec failed");
     return false;
   }
   stmt.Reset(raw);
   uint32_t cols = 0;
   if (dpiStmt_execute(stmt.Get(), DPI_MODE_EXEC_DEFAULT, &cols) < 0) {
-    dpiErrorInfo info{};
-    dpiContext_getError(s.ctx.get(), &info);
-    error = info.message ? std::string("oracle: ") + info.message : "oracle: exec failed";
+    error = util::FormatDpiError(s.ctx.get(), "oracle: exec failed");
     return false;
+  }
+  return true;
+}
+
+void Rollback(session::Session& s) {
+  if (s.conn) (void)dpiConn_rollback(s.conn.get());
+}
+
+std::string Upper(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+    return static_cast<char>(std::toupper(c));
+  });
+  return value;
+}
+
+std::string Hex(const std::string& raw) {
+  static constexpr char kDigits[] = "0123456789ABCDEF";
+  std::string out;
+  out.reserve(raw.size() * 2);
+  for (const unsigned char c : raw) {
+    out.push_back(kDigits[c >> 4]);
+    out.push_back(kDigits[c & 0x0F]);
+  }
+  return out;
+}
+
+bool Unhex(std::string value, std::string& raw) {
+  if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0) value.erase(0, 2);
+  if (value.size() % 2 != 0) return false;
+  raw.clear();
+  raw.reserve(value.size() / 2);
+  auto nibble = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+  };
+  for (size_t i = 0; i < value.size(); i += 2) {
+    const int hi = nibble(value[i]);
+    const int lo = nibble(value[i + 1]);
+    if (hi < 0 || lo < 0) return false;
+    raw.push_back(static_cast<char>((hi << 4) | lo));
+  }
+  return true;
+}
+
+std::string CsvEscape(const std::string& value, char delimiter) {
+  const bool quote = value.find(delimiter) != std::string::npos ||
+                     value.find('"') != std::string::npos ||
+                     value.find('\n') != std::string::npos ||
+                     value.find('\r') != std::string::npos;
+  if (!quote) return value;
+  std::string out{"\""};
+  out.reserve(value.size() + 2);
+  for (char c : value) {
+    if (c == '"') out.push_back('"');
+    out.push_back(c);
+  }
+  out.push_back('"');
+  return out;
+}
+
+std::string TimestampText(const dpiTimestamp& value, bool with_zone) {
+  char buffer[96];
+  const int fraction = static_cast<int>(value.fsecond);
+  if (with_zone) {
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d.%09d %+03d:%02d",
+                  value.year, value.month, value.day, value.hour, value.minute, value.second,
+                  fraction, value.tzHourOffset, std::abs(value.tzMinuteOffset));
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d.%09d", value.year,
+                  value.month, value.day, value.hour, value.minute, value.second, fraction);
+  }
+  return buffer;
+}
+
+bool CellText(dpiContext* ctx, dpiOracleTypeNum oracle_type, dpiNativeTypeNum native, dpiData* data,
+              const std::string& null_string, std::string& out, std::string& error) {
+  if (!data || data->isNull) {
+    out = null_string;
+    return true;
+  }
+  if (native == DPI_NATIVE_TYPE_LOB || oracle_type == DPI_ORACLE_TYPE_CLOB ||
+      oracle_type == DPI_ORACLE_TYPE_NCLOB || oracle_type == DPI_ORACLE_TYPE_BLOB) {
+    util::LobReadResult lob;
+    if (!util::ReadLobData(ctx, native, data, std::numeric_limits<uint64_t>::max(), lob, error)) {
+      return false;
+    }
+    if (lob.truncated) {
+      error = "oracle: LOB too large to export";
+      return false;
+    }
+    out = oracle_type == DPI_ORACLE_TYPE_BLOB ? "0x" + Hex(lob.data) : std::move(lob.data);
+    return true;
+  }
+  switch (native) {
+    case DPI_NATIVE_TYPE_BYTES: {
+      const std::string bytes(reinterpret_cast<const char*>(data->value.asBytes.ptr),
+                              data->value.asBytes.length);
+      out = oracle_type == DPI_ORACLE_TYPE_RAW || oracle_type == DPI_ORACLE_TYPE_LONG_RAW
+                ? "0x" + Hex(bytes)
+                : bytes;
+      return true;
+    }
+    case DPI_NATIVE_TYPE_INT64:
+      out = std::to_string(data->value.asInt64);
+      return true;
+    case DPI_NATIVE_TYPE_UINT64:
+      out = std::to_string(data->value.asUint64);
+      return true;
+    case DPI_NATIVE_TYPE_FLOAT:
+    case DPI_NATIVE_TYPE_DOUBLE: {
+      std::ostringstream ss;
+      ss << std::setprecision(17)
+         << (native == DPI_NATIVE_TYPE_FLOAT ? data->value.asFloat : data->value.asDouble);
+      out = ss.str();
+      return true;
+    }
+    case DPI_NATIVE_TYPE_TIMESTAMP:
+      if (oracle_type == DPI_ORACLE_TYPE_DATE) {
+        const auto& timestamp = data->value.asTimestamp;
+        char buffer[32];
+        std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d",
+                      timestamp.year, timestamp.month, timestamp.day, timestamp.hour,
+                      timestamp.minute, timestamp.second);
+        out = buffer;
+      } else {
+        out = TimestampText(data->value.asTimestamp,
+                            oracle_type == DPI_ORACLE_TYPE_TIMESTAMP_TZ);
+      }
+      return true;
+    case DPI_NATIVE_TYPE_BOOLEAN:
+      out = data->value.asBoolean ? "1" : "0";
+      return true;
+    default:
+      error = "oracle: unsupported CSV column type";
+      return false;
+  }
+}
+
+struct ColumnMeta {
+  std::string name;
+  std::string type;
+};
+
+bool LoadColumns(session::Session& s, const std::string& schema, const std::string& table,
+                 std::vector<ColumnMeta>& columns, std::string& error) {
+  const std::string sql =
+      "SELECT COLUMN_NAME, DATA_TYPE FROM ALL_TAB_COLUMNS WHERE OWNER = " +
+      util::QuoteLiteral(schema) + " AND TABLE_NAME = " + util::QuoteLiteral(table) +
+      " ORDER BY COLUMN_ID";
+  session::SqlRowsResult rows;
+  if (!session::ExecStringRows(s, sql, 1001, rows, error)) return false;
+  if (rows.truncated) {
+    error = "oracle: table has too many columns";
+    return false;
+  }
+  for (const auto& row : rows.rows) {
+    if (row.size() >= 2) columns.push_back({row[0], Upper(row[1])});
+  }
+  if (columns.empty()) {
+    error = "oracle: no columns for import";
+    return false;
+  }
+  return true;
+}
+
+std::vector<std::string> ColumnNames(const std::vector<ColumnMeta>& columns) {
+  std::vector<std::string> names;
+  names.reserve(columns.size());
+  for (const auto& column : columns) names.push_back(column.name);
+  return names;
+}
+
+std::unordered_map<std::string, std::string> ColumnTypes(const std::vector<ColumnMeta>& columns) {
+  std::unordered_map<std::string, std::string> result;
+  for (const auto& column : columns) result[Upper(column.name)] = column.type;
+  return result;
+}
+
+std::string ClobLiteral(const std::string& value) {
+  if (value.empty()) return "EMPTY_CLOB()";
+  std::ostringstream out;
+  for (size_t offset = 0; offset < value.size();) {
+    size_t count = std::min<size_t>(3000, value.size() - offset);
+    while (count > 0 && offset + count < value.size() &&
+           (static_cast<unsigned char>(value[offset + count]) & 0xC0) == 0x80) {
+      --count;
+    }
+    if (offset > 0) out << " || ";
+    out << "TO_CLOB(" << util::QuoteLiteral(value.substr(offset, count)) << ")";
+    offset += count;
+  }
+  return out.str();
+}
+
+bool ImportLiteral(const std::string& value, const std::string& type,
+                   const std::string& null_string, std::string& out, std::string& error) {
+  if (value == null_string) {
+    out = "NULL";
+    return true;
+  }
+  if (type == "DATE") {
+    out = "TO_DATE(" + util::QuoteLiteral(value) + ", 'YYYY-MM-DD HH24:MI:SS')";
+  } else if (type.find("TIMESTAMP") == 0 && type.find("TIME ZONE") != std::string::npos) {
+    out = "TO_TIMESTAMP_TZ(" + util::QuoteLiteral(value) +
+          ", 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM')";
+  } else if (type.find("TIMESTAMP") == 0) {
+    out = "TO_TIMESTAMP(" + util::QuoteLiteral(value) + ", 'YYYY-MM-DD HH24:MI:SS.FF')";
+  } else if (type == "RAW" || type == "LONG RAW" || type == "BLOB") {
+    std::string raw;
+    if (!Unhex(value, raw)) {
+      error = "oracle: invalid hexadecimal value for " + type;
+      return false;
+    }
+    const std::string hex = Hex(raw);
+    if (type == "BLOB" && raw.size() > 2000) {
+      error = "oracle: BLOB CSV import exceeds 2000 bytes; use SQL dump restore";
+      return false;
+    }
+    out = type == "BLOB" ? "TO_BLOB(HEXTORAW('" + hex + "'))" : "HEXTORAW('" + hex + "')";
+  } else if (type == "CLOB" || type == "NCLOB") {
+    out = ClobLiteral(value);
+  } else if (type == "NUMBER" || type == "FLOAT" || type == "BINARY_FLOAT" ||
+             type == "BINARY_DOUBLE") {
+    out = "TO_NUMBER(" + util::QuoteLiteral(value) +
+          ", 'TM9', 'NLS_NUMERIC_CHARACTERS=''.,''')";
+  } else {
+    out = util::QuoteLiteral(value);
   }
   return true;
 }
@@ -102,55 +294,47 @@ bool RunExportCsv(const session::ConnectParams& connect, const std::string& sche
     return false;
   }
   session::Session s;
-  if (!OpenIoSession(connect, s, error)) {
-    return false;
-  }
+  if (!OpenIoSession(connect, s, error)) return false;
+  IoCancelRegistration cancel_registration(cancel, s.conn.get());
   const std::string sql =
       "SELECT * FROM " + util::QuoteIdent(schema) + "." + util::QuoteIdent(table);
   util::StmtGuard stmt;
   dpiStmt* raw = nullptr;
-  if (dpiConn_prepareStmt(s.conn.get(), 0, sql.c_str(), static_cast<uint32_t>(sql.size()), nullptr, 0,
-                          &raw) < 0) {
-    error = "oracle: export prepare failed";
+  if (dpiConn_prepareStmt(s.conn.get(), 0, sql.c_str(), static_cast<uint32_t>(sql.size()), nullptr,
+                          0, &raw) < 0) {
+    error = util::FormatDpiError(s.ctx.get(), "oracle: export prepare failed");
     return false;
   }
   stmt.Reset(raw);
   uint32_t num_cols = 0;
   if (dpiStmt_execute(stmt.Get(), DPI_MODE_EXEC_DEFAULT, &num_cols) < 0) {
-    error = "oracle: export execute failed";
+    error = util::FormatDpiError(s.ctx.get(), "oracle: export execute failed");
     return false;
   }
-
-  std::ofstream out(output_path, std::ios::binary);
-  if (!out) {
-    error = "oracle: cannot create csv file";
-    return false;
-  }
-  // UTF-8 BOM
-  out.put(static_cast<char>(0xEF));
-  out.put(static_cast<char>(0xBB));
-  out.put(static_cast<char>(0xBF));
-  const char delim = opts.delimiter.empty() ? ',' : opts.delimiter[0];
-
   std::vector<std::string> names;
-  names.reserve(num_cols);
+  std::vector<dpiOracleTypeNum> oracle_types;
   for (uint32_t i = 1; i <= num_cols; ++i) {
     dpiQueryInfo info{};
-    dpiStmt_getQueryInfo(stmt.Get(), i, &info);
+    if (dpiStmt_getQueryInfo(stmt.Get(), i, &info) < 0) {
+      error = util::FormatDpiError(s.ctx.get(), "oracle: export column metadata failed");
+      return false;
+    }
     names.emplace_back(info.name, info.nameLength);
+    oracle_types.push_back(info.typeInfo.oracleTypeNum);
   }
+  AtomicOutput atomic(output_path);
+  if (!atomic.Open(error)) return false;
+  auto& out = atomic.stream();
+  out.write("\xEF\xBB\xBF", 3);
+  const char delimiter = opts.delimiter.empty() ? ',' : opts.delimiter.front();
   if (opts.header) {
     for (size_t i = 0; i < names.size(); ++i) {
-      if (i) {
-        out.put(delim);
-      }
-      out << CsvEscape(names[i], delim);
+      if (i) out.put(delimiter);
+      out << CsvEscape(names[i], delimiter);
     }
     out.put('\n');
   }
-
   int64_t rows = 0;
-  int64_t bytes = 3;
   while (true) {
     if (Canceled(cancel)) {
       error = "canceled";
@@ -159,45 +343,35 @@ bool RunExportCsv(const session::ConnectParams& connect, const std::string& sche
     int found = 0;
     uint32_t buffer_row = 0;
     if (dpiStmt_fetch(stmt.Get(), &found, &buffer_row) < 0) {
-      error = "oracle: export fetch failed";
+      error = util::FormatDpiError(s.ctx.get(), "oracle: export fetch failed");
       return false;
     }
-    if (!found) {
-      break;
-    }
+    if (!found) break;
     for (uint32_t c = 1; c <= num_cols; ++c) {
-      if (c > 1) {
-        out.put(delim);
-      }
+      if (c > 1) out.put(delimiter);
       dpiNativeTypeNum native = DPI_NATIVE_TYPE_BYTES;
       dpiData* data = nullptr;
-      if (dpiStmt_getQueryValue(stmt.Get(), c, &native, &data) < 0 || data == nullptr || data->isNull) {
-        out << opts.null_string;
-      } else if (native == DPI_NATIVE_TYPE_BYTES) {
-        std::string cell(reinterpret_cast<const char*>(data->value.asBytes.ptr),
-                         data->value.asBytes.length);
-        out << CsvEscape(cell, delim);
-      } else if (native == DPI_NATIVE_TYPE_INT64) {
-        out << data->value.asInt64;
-      } else if (native == DPI_NATIVE_TYPE_DOUBLE) {
-        out << data->value.asDouble;
-      } else {
-        out << opts.null_string;
+      if (dpiStmt_getQueryValue(stmt.Get(), c, &native, &data) < 0) {
+        error = util::FormatDpiError(s.ctx.get(), "oracle: export value failed");
+        return false;
       }
+      std::string value;
+      if (!CellText(s.ctx.get(), oracle_types[c - 1], native, data, opts.null_string, value,
+                    error)) {
+        return false;
+      }
+      out << CsvEscape(value, delimiter);
     }
     out.put('\n');
     ++rows;
     if (rows % 500 == 0 && progress) {
-      bytes = static_cast<int64_t>(out.tellp());
-      progress(bytes, rows, "exported " + std::to_string(rows) + " rows");
+      progress(static_cast<int64_t>(out.tellp()), rows,
+               "exported " + std::to_string(rows) + " rows");
     }
   }
-  out.flush();
-  bytes = static_cast<int64_t>(out.tellp());
-  if (progress) {
-    progress(bytes, rows, "exported " + std::to_string(rows) + " rows total");
-  }
-  s.Close();
+  const int64_t bytes = static_cast<int64_t>(out.tellp());
+  if (!atomic.Commit(error)) return false;
+  if (progress) progress(bytes, rows, "exported " + std::to_string(rows) + " rows total");
   return true;
 }
 
@@ -208,114 +382,135 @@ bool RunImportCsv(const session::ConnectParams& connect, const std::string& sche
     error = "oracle: invalid schema/table";
     return false;
   }
-  session::Session s;
-  if (!OpenIoSession(connect, s, error)) {
-    return false;
-  }
-  if (opts.truncate) {
-    const std::string trunc =
-        "TRUNCATE TABLE " + util::QuoteIdent(schema) + "." + util::QuoteIdent(table);
-    if (!ExecSimple(s, trunc, error)) {
-      return false;
-    }
-  }
-
-  std::ifstream in(input_path, std::ios::binary);
-  if (!in) {
+  std::ifstream input(std::filesystem::u8path(input_path), std::ios::binary);
+  if (!input) {
     error = "oracle: cannot open csv file";
     return false;
   }
-  // skip BOM
-  char bom[3]{};
-  in.read(bom, 3);
-  if (!(bom[0] == static_cast<char>(0xEF) && bom[1] == static_cast<char>(0xBB) &&
-        bom[2] == static_cast<char>(0xBF))) {
-    in.clear();
-    in.seekg(0);
-  }
-
-  const char delim = opts.delimiter.empty() ? ',' : opts.delimiter[0];
-  std::string line;
-  std::vector<std::string> headers;
+  session::Session s;
+  if (!OpenIoSession(connect, s, error)) return false;
+  IoCancelRegistration cancel_registration(cancel, s.conn.get());
+  std::vector<ColumnMeta> metadata;
+  if (!LoadColumns(s, schema, table, metadata, error)) return false;
+  CsvRecordReader reader(input, opts.delimiter.empty() ? ',' : opts.delimiter.front());
+  std::vector<std::string> first;
+  std::vector<std::string> source_columns;
   if (opts.header) {
-    if (!std::getline(in, line)) {
-      error = "oracle: empty csv";
+    if (!reader.Read(source_columns, error)) {
+      if (error.empty()) error = "oracle: empty csv";
       return false;
     }
-    if (!line.empty() && line.back() == '\r') {
-      line.pop_back();
-    }
-    headers = SplitCsvLine(line, delim);
   } else {
-    // discover columns
-    session::SqlRowsResult cols;
-    const std::string q =
-        "SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS WHERE OWNER = " + util::QuoteLiteral(schema) +
-        " AND TABLE_NAME = " + util::QuoteLiteral(table) + " ORDER BY COLUMN_ID";
-    if (!session::ExecStringRows(s, q, 1001, cols, error)) {
-      return false;
-    }
-    for (const auto& r : cols.rows) {
-      if (!r.empty()) {
-        headers.push_back(r[0]);
-      }
-    }
+    source_columns = ColumnNames(metadata);
   }
-  if (headers.empty()) {
-    error = "oracle: no columns for import";
+  CsvProjection projection;
+  if (!BuildCsvProjection(source_columns, opts.column_map, ColumnNames(metadata), projection,
+                          error)) {
+    return false;
+  }
+  const auto types = ColumnTypes(metadata);
+  bool has_first = reader.Read(first, error);
+  if (!has_first && !error.empty()) return false;
+  if (has_first && first.size() != source_columns.size()) {
+    error = "oracle: csv column count mismatch in first record";
     return false;
   }
 
+  if (opts.truncate) {
+    const std::string clear =
+        "DELETE FROM " + util::QuoteIdent(schema) + "." + util::QuoteIdent(table);
+    if (!ExecSimple(s, clear, error)) return false;
+  }
+
+  const std::string destination =
+      util::QuoteIdent(schema) + "." + util::QuoteIdent(table);
+  auto append_row = [&](const std::vector<std::string>& record, std::ostringstream& batch) -> bool {
+    if (record.size() != source_columns.size()) {
+      error = "oracle: csv column count mismatch";
+      return false;
+    }
+    batch << "INTO " << destination << " (";
+    for (size_t i = 0; i < projection.target_columns.size(); ++i) {
+      if (i) batch << ", ";
+      batch << util::QuoteIdent(projection.target_columns[i]);
+    }
+    batch << ") VALUES (";
+    for (size_t i = 0; i < projection.target_columns.size(); ++i) {
+      if (i) batch << ", ";
+      const std::string& target = projection.target_columns[i];
+      std::string literal;
+      const auto type = types.find(Upper(target));
+      if (type == types.end() ||
+          !ImportLiteral(record[projection.source_indexes[i]], type->second, opts.null_string,
+                         literal, error)) {
+        if (error.empty()) error = "oracle: missing target column metadata";
+        return false;
+      }
+      batch << literal;
+    }
+    batch << ") ";
+    return true;
+  };
+  auto execute_batch = [&](std::ostringstream& batch, int count) -> bool {
+    if (count == 0) return true;
+    batch << "SELECT 1 FROM DUAL";
+    if (!ExecSimple(s, batch.str(), error)) return false;
+    batch.str({});
+    batch.clear();
+    batch << "INSERT ALL ";
+    return true;
+  };
+
+  std::ostringstream batch;
+  batch << "INSERT ALL ";
+  int batch_rows = 0;
   int64_t rows = 0;
-  int64_t bytes = 0;
-  while (std::getline(in, line)) {
+  auto consume = [&](const std::vector<std::string>& record) -> bool {
+    if (!append_row(record, batch)) return false;
+    ++batch_rows;
+    ++rows;
+    if (batch_rows >= 50 || batch.tellp() >= 512 * 1024) {
+      if (!execute_batch(batch, batch_rows)) return false;
+      batch_rows = 0;
+    }
+    return true;
+  };
+  if (has_first && !consume(first)) {
+    Rollback(s);
+    return false;
+  }
+  std::vector<std::string> record;
+  while (reader.Read(record, error)) {
     if (Canceled(cancel)) {
       error = "canceled";
+      Rollback(s);
       return false;
     }
-    if (!line.empty() && line.back() == '\r') {
-      line.pop_back();
-    }
-    if (line.empty()) {
-      continue;
-    }
-    bytes += static_cast<int64_t>(line.size());
-    auto cells = SplitCsvLine(line, delim);
-    std::ostringstream sql;
-    sql << "INSERT INTO " << util::QuoteIdent(schema) << "." << util::QuoteIdent(table) << " (";
-    for (size_t i = 0; i < headers.size(); ++i) {
-      if (i) {
-        sql << ", ";
-      }
-      sql << util::QuoteIdent(headers[i]);
-    }
-    sql << ") VALUES (";
-    for (size_t i = 0; i < headers.size(); ++i) {
-      if (i) {
-        sql << ", ";
-      }
-      const std::string cell = i < cells.size() ? cells[i] : "";
-      if (cell == opts.null_string) {
-        sql << "NULL";
-      } else {
-        sql << util::QuoteLiteral(cell);
-      }
-    }
-    sql << ")";
-    if (!ExecSimple(s, sql.str(), error)) {
+    if (!consume(record)) {
+      Rollback(s);
       return false;
     }
-    ++rows;
     if (rows % 200 == 0 && progress) {
-      progress(bytes, rows, "imported " + std::to_string(rows) + " rows");
+      progress(reader.bytes_read(), rows, "imported " + std::to_string(rows) + " rows");
     }
   }
-  // commit if autocommit path — ODPI default may need commit
-  dpiConn_commit(s.conn.get());
-  if (progress) {
-    progress(bytes, rows, "imported " + std::to_string(rows) + " rows total");
+  if (!error.empty() || !execute_batch(batch, batch_rows)) {
+    Rollback(s);
+    return false;
   }
-  s.Close();
+  if (Canceled(cancel)) {
+    error = "canceled";
+    Rollback(s);
+    return false;
+  }
+  if (dpiConn_commit(s.conn.get()) < 0) {
+    error = util::FormatDpiError(s.ctx.get(), "oracle: import commit failed");
+    Rollback(s);
+    return false;
+  }
+  if (progress) {
+    progress(reader.bytes_read(), rows, "imported " + std::to_string(rows) + " rows total");
+  }
   return true;
 }
 

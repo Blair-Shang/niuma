@@ -1,4 +1,5 @@
 #include "bridge/bridge_router.h"
+#include "core/app_config.h"
 #include "core/runtime/service_manager.h"
 #include "ipc/platform_client.h"
 #include "util/json_util.h"
@@ -13,6 +14,7 @@
 #include "util/local_fs.h"
 #include "util/win_clipboard.h"
 #include "include/base/cef_callback.h"
+#include "include/cef_app.h"
 #include "include/cef_command_line.h"
 #include "include/cef_task.h"
 #include "include/wrapper/cef_closure_task.h"
@@ -21,6 +23,7 @@
 
 #include <functional>
 #include <sstream>
+#include <string>
 
 namespace niuma {
 
@@ -277,6 +280,26 @@ bool DispatchFsMethod(const BridgeRequest& req, BridgeCallback callback) {
     return true;
   }
 
+  if (req.method == "shell.fs.readTextPrefix") {
+    if (path.empty()) {
+      Respond(callback, req, false, "{}", "path required");
+      return true;
+    }
+    const int max_bytes = JsonGetInt(req.params, "maxBytes", -1);
+    if (max_bytes <= 0 ||
+        static_cast<std::size_t>(max_bytes) > LocalFs::kMaxTextPrefixBytes) {
+      Respond(callback, req, false, "{}",
+              "maxBytes must be between 1 and " +
+                  std::to_string(LocalFs::kMaxTextPrefixBytes));
+      return true;
+    }
+    const std::string result = LocalFs::ReadTextPrefix(
+        path, static_cast<std::size_t>(max_bytes), error);
+    Respond(callback, req, result.empty() ? false : true,
+            result.empty() ? "{}" : result, error);
+    return true;
+  }
+
   if (req.method == "shell.fs.writeText") {
     if (path.empty()) {
       Respond(callback, req, false, "{}", "path required");
@@ -390,10 +413,61 @@ bool DispatchShellUtilityMethod(const BridgeRequest& req, BridgeCallback callbac
     return true;
   }
 
+  if (req.method == "shell.update.apply") {
+    const std::string path = JsonGetString(req.params, "path");
+    RunOnUiThread([req, callback, path]() {
+      std::string error;
+      const bool ok = LocalFs::LaunchInstaller(path, error);
+      Respond(callback, req, ok, ok ? R"({"applied":true})" : "{}", error);
+      if (ok) {
+        // 安装程序已拉起：停止本机服务并退出消息循环，避免占用安装目录文件。
+        ServiceManager::Instance().ShutdownAll();
+        CefQuitMessageLoop();
+      }
+    });
+    return true;
+  }
+
   return false;
 }
 
 #endif
+
+/** 将 shell.update.* 改写为 platform.appUpdate.* 后透传 Platform（下载/校验/取消）。 */
+bool RewriteShellUpdateToPlatform(const std::string& method, std::string* out_method) {
+  if (method == "shell.update.download") {
+    *out_method = "platform.appUpdate.download";
+    return true;
+  }
+  if (method == "shell.update.verify") {
+    *out_method = "platform.appUpdate.verify";
+    return true;
+  }
+  if (method == "shell.update.cancel") {
+    *out_method = "platform.appUpdate.cancel";
+    return true;
+  }
+  return false;
+}
+
+std::string ReplaceJsonMethod(const std::string& raw, const std::string& from,
+                              const std::string& to) {
+  const std::string needle = "\"method\":\"" + from + "\"";
+  const auto pos = raw.find(needle);
+  if (pos == std::string::npos) {
+    const std::string alt_key = "\"method\"";
+    auto k = raw.find(alt_key);
+    if (k == std::string::npos) return raw;
+    const auto v = raw.find(from, k);
+    if (v == std::string::npos) return raw;
+    std::string out = raw;
+    out.replace(v, from.size(), to);
+    return out;
+  }
+  std::string out = raw;
+  out.replace(pos, needle.size(), "\"method\":\"" + to + "\"");
+  return out;
+}
 
 /**
  * 插件列表与启用状态 — Shell 直出；Platform Go 就绪前作为 platform.plugin.* 回退。
@@ -453,6 +527,27 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
     return;
   }
 
+  std::string platform_update_method;
+  if (RewriteShellUpdateToPlatform(req.method, &platform_update_method)) {
+    if (!ServiceManager::Instance().EnsureRunning("platform")) {
+      Respond(callback, req, false, "{}", "service unavailable: platform");
+      return;
+    }
+    const std::string raw =
+        ReplaceJsonMethod(req.params, req.method, platform_update_method);
+    platform_client_->Invoke("platform", platform_update_method, raw,
+                             [callback, id = req.id](bool ok, const std::string& data,
+                                                     const std::string& err) {
+                               BridgeResponse resp;
+                               resp.id = id;
+                               resp.ok = ok;
+                               resp.result = data;
+                               resp.error = err;
+                               callback(resp);
+                             });
+    return;
+  }
+
   auto parsed = ParseMethod(req.method);
   if (!parsed && req.method != "ping" && req.method != "shell.version" &&
       req.method != "shell.info") {
@@ -478,8 +573,8 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
     resp.id = req.id;
     resp.ok = true;
     std::ostringstream ss;
-    ss << R"({"version":")" << NIUMMA_APP_VERSION << R"(","layer":3,"build":")"
-       << NIUMMA_BUILD_ID << R"("})";
+    ss << R"({"version":")" << AppConfig::Version() << R"(","layer":3,"build":")"
+       << AppConfig::BuildId() << R"("})";
     resp.result = ss.str();
     callback(resp);
     return;
@@ -520,6 +615,7 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
     resp.ok = true;
     std::ostringstream ss;
     ss << R"({"runtime":"cef","platform":)" << JsonQuoteString(GetRuntimePlatformName())
+       << R"(,"arch":)" << JsonQuoteString(GetRuntimeArchName())
        << R"(,"installDir":)" << JsonQuoteString(GetInstallDir())
        << R"(,"webPath":"app://niuma/","frameless":)"
        << (frameless ? "true" : "false") << "}";

@@ -7,7 +7,12 @@ import BottomDock from './panels/BottomDock.vue'
 import DataTaskHost from '@/shell/data-tasks/DataTaskHost.vue'
 import ModuleWorkspace from './workspace/ModuleWorkspace.vue'
 import AiPanel from './panels/AiPanel.vue'
+import AccountHost from '@/shell/account/AccountHost.vue'
+import UpdateHost from '@/shell/account/UpdateHost.vue'
+import HelpHost from '@/shell/account/HelpHost.vue'
 import FramelessResizeEdges from '@/shell/widgets/FramelessResizeEdges.vue'
+import { useAccountStore } from '@/stores/account'
+import { useAppUpdateStore } from '@/stores/app-update'
 import { RsSplitPane } from '@niuma/ui'
 import type { RsSplitPaneItem } from '@niuma/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -19,6 +24,8 @@ import { useWindowChromeStore } from '@/stores/window-chrome'
 const paletteStore = useCommandPaletteStore()
 const windowChrome = useWindowChromeStore()
 const shellStore = useShellStore()
+const accountStore = useAccountStore()
+const appUpdateStore = useAppUpdateStore()
 
 /** 仅取 defineExpose 表面，避免 InstanceType<typeof RsSplitPane> 触发 TS 递归过深 */
 type RsSplitPaneExpose = {
@@ -113,6 +120,8 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 onMounted(() => {
   globalThis.addEventListener('keydown', onGlobalKeydown)
   void windowChrome.bootstrap()
+  void accountStore.bootstrap()
+  appUpdateStore.scheduleStartupCheck(10_000)
   void nextTick(() => {
     if (!shellStore.aiPanelOpen) {
       splitRef.value?.collapse('ai')
@@ -154,6 +163,9 @@ onUnmounted(() => {
     </div>
     <BottomDock />
     <DataTaskHost />
+    <AccountHost />
+    <UpdateHost />
+    <HelpHost />
     <StatusBar />
   </div>
 </template>

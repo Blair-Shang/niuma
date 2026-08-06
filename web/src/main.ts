@@ -77,10 +77,13 @@ async function prewarmActiveModules(): Promise<void> {
  * 5. router.isReady → mount → nextTick → 双 rAF 后再 reveal（CEF 首显须等首帧已绘制）
  */
 async function main() {
-  if (import.meta.env.DEV && isBridgeAvailable()) {
+  // Dev 兜底：仅在 Vue 长时间未走到下方正式 reveal 时触发。
+  // 须先 dismissBootLoader，且超时要长——短超时会关掉 Splash 后只剩主窗「加载中…」。
+  if (import.meta.env.DEV && isBridgeAvailable() && !isFileWorkbenchEntry()) {
     globalThis.setTimeout(() => {
+      dismissBootLoader()
       void windowApi.reveal()
-    }, 3500)
+    }, 20000)
   }
 
   const pinia = createPinia()

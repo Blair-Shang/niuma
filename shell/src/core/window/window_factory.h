@@ -31,6 +31,13 @@ class WindowFactory {
   void CreatePopupShell(CefRefPtr<CefBrowserView> popup_browser_view, bool is_devtools);
 
   std::string ResolveStartupUrl() const;
+  /**
+   * 由 ResolveStartupUrl() 派生静态启动页 URL（不进 Vue）：
+   * - .../index.html → .../splash.html
+   * - http://host:port/ → http://host:port/splash.html
+   * Dev（NIUMMA_DEV_URL）与打包（app://niuma/）共用此规则。
+   */
+  std::string ResolveSplashUrl() const;
   std::string BuildWindowUrl(const WindowCreateOptions& opts) const;
 
  private:

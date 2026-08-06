@@ -73,6 +73,20 @@ export interface FsReadTextResult {
   content: string
 }
 
+/** `shell.fs.readTextPrefix` 入参 */
+export interface FsReadTextPrefixParams {
+  path: string
+  maxBytes: number
+}
+
+/** `shell.fs.readTextPrefix` 返回 */
+export interface FsReadTextPrefixResult {
+  path: string
+  content: string
+  truncated: boolean
+  size: number
+}
+
 /** `shell.fs.writeText` 入参 */
 export interface FsWriteTextParams {
   path: string

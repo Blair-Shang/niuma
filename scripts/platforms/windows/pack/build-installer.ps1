@@ -136,6 +136,9 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=$archAllowed
 ArchitecturesInstallIn64BitMode=$archInstallMode
 DisableProgramGroupPage=yes
+; 覆盖升级时关闭占用安装目录的进程，减少「文件正在使用」失败
+CloseApplications=yes
+RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
@@ -179,5 +182,28 @@ if (Test-Path $SignScript) {
     & $SignScript -FilePath $setupExe
 }
 
+# 发版元数据：供 Admin 填写 download_url / sha256 / file_size
+$sha256 = (Get-FileHash -Path $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
+$fileSize = (Get-Item -LiteralPath $setupExe).Length
+$metaPath = Join-Path $OutputDir "$setupBaseName.release.json"
+$metaObj = [ordered]@{
+    version      = $AppVersion
+    platform     = 'windows'
+    arch         = $Arch
+    fileName     = (Split-Path -Leaf $setupExe)
+    fileSize     = $fileSize
+    sha256       = $sha256
+    downloadHint = "上传 Setup 后把 HTTPS URL 写入 Admin；桌面默认允许 *.niuma007.com"
+}
+$utf8 = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText(
+    $metaPath,
+    ($metaObj | ConvertTo-Json -Depth 4),
+    $utf8
+)
+
 Write-Host "Installer ready: $setupExe" -ForegroundColor Green
+Write-Host "sha256=$sha256" -ForegroundColor Cyan
+Write-Host "file_size=$fileSize" -ForegroundColor Cyan
+Write-Host "release meta: $metaPath" -ForegroundColor Cyan
 Write-Output $setupExe

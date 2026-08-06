@@ -1,6 +1,7 @@
 #include "meta/monitor.hpp"
 
 #include "session/sql_rows.hpp"
+#include "util/dpi_error.hpp"
 #include "util/sql_literal.hpp"
 #include "util/stmt_guard.hpp"
 
@@ -10,14 +11,7 @@ namespace niuma::oracle::meta {
 namespace {
 
 std::string DpiError(dpiContext* ctx) {
-  dpiErrorInfo info{};
-  if (ctx) {
-    dpiContext_getError(ctx, &info);
-  }
-  if (info.message == nullptr) {
-    return "oracle: monitor error";
-  }
-  return std::string("oracle: ") + info.message;
+  return util::FormatDpiError(ctx, "oracle: monitor error");
 }
 
 bool ExecNoResult(session::Session& session, const std::string& sql, std::string& error) {

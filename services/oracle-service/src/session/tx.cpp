@@ -1,17 +1,12 @@
 #include "session/tx.hpp"
 
+#include "util/dpi_error.hpp"
+
 namespace niuma::oracle::session {
 namespace {
 
 std::string DpiError(dpiContext* ctx) {
-  dpiErrorInfo info{};
-  if (ctx) {
-    dpiContext_getError(ctx, &info);
-  }
-  if (info.message == nullptr) {
-    return "oracle: transaction error";
-  }
-  return std::string("oracle: ") + info.message;
+  return util::FormatDpiError(ctx, "oracle: tx error");
 }
 
 }  // namespace

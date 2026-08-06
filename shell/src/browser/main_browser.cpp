@@ -2,6 +2,7 @@
 #include "ipc/platform_client.h"
 #include "browser/handlers/drag_handler.h"
 #include "core/window/main_window.h"
+#include "core/window/splash_window.h"
 #include "core/window/window_manager.h"
 #include "core/window/window_registry.h"
 #include "util/json_util.h"
@@ -71,6 +72,25 @@ bool IsDevToolsShortcut(const CefKeyEvent& event) {
   return false;
 }
 
+/**
+ * 可「早显」的窗口：不依赖 Vue mount / shell.window.reveal。
+ * - Splash：静态 splash.html，冷启动品牌窗
+ * - Auxiliary：文件工作台等，index 起显 + 内联 boot loader
+ * Main 仍须等 Web reveal（或超时兜底），避免首帧黑/白屏。
+ */
+bool IsEarlyRevealKind(niuma::WindowKind kind) {
+  return kind == niuma::WindowKind::Auxiliary || kind == niuma::WindowKind::Splash;
+}
+
+/**
+ * 主窗强制 reveal 延迟。
+ * 有 Splash 时用长超时：短延迟会关掉 Splash，用户只看到主窗内「加载中…」。
+ * 无 Splash（热重载后再 Conceal）仍用 3s，避免窗口一直隐藏。
+ */
+int64_t MainRevealFallbackDelayMs() {
+  return niuma::SplashWindow::Instance().HasSplash() ? 20000 : 3000;
+}
+
 }  // namespace
 
 namespace niuma {
@@ -132,14 +152,15 @@ void NiuMaClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
       PlatformClient::SetStreamFrameCallback(dispatch_platform_event);
       PlatformClient::StartEventListener(dispatch_platform_event);
     }
-    // 兜底：主窗口在 Web reveal 失败时 3 秒后强制显示。
+    // 兜底：主窗 Web reveal 失败时强制显示（Splash/辅助窗走早显，不走此分支）。
+    // 有 Splash 时勿用短延迟，否则 Splash 被关、主窗却仍停在「加载中…」。
     const WindowRecord* entry = WindowRegistry::Instance().FindByBrowser(browser);
-    if (!entry || entry->kind != WindowKind::Auxiliary) {
+    if (!entry || !IsEarlyRevealKind(entry->kind)) {
       CefPostDelayedTask(
           TID_UI,
           base::BindOnce(&NiuMaClient::RevealBrowserWindow,
                          CefRefPtr<NiuMaClient>(this), browser),
-          3000);
+          MainRevealFallbackDelayMs());
     }
   }
   browser_ = browser;
@@ -151,10 +172,18 @@ void NiuMaClient::RevealBrowserWindow(CefRefPtr<CefBrowser> browser) {
   if (!browser || IsDevToolsBrowser(browser)) {
     return;
   }
+  const WindowRecord* entry = WindowRegistry::Instance().FindByBrowser(browser);
+  const bool is_main = entry && entry->kind == WindowKind::Main;
   const int id = browser->GetIdentifier();
+
+  // 已 reveal 过：仍确保关掉 Splash（上次 Close 若因 CanClose 失败会卡死）
   if (revealed_browsers_.count(id) != 0) {
+    if (is_main) {
+      SplashWindow::Instance().Close();
+    }
     return;
   }
+
   if (WindowManager::Instance().RevealBrowser(browser)) {
     revealed_browsers_.insert(id);
 #if defined(OS_WIN)
@@ -164,6 +193,10 @@ void NiuMaClient::RevealBrowserWindow(CefRefPtr<CefBrowser> browser) {
       }
     }
 #endif
+    // 仅主窗 Reveal 时关 Splash；辅助窗 Reveal 不碰启动窗
+    if (is_main) {
+      SplashWindow::Instance().Close();
+    }
   }
 }
 
@@ -200,15 +233,18 @@ void NiuMaClient::OnLoadStart(CefRefPtr<CefBrowser> browser,
   }
   const WindowRecord* entry = WindowRegistry::Instance().FindByBrowser(browser);
   const int browser_id = browser->GetIdentifier();
-  // 辅助窗：index.html 起显 + 内联启动动画，不等待 Vite/Vue bundle
-  if (entry && entry->kind == WindowKind::Auxiliary) {
+  // Splash / 辅助窗：静态页或 index 起显，不等待 Vite/Vue bundle
+  if (entry && IsEarlyRevealKind(entry->kind)) {
     if (revealed_browsers_.count(browser_id) == 0) {
       RevealBrowserWindow(browser);
     }
     return;
   }
-  // 首载尚未 reveal 时窗口本就隐藏，跳过 Conceal，避免与 reveal 竞态产生黑屏一闪。
-  if (revealed_browsers_.count(browser_id) == 0) {
+  // 首载尚未 reveal：跳过 Conceal。
+  // Bridge reveal 只置 user_revealed，不一定写入 revealed_browsers_。
+  const bool already_shown =
+      revealed_browsers_.count(browser_id) != 0 || (entry && entry->user_revealed);
+  if (!already_shown) {
     return;
   }
   // 热重载 / 页面导航：已显示窗口先隐藏，待 Web reveal 后再显示。
@@ -228,22 +264,20 @@ void NiuMaClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
       frame->GetURL(), 0);
   NiuMaDragHandler::InstallFileDropHooks(frame);
 
-  // 窗口显示由 Web 侧在 Vue mount() + nextTick 后调用 shell.window.reveal 触发，
-  // 确保 Vue 首帧已渲染完毕再显示，彻底消除启动黑屏闪烁。
-  // OnAfterCreated 的 3 秒兜底只在首次创建浏览器时注册；热重载会 Conceal 窗口，
-  // 此处每次主帧加载结束都重新注册兜底，避免 Vite 全量刷新后窗口一直隐藏。
+  // 窗口显示由 Web 侧在 Vue mount() + dismissBootLoader 后 shell.window.reveal。
+  // 热重载会 Conceal：此处每次主帧 LoadEnd 重新注册兜底，避免窗口一直隐藏。
   const WindowRecord* entry = WindowRegistry::Instance().FindByBrowser(browser);
   // Popup（如历史 target=_blank）无 Vue 应用，不会调用 reveal；加载完成立即显示。
   if (entry && entry->kind == WindowKind::Popup) {
     RevealBrowserWindow(browser);
     return;
   }
-  if (!entry || entry->kind != WindowKind::Auxiliary) {
+  if (!entry || !IsEarlyRevealKind(entry->kind)) {
     CefPostDelayedTask(
         TID_UI,
         base::BindOnce(&NiuMaClient::RevealBrowserWindow,
                        CefRefPtr<NiuMaClient>(this), browser),
-        3000);
+        MainRevealFallbackDelayMs());
   }
 }
 
@@ -274,7 +308,9 @@ void NiuMaClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   if (!IsDevToolsBrowser(browser)) {
     WindowManager::Instance().DetachBrowser(browser);
 
-    if (window_id > 0 && closing_kind != WindowKind::Popup && message_router_handler_) {
+    // Popup / Splash 关闭不向 Web 广播：Splash 非业务窗；Popup 无对应前端会话
+    if (window_id > 0 && closing_kind != WindowKind::Popup &&
+        closing_kind != WindowKind::Splash && message_router_handler_) {
       std::ostringstream ss;
       ss << "{\"type\":\"shell.window.closed\",\"windowId\":" << window_id << "}";
       niuma::BridgeEvent ev;

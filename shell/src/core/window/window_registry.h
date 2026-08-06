@@ -35,10 +35,11 @@ struct PendingWindow {
 };
 
 /**
- * 全进程窗口登记表（主窗口 + 辅助窗口 + Popup 统一存储）。
+ * 全进程窗口登记表（Main / Splash / Auxiliary / Popup 统一存储）。
  *
  * 仅负责 id 分配、pending 队列、查找与聚焦状态；不直接创建 CEF 窗口。
- * 业务语义（主窗唯一、辅助窗可多开）由 MainWindow / AuxiliaryWindowManager 约束。
+ * 业务语义由各管理器约束：MainWindow（主窗唯一）、SplashWindow（启动单例）、
+ * AuxiliaryWindowManager（可多开 / route 复用）。
  */
 class WindowRegistry {
  public:
