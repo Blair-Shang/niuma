@@ -48,6 +48,67 @@ func TestBuildScriptCreateDatabaseWithExplicitOwner(t *testing.T) {
 	}
 }
 
+func TestBuildScriptCreateDatabaseNavicatOptions(t *testing.T) {
+	t.Parallel()
+
+	limit := 50
+	res, err := BuildScript(ScriptParams{
+		Action:          ActionCreateDatabase,
+		Name:            "sales",
+		Owner:           "salesapp",
+		Encoding:        "UTF8",
+		Template:        "template0",
+		LCCollate:       "en_US.utf8",
+		LCCtype:         "en_US.utf8",
+		Tablespace:      "salesspace",
+		ConnectionLimit: &limit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`CREATE DATABASE "sales"`,
+		`OWNER = "salesapp"`,
+		`ENCODING = 'UTF8'`,
+		`TEMPLATE = "template0"`,
+		`LC_COLLATE = 'en_US.utf8'`,
+		`LC_CTYPE = 'en_US.utf8'`,
+		`TABLESPACE = "salesspace"`,
+		`CONNECTION LIMIT = 50`,
+	} {
+		if !strings.Contains(res.SQL, want) {
+			t.Fatalf("missing %q in sql=%q", want, res.SQL)
+		}
+	}
+}
+
+func TestBuildScriptCreateDatabaseOmitsDefaultTablespace(t *testing.T) {
+	t.Parallel()
+
+	res, err := BuildScript(ScriptParams{
+		Action:     ActionCreateDatabase,
+		Name:       "app_db",
+		Encoding:   "UTF8",
+		Template:   "template0",
+		Tablespace: "DEFAULT",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.SQL, "TABLESPACE") {
+		t.Fatalf("Default tablespace must be omitted, sql=%q", res.SQL)
+	}
+}
+
+func TestExecCreateDatabaseRejectsProtectedName(t *testing.T) {
+	t.Parallel()
+
+	_, err := Exec(t.Context(), nil, ExecParams{Action: ActionCreateDatabase, Name: "template0"})
+	if err == nil {
+		t.Fatal("expected error for protected database name")
+	}
+}
+
 func TestMaintenanceDatabaseCandidates(t *testing.T) {
 	t.Parallel()
 

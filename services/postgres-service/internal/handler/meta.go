@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"niuma/services/postgres-service/internal/meta"
@@ -15,6 +16,7 @@ type metaRelationParams struct {
 	Schema    string `json:"schema"`
 	Name      string `json:"name"`
 	Table     string `json:"table"`
+	OnTable   string `json:"onTable"`
 	Args      string `json:"args"`
 	OID       uint32 `json:"oid"`
 	Kind      string `json:"kind"`
@@ -25,6 +27,15 @@ func (p metaRelationParams) relationName() string {
 		return p.Name
 	}
 	return p.Table
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (d *Dispatcher) metaColumns(ctx context.Context, req Request) Response {
@@ -118,6 +129,20 @@ func (d *Dispatcher) metaDDL(ctx context.Context, req Request) Response {
 	}
 	defer release()
 
+	if strings.EqualFold(params.Kind, "trigger") {
+		trg, err := meta.GetTriggerDDL(ctx, pool, meta.TriggerRef{
+			Schema:    params.Schema,
+			Name:      name,
+			TableName: firstNonEmpty(params.Table, params.OnTable),
+			OID:       params.OID,
+		})
+		if err != nil {
+			logOpWarn(MethodMetaDDL, err, "session", params.SessionID, "trigger", name)
+			return errorResponse(req.ID, err.Error())
+		}
+		return okResponse(req.ID, meta.DDLResult{ObjectType: "trigger", DDL: trg.Definition})
+	}
+
 	result, err := meta.GetDDL(ctx, pool, meta.RelationRef{Schema: params.Schema, Name: name})
 	if err != nil {
 		logOpWarn(MethodMetaDDL, err, "session", params.SessionID, "schema", params.Schema, "name", name)
@@ -184,6 +209,41 @@ func (d *Dispatcher) metaDatabaseCreateOptions(ctx context.Context, req Request)
 		"templates", len(result.Templates),
 		"collations", len(result.Collations),
 	)
+	return okResponse(req.ID, result)
+}
+
+type databaseOverviewParams struct {
+	SessionID string `json:"sessionId"`
+	ProfileID string `json:"profileId"`
+	Database  string `json:"database"`
+	Name      string `json:"name"`
+}
+
+func (d *Dispatcher) metaDatabaseOverview(ctx context.Context, req Request) Response {
+	var params databaseOverviewParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	name := strings.TrimSpace(params.Database)
+	if name == "" {
+		name = strings.TrimSpace(params.Name)
+	}
+	if name == "" {
+		return errorResponse(req.ID, "database required")
+	}
+
+	pool, _, release, err := d.resolvePool(ctx, req.Params)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := meta.GetDatabaseOverview(ctx, pool, name)
+	if err != nil {
+		logOpWarn(MethodMetaDatabaseOverview, err, "session", params.SessionID, "database", name)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodMetaDatabaseOverview, "session", params.SessionID, "database", name)
 	return okResponse(req.ID, result)
 }
 
@@ -364,5 +424,33 @@ func (d *Dispatcher) metaForeignKeys(ctx context.Context, req Request) Response 
 		return errorResponse(req.ID, err.Error())
 	}
 	logOpInfo(MethodMetaForeignKeys, "session", params.SessionID, "count", len(result.ForeignKeys))
+	return okResponse(req.ID, result)
+}
+
+func (d *Dispatcher) metaPrivileges(ctx context.Context, req Request) Response {
+	var params metaRelationParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	name := params.relationName()
+	if name == "" && params.OID == 0 {
+		return errorResponse(req.ID, "name required")
+	}
+	pool, _, release, err := d.resolvePoolForDatabase(ctx, req.Params, params.Database)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+	result, err := meta.ListPrivileges(ctx, pool, meta.PrivilegesParams{
+		Schema:     params.Schema,
+		Name:       name,
+		Args:       params.Args,
+		OID:        params.OID,
+		ObjectKind: params.Kind,
+	})
+	if err != nil {
+		logOpWarn(MethodMetaPrivileges, err, "session", params.SessionID, "name", name)
+		return errorResponse(req.ID, err.Error())
+	}
 	return okResponse(req.ID, result)
 }

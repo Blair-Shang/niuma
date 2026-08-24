@@ -14,6 +14,7 @@ import type {
 } from '@/api/types/vastbase'
 import {
   columnsEqual,
+  dataTypesEquivalent,
   newEmptyCheck,
   newEmptyColumn,
   newEmptyForeignKey,
@@ -329,7 +330,7 @@ export function buildAlterDesignOps(input: {
     }
     const effectiveName = r.name
     const nextType = syncColumnDataType(r)
-    if (nextType.toLowerCase() !== orig.dataType.trim().toLowerCase()) {
+    if (!dataTypesEquivalent(nextType, orig.dataType)) {
       ops.push({ op: 'alter_type', name: effectiveName, dataType: nextType })
     }
     if (r.nullable !== orig.nullable) {

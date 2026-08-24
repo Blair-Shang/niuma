@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import {
+  dismissOtherDdlDialogs,
+  registerDdlDialogClear,
+} from '@/modules/ops/conn-tree/ddl-dialog-exclusive'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import type { ConnItem } from '@/modules/ops/types'
 
@@ -38,6 +42,7 @@ export const useSqliteDdlActionStore = defineStore('sqlite-ddl-actions', () => {
   const busy = ref(false)
 
   function request(action: SqlitePendingDdlAction): void {
+    dismissOtherDdlDialogs('sqlite-ddl-actions')
     pending.value = {
       kind: 'danger',
       ...action,
@@ -48,6 +53,8 @@ export const useSqliteDdlActionStore = defineStore('sqlite-ddl-actions', () => {
     pending.value = null
     busy.value = false
   }
+
+  registerDdlDialogClear('sqlite-ddl-actions', clear)
 
   return { pending, busy, request, clear }
 })

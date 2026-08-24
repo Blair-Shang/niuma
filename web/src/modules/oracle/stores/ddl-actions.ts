@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import {
+  dismissOtherDdlDialogs,
+  registerDdlDialogClear,
+} from '@/modules/ops/conn-tree/ddl-dialog-exclusive'
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
@@ -59,6 +63,7 @@ export const useOracleDdlActionStore = defineStore('oracle-ddl-actions', () => {
   const busy = ref(false)
 
   function request(action: OraclePendingDdlAction): void {
+    dismissOtherDdlDialogs('oracle-ddl-actions')
     pending.value = {
       kind: 'danger',
       ...action,
@@ -69,6 +74,8 @@ export const useOracleDdlActionStore = defineStore('oracle-ddl-actions', () => {
     pending.value = null
     busy.value = false
   }
+
+  registerDdlDialogClear('oracle-ddl-actions', clear)
 
   return { pending, busy, request, clear }
 })

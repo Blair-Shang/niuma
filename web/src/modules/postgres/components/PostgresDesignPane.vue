@@ -64,6 +64,7 @@ import {
   type DesignForeignKeyDraft,
   type DesignIndexDraft,
   resolveBaseTypeOption,
+  supportsIdentityType,
 } from '@/modules/postgres/utils/table-design'
 
 const props = defineProps<{
@@ -308,6 +309,21 @@ const columnColumns = computed((): RsTableColumn<ColRow>[] => {
       align: 'center',
       editable: true,
       valueType: 'boolean',
+    },
+    {
+      key: 'identity',
+      title: t('modules.postgres.design.colIdentity'),
+      width: 110,
+      headerTip: t('modules.postgres.design.colIdentityHint'),
+      editable: (row) => supportsIdentityType(row.typeBase),
+      valueType: 'select',
+      editorOptions: {
+        options: [
+          { value: '', label: t('modules.postgres.design.colIdentityNone') },
+          { value: 'always', label: t('modules.postgres.design.colIdentityAlways') },
+          { value: 'by_default', label: t('modules.postgres.design.colIdentityByDefault') },
+        ],
+      },
     },
     {
       key: 'defaultExpr',
@@ -924,6 +940,9 @@ function updateColSideField<K extends keyof DesignColumnDraft>(
         updated.typeScale = typeScale
       }
       updated.dataType = syncColumnDataType(updated)
+      if (!supportsIdentityType(updated.typeBase)) {
+        updated.identity = ''
+      }
     }
     if (field === 'primaryKey' && value) updated.nullable = false
     return updated
@@ -952,7 +971,7 @@ function onColCommit(
         typeScale = ''
       } else if (kind === 'length') {
         typeScale = ''
-        // 仅当类型声明了 defaultLength（如 CHAR）时才自动填；VARCHAR/TIME/TIMESTAMP 可留空
+        // 有 defaultLength 时自动填（CHAR→1、VARCHAR→255）；TIME/TIMESTAMP 仍可留空
         if (!typeLength && opt?.defaultLength != null) {
           typeLength = String(opt.defaultLength)
         }
@@ -969,7 +988,14 @@ function onColCommit(
         typeScale = clamped.scale
       }
       const parts = { typeBase: nextBase, typeLength, typeScale }
-      return { ...r, ...parts, dataType: syncColumnDataType(parts) }
+      const nextIdentity = supportsIdentityType(nextBase) ? r.identity : ''
+      return {
+        ...r,
+        ...parts,
+        dataType: syncColumnDataType(parts),
+        identity: nextIdentity,
+        defaultExpr: nextIdentity ? '' : r.defaultExpr,
+      }
     }
     if (key === 'typeLength') {
       const kind = dataTypeParamKind(r.typeBase)
@@ -992,7 +1018,12 @@ function onColCommit(
       }
       return { ...r, ...parts, dataType: syncColumnDataType(parts) }
     }
-    if (key === 'defaultExpr') return { ...r, defaultExpr: draft }
+    if (key === 'identity') {
+      if (!supportsIdentityType(r.typeBase)) return { ...r, identity: '' }
+      const next = draft === 'always' || draft === 'by_default' ? draft : ''
+      return { ...r, identity: next, defaultExpr: next ? '' : r.defaultExpr }
+    }
+    if (key === 'defaultExpr') return { ...r, defaultExpr: r.identity ? '' : draft }
     if (key === 'comment') return { ...r, comment: draft }
     if (key === 'nullable') return { ...r, nullable: asBool(value, r.nullable) }
     if (key === 'primaryKey') {

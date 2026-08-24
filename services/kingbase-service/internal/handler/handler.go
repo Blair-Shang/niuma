@@ -27,7 +27,7 @@ const (
 	MethodQueryExec = "query.exec"
 	// MethodQueryExecBatch 在同一连接上顺序执行多条 SQL（临时表 / SET 跨语句可见；可指向非会话默认库）。
 	MethodQueryExecBatch = "query.execBatch"
-	// MethodRoutineCall 调用过程并读回 OUT（同连接临时表，不依赖 NOTICE）。
+	// MethodRoutineCall 专业化调用函数/过程（不走 query.exec）。
 	MethodRoutineCall = "routine.call"
 	// MethodQueryFetch 续取结果页。
 	MethodQueryFetch = "query.fetch"

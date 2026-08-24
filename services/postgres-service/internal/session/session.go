@@ -24,6 +24,8 @@ type Session struct {
 	Dialect *dialect.ServerProfile
 	// Notices 收集本会话连接上的 RAISE NOTICE（过程 OUT 读回等）。
 	Notices *NoticeSink
+	// Notify 维护 LISTEN 独立连接（惰性创建）。
+	Notify *NotifyHub
 
 	mu         sync.Mutex
 	inflight   map[string]*queryCancel
@@ -118,6 +120,10 @@ func (s *Session) CancelQuery(requestID string) int {
 func (s *Session) Close() {
 	s.CloseResultSet("")
 	s.CancelQuery("")
+	if s.Notify != nil {
+		s.Notify.Close()
+		s.Notify = nil
+	}
 	s.mu.Lock()
 	s.releaseTxConnLocked()
 	s.mu.Unlock()

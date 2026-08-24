@@ -219,6 +219,35 @@ type queryCancelParams struct {
 	RequestID string `json:"requestId"`
 }
 
+func (d *Dispatcher) queryExplain(ctx context.Context, req Request) Response {
+	var params session.QueryExecParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	if params.SessionID == "" {
+		return errorResponse(req.ID, errSessionIDRequired)
+	}
+	if strings.TrimSpace(params.SQL) == "" {
+		return errorResponse(req.ID, "sql required")
+	}
+	var extra struct {
+		Analyze bool `json:"analyze"`
+	}
+	_ = json.Unmarshal(req.Params, &extra)
+	prefix := "EXPLAIN"
+	if extra.Analyze {
+		prefix = "EXPLAIN ANALYZE"
+	}
+	params.SQL = prefix + "\n" + params.SQL
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	req.Params = raw
+	req.Method = MethodQueryExec
+	return d.queryExec(ctx, req)
+}
+
 func (d *Dispatcher) queryCancel(ctx context.Context, req Request) Response {
 	_ = ctx
 	var params queryCancelParams

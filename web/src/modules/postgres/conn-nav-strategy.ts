@@ -33,14 +33,24 @@ function resolveDesignMode(ctx?: ConnOpenContext): PostgresObjectScriptMode {
 
 function resolveObjectKind(ctx?: ConnOpenContext): PostgresObjectKind | undefined {
   const kind = ctx?.objectKind
-  if (kind === 'view' || kind === 'procedure' || kind === 'function' || kind === 'sequence') {
+  if (kind === 'materializedView' || kind === 'materialized_view') return 'materialized_view'
+  if (
+    kind === 'view' ||
+    kind === 'procedure' ||
+    kind === 'function' ||
+    kind === 'sequence' ||
+    kind === 'trigger'
+  ) {
     return kind
   }
   const category = segmentName(ctx, 'category')
   if (category === 'views') return 'view'
+  if (category === 'materialized_views') return 'materialized_view'
+  if (category === 'triggers') return 'trigger'
   if (category === 'procedures') return 'procedure'
   if (category === 'functions') return 'function'
   if (category === 'sequences') return 'sequence'
+  if (segmentName(ctx, 'trigger')) return 'trigger'
   if (segmentName(ctx, 'function')) return 'function'
   if (segmentName(ctx, 'procedure')) return 'procedure'
   if (segmentName(ctx, 'sequence')) return 'sequence'
@@ -48,11 +58,13 @@ function resolveObjectKind(ctx?: ConnOpenContext): PostgresObjectKind | undefine
 }
 
 function resolveObjectName(ctx?: ConnOpenContext, objectKind?: PostgresObjectKind): string | undefined {
-  if (objectKind === 'view') return segmentName(ctx, 'table')
+  if (objectKind === 'view' || objectKind === 'materialized_view') return segmentName(ctx, 'table')
   if (objectKind === 'procedure') return segmentName(ctx, 'procedure')
   if (objectKind === 'function') return segmentName(ctx, 'function')
   if (objectKind === 'sequence') return segmentName(ctx, 'sequence')
+  if (objectKind === 'trigger') return segmentName(ctx, 'trigger')
   return (
+    segmentName(ctx, 'trigger') ??
     segmentName(ctx, 'table') ??
     segmentName(ctx, 'function') ??
     segmentName(ctx, 'procedure') ??
@@ -74,6 +86,12 @@ function objectScriptFeatureLabel(
     if (objectKind === 'sequence') {
       return i18n.global.t('modules.postgres.session.tabNewSequence')
     }
+    if (objectKind === 'materialized_view') {
+      return i18n.global.t('modules.postgres.session.tabNewMatView')
+    }
+    if (objectKind === 'trigger') {
+      return i18n.global.t('modules.postgres.session.tabNewTrigger')
+    }
     return i18n.global.t('modules.postgres.session.tabNewView')
   }
   if (objectKind === 'procedure') {
@@ -84,6 +102,12 @@ function objectScriptFeatureLabel(
   }
   if (objectKind === 'sequence') {
     return i18n.global.t('modules.postgres.session.tabSequence')
+  }
+  if (objectKind === 'materialized_view') {
+    return i18n.global.t('modules.postgres.session.tabMatView')
+  }
+  if (objectKind === 'trigger') {
+    return i18n.global.t('modules.postgres.session.tabTrigger')
   }
   return i18n.global.t('modules.postgres.session.tabView')
 }
@@ -236,9 +260,13 @@ function buildObjectScriptTabSpec(item: ConnItem, ctx?: ConnOpenContext): Connec
   if (database) props.database = database
   if (schema) props.schema = schema
   if (objectName) props.objectName = objectName
-  if (objectKind === 'view' && objectName) {
+  if ((objectKind === 'view' || objectKind === 'materialized_view') && objectName) {
     props.table = objectName
     props.isView = true
+  }
+  if (objectKind === 'trigger') {
+    const onTable = segmentName(ctx, 'ontable')
+    if (onTable) props.table = onTable
   }
   if ((objectKind === 'procedure' || objectKind === 'function') && objectName) {
     props.routine = objectName

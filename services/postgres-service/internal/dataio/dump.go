@@ -53,7 +53,7 @@ func dumpSql(ctx context.Context, pool *pgxpool.Pool, taskID string, m *Manager,
 	}}
 
 	header := fmt.Sprintf(
-		"-- NiuMa PostgreSQL dump\n-- format: niuma-postgres-dump/1\n-- database: %s\n-- generated: %s\n-- mode: %s\n-- dropIfExists: %v\n-- createSchema: %v\n-- truncateBeforeData: %v\n-- note: no CREATE DATABASE; restore into a prepared target DB\n-- note: includes sequences / functions / procedures / triggers when selected\n\nSET client_encoding = 'UTF8';\n\n",
+		"-- NiuMa PostgreSQL dump\n-- format: niuma-postgres-dump/1\n-- database: %s\n-- generated: %s\n-- mode: %s\n-- dropIfExists: %v\n-- createSchema: %v\n-- truncateBeforeData: %v\n-- note: no CREATE DATABASE. Restore into a prepared target DB\n-- note: includes sequences / functions / procedures / triggers when selected\n\nSET client_encoding = 'UTF8';\n\n",
 		params.Database,
 		time.Now().UTC().Format(time.RFC3339),
 		params.Mode,

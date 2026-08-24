@@ -39,14 +39,14 @@ const {
   filesTouched,
   azure,
   formDisabled,
-  optionsLoading,
   nameError,
   canConfirm,
   collationOptions,
   recoveryOptions,
   compatOptions,
   previewSql,
-  defaultDataDir,
+  collationsLoading,
+  onCollationDropdownOpen,
 } = useSqlServerDatabaseCreateForm()
 
 const title = computed(() => pending.value?.title ?? '')
@@ -116,9 +116,6 @@ function markFilesTouched(): void {
   >
     <template #body>
       <form class="nm-sqlserver-ddl-dialog__form" autocomplete="off" @submit.prevent="onConfirm">
-        <p v-if="optionsLoading" class="nm-sqlserver-ddl-dialog__hint">
-          {{ t('modules.sqlserver.createDb.loadingOptions') }}
-        </p>
         <div class="nm-sqlserver-ddl-dialog__field nm-sqlserver-ddl-dialog__field--full">
           <RsLabel required>{{ t('modules.sqlserver.createDb.dbName') }}</RsLabel>
           <RsInput
@@ -141,7 +138,10 @@ function markFilesTouched(): void {
               v-model="collation"
               :options="collationOptions"
               :disabled="formDisabled"
+              :loading="collationsLoading"
               searchable
+              virtual
+              @update:open="onCollationDropdownOpen"
             />
           </div>
           <div v-if="!azure" class="nm-sqlserver-ddl-dialog__field">
@@ -171,7 +171,7 @@ function markFilesTouched(): void {
           />
         </div>
 
-        <template v-if="!azure && defaultDataDir">
+        <template v-if="!azure">
           <RsCheckbox v-model="customizeFiles" :disabled="formDisabled">
             {{ t('modules.sqlserver.createDb.customizeFiles') }}
           </RsCheckbox>

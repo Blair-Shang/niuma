@@ -12,14 +12,17 @@ const databaseOptionsListLimit = 500
 
 // DatabaseCreateOptions 是新建库表单的候选项（来自实例 catalog）。
 type DatabaseCreateOptions struct {
-	Owners           []string `json:"owners"`
-	Encodings        []string `json:"encodings"`
-	Templates        []string `json:"templates"`
-	Collations       []string `json:"collations"`
-	DefaultEncoding  string   `json:"defaultEncoding,omitempty"`
-	DefaultTemplate  string   `json:"defaultTemplate,omitempty"`
-	DefaultLcCollate string   `json:"defaultLcCollate,omitempty"`
-	DefaultLcCtype   string   `json:"defaultLcCtype,omitempty"`
+	Owners             []string `json:"owners"`
+	Encodings          []string `json:"encodings"`
+	Templates          []string `json:"templates"`
+	Tablespaces        []string `json:"tablespaces"`
+	ExistingDatabases  []string `json:"existingDatabases"`
+	Collations         []string `json:"collations"`
+	DefaultEncoding    string   `json:"defaultEncoding,omitempty"`
+	DefaultTemplate    string   `json:"defaultTemplate,omitempty"`
+	DefaultTablespace  string   `json:"defaultTablespace,omitempty"`
+	DefaultLcCollate   string   `json:"defaultLcCollate,omitempty"`
+	DefaultLcCtype     string   `json:"defaultLcCtype,omitempty"`
 }
 
 // ListDatabaseCreateOptions 列出新建库表单候选项；encoding 用于过滤排序规则。
@@ -33,6 +36,14 @@ func ListDatabaseCreateOptions(ctx context.Context, pool *pgxpool.Pool, encoding
 		return nil, err
 	}
 	templates, err := listDatabaseTemplates(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	tablespaces, err := listDatabaseTablespaces(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := listExistingDatabases(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
@@ -55,14 +66,20 @@ func ListDatabaseCreateOptions(ctx context.Context, pool *pgxpool.Pool, encoding
 	}
 
 	out := &DatabaseCreateOptions{
-		Owners:           owners,
-		Encodings:        encodings,
-		Templates:        templates,
-		Collations:       collations,
-		DefaultEncoding:  defaults.Encoding,
-		DefaultTemplate:  defaults.Template,
-		DefaultLcCollate: defaults.LcCollate,
-		DefaultLcCtype:   defaults.LcCtype,
+		Owners:            owners,
+		Encodings:         encodings,
+		Templates:         templates,
+		Tablespaces:       tablespaces,
+		ExistingDatabases: existing,
+		Collations:        collations,
+		DefaultEncoding:   defaults.Encoding,
+		DefaultTemplate:   defaults.Template,
+		DefaultTablespace: "pg_default",
+		DefaultLcCollate:  defaults.LcCollate,
+		DefaultLcCtype:    defaults.LcCtype,
+	}
+	if len(tablespaces) > 0 {
+		out.DefaultTablespace = tablespaces[0]
 	}
 	if out.DefaultEncoding == "" && len(encodings) > 0 {
 		out.DefaultEncoding = encodings[0]
@@ -151,11 +168,12 @@ ORDER BY 1`
 }
 
 func listDatabaseTemplates(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	// DBeaver：模板库 + 全部已有库均可作为克隆源。
 	const query = `
 SELECT d.datname
 FROM pg_catalog.pg_database d
-WHERE d.datistemplate
-ORDER BY d.datname
+ORDER BY CASE WHEN d.datname IN ('template0', 'template1') THEN 0 ELSE 1 END,
+         d.datname
 LIMIT $1`
 	out, err := scanStringList(ctx, pool, query, databaseOptionsListLimit)
 	if err != nil {
@@ -165,6 +183,31 @@ LIMIT $1`
 		return out, nil
 	}
 	return []string{"template0", "template1"}, nil
+}
+
+func listDatabaseTablespaces(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	const query = `
+SELECT t.spcname
+FROM pg_catalog.pg_tablespace t
+ORDER BY CASE WHEN t.spcname = 'pg_default' THEN 0 ELSE 1 END, t.spcname
+LIMIT $1`
+	out, err := scanStringList(ctx, pool, query, databaseOptionsListLimit)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+	return []string{"pg_default"}, nil
+}
+
+func listExistingDatabases(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	const query = `
+SELECT d.datname
+FROM pg_catalog.pg_database d
+ORDER BY d.datname
+LIMIT $1`
+	return scanStringList(ctx, pool, query, databaseOptionsListLimit)
 }
 
 func listDatabaseCollations(

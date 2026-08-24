@@ -10,14 +10,16 @@ import (
 
 // CategoryCountsResult 是 schema 下分类对象数量（非行数）。
 type CategoryCountsResult struct {
-	Tables     int `json:"tables"`
-	Views      int `json:"views"`
-	Functions  int `json:"functions"`
-	Procedures int `json:"procedures"`
-	Sequences  int `json:"sequences"`
+	Tables            int `json:"tables"`
+	Views             int `json:"views"`
+	MaterializedViews int `json:"materializedViews"`
+	Triggers          int `json:"triggers"`
+	Functions         int `json:"functions"`
+	Procedures        int `json:"procedures"`
+	Sequences         int `json:"sequences"`
 }
 
-// CountCategories 统计 schema 下表 / 视图 / 函数 / 过程 / 序列数量（轻量 COUNT，非行数）。
+// CountCategories 统计 schema 下表 / 视图 / 物化视图 / 触发器 / 函数 / 过程 / 序列数量（轻量 COUNT，非行数）。
 func CountCategories(ctx context.Context, pool *pgxpool.Pool, schema string) (*CategoryCountsResult, error) {
 	sch := strings.TrimSpace(schema)
 	if sch == "" {
@@ -36,14 +38,25 @@ SELECT
   (SELECT COUNT(*)::int
    FROM pg_catalog.pg_class c
    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = $1 AND c.relkind IN ('v', 'm', 'f')
+   WHERE n.nspname = $1 AND c.relkind IN ('v', 'f')
      AND c.relname NOT ILIKE 'bin$$%'),
+  (SELECT COUNT(*)::int
+   FROM pg_catalog.pg_class c
+   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = $1 AND c.relkind = 'm'
+     AND c.relname NOT ILIKE 'bin$$%'),
+  (SELECT COUNT(*)::int
+   FROM pg_catalog.pg_trigger t
+   JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = $1 AND NOT t.tgisinternal
+     AND c.relkind IN ('r', 'p', 'v', 'm', 'f')),
   (SELECT COUNT(*)::int
    FROM pg_catalog.pg_class c
    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = $1 AND c.relkind = 'S'
      AND c.relname NOT ILIKE 'bin$$%')
-`, sch).Scan(&out.Tables, &out.Views, &out.Sequences)
+`, sch).Scan(&out.Tables, &out.Views, &out.MaterializedViews, &out.Triggers, &out.Sequences)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: count relation categories: %w", err)
 	}

@@ -27,7 +27,7 @@ const (
 	MethodQueryExec = "query.exec"
 	// MethodQueryExecBatch 在同一连接上顺序执行多条 SQL（临时表 / SET 跨语句可见；可指向非会话默认库）。
 	MethodQueryExecBatch = "query.execBatch"
-	// MethodRoutineCall 调用过程并读回 OUT（同连接临时表，不依赖 NOTICE）。
+	// MethodRoutineCall 专业化调用函数/过程（不走 query.exec）。
 	MethodRoutineCall = "routine.call"
 	// MethodQueryFetch 续取结果页。
 	MethodQueryFetch = "query.fetch"
@@ -35,6 +35,15 @@ const (
 	MethodQueryClose = "query.close"
 	// MethodQueryCancel 取消在途查询。
 	MethodQueryCancel = "query.cancel"
+	// MethodQueryExplain 执行 EXPLAIN / EXPLAIN ANALYZE。
+	MethodQueryExplain = "query.explain"
+
+	// MethodNotifyListen 订阅 LISTEN 频道。
+	MethodNotifyListen = "notify.listen"
+	// MethodNotifyUnlisten 取消订阅。
+	MethodNotifyUnlisten = "notify.unlisten"
+	// MethodNotifyChannels 列出当前订阅。
+	MethodNotifyChannels = "notify.channels"
 
 	// MethodTreeDatabases 列出数据库。
 	MethodTreeDatabases = "tree.databases"
@@ -46,6 +55,8 @@ const (
 	MethodTreeRoutines = "tree.routines"
 	// MethodTreeSequences 列出序列。
 	MethodTreeSequences = "tree.sequences"
+	// MethodTreeTriggers 列出用户触发器。
+	MethodTreeTriggers = "tree.triggers"
 	// MethodTreeCategoryCounts 统计 schema 分类对象数。
 	MethodTreeCategoryCounts = "tree.categoryCounts"
 
@@ -71,6 +82,8 @@ const (
 	MethodMetaRoutineSource = "meta.routineSource"
 	// MethodMetaDatabaseCreateOptions 新建库表单候选项。
 	MethodMetaDatabaseCreateOptions = "meta.databaseCreateOptions"
+	// MethodMetaDatabaseOverview 已有库的建库属性（复制 CREATE DATABASE）。
+	MethodMetaDatabaseOverview = "meta.databaseOverview"
 	MethodMetaInstanceOverview      = "meta.instanceOverview"
 	MethodMetaActivity              = "meta.activity"
 	MethodMetaLocks                 = "meta.locks"
@@ -80,6 +93,8 @@ const (
 	MethodMetaServerVariables = "meta.serverVariables"
 	// MethodMetaServerStatus 扁平化 pg_stat_*（Status）。
 	MethodMetaServerStatus = "meta.serverStatus"
+	// MethodMetaPrivileges 读取对象 ACL。
+	MethodMetaPrivileges = "meta.privileges"
 
 	MethodDDLScript             = "ddl.script"
 	MethodDDLExec               = "ddl.exec"
@@ -183,6 +198,14 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.queryClose(ctx, req)
 	case MethodQueryCancel:
 		return d.queryCancel(ctx, req)
+	case MethodQueryExplain:
+		return d.queryExplain(ctx, req)
+	case MethodNotifyListen:
+		return d.notifyListen(ctx, req)
+	case MethodNotifyUnlisten:
+		return d.notifyUnlisten(ctx, req)
+	case MethodNotifyChannels:
+		return d.notifyChannels(ctx, req)
 	case MethodTxGetState:
 		return d.txGetState(ctx, req)
 	case MethodTxSetAutoCommit:
@@ -201,6 +224,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.treeRoutines(ctx, req)
 	case MethodTreeSequences:
 		return d.treeSequences(ctx, req)
+	case MethodTreeTriggers:
+		return d.treeTriggers(ctx, req)
 	case MethodTreeCategoryCounts:
 		return d.treeCategoryCounts(ctx, req)
 	case MethodCatalogSchemas:
@@ -225,6 +250,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.metaForeignKeys(ctx, req)
 	case MethodMetaDatabaseCreateOptions:
 		return d.metaDatabaseCreateOptions(ctx, req)
+	case MethodMetaDatabaseOverview:
+		return d.metaDatabaseOverview(ctx, req)
 	case MethodMetaInstanceOverview:
 		return d.metaInstanceOverview(ctx, req)
 	case MethodMetaActivity:
@@ -239,6 +266,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.metaServerVariables(ctx, req)
 	case MethodMetaServerStatus:
 		return d.metaServerStatus(ctx, req)
+	case MethodMetaPrivileges:
+		return d.metaPrivileges(ctx, req)
 	case MethodDDLScript:
 		return d.ddlScript(ctx, req)
 	case MethodDDLExec:

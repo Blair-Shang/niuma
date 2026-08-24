@@ -218,8 +218,9 @@ export function postgresBatchDropSql(
   items: Array<{
     schema: string
     name: string
-    kind: 'table' | 'view' | 'function' | 'procedure' | 'sequence'
+    kind: 'table' | 'view' | 'materialized_view' | 'function' | 'procedure' | 'sequence' | 'trigger'
     args?: string
+    table?: string
   }>,
 ): string {
   const lines = [
@@ -231,6 +232,11 @@ export function postgresBatchDropSql(
     const qn = qualifiedName(item.schema, item.name)
     if (item.kind === 'table') lines.push(`DROP TABLE IF EXISTS ${qn} CASCADE;`)
     else if (item.kind === 'view') lines.push(`DROP VIEW IF EXISTS ${qn} CASCADE;`)
+    else if (item.kind === 'materialized_view') lines.push(`DROP MATERIALIZED VIEW IF EXISTS ${qn} CASCADE;`)
+    else if (item.kind === 'trigger') {
+      if (!item.table) continue
+      lines.push(`DROP TRIGGER IF EXISTS ${quoteIdent(item.name)} ON ${qualifiedName(item.schema, item.table)};`)
+    }
     else if (item.kind === 'sequence') lines.push(`DROP SEQUENCE IF EXISTS ${qn} CASCADE;`)
     else if (item.kind === 'function') {
       const sig = item.args?.trim() ? `(${item.args})` : ''

@@ -48,6 +48,80 @@ export function buildInsertSqlText(
   return `INSERT INTO ${target} (${cols}) VALUES ${tuples.join(', ')};\n`
 }
 
+/**
+ * WHERE 等值片段：NULL 用 IS NULL（对齐 DBeaver / Navicat，避免 `= NULL`）。
+ */
+export function sqlWhereEquals(column: string, value: unknown): string {
+  if (value === null || value === undefined) {
+    return `${quoteIdent(column)} IS NULL`
+  }
+  return `${quoteIdent(column)} = ${toSqlLiteral(value)}`
+}
+
+function resolveKeyColumns(
+  keyColumns: string[],
+  fallbackColumns: string[],
+  row: Record<string, unknown>,
+): string[] {
+  if (keyColumns.length > 0) return keyColumns
+  if (fallbackColumns.length > 0) return fallbackColumns
+  return Object.keys(row).filter((k) => !k.startsWith('__'))
+}
+
+/**
+ * 生成 DELETE SQL（每行一条）。
+ * keyColumns 一般为主键；为空时用 fallbackColumns（通常为全列）。
+ */
+export function buildDeleteSqlText(
+  schema: string,
+  table: string,
+  keyColumns: string[],
+  rows: Array<Record<string, unknown>>,
+  fallbackColumns: string[] = [],
+): string {
+  const target = qualifiedName(schema, table)
+  if (rows.length === 0) return `-- no rows\n`
+  return (
+    rows
+      .map((row) => {
+        const cols = resolveKeyColumns(keyColumns, fallbackColumns, row)
+        if (cols.length === 0) return `-- no columns`
+        const where = cols.map((c) => sqlWhereEquals(c, row[c])).join(' AND ')
+        return `DELETE FROM ${target} WHERE ${where};`
+      })
+      .join('\n') + '\n'
+  )
+}
+
+/**
+ * 生成 UPDATE SQL（每行一条）。
+ * SET 写全部 columns；WHERE 用主键，无主键时用 fallbackColumns（全列）。
+ */
+export function buildUpdateSqlText(
+  schema: string,
+  table: string,
+  columns: string[],
+  keyColumns: string[],
+  rows: Array<Record<string, unknown>>,
+  fallbackColumns: string[] = [],
+): string {
+  const target = qualifiedName(schema, table)
+  if (rows.length === 0 || columns.length === 0) return `-- no rows\n`
+  return (
+    rows
+      .map((row) => {
+        const keys = resolveKeyColumns(keyColumns, fallbackColumns, row)
+        if (keys.length === 0) return `-- no columns`
+        const set = columns
+          .map((c) => `${quoteIdent(c)} = ${toSqlLiteral(row[c])}`)
+          .join(', ')
+        const where = keys.map((c) => sqlWhereEquals(c, row[c])).join(' AND ')
+        return `UPDATE ${target} SET ${set} WHERE ${where};`
+      })
+      .join('\n') + '\n'
+  )
+}
+
 /** 导出当前结果为 INSERT SQL。 */
 export function exportQueryResultAsSql(
   schema: string,

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * PostgreSQL 表 / 视图数据浏览：挂载公共 BrowseDataShell。
+ * 对齐 MySQL：网格右键复制 INSERT/UPDATE/DELETE、粘贴、行提交；视图只读。
+ */
 import {
   RsButton,
   RsCodeEditor,
@@ -7,9 +11,15 @@ import {
   RsLoading,
   RsPopover,
 } from '@niuma/ui'
-import { computed, proxyRefs } from 'vue'
-import { BrowseDataGrid, BrowseDataShell } from '@/modules/database'
+import { computed } from 'vue'
+import {
+  BrowseDataGrid,
+  BrowseDataShell,
+  BrowseIoMenu,
+} from '@/modules/database'
 import { usePostgresBrowsePane } from '@/modules/postgres/composables/usePostgresBrowsePane'
+
+const BROWSE_GUTTER_WIDTH = 40
 
 const props = defineProps<{
   sessionId: string | null
@@ -21,129 +31,202 @@ const props = defineProps<{
   sessionLabel?: string
   active: boolean
 }>()
-const pane = proxyRefs(usePostgresBrowsePane(props))
+
+const {
+  t,
+  page,
+  pageSize,
+  pageSizeOptions,
+  totalRows,
+  filterOpen,
+  filterDraft,
+  appliedWhereSql,
+  lastDataSql,
+  loading,
+  saving,
+  lastResult,
+  selectedRowKeys,
+  resultRows,
+  resultColumns,
+  deleteConfirm,
+  importMenuOpen,
+  exportMenuOpen,
+  importMenuItems,
+  exportMenuItems,
+  shellLabels,
+  scopeLabel,
+  scopeOk,
+  canInsert,
+  canEdit,
+  canDeleteSelection,
+  tableEditable,
+  statusMeta,
+  statusHint,
+  isView,
+  filterSqlConfig,
+  refresh,
+  onFilterKeydown,
+  openInsert,
+  requestDelete,
+  confirmDelete,
+  onBrowseKeydown,
+  onCellEditCommit,
+  isBrowseRowPending,
+  onBrowseRowEditCommit,
+  onBrowseRowEditRollback,
+  contextMenuItems,
+  onContextMenuSelect,
+  onImportMenuSelect,
+  onExportMenuSelect,
+  openBrowseIo,
+  ddlMenuOpen,
+  ddlLoading,
+  ddlText,
+  objectType,
+  canOpenDesign,
+  copyBrowseDdl,
+  openDesignTable,
+  openDdlTab,
+} = usePostgresBrowsePane(props)
 
 const dialogLabels = computed(() => ({
-  apply: pane.t('modules.postgres.browse.cellApply'),
-  cancel: pane.t('modules.postgres.browse.cellCancel'),
-  hint: pane.t('modules.postgres.browse.cellApplyHint'),
-  viewTitle: pane.t('modules.postgres.browse.cellView'),
+  apply: t('modules.postgres.browse.cellApply'),
+  cancel: t('modules.postgres.browse.cellCancel'),
+  hint: t('modules.postgres.browse.cellApplyHint'),
+  viewTitle: t('modules.postgres.browse.cellView'),
 }))
+
+const showMutate = computed(() => !isView.value)
+const importDisabled = computed(() => !canInsert.value || saving.value)
+const exportDisabled = computed(
+  () => !props.profileId && (!lastResult.value || resultRows.value.length === 0),
+)
+const statusWarn = computed(
+  () => Boolean(lastResult.value) && !isView.value && !canEdit.value && !resultRows.value.some((r) => r.__isNew),
+)
+const deleteCount = computed(
+  () => selectedRowKeys.value.filter((k) => !String(k).startsWith('new-')).length || 1,
+)
 </script>
 
 <template>
   <BrowseDataShell
-    v-model:page="pane.page"
-    v-model:page-size="pane.pageSize"
-    v-model:filter-open="pane.filterOpen"
-    v-model:import-menu-open="pane.importMenuOpen"
-    v-model:export-menu-open="pane.exportMenuOpen"
+    v-model:page="page"
+    v-model:page-size="pageSize"
+    v-model:filter-open="filterOpen"
+    v-model:import-menu-open="importMenuOpen"
+    v-model:export-menu-open="exportMenuOpen"
     class="nm-postgres-browse"
-    :labels="pane.shellLabels"
+    :labels="shellLabels"
     brand-icon="database"
     :session-label="sessionLabel || 'Postgres'"
-    :scope-label="pane.scopeLabel"
-    :loading="pane.loading"
-    :saving="pane.saving"
-    :show-mutate="!pane.isView"
-    :can-insert="pane.canInsert"
-    :can-delete="pane.canDelete"
-    :show-import="pane.canInsert"
-    :show-export="true"
-    :export-disabled="!pane.lastResult"
-    :has-active-filter="Boolean(pane.appliedWhereSql)"
-    :has-scope="pane.scopeOk"
-    :has-result="Boolean(pane.lastResult)"
-    :page-size-options="pane.pageSizeOptions"
-    :total-rows="pane.totalRows"
-    :last-data-sql="pane.lastDataSql"
-    :status-meta="pane.statusMeta"
-    :status-hint="pane.statusHint"
-    @refresh="pane.refresh"
-    @insert="pane.openInsert"
-    @delete="pane.deleteConfirm = true"
+    :scope-label="scopeLabel"
+    :loading="loading"
+    :saving="saving"
+    :show-mutate="showMutate"
+    :can-insert="canInsert"
+    :can-delete="canDeleteSelection"
+    :show-import="showMutate"
+    :import-disabled="importDisabled"
+    :export-disabled="exportDisabled"
+    :has-active-filter="Boolean(appliedWhereSql)"
+    :has-scope="scopeOk"
+    :has-result="Boolean(lastResult)"
+    :page-size-options="pageSizeOptions"
+    :total-rows="totalRows"
+    :last-data-sql="lastDataSql"
+    :status-meta="statusMeta"
+    :status-hint="statusHint"
+    :status-warn="statusWarn"
+    @insert="openInsert"
+    @delete="requestDelete"
+    @refresh="refresh"
+    @keydown="onBrowseKeydown"
   >
-    <template #export-menu>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.localExport('csv')">CSV</button>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.localExport('json')">JSON</button>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.localExport('tsv')">TSV</button>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.openFullCsv('export_csv')">
-        {{ pane.t('modules.postgres.browse.formatCsvFull') }}
-      </button>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.copyTsv()">
-        {{ pane.t('modules.postgres.browse.copyTsv') }}
-      </button>
-    </template>
     <template #import-menu>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.localImport('csv')">CSV</button>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.localImport('json')">JSON</button>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.localImport('tsv')">TSV</button>
-      <button type="button" class="nm-postgres-browse__menu-item" @click="pane.openFullCsv('import_csv')">
-        {{ pane.t('modules.postgres.browse.importCsvFull') }}
-      </button>
+      <BrowseIoMenu :items="importMenuItems" @select="onImportMenuSelect">
+        <button
+          type="button"
+          class="nm-postgres-browse__io-extra"
+          :disabled="!profileId || saving"
+          @pointerdown.stop.prevent="openBrowseIo('import_csv')"
+        >
+          {{ t('modules.postgres.tree.importCsv') }}
+        </button>
+      </BrowseIoMenu>
     </template>
+    <template #export-menu>
+      <BrowseIoMenu :items="exportMenuItems" @select="onExportMenuSelect" />
+    </template>
+
     <template #toolbar-extra>
-      <RsPopover v-model:open="pane.ddlMenuOpen" side="bottom" align="end" :side-offset="4" width="auto">
+      <RsPopover
+        v-model:open="ddlMenuOpen"
+        side="bottom"
+        align="end"
+        :side-offset="4"
+        width="auto"
+      >
         <RsButton
           variant="ghost"
           size="sm"
           icon="file-code"
-          :disabled="!table || !sessionId"
-          :tooltip="pane.t('modules.postgres.browse.ddlTooltip')"
+          :disabled="!database || !table || !sessionId"
+          :tooltip="t('modules.postgres.browse.ddlTooltip')"
         >
-          {{ pane.t('modules.postgres.browse.ddl') }}
+          {{ t('modules.postgres.browse.ddl') }}
         </RsButton>
         <template #content>
           <div class="nm-postgres-browse__ddl-pop">
             <div class="nm-postgres-browse__ddl-head">
               <div class="nm-postgres-browse__ddl-title">
-                <span>{{ pane.t('modules.postgres.session.tabDdl') }}</span>
-                <span v-if="pane.objectType" class="nm-postgres-browse__ddl-type">{{ pane.objectType }}</span>
+                <span>{{ t('modules.postgres.session.tabDdl') }}</span>
+                <span v-if="objectType" class="nm-postgres-browse__ddl-type">{{ objectType }}</span>
               </div>
               <div class="nm-postgres-browse__ddl-actions">
                 <RsButton
                   variant="ghost"
                   size="sm"
                   icon="copy"
-                  :disabled="!pane.ddlText || pane.ddlLoading"
-                  :tooltip="pane.t('modules.postgres.ddl.copy')"
-                  @click="pane.copyBrowseDdl"
+                  :disabled="!ddlText || ddlLoading"
+                  :tooltip="t('modules.postgres.ddl.copy')"
+                  @click="copyBrowseDdl"
                 >
-                  {{ pane.t('modules.postgres.ddl.copy') }}
+                  {{ t('modules.postgres.ddl.copy') }}
                 </RsButton>
                 <RsButton
-                  v-if="pane.canOpenDesign"
+                  v-if="canOpenDesign"
                   variant="ghost"
                   size="sm"
                   icon="pencil"
-                  :disabled="!table || !profileId"
-                  :tooltip="pane.t('modules.postgres.browse.openDesignTooltip')"
-                  @click="pane.openDesignTable"
+                  :disabled="!database || !table || !profileId"
+                  :tooltip="t('modules.postgres.browse.openDesignTooltip')"
+                  @click="openDesignTable"
                 >
-                  {{ pane.t('modules.postgres.browse.openDesign') }}
+                  {{ t('modules.postgres.browse.openDesign') }}
                 </RsButton>
                 <RsButton
                   variant="ghost"
                   size="sm"
                   icon="external-link"
-                  :disabled="!table || !profileId"
-                  :tooltip="pane.t('modules.postgres.browse.openDdlTooltip')"
-                  @click="pane.openDdlTab"
+                  :disabled="!database || !table || !profileId"
+                  :tooltip="t('modules.postgres.browse.openDdlTooltip')"
+                  @click="openDdlTab"
                 >
-                  {{ pane.t('modules.postgres.browse.openDdl') }}
+                  {{ t('modules.postgres.browse.openDdl') }}
                 </RsButton>
               </div>
             </div>
-            <RsLoading v-if="pane.ddlLoading && !pane.ddlText" block class="nm-postgres-browse__ddl-loading" />
+            <RsLoading v-if="ddlLoading && !ddlText" block class="nm-postgres-browse__ddl-loading" />
             <RsEmpty
-              v-else-if="!pane.ddlText"
+              v-else-if="!ddlText"
               class="nm-postgres-browse__ddl-empty"
               icon="file-code"
-              :description="pane.t('modules.postgres.ddl.empty')"
+              :description="t('modules.postgres.ddl.empty')"
             />
             <RsCodeEditor
               v-else
-              v-model="pane.ddlText"
+              v-model="ddlText"
               class="nm-postgres-browse__ddl-editor"
               language="sql"
               readonly
@@ -156,47 +239,51 @@ const dialogLabels = computed(() => ({
         </template>
       </RsPopover>
     </template>
+
     <template #filter>
-      <div class="nm-postgres-browse__filter" @keydown.capture="pane.onFilterKeydown">
+      <div class="nm-postgres-browse__filter" @keydown.capture="onFilterKeydown">
         <RsCodeEditor
-          v-model="pane.filterDraft"
+          v-model="filterDraft"
           language="sql"
           embedded
           :rounded="false"
           :fold-gutter="false"
-          :gutter-width="pane.browseGutterWidth"
+          :gutter-width="BROWSE_GUTTER_WIDTH"
           :show-toolbar="false"
           height="100%"
-          :sql-config="pane.filterSqlConfig"
-          :placeholder="pane.t('modules.postgres.browse.filterEditorPlaceholder')"
+          :sql-config="filterSqlConfig"
+          :placeholder="t('modules.postgres.browse.filterEditorPlaceholder')"
         />
       </div>
     </template>
+
     <BrowseDataGrid
-      v-model:selected-row-keys="pane.selectedRowKeys"
-      :columns="pane.resultColumns"
-      :data="pane.resultRows"
-      :loading="pane.loading"
-      :editable="pane.canEdit || pane.resultRows.some((row) => row.__isNew)"
-      :allow-null="pane.canEdit"
-      :row-pending="pane.isBrowseRowPending"
+      v-model:selected-row-keys="selectedRowKeys"
+      :columns="resultColumns"
+      :data="resultRows"
+      :loading="loading"
+      :editable="tableEditable"
+      :allow-null="tableEditable"
+      :row-pending="isBrowseRowPending"
+      :context-menu-items="contextMenuItems"
       :layout-active="active"
-      :gutter-width="pane.browseGutterWidth"
+      :gutter-width="BROWSE_GUTTER_WIDTH"
       :dialog-labels="dialogLabels"
-      :empty-text="pane.t('modules.postgres.browse.empty')"
-      @cell-edit-commit="pane.onCellEditCommit"
-      @row-edit-commit="pane.onBrowseRowEditCommit"
-      @row-edit-rollback="pane.onBrowseRowEditRollback"
+      :empty-text="t('modules.postgres.browse.empty')"
+      @cell-edit-commit="onCellEditCommit"
+      @row-edit-commit="onBrowseRowEditCommit"
+      @row-edit-rollback="onBrowseRowEditRollback"
+      @context-menu-select="onContextMenuSelect"
     />
 
     <template #dialogs>
       <RsConfirmDialog
-        v-model:open="pane.deleteConfirm"
-        :title="pane.t('modules.postgres.browse.deleteTitle')"
-        :description="pane.t('modules.postgres.browse.deleteDesc', { count: pane.selectedRowKeys.length })"
+        v-model:open="deleteConfirm"
+        :title="t('modules.postgres.browse.deleteTitle')"
+        :description="t('modules.postgres.browse.deleteDesc', { count: deleteCount })"
         tone="danger"
         confirm-variant="danger"
-        @confirm="pane.deleteSelected"
+        @confirm="confirmDelete"
       />
     </template>
   </BrowseDataShell>
@@ -208,20 +295,7 @@ const dialogLabels = computed(() => ({
   width: 100%;
   height: 100%;
 }
-.nm-postgres-browse__menu-item {
-  display: block;
-  width: 100%;
-  padding: 0.4rem 0.75rem;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-}
-.nm-postgres-browse__menu-item:hover {
-  background: var(--rs-bg-muted);
-}
+
 .nm-postgres-browse__ddl-pop {
   display: flex;
   flex-direction: column;
@@ -230,6 +304,7 @@ const dialogLabels = computed(() => ({
   height: min(26rem, 65vh);
   min-height: 16rem;
 }
+
 .nm-postgres-browse__ddl-head {
   display: flex;
   align-items: center;
@@ -238,6 +313,7 @@ const dialogLabels = computed(() => ({
   flex-shrink: 0;
   min-width: 0;
 }
+
 .nm-postgres-browse__ddl-title {
   display: flex;
   align-items: center;
@@ -247,22 +323,50 @@ const dialogLabels = computed(() => ({
   font-weight: 600;
   color: var(--rs-text);
 }
+
 .nm-postgres-browse__ddl-type {
   font-weight: 500;
   color: var(--rs-muted);
   font-family: var(--rs-font-mono);
   font-size: 11px;
 }
+
 .nm-postgres-browse__ddl-actions {
   display: flex;
   align-items: center;
   gap: 0.15rem;
   flex-shrink: 0;
 }
+
 .nm-postgres-browse__ddl-loading,
 .nm-postgres-browse__ddl-empty,
 .nm-postgres-browse__ddl-editor {
   flex: 1;
   min-height: 0;
+}
+
+.nm-postgres-browse__io-extra {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 0;
+  border-radius: var(--rs-radius-sm);
+  background: transparent;
+  color: var(--rs-text);
+  font-size: var(--rs-font-size-sm);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.nm-postgres-browse__io-extra:hover:not(:disabled) {
+  background: var(--rs-bg-muted, rgba(127, 127, 127, 0.12));
+}
+
+.nm-postgres-browse__io-extra:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 </style>

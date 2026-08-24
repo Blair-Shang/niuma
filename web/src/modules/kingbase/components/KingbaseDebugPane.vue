@@ -32,10 +32,8 @@ import {
 import {
   defaultKingbaseProfile,
   resolveMonacoLanguageFromProfile,
-  resolveSplitFeaturesFromProfile,
 } from '@/modules/sql-editor/capabilities'
 import { formatSql } from '@/modules/sql-editor/format'
-import { splitSqlStatementsWithFeatures } from '@/modules/sql-editor/split/sql-statement-splitter'
 import {
   bootstrapKingbaseMonaco,
   KINGBASE_MONACO_LANGUAGE_ID,
@@ -45,10 +43,7 @@ import {
   countKingbaseDebugLogPoints,
   insertKingbaseDebugLogPoint,
   insertKingbaseDebugLogPointAtLine,
-  isKingbaseDebugSessionScaffoldSql,
-  wrapKingbaseCallWithDebugSession,
 } from '@/modules/kingbase/utils/kingbase-debug-assist'
-import { hasBatchExecMarker } from '@/modules/kingbase/utils/query-exec-mode'
 import {
   buildCallParams,
   buildRoutineCallSql,
@@ -262,21 +257,6 @@ function toRoutineParams(): RoutineCallParam[] {
   }))
 }
 
-function buildCallSql(): string {
-  if (!props.schema || !props.routine) return ''
-  let sql = buildRoutineCallSql({
-    schema: props.schema,
-    name: props.routine,
-    kind: kind.value,
-    params: toRoutineParams(),
-    qualify: qualifiedName,
-  })
-  if (enableDebugSession.value) {
-    sql = wrapKingbaseCallWithDebugSession(sql)
-  }
-  return sql
-}
-
 function cellText(v: unknown): string {
   if (v == null) return 'NULL'
   if (typeof v === 'object') {
@@ -327,103 +307,38 @@ async function runCall(): Promise<void> {
   inspectTab.value = 'result'
 
   try {
-    const hasOut = params.value.some((p) => /out/i.test(p.mode || ''))
-    // 带 OUT 的过程：服务端 routine.call（同连接临时表），不依赖 NOTICE / 多语句脚本
-    if (kind.value === 'procedure' && hasOut) {
-      const result = await kingbaseApi.routineCall({
-        sessionId: props.sessionId,
-        database: props.database,
-        schema: props.schema,
-        name: props.routine,
-        args: toRoutineParams().map((p) => ({
-          name: p.name,
-          type: p.type,
-          mode: p.mode,
-          value: p.value,
-          isNull: p.isNull,
-        })),
-        requestId: `kingbase-routine-${Date.now()}`,
-      })
-      const grid = toGrid(result, 0, `CALL ${qualifiedName(props.schema, props.routine)}`)
-      if (grid) {
-        resultGrids.value.push(grid)
-        activeGridId.value = grid.id
-        messages.value.push(
-          `OK  routine.call  → ${grid.rows.length} row(s)  ${result.durationMs}ms`,
-        )
-        toast.success(t('modules.kingbase.debug.runOk'))
-      } else {
-        inspectTab.value = 'messages'
-        messages.value.push(`OK  routine.call  → ${result.commandTag || 'done'}`)
-        toast.success(t('modules.kingbase.debug.runOkNoResult'))
-      }
-      return
-    }
-
-    // 函数 / 无 OUT 过程：生成 SQL 执行；debug wrap 或多语句 / batch 标识时同连接批跑
-    const sql = buildCallSql().trim()
-    if (!sql) return
-    const features = resolveSplitFeaturesFromProfile(dialectProfile.value)
-    const statements = splitSqlStatementsWithFeatures(sql, features)
-      .map((s) => s.sql.trim())
-      .filter(Boolean)
-
-    let results: KingbaseQueryExecResult[] = []
-    const useBatch = statements.length > 1 || hasBatchExecMarker(sql)
-    if (useBatch) {
-      const batch = await kingbaseApi.queryExecBatch({
-        sessionId: props.sessionId,
-        database: props.database,
-        statements,
-        limit: 200,
-        requestId: `kingbase-debug-${Date.now()}`,
-      })
-      results = batch.results ?? []
-      for (const n of batch.notices ?? []) messages.value.push(`NOTICE  ${n}`)
-    } else {
-      results = [
-        await kingbaseApi.queryExec({
-          sessionId: props.sessionId,
-          database: props.database,
-          sql: statements[0]!,
-          limit: 200,
-          requestId: `kingbase-debug-${Date.now()}`,
-        }),
-      ]
-    }
-
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]!
-      for (const n of result.notices ?? []) messages.value.push(`NOTICE  ${n}`)
-      const stmt = statements[i] ?? ''
-      const preview = stmt.length > 72 ? `${stmt.slice(0, 72)}…` : stmt
-      // 调试包装的 set_config / SET 只记消息，不进结果页
-      if (isKingbaseDebugSessionScaffoldSql(stmt)) {
-        messages.value.push(`OK  #${i + 1}  ${preview}  → scaffold`)
-        continue
-      }
-      const grid = toGrid(result, resultGrids.value.length, preview)
-      if (grid) {
-        resultGrids.value.push(grid)
-        activeGridId.value = grid.id
-        messages.value.push(
-          `OK  #${i + 1}  ${preview}  → ${grid.rows.length} row(s)  ${result.durationMs}ms`,
-        )
-      } else {
-        const affected = result.rowsAffected ?? result.rowCount
-        messages.value.push(
-          `OK  #${i + 1}  ${preview}  → ${result.commandTag || 'done'}${
-            affected != null ? ` (${affected})` : ''
-          }  ${result.durationMs}ms`,
-        )
-      }
-    }
-
-    if (resultGrids.value.length === 0) {
-      inspectTab.value = 'messages'
-      toast.success(t('modules.kingbase.debug.runOkNoResult'))
-    } else {
+    const result = await kingbaseApi.routineCall({
+      sessionId: props.sessionId,
+      database: props.database,
+      schema: props.schema,
+      name: props.routine,
+      kind: kind.value,
+      oid: props.oid,
+      args: toRoutineParams().map((p) => ({
+        name: p.name,
+        type: p.type,
+        mode: p.mode,
+        value: p.value,
+        isNull: p.isNull,
+      })),
+      debugSession: enableDebugSession.value,
+      limit: 200,
+      requestId: `kingbase-routine-${Date.now()}`,
+    })
+    for (const n of result.notices ?? []) messages.value.push(`NOTICE  ${n}`)
+    const preview = `${kind.value === 'function' ? 'SELECT' : 'CALL'} ${qualifiedName(props.schema, props.routine)}`
+    const grid = toGrid(result, 0, preview)
+    if (grid) {
+      resultGrids.value.push(grid)
+      activeGridId.value = grid.id
+      messages.value.push(
+        `OK  routine.call  → ${grid.rows.length} row(s)  ${result.durationMs}ms`,
+      )
       toast.success(t('modules.kingbase.debug.runOk'))
+    } else {
+      inspectTab.value = 'messages'
+      messages.value.push(`OK  routine.call  → ${result.commandTag || 'done'}`)
+      toast.success(t('modules.kingbase.debug.runOkNoResult'))
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

@@ -30,6 +30,30 @@ func isCopyFromStdin(sql string) bool {
 	return copyFromStdinRe.MatchString(stripSQLLeadingComments(sql))
 }
 
+// skipCopyStmtLineEnding 吃掉 COPY 语句分号后的换行（\n 或 \r\n）。
+// 该换行属于 SQL 行结束，不是 COPY 数据；若不跳过，HEADER true 会把空行当表头丢掉，
+// 随后把真正的 CSV 表头（如 created_at）当成数据行插入。
+func skipCopyStmtLineEnding(br *bufio.Reader) int64 {
+	var n int64
+	b, err := br.Peek(1)
+	if err != nil || len(b) == 0 {
+		return 0
+	}
+	if b[0] == '\r' {
+		_, _ = br.ReadByte()
+		n++
+		b, err = br.Peek(1)
+		if err != nil || len(b) == 0 {
+			return n
+		}
+	}
+	if b[0] == '\n' {
+		_, _ = br.ReadByte()
+		n++
+	}
+	return n
+}
+
 // copyDataReader 从 SQL 脚本中流式读取 COPY 数据段，直到单独一行 "\."（不含该行）。
 type copyDataReader struct {
 	br      *bufio.Reader

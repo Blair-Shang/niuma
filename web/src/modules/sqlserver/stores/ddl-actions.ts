@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import {
+  dismissOtherDdlDialogs,
+  registerDdlDialogClear,
+} from '@/modules/ops/conn-tree/ddl-dialog-exclusive'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import type { ConnItem } from '@/modules/ops/types'
 
@@ -38,6 +42,7 @@ export const useSqlServerDdlActionStore = defineStore('sqlserver-ddl-actions', (
   const busy = ref(false)
 
   function request(action: SqlServerPendingDdlAction): void {
+    dismissOtherDdlDialogs('sqlserver-ddl-actions')
     pending.value = action
   }
 
@@ -45,6 +50,8 @@ export const useSqlServerDdlActionStore = defineStore('sqlserver-ddl-actions', (
     pending.value = null
     busy.value = false
   }
+
+  registerDdlDialogClear('sqlserver-ddl-actions', clear)
 
   return { pending, busy, request, clear }
 })

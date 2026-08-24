@@ -314,6 +314,8 @@ services/
 | 方法 | 说明 |
 |------|------|
 | `query.exec` | 单语句执行；Web 拆句后严格顺序调用 |
+| `query.explain` | `EXPLAIN` / `EXPLAIN ANALYZE`（服务端包装） |
+| `notify.listen` / `unlisten` / `channels` | LISTEN / NOTIFY；事件 `postgres.notify` |
 | `query.execBatch` | 同连接顺序多语句（临时表 / SET 可见） |
 | `query.fetch` / `query.close` / `query.cancel` | 续取 / 关闭游标 / `context` + pgx 取消 |
 | `routine.call` | 过程 OUT 读回（同连接） |
@@ -325,9 +327,9 @@ services/
 
 | 组 | 方法 |
 |----|------|
-| 树 | `tree.databases` / `schemas` / `tables` / `routines` / `sequences` / `categoryCounts` |
+| 树 | `tree.databases` / `schemas` / `tables` / `routines` / `sequences` / `triggers` / `categoryCounts` |
 | 目录 | `catalog.schemas` / `tables` / `columns` |
-| 元数据 | `meta.columns` / `indexes` / `constraints` / `ddl` / `primaryKey` / `foreignKeys` / `routineSource` / `databaseCreateOptions` |
+| 元数据 | `meta.columns` / `indexes` / `constraints` / `ddl` / `primaryKey` / `foreignKeys` / `routineSource` / `databaseCreateOptions` / `databaseOverview` / `privileges` |
 | Monitor | `meta.instanceOverview` / `activity` / `locks` / `backendCancel` / `backendTerminate` / `serverVariables` / `serverStatus` |
 | DDL | `ddl.script` / `exec` / `designPreview` / `designApply` / `createTablePreview` / `createTableApply` |
 | IO | `io.exportCsv` / `importCsv` / `dumpSql` / `execSqlFile` / `cancel` |
@@ -336,7 +338,7 @@ services/
 对象树：
 
 ```
-connection → database → schema → {Tables|Views|Procedures|Functions|Sequences} → object
+connection → database → schema → {Tables|Views|Materialized views|Sequences|Functions|Procedures|Triggers} → object
 ```
 
 系统 schema 仅排除官方集合（`pg_catalog` / `information_schema` / `pg_toast*` / `pg_temp*`），**不含**金仓 `sys` / `plsql_debug`。
@@ -379,7 +381,7 @@ res:{profileId}:database:{db}:schema:{schema}:table:{table}
 | **P1** | `tree.*`、`catalog.*` | [x] |
 | **P2** | `meta.*`、DDL 脚本 | [x] |
 | **P3** | `io.*`（COPY / dump / execSqlFile） | [x] |
-| **P4** | Monitor、表设计器 | [x] |
+| **P4** | Monitor、表设计器、物化视图/触发器树、IDENTITY、Grant、LISTEN/NOTIFY、VACUUM | [x] |
 | **LSP** | `postgresparser` + `postgres.lsp.*` | [x] |
 | **Web** | `modules/postgres` | [x] 独立 ConnKind / 模块 / LSP `postgresql` |
 
@@ -422,5 +424,7 @@ res:{profileId}:database:{db}:schema:{schema}:table:{table}
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v0.4 | 2026-08-24 | 新建库对齐 DBeaver/Navicat：表空间、连接数、任意库作模板、库名校验、按元数据复制 DDL |
+| v0.3 | 2026-08-24 | 物化视图/触发器独立分类；`query.explain`；LISTEN/NOTIFY；IDENTITY；受控 Grant/VACUUM |
 | v0.2 | 2026-08-18 | Web 独立模块落地：ConnKind / session / i18n / Monaco `postgresql` LSP |
 | v0.1 | 2026-08-18 | 新增：锁定 Go + pgx；后端 P0–P4 + LSP；隔离红线；Web 待注册 |

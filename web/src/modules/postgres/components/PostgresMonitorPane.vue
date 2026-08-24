@@ -16,12 +16,13 @@ import {
 import type { RsContextMenuItem, RsSelectOptions, RsTabItem, RsTableColumn } from '@niuma/ui'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { postgresApi } from '@/api'
+import { postgresApi, subscribeBridgeEventByPrefix } from '@/api'
 import type {
   PostgresActivitySession,
   PostgresLockBlockingEdge,
   PostgresLockInfo,
   PostgresMetaInstanceOverviewResult,
+  PostgresNotifyEvent,
   PostgresServerKVItem,
 } from '@/api/types/postgres'
 
@@ -37,7 +38,8 @@ const props = defineProps<{
 const { t } = useI18n()
 const toast = useRsToast()
 
-type Section = 'instance' | 'sessions' | 'locks' | 'variables' | 'status'
+type Section = 'instance' | 'sessions' | 'locks' | 'variables' | 'status' | 'notify'
+type NotifyRow = { __rowKey: string; at: string; channel: string; payload: string; pid: number }
 type BackendAction = 'cancel' | 'terminate'
 type KVRow = { name: string; value: string }
 
@@ -67,6 +69,12 @@ const variables = ref<PostgresServerKVItem[]>([])
 const statusItems = ref<PostgresServerKVItem[]>([])
 const kvTruncated = ref(false)
 const kvQuery = ref('')
+const notifyChannel = ref('')
+const notifyChannels = ref<string[]>([])
+const notifyRows = ref<NotifyRow[]>([])
+const notifyBusy = ref(false)
+let offNotify: (() => void) | null = null
+let notifySeq = 0
 
 /**
  * Dialog Portal 挂载点：挂到当前面板，无遮罩、非 modal，避免挡住 Shell Tab 切换。
@@ -151,6 +159,11 @@ const tabItems = computed((): RsTabItem[] => [
   },
   { value: 'variables', label: t('modules.postgres.monitor.tabVariables') },
   { value: 'status', label: t('modules.postgres.monitor.tabStatus') },
+  {
+    value: 'notify',
+    label: t('modules.postgres.monitor.tabNotify'),
+    badge: notifyChannels.value.length || undefined,
+  },
 ])
 
 const kvColumns = computed((): RsTableColumn<KVRow>[] => [
@@ -748,7 +761,78 @@ watch(section, (tab) => {
   if (props.active && scopeOk.value) void loadCurrent()
 })
 
-onBeforeUnmount(() => clearRefreshTimer())
+async function refreshNotifyChannels(): Promise<void> {
+  if (!props.sessionId) {
+    notifyChannels.value = []
+    return
+  }
+  const result = await postgresApi.notifyChannels({ sessionId: props.sessionId })
+  notifyChannels.value = result.channels ?? []
+}
+
+async function listenNotify(): Promise<void> {
+  const channel = notifyChannel.value.trim()
+  if (!channel) return
+  if (!props.sessionId) {
+    toast.warning(t('modules.postgres.monitor.notifyNeedSession'))
+    return
+  }
+  notifyBusy.value = true
+  try {
+    const result = await postgresApi.notifyListen({ sessionId: props.sessionId, channel })
+    notifyChannels.value = result.channels ?? []
+    notifyChannel.value = ''
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.postgres.monitor.loadError'))
+  } finally {
+    notifyBusy.value = false
+  }
+}
+
+async function unlistenNotify(channel: string): Promise<void> {
+  if (!props.sessionId || !channel) return
+  notifyBusy.value = true
+  try {
+    const result = await postgresApi.notifyUnlisten({ sessionId: props.sessionId, channel })
+    notifyChannels.value = result.channels ?? []
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.postgres.monitor.loadError'))
+  } finally {
+    notifyBusy.value = false
+  }
+}
+
+const notifyCols = computed((): RsTableColumn<NotifyRow>[] => [
+  { key: 'at', title: t('modules.postgres.monitor.notifyColTime'), width: 92 },
+  { key: 'channel', title: t('modules.postgres.monitor.notifyColChannel'), minWidth: 120 },
+  { key: 'payload', title: t('modules.postgres.monitor.notifyColPayload'), minWidth: 220, ellipsis: true },
+  { key: 'pid', title: t('modules.postgres.monitor.notifyColPid'), width: 80, align: 'right' },
+])
+
+onMounted(() => {
+  offNotify = subscribeBridgeEventByPrefix('postgres.notify', (detail) => {
+    const ev = detail as PostgresNotifyEvent
+    if (!props.sessionId || ev.sessionId !== props.sessionId) return
+    notifySeq += 1
+    notifyRows.value = [
+      {
+        __rowKey: `n-${notifySeq}`,
+        at: new Date().toLocaleTimeString(),
+        channel: ev.channel,
+        payload: ev.payload ?? '',
+        pid: ev.pid,
+      },
+      ...notifyRows.value,
+    ].slice(0, 200)
+  })
+  if (props.sessionId) void refreshNotifyChannels()
+})
+
+onBeforeUnmount(() => {
+  clearRefreshTimer()
+  offNotify?.()
+  offNotify = null
+})
 </script>
 
 <template>
@@ -829,6 +913,39 @@ onBeforeUnmount(() => clearRefreshTimer())
           · {{ t('modules.postgres.monitor.listTruncated', { limit: listLimit }) }}
         </template>
       </span>
+    </div>
+
+    <div
+      v-else-if="section === 'notify' && scopeOk"
+      class="nm-vast-monitor__filters"
+    >
+      <RsInput
+        v-model="notifyChannel"
+        size="sm"
+        class="nm-vast-monitor__filter-input"
+        :placeholder="t('modules.postgres.monitor.notifyChannelPh')"
+        @keydown.enter.prevent="listenNotify"
+      />
+      <RsButton size="sm" variant="primary" :loading="notifyBusy" :disabled="!notifyChannel.trim()" @click="listenNotify">
+        {{ t('modules.postgres.monitor.notifyListen') }}
+      </RsButton>
+      <div class="nm-vast-monitor__notify-channels">
+        <span v-if="notifyChannels.length === 0" class="nm-vast-monitor__filter-meta nm-vast-monitor__filter-meta--inline">
+          {{ t('modules.postgres.monitor.notifyEmpty') }}
+        </span>
+        <button
+          v-for="ch in notifyChannels"
+          :key="ch"
+          type="button"
+          class="nm-vast-monitor__notify-chip"
+          :disabled="notifyBusy"
+          :title="t('modules.postgres.monitor.notifyUnlisten')"
+          @click="unlistenNotify(ch)"
+        >
+          <span>{{ ch }}</span>
+          <RsIcon name="x" :size="12" />
+        </button>
+      </div>
     </div>
 
     <div
@@ -987,6 +1104,26 @@ onBeforeUnmount(() => clearRefreshTimer())
           column-layout="auto"
           cell-tooltip
           row-key="name"
+          class="nm-vast-monitor__table"
+        />
+      </template>
+
+      <template v-else-if="section === 'notify'">
+        <RsEmpty
+          v-if="notifyRows.length === 0"
+          icon="radio"
+          :description="t('modules.postgres.monitor.notifyEmpty')"
+        />
+        <RsTable
+          v-else
+          :columns="notifyCols"
+          :data="notifyRows"
+          size="sm"
+          fill
+          resizable
+          column-layout="auto"
+          cell-tooltip
+          row-key="__rowKey"
           class="nm-vast-monitor__table"
         />
       </template>
@@ -1186,6 +1323,49 @@ onBeforeUnmount(() => clearRefreshTimer())
   font-size: var(--rs-font-size-xs);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+.nm-vast-monitor__filter-meta--inline {
+  margin-left: 0;
+}
+
+.nm-vast-monitor__notify-channels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rs-space-xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.nm-vast-monitor__notify-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 14rem;
+  padding: 0 6px;
+  border: 1px solid var(--rs-border-subtle);
+  border-radius: var(--rs-radius-sm);
+  background: var(--rs-surface-raised, var(--rs-surface));
+  color: inherit;
+  font: inherit;
+  font-size: var(--rs-font-size-xs);
+  cursor: pointer;
+}
+
+.nm-vast-monitor__notify-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nm-vast-monitor__notify-chip:hover:not(:disabled) {
+  border-color: var(--rs-border);
+}
+
+.nm-vast-monitor__notify-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .nm-vast-monitor__body {

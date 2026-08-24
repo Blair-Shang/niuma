@@ -17,6 +17,7 @@ session:
     - tree.tables
     - tree.routines
     - tree.sequences
+    - tree.triggers
     - tree.categoryCounts
     - catalog.schemas
     - catalog.tables
@@ -29,6 +30,7 @@ session:
     - meta.primaryKey
     - meta.foreignKeys
     - meta.databaseCreateOptions
+    - meta.databaseOverview
     - meta.instanceOverview
     - meta.activity
     - meta.locks
@@ -36,6 +38,7 @@ session:
     - meta.backendTerminate
     - meta.serverVariables
     - meta.serverStatus
+    - meta.privileges
     - ddl.script
     - ddl.exec
     - ddl.designPreview

@@ -32,10 +32,8 @@ import {
 import {
   defaultPostgreSQLProfile,
   resolveMonacoLanguageFromProfile,
-  resolveSplitFeaturesFromProfile,
 } from '@/modules/sql-editor/capabilities'
 import { formatSql } from '@/modules/sql-editor/format'
-import { splitSqlStatementsWithFeatures } from '@/modules/sql-editor/split/sql-statement-splitter'
 import {
   bootstrapPostgresMonaco,
   POSTGRES_MONACO_LANGUAGE_ID,
@@ -45,10 +43,7 @@ import {
   countPostgresDebugLogPoints,
   insertPostgresDebugLogPoint,
   insertPostgresDebugLogPointAtLine,
-  isPostgresDebugSessionScaffoldSql,
-  wrapPostgresCallWithDebugSession,
 } from '@/modules/postgres/utils/postgres-debug-assist'
-import { hasBatchExecMarker } from '@/modules/postgres/utils/query-exec-mode'
 import {
   buildCallParams,
   buildRoutineCallSql,
@@ -266,19 +261,58 @@ function toRoutineParams(): RoutineCallParam[] {
   }))
 }
 
-function buildCallSql(): string {
-  if (!props.schema || !props.routine) return ''
-  let sql = buildRoutineCallSql({
-    schema: props.schema,
-    name: props.routine,
-    kind: kind.value,
-    params: toRoutineParams(),
-    qualify: qualifiedName,
-  })
-  if (enableDebugSession.value) {
-    sql = wrapPostgresCallWithDebugSession(sql)
+async function runCall(): Promise<void> {
+  if (!canRun.value || !props.sessionId) return
+  if (!props.schema || !props.routine) return
+
+  running.value = true
+  messages.value = []
+  resultGrids.value = []
+  activeGridId.value = ''
+  inspectTab.value = 'result'
+
+  try {
+    const result = await postgresApi.routineCall({
+      sessionId: props.sessionId,
+      database: props.database,
+      schema: props.schema,
+      name: props.routine,
+      kind: kind.value,
+      oid: props.oid,
+      args: toRoutineParams().map((p) => ({
+        name: p.name,
+        type: p.type,
+        mode: p.mode,
+        value: p.value,
+        isNull: p.isNull,
+      })),
+      debugSession: enableDebugSession.value,
+      limit: 200,
+      requestId: `postgres-routine-${Date.now()}`,
+    })
+    for (const n of result.notices ?? []) messages.value.push(`NOTICE  ${n}`)
+    const preview = `${kind.value === 'function' ? 'SELECT' : 'CALL'} ${qualifiedName(props.schema, props.routine)}`
+    const grid = toGrid(result, 0, preview)
+    if (grid) {
+      resultGrids.value.push(grid)
+      activeGridId.value = grid.id
+      messages.value.push(
+        `OK  routine.call  → ${grid.rows.length} row(s)  ${result.durationMs}ms`,
+      )
+      toast.success(t('modules.postgres.debug.runOk'))
+    } else {
+      inspectTab.value = 'messages'
+      messages.value.push(`OK  routine.call  → ${result.commandTag || 'done'}`)
+      toast.success(t('modules.postgres.debug.runOkNoResult'))
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    messages.value.push(`ERR  ${msg}`)
+    inspectTab.value = 'messages'
+    toast.error(msg)
+  } finally {
+    running.value = false
   }
-  return sql
 }
 
 function cellText(v: unknown): string {
@@ -317,125 +351,6 @@ function toGrid(result: PostgresQueryExecResult, index: number, sqlPreview: stri
     sqlPreview,
     rowCount: n,
     durationMs: result.durationMs,
-  }
-}
-
-async function runCall(): Promise<void> {
-  if (!canRun.value || !props.sessionId) return
-  if (!props.schema || !props.routine) return
-
-  running.value = true
-  messages.value = []
-  resultGrids.value = []
-  activeGridId.value = ''
-  inspectTab.value = 'result'
-
-  try {
-    const hasOut = params.value.some((p) => /out/i.test(p.mode || ''))
-    // 带 OUT 的过程：服务端 routine.call（同连接临时表），不依赖 NOTICE / 多语句脚本
-    if (kind.value === 'procedure' && hasOut) {
-      const result = await postgresApi.routineCall({
-        sessionId: props.sessionId,
-        database: props.database,
-        schema: props.schema,
-        name: props.routine,
-        args: toRoutineParams().map((p) => ({
-          name: p.name,
-          type: p.type,
-          mode: p.mode,
-          value: p.value,
-          isNull: p.isNull,
-        })),
-        requestId: `postgres-routine-${Date.now()}`,
-      })
-      const grid = toGrid(result, 0, `CALL ${qualifiedName(props.schema, props.routine)}`)
-      if (grid) {
-        resultGrids.value.push(grid)
-        activeGridId.value = grid.id
-        messages.value.push(
-          `OK  routine.call  → ${grid.rows.length} row(s)  ${result.durationMs}ms`,
-        )
-        toast.success(t('modules.postgres.debug.runOk'))
-      } else {
-        inspectTab.value = 'messages'
-        messages.value.push(`OK  routine.call  → ${result.commandTag || 'done'}`)
-        toast.success(t('modules.postgres.debug.runOkNoResult'))
-      }
-      return
-    }
-
-    // 函数 / 无 OUT 过程：生成 SQL 执行；debug wrap 或多语句 / batch 标识时同连接批跑
-    const sql = buildCallSql().trim()
-    if (!sql) return
-    const features = resolveSplitFeaturesFromProfile(dialectProfile.value)
-    const statements = splitSqlStatementsWithFeatures(sql, features)
-      .map((s) => s.sql.trim())
-      .filter(Boolean)
-
-    let results: PostgresQueryExecResult[] = []
-    const useBatch = statements.length > 1 || hasBatchExecMarker(sql)
-    if (useBatch) {
-      const batch = await postgresApi.queryExecBatch({
-        sessionId: props.sessionId,
-        database: props.database,
-        statements,
-        limit: 200,
-        requestId: `postgres-debug-${Date.now()}`,
-      })
-      results = batch.results ?? []
-      for (const n of batch.notices ?? []) messages.value.push(`NOTICE  ${n}`)
-    } else {
-      results = [
-        await postgresApi.queryExec({
-          sessionId: props.sessionId,
-          database: props.database,
-          sql: statements[0]!,
-          limit: 200,
-          requestId: `postgres-debug-${Date.now()}`,
-        }),
-      ]
-    }
-
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]!
-      for (const n of result.notices ?? []) messages.value.push(`NOTICE  ${n}`)
-      const stmt = statements[i] ?? ''
-      const preview = stmt.length > 72 ? `${stmt.slice(0, 72)}…` : stmt
-      // 调试包装的 set_config / SET 只记消息，不进结果页
-      if (isPostgresDebugSessionScaffoldSql(stmt)) {
-        messages.value.push(`OK  #${i + 1}  ${preview}  → scaffold`)
-        continue
-      }
-      const grid = toGrid(result, resultGrids.value.length, preview)
-      if (grid) {
-        resultGrids.value.push(grid)
-        activeGridId.value = grid.id
-        messages.value.push(
-          `OK  #${i + 1}  ${preview}  → ${grid.rows.length} row(s)  ${result.durationMs}ms`,
-        )
-      } else {
-        const affected = result.rowsAffected ?? result.rowCount
-        messages.value.push(
-          `OK  #${i + 1}  ${preview}  → ${result.commandTag || 'done'}${
-            affected != null ? ` (${affected})` : ''
-          }  ${result.durationMs}ms`,
-        )
-      }
-    }
-
-    if (resultGrids.value.length === 0) {
-      inspectTab.value = 'messages'
-      toast.success(t('modules.postgres.debug.runOkNoResult'))
-    } else {
-      toast.success(t('modules.postgres.debug.runOk'))
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    messages.value.push(`ERR  ${msg}`)
-    inspectTab.value = 'messages'
-    toast.error(msg)
-  } finally {
-    running.value = false
   }
 }
 

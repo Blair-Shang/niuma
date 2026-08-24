@@ -79,7 +79,7 @@ describe('buildCallParams / serializeCallParams', () => {
       params: rows,
       qualify: (s, n) => `"${s}"."${n}"`,
     })
-    expect(sql).toContain('SELECT "public"."f_pinyin"(NULL::varchar)')
+    expect(sql).toContain('SELECT * FROM "public"."f_pinyin"(NULL::varchar)')
     expect(sql).not.toContain('f_pinyin()')
   })
 
@@ -108,7 +108,7 @@ describe('buildCallPlaceholders / buildRoutineCallSql', () => {
       args: 'integer',
       qualify,
     })
-    expect(sql).toContain('SELECT "public"."fn"(')
+    expect(sql).toContain('SELECT * FROM "public"."fn"(')
     expect(sql).toContain('NULL::integer')
   })
 
@@ -121,7 +121,7 @@ describe('buildCallPlaceholders / buildRoutineCallSql', () => {
       qualify,
     })
     expect(sql).toBe(
-      '-- Call function "public"."f_pinyin"\nSELECT "public"."f_pinyin"(NULL::varchar /* p_name */);\n',
+      '-- Call function "public"."f_pinyin"\nSELECT * FROM "public"."f_pinyin"(NULL::varchar /* p_name */);\n',
     )
     expect(sql).not.toMatch(/NULL::varchar\s+--/)
   })

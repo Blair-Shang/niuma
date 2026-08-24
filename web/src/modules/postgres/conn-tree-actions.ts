@@ -9,7 +9,6 @@ import { useConnectionNavigation } from '@/modules/ops/composables/useConnection
 import { postgresApi } from '@/api/postgres'
 import { i18n } from '@/locale'
 import {
-  postgresAnalyzeSql,
   postgresBatchDropSql,
   postgresCallFunctionSeed,
   postgresCallProcedureSeed,
@@ -17,15 +16,12 @@ import {
   postgresDeleteSeed,
   postgresDepsSql,
   postgresDropSequenceSql,
-  postgresGrantSeed,
   postgresInsertSeed,
-  postgresRefreshMatViewSql,
   postgresSelectSeed,
   postgresSequenceCurrvalSeed,
   postgresSequenceNextvalSeed,
   postgresSequenceSetvalSeed,
   postgresUpdateSeed,
-  postgresVacuumSql,
   qualifiedName,
   qualifiedRoutineName,
 } from '@/modules/postgres/sql-seed'
@@ -154,12 +150,14 @@ function objectScriptPath(
     { kind: 'category', name: category },
   ]
   if (objectName) {
-    if (category === 'views') {
+    if (category === 'views' || category === 'materialized_views') {
       segments.push({ kind: 'table', name: objectName })
     } else if (category === 'functions') {
       segments.push({ kind: 'function', name: objectName })
     } else if (category === 'sequences') {
       segments.push({ kind: 'sequence', name: objectName })
+    } else if (category === 'triggers') {
+      segments.push({ kind: 'trigger', name: objectName })
     } else {
       segments.push({ kind: 'procedure', name: objectName })
     }
@@ -222,6 +220,7 @@ function requestDanger(
 ): void {
   const schema = segmentName(path, 'schema')
   const name =
+    segmentName(path, 'trigger') ??
     segmentName(path, 'table') ??
     segmentName(path, 'function') ??
     segmentName(path, 'procedure') ??
@@ -238,9 +237,58 @@ function requestDanger(
     name,
     args: segmentName(path, 'args'),
     oid: Number.isFinite(oid) ? oid : undefined,
+    table: segmentName(path, 'ontable'),
     refreshPath: categoryRefreshPath(path),
     title: t(titleKey),
     description: t(descKey, { name: `${schema}.${name}` }),
+  })
+}
+
+function requestGrant(conn: ConnItem, path: ConnResourcePath): void {
+  const schema = segmentName(path, 'schema')
+  const last = lastSegment(path)
+  let objectKind = 'table'
+  let name = segmentName(path, 'table') ?? ''
+  if (last?.kind === 'schema' && schema) {
+    objectKind = 'schema'
+    name = schema
+  } else if (segmentName(path, 'function')) {
+    objectKind = 'function'
+    name = segmentName(path, 'function') ?? ''
+  } else if (segmentName(path, 'procedure')) {
+    objectKind = 'procedure'
+    name = segmentName(path, 'procedure') ?? ''
+  } else if (segmentName(path, 'sequence')) {
+    objectKind = 'sequence'
+    name = segmentName(path, 'sequence') ?? ''
+  } else if (segmentName(path, 'category') === 'materialized_views') {
+    objectKind = 'materialized_view'
+  } else if (segmentName(path, 'category') === 'views') {
+    objectKind = 'view'
+  }
+  if (!name) return
+  const oidRaw = segmentName(path, 'oid')
+  const oid = oidRaw ? Number(oidRaw) : undefined
+  usePostgresDdlActionStore().request({
+    conn,
+    kind: 'grant',
+    action: 'grant',
+    profileId: conn.profileId,
+    database: segmentName(path, 'database'),
+    schema,
+    name,
+    args: segmentName(path, 'args'),
+    oid: Number.isFinite(oid) ? oid : undefined,
+    objectKind,
+    title: t('modules.postgres.ddl.grantTitle'),
+    description: t('modules.postgres.ddl.grantDesc', {
+      name:
+        objectKind === 'schema' || objectKind === 'database'
+          ? name
+          : schema
+            ? `${schema}.${name}`
+            : name,
+    }),
   })
 }
 
@@ -256,6 +304,7 @@ function requestRename(conn: ConnItem, path: ConnResourcePath): void {
   let action: PostgresDdlAction = 'rename_table'
   if (segmentName(path, 'function')) action = 'rename_function'
   else if (segmentName(path, 'procedure')) action = 'rename_procedure'
+  else if (category === 'materialized_views') action = 'rename_matview'
   else if (category === 'views') action = 'rename_view'
 
   const oidRaw = segmentName(path, 'oid')
@@ -324,6 +373,8 @@ function requestCreateDatabase(conn: ConnItem): void {
       owner: 'CURRENT_USER',
       encoding: 'UTF8',
       template: 'template0',
+      tablespace: '',
+      connectionLimit: -1,
       lcCollate: '',
       lcCtype: '',
     },
@@ -512,45 +563,26 @@ async function openGeneratedScript(conn: ConnItem, path: ConnResourcePath, key: 
   )
 }
 
-function openMaintenanceSql(conn: ConnItem, path: ConnResourcePath, kind: string): void {
-  const schema = segmentName(path, 'schema')
-  const table = segmentName(path, 'table')
-  if (!schema || !table) return
-  if (kind === 'vacuum') {
-    openQuery(
-      conn,
-      path,
-      [
-        `-- ${t('modules.postgres.tree.vacuumComment')}`,
-        `-- ${t('modules.postgres.tree.vacuumFullHint')}`,
-        postgresVacuumSql(schema, table),
-      ].join('\n'),
-    )
-  } else if (kind === 'analyze') {
-    openQuery(
-      conn,
-      path,
-      [`-- ${t('modules.postgres.tree.analyzeComment')}`, postgresAnalyzeSql(schema, table)].join('\n'),
-    )
-  } else if (kind === 'refreshMatView') {
-    openQuery(
-      conn,
-      path,
-      [
-        `-- ${t('modules.postgres.tree.refreshMatViewComment')}`,
-        `-- ${t('modules.postgres.tree.refreshMatViewFallback')}`,
-        postgresRefreshMatViewSql(schema, table),
-      ].join('\n'),
-    )
-  }
-}
-
 async function copyObjectDdl(conn: ConnItem, path: ConnResourcePath): Promise<void> {
   const database = segmentName(path, 'database')
   const schema = segmentName(path, 'schema')
   const table = segmentName(path, 'table')
+  const trigger = segmentName(path, 'trigger')
   const routine = segmentName(path, 'function') ?? segmentName(path, 'procedure')
   try {
+    if (trigger && schema) {
+      const result = await postgresApi.metaDDL({
+        profileId: conn.profileId,
+        database,
+        schema,
+        name: trigger,
+        table: segmentName(path, 'ontable'),
+        oid: Number(segmentName(path, 'oid') || '') || undefined,
+        kind: 'trigger',
+      })
+      if (result.ddl) await copyText(result.ddl)
+      return
+    }
     if (table && schema) {
       const result = await postgresApi.metaDDL({
         profileId: conn.profileId,
@@ -582,14 +614,26 @@ async function copyCreateDatabaseDdl(conn: ConnItem, path: ConnResourcePath): Pr
   const name = segmentName(path, 'database')
   if (!name) return
   try {
+    const overview = await postgresApi.metaDatabaseOverview({
+      profileId: conn.profileId,
+      database: name,
+    })
     const script = await postgresApi.ddlScript({
       action: 'create_database',
       profileId: conn.profileId,
       name,
-      owner: 'CURRENT_USER',
-      encoding: 'UTF8',
+      owner: overview.owner || 'CURRENT_USER',
+      encoding: overview.encoding || 'UTF8',
       template: 'template0',
+      lcCollate: overview.collate,
+      lcCtype: overview.ctype,
+      tablespace: overview.tablespace,
+      connectionLimit: overview.connectionLimit,
     })
+    if (!script.sql?.trim()) {
+      notify().error(t('modules.postgres.tree.copyFailed'))
+      return
+    }
     await copyText(script.sql)
   } catch (e) {
     notify().error(e instanceof Error ? e.message : t('modules.postgres.tree.copyFailed'))
@@ -607,16 +651,23 @@ async function openBatchDropScript(conn: ConnItem, path: ConnResourcePath): Prom
       .filter((c) => lastSegment(c.path)?.kind !== 'hint')
       .map((c) => {
         const leaf = lastSegment(c.path)
-        let kind: 'table' | 'view' | 'function' | 'procedure' | 'sequence' = 'table'
+        let kind: 'table' | 'view' | 'materialized_view' | 'function' | 'procedure' | 'sequence' | 'trigger' = 'table'
         if (category === 'views') kind = 'view'
+        else if (category === 'materialized_views') kind = 'materialized_view'
+        else if (category === 'triggers') kind = 'trigger'
         else if (category === 'sequences') kind = 'sequence'
         else if (category === 'functions') kind = 'function'
         else if (category === 'procedures') kind = 'procedure'
         return {
           schema,
-          name: leaf?.name ?? '',
+          name:
+            (kind === 'trigger' ? segmentName(c.path, 'trigger') : undefined) ??
+            (kind === 'sequence' ? segmentName(c.path, 'sequence') : undefined) ??
+            leaf?.name ??
+            '',
           kind,
           args: segmentName(c.path, 'args'),
+          table: segmentName(c.path, 'ontable'),
         }
       })
       .filter((i) => i.name)
@@ -655,6 +706,17 @@ function requestIoAction(
 
 export function activate(conn: ConnItem, path: ConnResourcePath): void {
   if (lastSegment(path)?.kind === 'hint') return
+  if (segmentName(path, 'trigger')) {
+    openFeature(conn, path, 'objectScript', undefined, {
+      designMode: 'alter',
+      objectKind: 'trigger',
+    })
+    return
+  }
+  if (segmentName(path, 'category') === 'materialized_views' && segmentName(path, 'table')) {
+    openFeature(conn, path, 'browse')
+    return
+  }
   if (segmentName(path, 'table')) {
     openFeature(conn, path, 'browse')
     return
@@ -693,6 +755,7 @@ export function onConnMenuSelect(conn: ConnItem, key: string): boolean {
 export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key: string): void {
   if (key === 'copyName') {
     const name =
+      segmentName(path, 'trigger') ??
       segmentName(path, 'table') ??
       segmentName(path, 'function') ??
       segmentName(path, 'procedure') ??
@@ -746,27 +809,7 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
   }
 
   if (key === 'grant') {
-    const schema = segmentName(path, 'schema')
-    if (!schema) return
-    if (lastSegment(path)?.kind === 'schema') {
-      openQuery(conn, path, postgresGrantSeed('schema', schema, schema))
-      return
-    }
-    const table = segmentName(path, 'table')
-    if (table) {
-      const isView = segmentName(path, 'category') === 'views'
-      openQuery(conn, path, postgresGrantSeed(isView ? 'view' : 'table', schema, table))
-      return
-    }
-    const fn = segmentName(path, 'function')
-    if (fn) {
-      openQuery(conn, path, postgresGrantSeed('function', schema, fn, segmentName(path, 'args')))
-      return
-    }
-    const proc = segmentName(path, 'procedure')
-    if (proc) {
-      openQuery(conn, path, postgresGrantSeed('procedure', schema, proc, segmentName(path, 'args')))
-    }
+    requestGrant(conn, path)
     return
   }
 
@@ -802,8 +845,16 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
     return
   }
 
-  if (key === 'vacuum' || key === 'analyze' || key === 'refreshMatView') {
-    openMaintenanceSql(conn, path, key)
+  if (key === 'vacuum') {
+    requestDanger(conn, path, 'vacuum_table', 'modules.postgres.ddl.vacuumTitle', 'modules.postgres.ddl.vacuumDesc')
+    return
+  }
+  if (key === 'analyze') {
+    requestDanger(conn, path, 'analyze_table', 'modules.postgres.ddl.analyzeTitle', 'modules.postgres.ddl.analyzeDesc')
+    return
+  }
+  if (key === 'refreshMatView') {
+    requestDanger(conn, path, 'refresh_matview', 'modules.postgres.ddl.refreshTitle', 'modules.postgres.ddl.refreshDesc')
     return
   }
 
@@ -836,6 +887,13 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
   }
 
   if (key === 'source') {
+    if (segmentName(path, 'trigger')) {
+      openFeature(conn, path, 'objectScript', undefined, {
+        designMode: 'alter',
+        objectKind: 'trigger',
+      })
+      return
+    }
     const sequence = segmentName(path, 'sequence')
     if (sequence) {
       openFeature(conn, path, 'objectScript', undefined, {
@@ -875,6 +933,16 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
 
   if (key === 'createSequence') {
     openCreateObjectScript(conn, path, 'sequences')
+    return
+  }
+
+  if (key === 'createMatView') {
+    openCreateObjectScript(conn, path, 'materialized_views')
+    return
+  }
+
+  if (key === 'createTrigger') {
+    openCreateObjectScript(conn, path, 'triggers')
     return
   }
 
@@ -963,6 +1031,10 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
       requestSchemaDrop(conn, path)
       return
     }
+    if (segmentName(path, 'trigger')) {
+      requestDanger(conn, path, 'drop_trigger', 'modules.postgres.ddl.dropTriggerTitle', 'modules.postgres.ddl.dropTriggerDesc')
+      return
+    }
     if (segmentName(path, 'sequence')) {
       const schema = segmentName(path, 'schema')
       const seq = segmentName(path, 'sequence')
@@ -977,7 +1049,12 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
       requestDanger(conn, path, 'drop_procedure', 'modules.postgres.ddl.dropProcTitle', 'modules.postgres.ddl.dropProcDesc')
       return
     }
-    const isView = segmentName(path, 'category') === 'views'
+    const category = segmentName(path, 'category')
+    if (category === 'materialized_views') {
+      requestDanger(conn, path, 'drop_matview', 'modules.postgres.ddl.dropMatViewTitle', 'modules.postgres.ddl.dropDesc')
+      return
+    }
+    const isView = category === 'views'
     requestDanger(
       conn,
       path,

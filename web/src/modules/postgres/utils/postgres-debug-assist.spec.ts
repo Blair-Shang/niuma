@@ -50,7 +50,7 @@ describe('postgres-debug-assist', () => {
     expect(isPostgresDebugSessionScaffoldSql('SET client_min_messages TO NOTICE')).toBe(true)
     expect(
       isPostgresDebugSessionScaffoldSql(
-        '-- Call function "public"."f_pinyin"\nSELECT "public"."f_pinyin"(NULL::varchar)',
+        '-- Call function "public"."f_pinyin"\nSELECT * FROM "public"."f_pinyin"(NULL::varchar)',
       ),
     ).toBe(false)
   })

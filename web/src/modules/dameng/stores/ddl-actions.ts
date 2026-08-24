@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import {
+  dismissOtherDdlDialogs,
+  registerDdlDialogClear,
+} from '@/modules/ops/conn-tree/ddl-dialog-exclusive'
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
@@ -52,6 +56,7 @@ export const useDamengDdlActionStore = defineStore('dameng-ddl-actions', () => {
   const busy = ref(false)
 
   function request(action: DamengPendingDdlAction): void {
+    dismissOtherDdlDialogs('dameng-ddl-actions')
     pending.value = {
       kind: 'danger',
       ...action,
@@ -62,6 +67,8 @@ export const useDamengDdlActionStore = defineStore('dameng-ddl-actions', () => {
     pending.value = null
     busy.value = false
   }
+
+  registerDdlDialogClear('dameng-ddl-actions', clear)
 
   return { pending, busy, request, clear }
 })

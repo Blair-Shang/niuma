@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -61,15 +59,10 @@ func execSqlFile(
 		return nil
 	}
 
-	reader := bufio.NewReaderSize(f, 256*1024)
+	scanner := newSQLStmtScanner(bufio.NewReaderSize(f, 256*1024))
 	var (
-		stmt      strings.Builder
-		inSingle  bool
-		inDouble  bool
-		dollarTag string
-		bytesRead int64
-		executed  int
-		failed    int
+		executed int
+		failed   int
 	)
 
 	handleErr := func(stmtNo int, kind string, err error) error {
@@ -84,21 +77,18 @@ func execSqlFile(
 			msg = fmt.Sprintf("error near statement %d (copy): %v", stmtNo, err)
 		}
 		failed++
-		m.emitProgress(taskID, PhaseRunning, bytesRead, int64(executed), msg)
+		m.emitProgress(taskID, PhaseRunning, scanner.bytesRead, int64(executed), msg)
 		return nil
 	}
 
-	flush := func() error {
-		sql := stripSQLLeadingComments(stmt.String())
-		stmt.Reset()
-		if sql == "" {
-			return nil
-		}
+	runStmt := func(sql string) error {
 		stmtNo := executed + failed + 1
+		bytesRead := scanner.bytesRead
 
 		if isCopyFromStdin(sql) {
 			m.emitProgress(taskID, PhaseRunning, bytesRead, int64(executed), fmt.Sprintf("copying (%d)", stmtNo))
-			payload := &copyDataReader{br: reader}
+			scanner.addBytes(skipCopyStmtLineEnding(scanner.reader))
+			payload := &copyDataReader{br: scanner.reader}
 			cr := &countingReader{r: payload, onProgress: func(n int64) {
 				m.emitProgress(taskID, PhaseRunning, bytesRead+n, int64(executed), fmt.Sprintf("imported %d bytes", n))
 			}}
@@ -108,13 +98,13 @@ func execSqlFile(
 				n, _ := io.Copy(io.Discard, payload)
 				_ = n
 			}
-			bytesRead += payload.consumed()
+			scanner.addBytes(payload.consumed())
 			if err != nil {
 				_ = reacquire()
 				return handleErr(stmtNo, "copy", err)
 			}
 			executed++
-			m.emitProgress(taskID, PhaseRunning, bytesRead, int64(executed), fmt.Sprintf("executed %d statement(s)", executed))
+			m.emitProgress(taskID, PhaseRunning, scanner.bytesRead, int64(executed), fmt.Sprintf("executed %d statement(s)", executed))
 			return nil
 		}
 
@@ -122,7 +112,7 @@ func execSqlFile(
 			return handleErr(stmtNo, "exec", err)
 		}
 		executed++
-		m.emitProgress(taskID, PhaseRunning, bytesRead, int64(executed), fmt.Sprintf("executed %d statement(s)", executed))
+		m.emitProgress(taskID, PhaseRunning, scanner.bytesRead, int64(executed), fmt.Sprintf("executed %d statement(s)", executed))
 		return nil
 	}
 
@@ -132,92 +122,16 @@ func execSqlFile(
 			return ctx.Err()
 		default:
 		}
-		r, _, err := reader.ReadRune()
+		sql, err := scanner.next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return err
 		}
-		bytesRead++
-
-		if dollarTag != "" {
-			stmt.WriteRune(r)
-			if r == '$' {
-				tail := stmt.String()
-				if strings.HasSuffix(tail, dollarTag) {
-					dollarTag = ""
-				}
-			}
-			continue
+		if err := runStmt(sql); err != nil {
+			return err
 		}
-
-		if inSingle {
-			stmt.WriteRune(r)
-			if r == '\'' {
-				next, err := reader.Peek(1)
-				if err == nil && next[0] == '\'' {
-					b, _ := reader.ReadByte()
-					stmt.WriteByte(b)
-					bytesRead++
-					continue
-				}
-				inSingle = false
-			}
-			continue
-		}
-		if inDouble {
-			stmt.WriteRune(r)
-			if r == '"' {
-				inDouble = false
-			}
-			continue
-		}
-
-		if r == '\'' {
-			inSingle = true
-			stmt.WriteRune(r)
-			continue
-		}
-		if r == '"' {
-			inDouble = true
-			stmt.WriteRune(r)
-			continue
-		}
-		if r == '$' {
-			tag := "$"
-			for {
-				nr, _, nerr := reader.ReadRune()
-				if nerr != nil {
-					stmt.WriteString(tag)
-					break
-				}
-				bytesRead++
-				tag += string(nr)
-				if nr == '$' {
-					dollarTag = tag
-					stmt.WriteString(tag)
-					break
-				}
-				if !(unicode.IsLetter(nr) || unicode.IsDigit(nr) || nr == '_') {
-					stmt.WriteString(tag)
-					break
-				}
-			}
-			continue
-		}
-
-		if r == ';' {
-			if err := flush(); err != nil {
-				return err
-			}
-			continue
-		}
-		stmt.WriteRune(r)
-	}
-
-	if err := flush(); err != nil {
-		return err
 	}
 
 	if failed > 0 {

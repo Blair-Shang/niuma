@@ -130,9 +130,15 @@ export interface KingbaseRoutineCallParams {
   database?: string
   schema: string
   name: string
+  /** function | procedure；缺省时服务端按 OUT 或 pg_proc 推断 */
+  kind?: 'function' | 'procedure'
+  oid?: number
   args: KingbaseRoutineCallArg[]
   requestId?: string
   timeoutMs?: number
+  limit?: number
+  /** 同连接开启 niuma.debug / NOTICE，供线上日志点使用 */
+  debugSession?: boolean
 }
 
 export interface KingbaseQueryFetchParams {

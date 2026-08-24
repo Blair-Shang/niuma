@@ -23,6 +23,7 @@ function buildPayload(req: PostgresPendingDdlAction): PostgresDdlParams {
     name: req.name,
     args: req.args,
     oid: req.oid,
+    table: req.table,
   }
 }
 
@@ -33,7 +34,8 @@ async function onConfirm(): Promise<void> {
     req.kind === 'rename' ||
     req.kind === 'create_database' ||
     req.kind === 'create_schema' ||
-    req.kind === 'alter_owner'
+    req.kind === 'alter_owner' ||
+    req.kind === 'grant'
   ) {
     return
   }

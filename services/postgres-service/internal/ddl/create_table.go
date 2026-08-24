@@ -17,6 +17,8 @@ type CreateTableColumn struct {
 	Default    *string `json:"default,omitempty"`
 	PrimaryKey bool    `json:"primaryKey,omitempty"`
 	Comment    string  `json:"comment,omitempty"`
+	// Identity 为 always / by_default。
+	Identity string `json:"identity,omitempty"`
 }
 
 // CreateTableIndex 是新建表时附带的索引。
@@ -108,6 +110,31 @@ func validateDefaultExpr(expr string) error {
 	return nil
 }
 
+// identityAllowedType 判断列类型是否允许 GENERATED ... AS IDENTITY。
+func identityAllowedType(dt string) bool {
+	base := strings.ToUpper(strings.TrimSpace(dt))
+	if i := strings.IndexByte(base, '('); i >= 0 {
+		base = strings.TrimSpace(base[:i])
+	}
+	switch base {
+	case "SMALLINT", "INT2", "INTEGER", "INT", "INT4", "BIGINT", "INT8":
+		return true
+	default:
+		return false
+	}
+}
+
+func requireIdentityType(dt, column string) error {
+	if identityAllowedType(dt) {
+		return nil
+	}
+	name := strings.TrimSpace(column)
+	if name != "" {
+		return fmt.Errorf("postgres: column %q: IDENTITY requires smallint, integer, or bigint", name)
+	}
+	return fmt.Errorf("postgres: IDENTITY requires smallint, integer, or bigint")
+}
+
 func quoteStringLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
@@ -154,7 +181,14 @@ func PreviewCreateTable(params CreateTableParams) (*CreateTableResult, error) {
 		if !col.Nullable {
 			b.WriteString(" NOT NULL")
 		}
-		if col.Default != nil {
+		if ident := normalizeIdentity(col.Identity); ident != "" {
+			if err := requireIdentityType(col.DataType, name); err != nil {
+				return nil, err
+			}
+			b.WriteString(" GENERATED ")
+			b.WriteString(ident)
+			b.WriteString(" AS IDENTITY")
+		} else if col.Default != nil {
 			def := strings.TrimSpace(*col.Default)
 			if def != "" {
 				if err := validateDefaultExpr(def); err != nil {

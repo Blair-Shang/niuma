@@ -190,8 +190,7 @@ export default {
         tabResult: '结果',
         tabMessages: '消息',
         tabHelp: '说明',
-        noResult:
-          '尚无结果集。带 OUT 的过程请用「运行调用」（routine.call）；无结果时也可查看消息。',
+        noResult: '尚无结果集。点「运行调用」执行后会显示在此；无结果时也可查看消息。',
         noMessages: '尚无执行消息。',
         resultTitle: '结果 {n}',
         resultEmpty: '无数据行',
@@ -202,12 +201,12 @@ export default {
         runOk: '调用已执行',
         runOkNoResult: '调用已执行（无结果集，请查看消息）',
         enableSessionVar: '运行调用时开启 NOTICE / niuma.debug 调试开关',
-        tipRun: '「运行调用」始终执行服务器上的原过程/函数；参数在左侧网格填写。',
+        tipRun: '「运行调用」走专用 routine.call（函数 SELECT / 过程 CALL / OUT 同连接读回）；参数在左侧网格填写。',
         tipSafe: '左侧源码与日志点只在本面板编辑器里，不会写入或覆盖数据库对象。',
         tipLog:
           '「插入日志点」仅改编辑器草稿（RAISE NOTICE + niuma.debug 门控）；不会改变线上逻辑。',
         tipOut:
-          '含 OUT 时「运行调用」走 routine.call 直接出结果行；「复制调用脚本」带 -- niuma:exec=batch，查询页同连接批跑。',
+          '「运行调用」一律走 routine.call，不经过查询页。「复制调用脚本」可粘贴到查询面板；含 OUT 的过程脚本带 -- niuma:exec=batch，需同连接批跑。',
       },
       browse: {
         toolbarLabel: '数据浏览',

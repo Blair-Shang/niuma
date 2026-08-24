@@ -18,7 +18,14 @@ export function lastSegment(path: ConnResourcePath): { kind: string; name: strin
   return path.segments[path.segments.length - 1]
 }
 
-export type CategoryId = 'tables' | 'views' | 'functions' | 'procedures' | 'sequences'
+export type CategoryId =
+  | 'tables'
+  | 'views'
+  | 'materialized_views'
+  | 'triggers'
+  | 'functions'
+  | 'procedures'
+  | 'sequences'
 
 export const SCHEMA_CATEGORIES: Array<{
   id: CategoryId
@@ -27,9 +34,11 @@ export const SCHEMA_CATEGORIES: Array<{
 }> = [
   { id: 'tables', labelKey: 'modules.postgres.tree.catTables', icon: 'table' },
   { id: 'views', labelKey: 'modules.postgres.tree.catViews', icon: 'eye' },
+  { id: 'materialized_views', labelKey: 'modules.postgres.tree.catMatViews', icon: 'layers' },
   { id: 'sequences', labelKey: 'modules.postgres.tree.catSequences', icon: 'hash' },
   { id: 'functions', labelKey: 'modules.postgres.tree.catFunctions', icon: 'square-function' },
   { id: 'procedures', labelKey: 'modules.postgres.tree.catProcedures', icon: 'workflow' },
+  { id: 'triggers', labelKey: 'modules.postgres.tree.catTriggers', icon: 'zap' },
 ]
 
 const PROTECTED_DATABASES = new Set(['postgres', 'template0', 'template1'])
@@ -40,23 +49,16 @@ export function isProtectedDatabase(name: string): boolean {
 
 export function isProtectedSchema(name: string): boolean {
   const n = name.toLowerCase()
-  if (
-    n === 'information_schema' ||
-    n === 'pg_catalog' ||
-    n === 'sys' ||
-    n === 'sys_catalog' ||
-    n === 'plsql_debug' ||
-    n === 'perf'
-  ) {
-    return true
-  }
-  return n.startsWith('pg_') || n.startsWith('sys_')
+  if (n === 'information_schema' || n === 'pg_catalog') return true
+  return n.startsWith('pg_')
 }
 
 export function isCategoryId(name: string | undefined): name is CategoryId {
   return (
     name === 'tables' ||
     name === 'views' ||
+    name === 'materialized_views' ||
+    name === 'triggers' ||
     name === 'functions' ||
     name === 'procedures' ||
     name === 'sequences'
@@ -85,9 +87,13 @@ export async function loadCategoryChildren(
   const base = basePath(database, schema, category)
   const nameFilter = filter?.trim() || undefined
 
-  if (category === 'tables' || category === 'views') {
+  if (category === 'tables' || category === 'views' || category === 'materialized_views') {
     const types =
-      category === 'tables' ? ['table'] : ['view', 'materialized_view', 'foreign_table']
+      category === 'tables'
+        ? ['table']
+        : category === 'materialized_views'
+          ? ['materialized_view']
+          : ['view', 'foreign_table']
     const result = await postgresApi.treeTables({
       profileId: conn.profileId,
       database,
@@ -105,8 +111,43 @@ export async function loadCategoryChildren(
         ],
       },
       label: tbl.name,
-      icon: category === 'views' ? 'eye' : 'table',
-      badge: tbl.type !== 'table' && tbl.type !== 'view' ? tbl.type : undefined,
+      icon:
+        category === 'materialized_views' ? 'layers' : category === 'views' ? 'eye' : 'table',
+      badge: tbl.type !== 'table' && tbl.type !== 'view' && tbl.type !== 'materialized_view' ? tbl.type : undefined,
+      collapsible: false,
+    }))
+    if (result.truncated) {
+      nodes.push({
+        path: {
+          segments: [...base.segments, { kind: 'hint', name: `__truncated_${category}` }],
+        },
+        label: t('modules.postgres.tree.listTruncated', { limit: TREE_CHILDREN_LIMIT }),
+        icon: 'info',
+        collapsible: false,
+      })
+    }
+    return nodes
+  }
+
+  if (category === 'triggers') {
+    const result = await postgresApi.treeTriggers({
+      profileId: conn.profileId,
+      database,
+      schema,
+      filter: nameFilter,
+      limit: TREE_CHILDREN_LIMIT,
+    })
+    const nodes: ConnResourceDescriptor[] = result.triggers.map((trg) => ({
+      path: {
+        segments: [
+          ...base.segments,
+          { kind: 'trigger', name: trg.name },
+          { kind: 'ontable', name: trg.tableName },
+          ...(trg.oid ? [{ kind: 'oid', name: String(trg.oid) }] : []),
+        ],
+      },
+      label: `${trg.name} → ${trg.tableName}`,
+      icon: 'zap',
       collapsible: false,
     }))
     if (result.truncated) {
@@ -193,6 +234,8 @@ function countForCategory(
   counts: {
     tables: number
     views: number
+    materializedViews?: number
+    triggers?: number
     functions: number
     procedures: number
     sequences?: number
@@ -202,6 +245,8 @@ function countForCategory(
   if (!counts) return undefined
   if (id === 'tables') return counts.tables
   if (id === 'views') return counts.views
+  if (id === 'materialized_views') return counts.materializedViews
+  if (id === 'triggers') return counts.triggers
   if (id === 'functions') return counts.functions
   if (id === 'procedures') return counts.procedures
   return counts.sequences

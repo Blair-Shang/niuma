@@ -14,6 +14,7 @@ import type {
 } from '@/api/types/postgres'
 import {
   columnsEqual,
+  dataTypesEquivalent,
   joinColumnList,
   newEmptyCheck,
   newEmptyColumn,
@@ -46,6 +47,7 @@ export function toDesignRows(cols: PostgresColumnInfo[], pkCols: string[]): Desi
       defaultExpr: c.default ?? '',
       primaryKey: pk.has(c.name),
       comment: c.comment ?? '',
+      identity: c.identity === 'always' || c.identity === 'by_default' ? c.identity : '',
       removed: false,
     }
   })
@@ -233,7 +235,8 @@ export function buildCreateColumns(rows: DesignColumnDraft[]): PostgresCreateTab
         primaryKey: r.primaryKey,
         comment: r.comment.trim() || undefined,
       }
-      if (r.defaultExpr.trim()) col.default = r.defaultExpr.trim()
+      if (r.identity) col.identity = r.identity
+      else if (r.defaultExpr.trim()) col.default = r.defaultExpr.trim()
       return col
     })
 }
@@ -403,7 +406,8 @@ export function buildAlterDesignOps(input: {
         dataType: syncColumnDataType(r),
         nullable: r.nullable,
       }
-      if (r.defaultExpr) op.default = r.defaultExpr
+      if (r.identity) op.identity = r.identity
+      else if (r.defaultExpr) op.default = r.defaultExpr
       if (r.comment.trim()) op.comment = r.comment.trim()
       ops.push(op)
       continue
@@ -417,7 +421,7 @@ export function buildAlterDesignOps(input: {
     }
     const effectiveName = r.name
     const nextType = syncColumnDataType(r)
-    if (nextType.toLowerCase() !== orig.dataType.trim().toLowerCase()) {
+    if (!dataTypesEquivalent(nextType, orig.dataType)) {
       ops.push({ op: 'alter_type', name: effectiveName, dataType: nextType })
     }
     if (r.nullable !== orig.nullable) {
@@ -426,8 +430,21 @@ export function buildAlterDesignOps(input: {
         name: effectiveName,
       })
     }
+    const origIdentity = orig.identity === 'always' || orig.identity === 'by_default' ? orig.identity : ''
+    if (origIdentity !== r.identity) {
+      if (origIdentity && !r.identity) {
+        ops.push({ op: 'drop_identity', name: effectiveName })
+      } else if (!origIdentity && r.identity) {
+        ops.push({ op: 'set_identity', name: effectiveName, identity: r.identity })
+      } else if (origIdentity && r.identity) {
+        ops.push(
+          { op: 'drop_identity', name: effectiveName },
+          { op: 'set_identity', name: effectiveName, identity: r.identity },
+        )
+      }
+    }
     const origDefault = orig.default ?? ''
-    if (r.defaultExpr !== origDefault) {
+    if (!r.identity && origIdentity === '' && r.defaultExpr !== origDefault) {
       if (!r.defaultExpr) {
         ops.push({ op: 'drop_default', name: effectiveName })
       } else {

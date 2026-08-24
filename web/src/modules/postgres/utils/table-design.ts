@@ -67,8 +67,8 @@ export const POSTGRES_BASE_TYPE_OPTIONS: PostgresBaseTypeOption[] = [
   { base: 'DOUBLE PRECISION', kind: 'none' },
   { base: 'BOOLEAN', kind: 'none' },
   { base: 'TEXT', kind: 'none' },
-  /** 空长度 → 无上限 VARCHAR（PG）；有长度 → VARCHAR(n) */
-  { base: 'VARCHAR', kind: 'length' },
+  /** 未填长度时默认 VARCHAR(255)；需要无上限时请用 TEXT，或手动把长度改成其它值。 */
+  { base: 'VARCHAR', kind: 'length', defaultLength: 255 },
   { base: 'CHAR', kind: 'length', defaultLength: 1 },
   { base: 'DATE', kind: 'none' },
   /** 可选小数秒精度：TIMESTAMP(p) / TIME(p) */
@@ -106,6 +106,8 @@ export interface DesignColumnDraft {
   defaultExpr: string
   primaryKey: boolean
   comment: string
+  /** '' | always | by_default */
+  identity: '' | 'always' | 'by_default'
   removed: boolean
 }
 
@@ -238,6 +240,7 @@ export function defaultCreateTableColumns(): DesignColumnDraft[] {
       defaultExpr: '',
       primaryKey: true,
       comment: '',
+      identity: 'by_default',
       removed: false,
     }),
     withTypeFields({
@@ -249,6 +252,7 @@ export function defaultCreateTableColumns(): DesignColumnDraft[] {
       defaultExpr: 'CURRENT_TIMESTAMP',
       primaryKey: false,
       comment: '',
+      identity: '',
       removed: false,
     }),
   ]
@@ -264,6 +268,7 @@ export function newEmptyColumn(index = 0): DesignColumnDraft {
     defaultExpr: '',
     primaryKey: false,
     comment: '',
+    identity: '',
     removed: false,
   })
 }
@@ -365,7 +370,7 @@ export function resolveBaseTypeOption(base: string): PostgresBaseTypeOption | un
 const TYPE_ALIASES: Record<string, string> = {
   'CHARACTER VARYING': 'VARCHAR',
   VARCHAR: 'VARCHAR',
-  'CHARACTER': 'CHAR',
+  CHARACTER: 'CHAR',
   CHAR: 'CHAR',
   BPCHAR: 'CHAR',
   INT: 'INTEGER',
@@ -377,6 +382,10 @@ const TYPE_ALIASES: Record<string, string> = {
   BOOL: 'BOOLEAN',
   DECIMAL: 'DECIMAL',
   NUMERIC: 'NUMERIC',
+  'TIMESTAMP WITHOUT TIME ZONE': 'TIMESTAMP',
+  'TIMESTAMP WITH TIME ZONE': 'TIMESTAMPTZ',
+  TIMESTAMPTZ: 'TIMESTAMPTZ',
+  'TIME WITHOUT TIME ZONE': 'TIME',
 }
 
 function normalizeBaseType(base: string): string {
@@ -389,10 +398,43 @@ function normalizeBaseType(base: string): string {
   return trimmed
 }
 
+/** PostgreSQL IDENTITY 仅允许 smallint / integer / bigint（不含 SERIAL 伪类型）。 */
+const IDENTITY_BASE_TYPES = new Set(['SMALLINT', 'INTEGER', 'BIGINT'])
+
+/** 当前列类型是否允许 GENERATED ... AS IDENTITY。 */
+export function supportsIdentityType(baseOrDataType: string): boolean {
+  const raw = baseOrDataType.trim()
+  if (!raw) return false
+  const base = parseDataType(raw).base || raw
+  return IDENTITY_BASE_TYPES.has(normalizeBaseType(base).toUpperCase())
+}
+
+/** format_type 会给出 timestamp(6) without time zone 这类写法。 */
+function parseTimestampLike(text: string): ParsedDataType | null {
+  const m =
+    /^(timestamp|time)(?:\s*\(\s*(\d+)\s*\))?\s+(without time zone|with time zone)$/i.exec(text)
+  if (!m) return null
+  const kind = m[1]!.toLowerCase()
+  const withTz = m[3]!.toLowerCase() === 'with time zone'
+  let base = 'TIME'
+  if (kind === 'timestamp') {
+    base = withTz ? 'TIMESTAMPTZ' : 'TIMESTAMP'
+  } else if (withTz) {
+    base = 'TIME WITH TIME ZONE'
+  }
+  const length = m[2] != null ? Number(m[2]) : undefined
+  if (length != null && Number.isFinite(length)) {
+    return { base, length, raw: text }
+  }
+  return { base, raw: text }
+}
+
 /** 解析 VARCHAR(255) / NUMERIC(18,2) / TEXT 等。 */
 export function parseDataType(raw: string): ParsedDataType {
   const text = raw.trim()
   if (!text) return { base: 'TEXT', raw: text }
+  const tz = parseTimestampLike(text)
+  if (tz) return tz
   const m = /^([A-Za-z][A-Za-z0-9_\s]*?)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)$/i.exec(text)
   if (!m) {
     return { base: normalizeBaseType(text), raw: text }
@@ -411,6 +453,11 @@ export function dataTypeParamKind(base: string): DataTypeParamKind {
   return findBaseTypeOption(normalizeBaseType(base))?.kind ?? 'none'
 }
 
+/** 比较两个类型字面量是否等价（忽略 format_type 别名与大小写）。 */
+export function dataTypesEquivalent(a: string, b: string): boolean {
+  return splitDataTypeFields(a).dataType.toLowerCase() === splitDataTypeFields(b).dataType.toLowerCase()
+}
+
 /** 由基底类型 + 参数拼出 dataType 字面量。 */
 export function composeDataType(input: {
   base: string
@@ -420,13 +467,14 @@ export function composeDataType(input: {
 }): string {
   const baseRaw = input.base.trim()
   if (!baseRaw) return 'TEXT'
-  const opt = findBaseTypeOption(baseRaw)
-  const base = opt?.base ?? baseRaw
+  const normalized = normalizeBaseType(baseRaw)
+  const opt = findBaseTypeOption(normalized)
+  const base = opt?.base ?? normalized
   const kind = opt?.kind ?? 'none'
   if (kind === 'length') {
     const n = Number(input.length)
     if (Number.isFinite(n) && n > 0) return `${base}(${Math.floor(n)})`
-    // 有默认长度（如 CHAR→1）则补上；VARCHAR / TIME / TIMESTAMP 允许无括号
+    // 有默认长度（CHAR→1、VARCHAR→255）则补上；TIME / TIMESTAMP 允许无括号
     if (opt?.defaultLength != null && opt.defaultLength > 0) {
       return `${base}(${opt.defaultLength})`
     }

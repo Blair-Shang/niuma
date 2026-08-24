@@ -1,6 +1,6 @@
 /**
  * Postgres 连接树 Provider：database → schema → 分类 → 对象。
- * 右键菜单对齐 Navicat / DBeaver / Vastbase（PG 系专业密度）。
+ * 右键菜单覆盖连接 / 库 / Schema / 对象的常用操作。
  */
 import type { RsContextMenuItem } from '@niuma/ui'
 import type { ConnTreeChildProvider } from '@/modules/ops/conn-tree/registry'
@@ -111,7 +111,7 @@ function tableMenus(isView: boolean, relType?: string): RsContextMenuItem[] {
   }
   return [
     {
-      key: 'browse',
+      key: 'open',
       label: t(isView ? 'modules.postgres.tree.viewOpen' : 'modules.postgres.tree.tableOpen'),
       icon: isView ? 'eye' : 'table',
     },
@@ -245,7 +245,7 @@ function sequenceMenus(): RsContextMenuItem[] {
   ]
 }
 
-/** Schema 级「新建」：对齐 MySQL 库节点 / Navicat New / DBeaver Create New。 */
+/** Schema 级「新建」：表 / 视图 / 例程 / 序列 / 物化视图 / 触发器。 */
 function schemaCreateMenus(): RsContextMenuItem {
   return {
     key: 'createMenu',
@@ -265,8 +265,34 @@ function schemaCreateMenus(): RsContextMenuItem {
         label: t('modules.postgres.tree.create.sequences'),
         icon: 'list-ordered',
       },
+      {
+        key: 'createMatView',
+        label: t('modules.postgres.tree.create.materialized_views'),
+        icon: 'layers',
+      },
+      {
+        key: 'createTrigger',
+        label: t('modules.postgres.tree.create.triggers'),
+        icon: 'zap',
+      },
     ],
   }
+}
+
+function triggerMenus(): RsContextMenuItem[] {
+  return [
+    { key: 'source', label: t('modules.postgres.tree.editTrigger'), icon: 'file-pen' },
+    { key: 'sep-mutate', label: '', separator: true },
+    {
+      key: 'drop',
+      label: t('modules.postgres.tree.dropTrigger'),
+      icon: 'trash-2',
+      danger: true,
+    },
+    { key: 'sep-clipboard', label: '', separator: true },
+    { key: 'copyName', label: t('modules.postgres.tree.copyName'), icon: 'copy' },
+    { key: 'copyDdl', label: t('modules.postgres.tree.copyDdl'), icon: 'clipboard' },
+  ]
 }
 
 export const postgresConnTreeProvider: ConnTreeChildProvider = {
@@ -286,6 +312,8 @@ export const postgresConnTreeProvider: ConnTreeChildProvider = {
           leaf.kind === 'oid' ||
           leaf.kind === 'args' ||
           leaf.kind === 'reltype' ||
+          leaf.kind === 'trigger' ||
+          leaf.kind === 'ontable' ||
           leaf.kind === 'hint')
       ) {
         return []
@@ -447,8 +475,16 @@ export const postgresConnTreeProvider: ConnTreeChildProvider = {
       return items
     }
 
+    if (segmentName(path, 'trigger') || last.kind === 'trigger') {
+      return triggerMenus()
+    }
+
     if (last.kind === 'table' || segmentName(path, 'table')) {
-      return tableMenus(segmentName(path, 'category') === 'views', segmentName(path, 'reltype'))
+      const category = segmentName(path, 'category')
+      const relType =
+        segmentName(path, 'reltype') ??
+        (category === 'materialized_views' ? 'materialized_view' : undefined)
+      return tableMenus(category === 'views' || category === 'materialized_views', relType)
     }
 
     if (segmentName(path, 'function') || last.kind === 'function') {

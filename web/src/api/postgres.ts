@@ -11,6 +11,8 @@ import type {
   PostgresMetaForeignKeysResult,
   PostgresDatabaseCreateOptionsParams,
   PostgresDatabaseCreateOptionsResult,
+  PostgresDatabaseOverviewParams,
+  PostgresDatabaseOverviewResult,
   PostgresMetaInstanceOverviewResult,
   PostgresMetaActivityResult,
   PostgresMetaLocksResult,
@@ -66,6 +68,10 @@ import type {
   PostgresTreeSchemasResult,
   PostgresTreeSequencesResult,
   PostgresTreeTablesResult,
+  PostgresTreeTriggersResult,
+  PostgresNotifyChannelParams,
+  PostgresNotifyChannelsResult,
+  PostgresMetaPrivilegesResult,
 } from './types/postgres'
 
 /** Postgres bridge contract, served exclusively by postgres-service. */
@@ -81,7 +87,7 @@ export const postgresApi = {
   /** 同一物理连接顺序执行多条 SQL（临时表 / SET 跨语句可见）。 */
   queryExecBatch: (params: PostgresQueryExecBatchParams) =>
     bridgeInvoke<PostgresQueryExecBatchResult>('postgres.query.execBatch', params),
-  /** 同连接调用过程并读回 OUT（不依赖 NOTICE / 编辑器脚本）。 */
+  /** 专业化例程调用：函数 SELECT / 过程 CALL / OUT 同连接读回（不走 query.exec）。 */
   routineCall: (params: PostgresRoutineCallParams) =>
     bridgeInvoke<PostgresQueryExecResult>('postgres.routine.call', params),
   queryFetch: (params: PostgresQueryFetchParams) =>
@@ -98,18 +104,14 @@ export const postgresApi = {
     bridgeInvoke<PostgresTxState>('postgres.tx.commit', params),
   txRollback: (params: PostgresTxSessionParams) =>
     bridgeInvoke<PostgresTxState>('postgres.tx.rollback', params),
-  /** P0：EXPLAIN 走 query.exec 包装；服务端尚未单独实现 query.explain。 */
-  queryExplain: async (params: PostgresQueryExplainParams) => {
-    const prefix = params.analyze ? 'EXPLAIN ANALYZE' : 'EXPLAIN'
-    return postgresApi.queryExec({
-      sessionId: params.sessionId,
-      database: params.database,
-      sql: `${prefix}\n${params.sql}`,
-      limit: params.limit,
-      timeoutMs: params.timeoutMs,
-      requestId: params.requestId,
-    })
-  },
+  queryExplain: (params: PostgresQueryExplainParams) =>
+    bridgeInvoke<PostgresQueryExecResult>('postgres.query.explain', params),
+  notifyListen: (params: PostgresNotifyChannelParams) =>
+    bridgeInvoke<PostgresNotifyChannelsResult>('postgres.notify.listen', params),
+  notifyUnlisten: (params: PostgresNotifyChannelParams) =>
+    bridgeInvoke<PostgresNotifyChannelsResult>('postgres.notify.unlisten', params),
+  notifyChannels: (params: PostgresNotifyChannelParams) =>
+    bridgeInvoke<PostgresNotifyChannelsResult>('postgres.notify.channels', params),
 
   treeDatabases(params: PostgresTreeListParams): Promise<PostgresTreeDatabasesResult> {
     return bridgeInvoke('postgres.tree.databases', params)
@@ -125,6 +127,9 @@ export const postgresApi = {
   },
   treeSequences(params: PostgresTreeListParams): Promise<PostgresTreeSequencesResult> {
     return bridgeInvoke('postgres.tree.sequences', params)
+  },
+  treeTriggers(params: PostgresTreeListParams): Promise<PostgresTreeTriggersResult> {
+    return bridgeInvoke('postgres.tree.triggers', params)
   },
   treeCategoryCounts(params: PostgresTreeListParams): Promise<PostgresTreeCategoryCountsResult> {
     return bridgeInvoke('postgres.tree.categoryCounts', params)
@@ -186,6 +191,14 @@ export const postgresApi = {
     params: PostgresDatabaseCreateOptionsParams,
   ): Promise<PostgresDatabaseCreateOptionsResult> {
     return bridgeInvoke('postgres.meta.databaseCreateOptions', params)
+  },
+  metaDatabaseOverview(
+    params: PostgresDatabaseOverviewParams,
+  ): Promise<PostgresDatabaseOverviewResult> {
+    return bridgeInvoke('postgres.meta.databaseOverview', params)
+  },
+  metaPrivileges(params: PostgresMetaRelationParams): Promise<PostgresMetaPrivilegesResult> {
+    return bridgeInvoke('postgres.meta.privileges', params)
   },
   ddlScript(params: PostgresDdlParams): Promise<PostgresDdlScriptResult> {
     return bridgeInvoke('postgres.ddl.script', params)

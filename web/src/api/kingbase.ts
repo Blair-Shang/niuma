@@ -81,7 +81,7 @@ export const kingbaseApi = {
   /** 同一物理连接顺序执行多条 SQL（临时表 / SET 跨语句可见）。 */
   queryExecBatch: (params: KingbaseQueryExecBatchParams) =>
     bridgeInvoke<KingbaseQueryExecBatchResult>('kingbase.query.execBatch', params),
-  /** 同连接调用过程并读回 OUT（不依赖 NOTICE / 编辑器脚本）。 */
+  /** 专业化例程调用：函数 SELECT / 过程 CALL / OUT 同连接读回（不走 query.exec）。 */
   routineCall: (params: KingbaseRoutineCallParams) =>
     bridgeInvoke<KingbaseQueryExecResult>('kingbase.routine.call', params),
   queryFetch: (params: KingbaseQueryFetchParams) =>

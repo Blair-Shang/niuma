@@ -57,13 +57,23 @@ type ScriptParams struct {
 	// NewName 用于 rename_* 动作。
 	NewName string `json:"newName,omitempty"`
 	// 库级 create_database 可选参数。
-	Owner     string `json:"owner,omitempty"`
-	Encoding  string `json:"encoding,omitempty"`
-	Template  string `json:"template,omitempty"`
-	LCCollate string `json:"lcCollate,omitempty"`
-	LCCtype   string `json:"lcCtype,omitempty"`
+	Owner           string `json:"owner,omitempty"`
+	Encoding        string `json:"encoding,omitempty"`
+	Template        string `json:"template,omitempty"`
+	LCCollate       string `json:"lcCollate,omitempty"`
+	LCCtype         string `json:"lcCtype,omitempty"`
+	Tablespace      string `json:"tablespace,omitempty"`
+	ConnectionLimit *int   `json:"connectionLimit,omitempty"`
 	// Capabilities 会话方言能力（缺省则按产品默认 PostgreSQL Cap）。
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Table 触发器所属表。
+	Table string `json:"table,omitempty"`
+	// Privileges / Grantee 用于 grant / revoke。
+	Privileges  []string `json:"privileges,omitempty"`
+	Grantee     string   `json:"grantee,omitempty"`
+	GrantOption bool     `json:"grantOption,omitempty"`
+	ObjectKind  string   `json:"objectKind,omitempty"`
+	Concurrently bool    `json:"concurrently,omitempty"`
 }
 
 // ScriptResult 是 ddl.script 返回。
@@ -82,11 +92,19 @@ type ExecParams struct {
 	Args      string `json:"args,omitempty"`
 	OID       uint32 `json:"oid,omitempty"`
 	NewName   string `json:"newName,omitempty"`
-	Owner     string `json:"owner,omitempty"`
-	Encoding  string `json:"encoding,omitempty"`
-	Template  string `json:"template,omitempty"`
-	LCCollate string `json:"lcCollate,omitempty"`
-	LCCtype   string `json:"lcCtype,omitempty"`
+	Owner           string `json:"owner,omitempty"`
+	Encoding        string `json:"encoding,omitempty"`
+	Template        string `json:"template,omitempty"`
+	LCCollate       string `json:"lcCollate,omitempty"`
+	LCCtype         string `json:"lcCtype,omitempty"`
+	Tablespace      string `json:"tablespace,omitempty"`
+	ConnectionLimit *int   `json:"connectionLimit,omitempty"`
+	Table        string   `json:"table,omitempty"`
+	Privileges   []string `json:"privileges,omitempty"`
+	Grantee      string   `json:"grantee,omitempty"`
+	GrantOption  bool     `json:"grantOption,omitempty"`
+	ObjectKind   string   `json:"objectKind,omitempty"`
+	Concurrently bool     `json:"concurrently,omitempty"`
 }
 
 // ExecResult 是 ddl.exec 返回。
@@ -119,8 +137,12 @@ func requireNewName(newName string) error {
 }
 
 func requireDatabaseName(name string) error {
-	if strings.TrimSpace(name) == "" {
+	name = strings.TrimSpace(name)
+	if name == "" {
 		return fmt.Errorf("postgres: database name required")
+	}
+	if strings.Contains(name, "\x00") {
+		return fmt.Errorf("postgres: invalid database name")
 	}
 	return nil
 }
@@ -259,9 +281,9 @@ func isSafeDatabaseIdent(name string) bool {
 	return !strings.Contains(name, `"`)
 }
 
-var allowedDatabaseTemplates = map[string]struct{}{
-	"template0": {},
-	"template1": {},
+func isDefaultCreateOption(value string) bool {
+	v := strings.TrimSpace(value)
+	return v == "" || strings.EqualFold(v, "DEFAULT") || v == "__default__"
 }
 
 func quoteLiteral(value string) string {
@@ -272,9 +294,9 @@ func buildCreateDatabaseSQL(name string, params ScriptParams) (string, error) {
 	if err := requireDatabaseName(name); err != nil {
 		return "", err
 	}
-	clauses := make([]string, 0, 5)
+	clauses := make([]string, 0, 7)
 
-	// 金仓 CREATE DATABASE 不支持 OWNER = CURRENT_USER；省略 OWNER 即默认当前用户。
+	// 省略 OWNER 即默认当前用户（与 OWNER CURRENT_USER 等价，且避免无 CREATEROLE 时的歧义）。
 	owner := strings.TrimSpace(params.Owner)
 	if owner != "" && !strings.EqualFold(owner, "CURRENT_USER") {
 		if !isSafeDatabaseIdent(owner) {
@@ -284,38 +306,46 @@ func buildCreateDatabaseSQL(name string, params ScriptParams) (string, error) {
 	}
 
 	encoding := strings.ToUpper(strings.TrimSpace(params.Encoding))
-	if encoding == "" {
-		encoding = "UTF8"
-	}
-	if _, ok := allowedDatabaseEncodings[encoding]; !ok {
-		if !isSafeDatabaseLiteral(encoding) {
-			return "", fmt.Errorf("postgres: unsupported database encoding %q", encoding)
+	if encoding != "" {
+		if _, ok := allowedDatabaseEncodings[encoding]; !ok {
+			if !isSafeDatabaseLiteral(encoding) {
+				return "", fmt.Errorf("postgres: unsupported database encoding %q", encoding)
+			}
 		}
+		clauses = append(clauses, "ENCODING = "+quoteLiteral(encoding))
 	}
-	clauses = append(clauses, "ENCODING = "+quoteLiteral(encoding))
 
-	template := strings.TrimSpace(params.Template)
-	if template == "" {
-		template = "template0"
-	}
-	if _, ok := allowedDatabaseTemplates[template]; !ok {
+	// DBeaver：空模板省略 TEMPLATE，允许任意已有库作为克隆源。
+	if template := strings.TrimSpace(params.Template); !isDefaultCreateOption(template) {
 		if !isSafeDatabaseIdent(template) {
 			return "", fmt.Errorf("postgres: unsupported database template %q", template)
 		}
+		clauses = append(clauses, "TEMPLATE = "+quoteIdent(template))
 	}
-	clauses = append(clauses, "TEMPLATE = "+quoteIdent(template))
 
-	if lc := strings.TrimSpace(params.LCCollate); lc != "" {
+	if lc := strings.TrimSpace(params.LCCollate); lc != "" && !isDefaultCreateOption(lc) {
 		if !isSafeDatabaseLiteral(lc) {
 			return "", fmt.Errorf("postgres: invalid lcCollate")
 		}
 		clauses = append(clauses, "LC_COLLATE = "+quoteLiteral(lc))
 	}
-	if lc := strings.TrimSpace(params.LCCtype); lc != "" {
+	if lc := strings.TrimSpace(params.LCCtype); lc != "" && !isDefaultCreateOption(lc) {
 		if !isSafeDatabaseLiteral(lc) {
 			return "", fmt.Errorf("postgres: invalid lcCtype")
 		}
 		clauses = append(clauses, "LC_CTYPE = "+quoteLiteral(lc))
+	}
+
+	// DBeaver：Default 省略 TABLESPACE（RDS 等不能写 TABLESPACE pg_default）。
+	if ts := strings.TrimSpace(params.Tablespace); !isDefaultCreateOption(ts) {
+		if !isSafeDatabaseIdent(ts) {
+			return "", fmt.Errorf("postgres: invalid tablespace %q", ts)
+		}
+		clauses = append(clauses, "TABLESPACE = "+quoteIdent(ts))
+	}
+
+	if params.ConnectionLimit != nil && *params.ConnectionLimit >= 0 {
+		clauses = append(clauses, fmt.Sprintf("CONNECTION LIMIT = %d", *params.ConnectionLimit))
 	}
 
 	sql := "CREATE DATABASE " + quoteIdent(strings.TrimSpace(name))
@@ -662,6 +692,117 @@ $$;`, qn),
 			return nil, err
 		}
 		return &ScriptResult{Action: action, SQL: sql, Danger: true, Summary: "alter procedure owner"}, nil
+	case ActionGrant:
+		sql, err := buildGrantSQL(params)
+		if err != nil {
+			return nil, err
+		}
+		return &ScriptResult{Action: action, SQL: sql, Danger: true, Summary: "grant"}, nil
+	case ActionRevoke:
+		sql, err := buildRevokeSQL(params)
+		if err != nil {
+			return nil, err
+		}
+		return &ScriptResult{Action: action, SQL: sql, Danger: true, Summary: "revoke"}, nil
+	case ActionVacuumTable:
+		if err := requireSchemaName(schema, params.Name); err != nil {
+			return nil, err
+		}
+		return &ScriptResult{
+			Action:  action,
+			SQL:     "VACUUM ANALYZE " + qualified(schema, name),
+			Danger:  true,
+			Summary: "vacuum analyze",
+		}, nil
+	case ActionAnalyzeTable:
+		if err := requireSchemaName(schema, params.Name); err != nil {
+			return nil, err
+		}
+		return &ScriptResult{
+			Action:  action,
+			SQL:     "ANALYZE " + qualified(schema, name),
+			Danger:  true,
+			Summary: "analyze",
+		}, nil
+	case ActionRefreshMatView:
+		if err := requireSchemaName(schema, params.Name); err != nil {
+			return nil, err
+		}
+		sql := "REFRESH MATERIALIZED VIEW "
+		if params.Concurrently {
+			sql += "CONCURRENTLY "
+		}
+		sql += qualified(schema, name)
+		return &ScriptResult{Action: action, SQL: sql, Danger: true, Summary: "refresh materialized view"}, nil
+	case ActionDropMatView:
+		if err := requireSchemaName(schema, params.Name); err != nil {
+			return nil, err
+		}
+		return &ScriptResult{
+			Action:  action,
+			SQL:     "DROP MATERIALIZED VIEW IF EXISTS " + qualified(schema, name) + " CASCADE",
+			Danger:  true,
+			Summary: "drop materialized view",
+		}, nil
+	case ActionRenameMatView:
+		if err := requireSchemaName(schema, params.Name); err != nil {
+			return nil, err
+		}
+		if err := requireNewName(params.NewName); err != nil {
+			return nil, err
+		}
+		return &ScriptResult{
+			Action: action,
+			SQL: fmt.Sprintf(
+				"ALTER MATERIALIZED VIEW %s RENAME TO %s",
+				qualified(schema, name),
+				quoteIdent(strings.TrimSpace(params.NewName)),
+			),
+			Danger:  true,
+			Summary: "rename materialized view",
+		}, nil
+	case ActionDropTrigger:
+		table := strings.TrimSpace(params.Table)
+		if table == "" {
+			return nil, fmt.Errorf("postgres: trigger table required")
+		}
+		if err := requireSchemaName(schema, params.Name); err != nil {
+			return nil, err
+		}
+		return &ScriptResult{
+			Action: action,
+			SQL: fmt.Sprintf(
+				"DROP TRIGGER IF EXISTS %s ON %s",
+				quoteIdent(name),
+				qualified(schema, table),
+			),
+			Danger:  true,
+			Summary: "drop trigger",
+		}, nil
+	case ActionCreateTrigger:
+		table := strings.TrimSpace(params.Table)
+		if table == "" {
+			table = "target_table"
+		}
+		on := qualified(schema, table)
+		return &ScriptResult{
+			Action: action,
+			SQL: fmt.Sprintf(`CREATE TRIGGER %s
+  AFTER INSERT OR UPDATE OR DELETE
+  ON %s
+  FOR EACH ROW
+  EXECUTE PROCEDURE %s()`, quoteIdent(name), on, qualified(schema, "trigger_fn")),
+			Summary: "create trigger template",
+		}, nil
+	case ActionCreateMatView:
+		qn := qualified(schema, name)
+		return &ScriptResult{
+			Action: action,
+			SQL: fmt.Sprintf(`CREATE MATERIALIZED VIEW %s AS
+SELECT 1 AS col
+WITH DATA`, qn),
+			Summary: "create materialized view template",
+		}, nil
 	default:
 		return nil, fmt.Errorf("postgres: unsupported ddl action %q", action)
 	}
@@ -670,20 +811,31 @@ $$;`, qn),
 // Exec 执行白名单 DDL（危险操作与 create_database）。
 func Exec(ctx context.Context, pool *pgxpool.Pool, params ExecParams) (*ExecResult, error) {
 	script, err := BuildScript(ScriptParams{
-		Action:    params.Action,
-		Schema:    params.Schema,
-		Name:      params.Name,
-		Args:      params.Args,
-		OID:       params.OID,
-		NewName:   params.NewName,
-		Owner:     params.Owner,
-		Encoding:  params.Encoding,
-		Template:  params.Template,
-		LCCollate: params.LCCollate,
-		LCCtype:   params.LCCtype,
+		Action:          params.Action,
+		Schema:          params.Schema,
+		Name:            params.Name,
+		Args:            params.Args,
+		OID:             params.OID,
+		NewName:         params.NewName,
+		Owner:           params.Owner,
+		Encoding:        params.Encoding,
+		Template:        params.Template,
+		LCCollate:       params.LCCollate,
+		LCCtype:         params.LCCtype,
+		Tablespace:      params.Tablespace,
+		ConnectionLimit: params.ConnectionLimit,
+		Table:           params.Table,
+		Privileges:      params.Privileges,
+		Grantee:         params.Grantee,
+		GrantOption:     params.GrantOption,
+		ObjectKind:      params.ObjectKind,
+		Concurrently:    params.Concurrently,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(params.Action) == ActionCreateDatabase && isProtectedDatabase(params.Name) {
+		return nil, fmt.Errorf("postgres: cannot create protected database %q", strings.TrimSpace(params.Name))
 	}
 	if !script.Danger && strings.TrimSpace(params.Action) != ActionCreateDatabase && strings.TrimSpace(params.Action) != ActionCreateSchema {
 		return nil, fmt.Errorf("postgres: action %q is not executable via ddl.exec; open query instead", params.Action)

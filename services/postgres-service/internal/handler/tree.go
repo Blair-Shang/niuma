@@ -181,6 +181,35 @@ func (d *Dispatcher) treeSequences(ctx context.Context, req Request) Response {
 	return okResponse(req.ID, result)
 }
 
+func (d *Dispatcher) treeTriggers(ctx context.Context, req Request) Response {
+	var params treeListParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	if params.Schema == "" {
+		return errorResponse(req.ID, "schema required")
+	}
+
+	pool, _, release, err := d.resolvePoolForDatabase(ctx, req.Params, params.Database)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := tree.ListTriggers(ctx, pool, tree.ListParams{
+		Filter:   params.Filter,
+		Limit:    params.Limit,
+		Database: params.Database,
+		Schema:   params.Schema,
+	})
+	if err != nil {
+		logOpWarn(MethodTreeTriggers, err, "session", params.SessionID, "schema", params.Schema)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodTreeTriggers, "session", params.SessionID, "schema", params.Schema, "count", len(result.Triggers), "truncated", result.Truncated)
+	return okResponse(req.ID, result)
+}
+
 func (d *Dispatcher) treeCategoryCounts(ctx context.Context, req Request) Response {
 	var params treeListParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -210,6 +239,8 @@ func (d *Dispatcher) treeCategoryCounts(ctx context.Context, req Request) Respon
 		"functions", result.Functions,
 		"procedures", result.Procedures,
 		"sequences", result.Sequences,
+		"materializedViews", result.MaterializedViews,
+		"triggers", result.Triggers,
 	)
 	return okResponse(req.ID, result)
 }

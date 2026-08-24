@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import {
+  dismissOtherDdlDialogs,
+  registerDdlDialogClear,
+} from '@/modules/ops/conn-tree/ddl-dialog-exclusive'
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
@@ -46,6 +50,7 @@ export const useClickHouseDdlActionStore = defineStore('clickhouse-ddl-actions',
   const busy = ref(false)
 
   function request(action: ClickHousePendingDdlAction): void {
+    dismissOtherDdlDialogs('clickhouse-ddl-actions')
     pending.value = {
       kind: 'danger',
       ...action,
@@ -56,6 +61,8 @@ export const useClickHouseDdlActionStore = defineStore('clickhouse-ddl-actions',
     pending.value = null
     busy.value = false
   }
+
+  registerDdlDialogClear('clickhouse-ddl-actions', clear)
 
   return { pending, busy, request, clear }
 })

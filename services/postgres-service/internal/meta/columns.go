@@ -28,6 +28,8 @@ type ColumnInfo struct {
 	Nullable bool    `json:"nullable"`
 	Default  *string `json:"default,omitempty"`
 	Comment  string  `json:"comment,omitempty"`
+	// Identity 为 always / by_default；空表示非 IDENTITY 列。
+	Identity string `json:"identity,omitempty"`
 }
 
 // ColumnsResult 是列列表结果。
@@ -56,6 +58,7 @@ func ListColumns(ctx context.Context, pool *pgxpool.Pool, ref RelationRef) (*Col
 		return &ColumnsResult{Columns: []ColumnInfo{}}, nil
 	}
 
+	// attidentity 是内部 "char"（OID 18），pgx 二进制协议无法扫进 string，需转 text。
 	const q = `
 SELECT
   a.attnum,
@@ -63,7 +66,8 @@ SELECT
   pg_catalog.format_type(a.atttypid, a.atttypmod),
   NOT a.attnotnull,
   pg_catalog.pg_get_expr(ad.adbin, ad.adrelid),
-  pg_catalog.col_description(a.attrelid, a.attnum)
+  pg_catalog.col_description(a.attrelid, a.attnum),
+  a.attidentity::text
 FROM pg_catalog.pg_attribute a
 LEFT JOIN pg_catalog.pg_attrdef ad
   ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
@@ -83,12 +87,19 @@ ORDER BY a.attnum`
 		var col ColumnInfo
 		var def *string
 		var comment *string
-		if err := rows.Scan(&col.Ordinal, &col.Name, &col.DataType, &col.Nullable, &def, &comment); err != nil {
+		var identity string
+		if err := rows.Scan(&col.Ordinal, &col.Name, &col.DataType, &col.Nullable, &def, &comment, &identity); err != nil {
 			return nil, fmt.Errorf("postgres: list columns scan: %w", err)
 		}
 		col.Default = def
 		if comment != nil {
 			col.Comment = *comment
+		}
+		switch strings.TrimSpace(identity) {
+		case "a":
+			col.Identity = "always"
+		case "d":
+			col.Identity = "by_default"
 		}
 		out = append(out, col)
 	}

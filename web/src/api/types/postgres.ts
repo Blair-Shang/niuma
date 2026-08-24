@@ -130,9 +130,15 @@ export interface PostgresRoutineCallParams {
   database?: string
   schema: string
   name: string
+  /** function | procedure；缺省时服务端按 OUT 或 pg_proc 推断 */
+  kind?: 'function' | 'procedure'
+  oid?: number
   args: PostgresRoutineCallArg[]
   requestId?: string
   timeoutMs?: number
+  limit?: number
+  /** 同连接开启 niuma.debug / NOTICE，供线上日志点使用 */
+  debugSession?: boolean
 }
 
 export interface PostgresQueryFetchParams {
@@ -185,6 +191,25 @@ export interface PostgresQueryExplainParams {
   requestId?: string
 }
 
+export interface PostgresNotifyChannelParams {
+  sessionId: string
+  channel?: string
+}
+
+export interface PostgresNotifyChannelsResult {
+  ok?: boolean
+  channel?: string
+  channels: string[]
+}
+
+export interface PostgresNotifyEvent {
+  type: 'postgres.notify'
+  sessionId: string
+  channel: string
+  payload?: string
+  pid: number
+}
+
 /** 树列表通用过滤 */
 export interface PostgresTreeListParams {
   profileId?: string
@@ -224,6 +249,17 @@ export interface PostgresSequenceInfo {
   name: string
 }
 
+export interface PostgresTriggerInfo {
+  oid?: number
+  name: string
+  tableName: string
+}
+
+export interface PostgresTreeTriggersResult {
+  triggers: PostgresTriggerInfo[]
+  truncated?: boolean
+}
+
 export interface PostgresTreeDatabasesResult {
   databases: PostgresDatabaseInfo[]
   truncated?: boolean
@@ -252,6 +288,8 @@ export interface PostgresTreeSequencesResult {
 export interface PostgresTreeCategoryCountsResult {
   tables: number
   views: number
+  materializedViews?: number
+  triggers?: number
   functions: number
   procedures: number
   sequences?: number
@@ -277,6 +315,7 @@ export interface PostgresColumnInfo {
   nullable: boolean
   default?: string | null
   comment?: string
+  identity?: '' | 'always' | 'by_default'
 }
 
 export interface PostgresCatalogSchemasResult {
@@ -366,11 +405,33 @@ export interface PostgresDatabaseCreateOptionsResult {
   owners: string[]
   encodings: string[]
   templates: string[]
+  tablespaces?: string[]
+  existingDatabases?: string[]
   collations: string[]
   defaultEncoding?: string
   defaultTemplate?: string
+  defaultTablespace?: string
   defaultLcCollate?: string
   defaultLcCtype?: string
+}
+
+export interface PostgresDatabaseOverviewParams {
+  sessionId?: string
+  profileId?: string
+  database?: string
+  name?: string
+}
+
+export interface PostgresDatabaseOverviewResult {
+  name: string
+  owner?: string
+  encoding?: string
+  collate?: string
+  ctype?: string
+  tablespace?: string
+  connectionLimit: number
+  allowConn?: boolean
+  isTemplate?: boolean
 }
 
 export interface PostgresDatabaseCreateOptionsParams {
@@ -488,6 +549,7 @@ export interface PostgresDesignOp {
   refColumns?: string[]
   onDelete?: string
   onUpdate?: string
+  identity?: string
 }
 
 export interface PostgresDesignParams {
@@ -516,6 +578,7 @@ export interface PostgresCreateTableColumn {
   default?: string | null
   primaryKey?: boolean
   comment?: string
+  identity?: string
 }
 export interface PostgresCreateTableIndex {
   name: string
@@ -581,6 +644,16 @@ export type PostgresDdlAction =
   | 'alter_schema_owner'
   | 'alter_function_owner'
   | 'alter_procedure_owner'
+  | 'grant'
+  | 'revoke'
+  | 'vacuum_table'
+  | 'analyze_table'
+  | 'refresh_matview'
+  | 'drop_matview'
+  | 'rename_matview'
+  | 'drop_trigger'
+  | 'create_trigger'
+  | 'create_matview'
 
 export interface PostgresDdlParams extends PostgresMetaRelationParams {
   args?: string
@@ -591,8 +664,27 @@ export interface PostgresDdlParams extends PostgresMetaRelationParams {
   template?: string
   lcCollate?: string
   lcCtype?: string
+  tablespace?: string
+  connectionLimit?: number
   capabilities?: string[]
   action: PostgresDdlAction
+  table?: string
+  privileges?: string[]
+  grantee?: string
+  grantOption?: boolean
+  objectKind?: string
+  concurrently?: boolean
+}
+
+export interface PostgresPrivilegeGrant {
+  grantee: string
+  privilege: string
+  grantable: boolean
+}
+
+export interface PostgresMetaPrivilegesResult {
+  objectKind: string
+  grants: PostgresPrivilegeGrant[]
 }
 export interface PostgresDdlScriptResult {
   action: string

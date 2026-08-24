@@ -22,7 +22,7 @@ import {
   parsePostgresObjectNameFromSql,
   toReplaceViewSql,
 } from '@/modules/postgres/utils/normalize-object-ddl'
-import { postgresDropSequenceSql, qualifiedName } from '@/modules/postgres/sql-seed'
+import { postgresDropSequenceSql, qualifiedName, quoteIdent } from '@/modules/postgres/sql-seed'
 import {
   patchCategoryObjectCount,
   refreshResourceIfLoaded,
@@ -38,6 +38,8 @@ const props = withDefaults(defineProps<{
   schema?: string
   objectName?: string
   objectKind?: PostgresObjectKind
+  /** 触发器所在表（meta.ddl kind=trigger） */
+  table?: string
   args?: string
   oid?: number
   designMode?: PostgresObjectScriptMode
@@ -104,6 +106,8 @@ function kindFeatureLabel(kind: PostgresObjectKind): string {
   if (kind === 'procedure') return t('modules.postgres.session.tabProcedure')
   if (kind === 'function') return t('modules.postgres.session.tabFunction')
   if (kind === 'sequence') return t('modules.postgres.session.tabSequence')
+  if (kind === 'materialized_view') return t('modules.postgres.session.tabMatView')
+  if (kind === 'trigger') return t('modules.postgres.session.tabTrigger')
   return t('modules.postgres.session.tabView')
 }
 
@@ -124,6 +128,12 @@ function createFallbackTemplate(): string {
   if (objectKind.value === 'sequence') {
     return `CREATE SEQUENCE ${qn}\n  INCREMENT BY 1\n  MINVALUE 1\n  START WITH 1\n  CACHE 1\n  NO CYCLE;`
   }
+  if (objectKind.value === 'materialized_view') {
+    return `CREATE MATERIALIZED VIEW ${qn} AS\nSELECT\n  1 AS example_column\nWITH DATA;`
+  }
+  if (objectKind.value === 'trigger') {
+    return `CREATE TRIGGER ${quoteIdent(name)}\n  AFTER INSERT OR UPDATE OR DELETE\n  ON ${qualifiedName(schema, 'target_table')}\n  FOR EACH ROW\n  EXECUTE PROCEDURE ${qualifiedName(schema, 'trigger_fn')}();`
+  }
   return `CREATE OR REPLACE VIEW ${qn} AS\nSELECT\n  1 AS example_column;`
 }
 
@@ -133,9 +143,16 @@ async function loadCreateTemplate(): Promise<void> {
     originalSql.value = sqlText.value
     return
   }
-  let action: 'create_view' | 'create_function' | 'create_procedure' = 'create_view'
+  let action:
+    | 'create_view'
+    | 'create_function'
+    | 'create_procedure'
+    | 'create_matview'
+    | 'create_trigger' = 'create_view'
   if (objectKind.value === 'function') action = 'create_function'
   if (objectKind.value === 'procedure') action = 'create_procedure'
+  if (objectKind.value === 'materialized_view') action = 'create_matview'
+  if (objectKind.value === 'trigger') action = 'create_trigger'
   const name = objectName.value || `new_${objectKind.value}`
   try {
     if (!props.sessionId) throw new Error('No active session')
@@ -164,12 +181,17 @@ async function loadScript(): Promise<void> {
   loading.value = true
   try {
     const result =
-      objectKind.value === 'view' || objectKind.value === 'sequence'
+      objectKind.value === 'view' ||
+      objectKind.value === 'sequence' ||
+      objectKind.value === 'materialized_view' ||
+      objectKind.value === 'trigger'
         ? await postgresApi.metaDDL({
             sessionId: props.sessionId,
             database: props.database,
             schema: props.schema,
             name: objectName.value,
+            kind: objectKind.value === 'trigger' ? 'trigger' : undefined,
+            table: objectKind.value === 'trigger' ? props.table : undefined,
           })
         : await postgresApi.metaRoutineSource({
             sessionId: props.sessionId,
@@ -217,11 +239,13 @@ function switchToAlterAfterCreate(name: string): void {
     objectName: name,
     objectKind: objectKind.value,
   }
-  if (objectKind.value === 'view') {
+  if (objectKind.value === 'view' || objectKind.value === 'materialized_view') {
     nextProps.table = name
     nextProps.isView = true
   } else if (objectKind.value === 'sequence') {
     nextProps.sequence = name
+  } else if (objectKind.value === 'trigger') {
+    if (props.table) nextProps.table = props.table
   } else {
     nextProps.routine = name
     nextProps.routineKind = objectKind.value

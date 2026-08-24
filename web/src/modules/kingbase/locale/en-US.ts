@@ -191,7 +191,7 @@ export default {
         tabMessages: 'Messages',
         tabHelp: 'Help',
         noResult:
-          'No result set yet. For OUT procedures use “Run call” (routine.call); otherwise check Messages.',
+          'No result set yet. Use “Run call” (routine.call); otherwise check Messages.',
         noMessages: 'No messages yet.',
         resultTitle: 'Result {n}',
         resultEmpty: 'No rows',
@@ -202,12 +202,13 @@ export default {
         runOk: 'Call executed',
         runOkNoResult: 'Call executed (no result set — see Messages)',
         enableSessionVar: 'Enable NOTICE / niuma.debug switch when running',
-        tipRun: 'Run call always executes the live procedure/function; fill args in the left grid.',
+        tipRun:
+          'Run call always uses routine.call (function SELECT / procedure CALL / OUT on one connection); fill args in the left grid.',
         tipSafe: 'Source and log points stay in this editor only — they never overwrite the database object.',
         tipLog:
           'Insert log point only edits the draft (RAISE NOTICE + niuma.debug gate); live logic is unchanged.',
         tipOut:
-          'With OUT params, “Run call” uses routine.call for a result row; “Copy call script” includes -- niuma:exec=batch so the query pane runs on one connection.',
+          'Run call always uses routine.call, not the query pane. “Copy call script” pastes into the query editor; OUT procedures include -- niuma:exec=batch so the query pane runs on one connection.',
       },
       browse: {
         toolbarLabel: 'Browse data',

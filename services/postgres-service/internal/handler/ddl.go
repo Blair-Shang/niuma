@@ -24,10 +24,18 @@ type ddlScriptParams struct {
 	Owner     string `json:"owner"`
 	Encoding  string `json:"encoding"`
 	Template  string `json:"template"`
-	LCCollate string `json:"lcCollate"`
-	LCCtype   string `json:"lcCtype"`
+	LCCollate       string `json:"lcCollate"`
+	LCCtype         string `json:"lcCtype"`
+	Tablespace      string `json:"tablespace"`
+	ConnectionLimit *int   `json:"connectionLimit"`
 	// Capabilities 可选；有 sessionId 时优先用会话探测结果。
 	Capabilities []string `json:"capabilities"`
+	Table        string   `json:"table"`
+	Privileges   []string `json:"privileges"`
+	Grantee      string   `json:"grantee"`
+	GrantOption  bool     `json:"grantOption"`
+	ObjectKind   string   `json:"objectKind"`
+	Concurrently bool     `json:"concurrently"`
 }
 
 func ddlParamsFromRequest(params ddlScriptParams) ddl.ScriptParams {
@@ -41,25 +49,41 @@ func ddlParamsFromRequest(params ddlScriptParams) ddl.ScriptParams {
 		Owner:        params.Owner,
 		Encoding:     params.Encoding,
 		Template:     params.Template,
-		LCCollate:    params.LCCollate,
-		LCCtype:      params.LCCtype,
-		Capabilities: params.Capabilities,
+		LCCollate:       params.LCCollate,
+		LCCtype:         params.LCCtype,
+		Tablespace:      params.Tablespace,
+		ConnectionLimit: params.ConnectionLimit,
+		Capabilities:    params.Capabilities,
+		Table:        params.Table,
+		Privileges:   params.Privileges,
+		Grantee:      params.Grantee,
+		GrantOption:  params.GrantOption,
+		ObjectKind:   params.ObjectKind,
+		Concurrently: params.Concurrently,
 	}
 }
 
 func ddlExecParamsFromRequest(params ddlScriptParams) ddl.ExecParams {
 	return ddl.ExecParams{
-		Action:    params.Action,
-		Schema:    params.Schema,
-		Name:      params.Name,
-		Args:      params.Args,
-		OID:       params.OID,
-		NewName:   params.NewName,
-		Owner:     params.Owner,
-		Encoding:  params.Encoding,
-		Template:  params.Template,
-		LCCollate: params.LCCollate,
-		LCCtype:   params.LCCtype,
+		Action:          params.Action,
+		Schema:          params.Schema,
+		Name:            params.Name,
+		Args:            params.Args,
+		OID:             params.OID,
+		NewName:         params.NewName,
+		Owner:           params.Owner,
+		Encoding:        params.Encoding,
+		Template:        params.Template,
+		LCCollate:       params.LCCollate,
+		LCCtype:         params.LCCtype,
+		Tablespace:      params.Tablespace,
+		ConnectionLimit: params.ConnectionLimit,
+		Table:           params.Table,
+		Privileges:      params.Privileges,
+		Grantee:         params.Grantee,
+		GrantOption:     params.GrantOption,
+		ObjectKind:      params.ObjectKind,
+		Concurrently:    params.Concurrently,
 	}
 }
 
@@ -84,7 +108,7 @@ func (d *Dispatcher) ddlScript(ctx context.Context, req Request) Response {
 	return okResponse(req.ID, result)
 }
 
-// preferredDatabase 从会话或一次性建连参数解析初始库（金仓常见 TEST）。
+// preferredDatabase 从会话或一次性建连参数解析初始库（官方 PostgreSQL 常见 postgres）。
 func (d *Dispatcher) preferredDatabase(raw json.RawMessage) string {
 	var withSession sessionIDParams
 	if err := json.Unmarshal(raw, &withSession); err == nil && strings.TrimSpace(withSession.SessionID) != "" {
@@ -138,6 +162,10 @@ func (d *Dispatcher) ddlExec(ctx context.Context, req Request) Response {
 		}
 	} else if ddl.IsSchemaAction(params.Action) {
 		if strings.TrimSpace(params.Name) == "" {
+			return errorResponse(req.ID, "name required")
+		}
+	} else if params.Action == ddl.ActionGrant || params.Action == ddl.ActionRevoke {
+		if strings.TrimSpace(params.Name) == "" && params.OID == 0 {
 			return errorResponse(req.ID, "name required")
 		}
 	} else if params.OID == 0 && (params.Schema == "" || params.Name == "") {

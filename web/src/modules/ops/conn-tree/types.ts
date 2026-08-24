@@ -38,6 +38,7 @@ export interface ConnOpenContext {
     | 'procedure'
     | 'function'
     | 'materializedView'
+    | 'materialized_view'
     | 'dictionary'
     | 'package'
     | 'trigger'

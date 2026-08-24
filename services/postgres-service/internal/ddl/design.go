@@ -20,6 +20,8 @@ const (
 	DesignSetDefault       = "set_default"
 	DesignDropDefault      = "drop_default"
 	DesignSetColumnComment = "set_column_comment"
+	DesignSetIdentity      = "set_identity"
+	DesignDropIdentity     = "drop_identity"
 )
 
 // DesignOp 是一条受控 ALTER 操作。
@@ -33,6 +35,8 @@ type DesignOp struct {
 	Nullable *bool `json:"nullable,omitempty"`
 	// Comment 列/表注释。
 	Comment string `json:"comment,omitempty"`
+	// Identity 为 always / by_default；仅 set_identity / add_column。
+	Identity string `json:"identity,omitempty"`
 	// Columns 主键 / 唯一 / 索引 / 外键本地列。
 	Columns []string `json:"columns,omitempty"`
 	// Unique 仅 add_index。
@@ -104,7 +108,12 @@ func buildDesignSQL(schema, table string, op DesignOp) (string, error) {
 		if op.Nullable != nil && !*op.Nullable {
 			sql += " NOT NULL"
 		}
-		if op.Default != nil && strings.TrimSpace(*op.Default) != "" {
+		if ident := normalizeIdentity(op.Identity); ident != "" {
+			if err := requireIdentityType(op.DataType, name); err != nil {
+				return "", err
+			}
+			sql += " GENERATED " + ident + " AS IDENTITY"
+		} else if op.Default != nil && strings.TrimSpace(*op.Default) != "" {
 			sql += " DEFAULT " + strings.TrimSpace(*op.Default)
 		}
 		return sql, nil
@@ -119,7 +128,15 @@ func buildDesignSQL(schema, table string, op DesignOp) (string, error) {
 		if strings.TrimSpace(op.DataType) == "" {
 			return "", fmt.Errorf("postgres: alter_type requires dataType")
 		}
-		return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s", rel, col, strings.TrimSpace(op.DataType)), nil
+		if err := validateDataType(op.DataType); err != nil {
+			return "", err
+		}
+		dt := strings.TrimSpace(op.DataType)
+		// PG 对许多类型组合（如 varchar/text → bigint）不会自动转换，必须带 USING。
+		return fmt.Sprintf(
+			"ALTER TABLE %s ALTER COLUMN %s TYPE %s USING CAST(%s AS %s)",
+			rel, col, dt, col, dt,
+		), nil
 	case DesignSetNull:
 		return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL", rel, col), nil
 	case DesignSetNotNull:
@@ -137,6 +154,14 @@ func buildDesignSQL(schema, table string, op DesignOp) (string, error) {
 			lit = "'" + strings.ReplaceAll(c, "'", "''") + "'"
 		}
 		return fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s", rel, col, lit), nil
+	case DesignSetIdentity:
+		ident := normalizeIdentity(op.Identity)
+		if ident == "" {
+			return "", fmt.Errorf("postgres: set_identity requires always or by_default")
+		}
+		return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s ADD GENERATED %s AS IDENTITY", rel, col, ident), nil
+	case DesignDropIdentity:
+		return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP IDENTITY IF EXISTS", rel, col), nil
 	default:
 		return "", fmt.Errorf("postgres: unsupported design op %q", op.Op)
 	}
@@ -193,6 +218,17 @@ func ApplyDesign(ctx context.Context, pool *pgxpool.Pool, params DesignApplyPara
 		CommandTags: tags,
 		DurationMS:  time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func normalizeIdentity(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "always":
+		return "ALWAYS"
+	case "by_default", "by default", "default":
+		return "BY DEFAULT"
+	default:
+		return ""
+	}
 }
 
 func execSQLBatchInTx(ctx context.Context, pool *pgxpool.Pool, statements []string, label string) ([]string, error) {

@@ -14,13 +14,18 @@ const {
   dbOwner,
   dbEncoding,
   dbTemplate,
+  dbTablespace,
   dbLcCollate,
   dbLcCtype,
+  dbConnLimit,
   ownerOptions,
   encodingOptions,
   templateOptions,
+  tablespaceOptions,
   collationOptions,
   formDisabled,
+  nameError,
+  templateOverrideHint,
   canConfirm,
   buildPayload,
 } = usePostgresDatabaseCreateForm()
@@ -57,6 +62,7 @@ async function onConfirm(): Promise<void> {
             :placeholder="t('modules.postgres.ddl.dbNamePh')"
             @keydown.enter="onConfirm"
           />
+          <p v-if="dbName.trim() && nameError" class="nm-pg-create-db__error">{{ nameError }}</p>
         </div>
 
         <div class="nm-kb-ddl-dialog__grid">
@@ -69,6 +75,7 @@ async function onConfirm(): Promise<void> {
               :options="ownerOptions"
               :disabled="formDisabled"
               searchable
+              virtual
             />
           </div>
           <div class="nm-kb-ddl-dialog__field">
@@ -85,6 +92,7 @@ async function onConfirm(): Promise<void> {
               :options="encodingOptions"
               :disabled="formDisabled"
               searchable
+              virtual
             />
           </div>
         </div>
@@ -104,8 +112,31 @@ async function onConfirm(): Promise<void> {
               :options="templateOptions"
               :disabled="formDisabled"
               searchable
+              virtual
             />
           </div>
+          <div class="nm-kb-ddl-dialog__field">
+            <RsTooltip
+              icon
+              :content="t('modules.postgres.ddl.dbTablespaceHint')"
+              side="top"
+              align="start"
+            >
+              <RsLabel>{{ t('modules.postgres.ddl.dbTablespace') }}</RsLabel>
+            </RsTooltip>
+            <RsSelect
+              v-model="dbTablespace"
+              :options="tablespaceOptions"
+              :disabled="formDisabled"
+              searchable
+              virtual
+            />
+          </div>
+        </div>
+
+        <p v-if="templateOverrideHint" class="nm-pg-create-db__hint">{{ templateOverrideHint }}</p>
+
+        <div class="nm-kb-ddl-dialog__grid">
           <div class="nm-kb-ddl-dialog__field">
             <RsTooltip
               icon
@@ -120,24 +151,41 @@ async function onConfirm(): Promise<void> {
               :options="collationOptions"
               :disabled="formDisabled"
               searchable
+              virtual
+            />
+          </div>
+          <div class="nm-kb-ddl-dialog__field">
+            <RsTooltip
+              icon
+              :content="t('modules.postgres.ddl.dbLcCtypeHint')"
+              side="top"
+              align="start"
+            >
+              <RsLabel>{{ t('modules.postgres.ddl.dbLcCtype') }}</RsLabel>
+            </RsTooltip>
+            <RsSelect
+              v-model="dbLcCtype"
+              :options="collationOptions"
+              :disabled="formDisabled"
+              searchable
+              virtual
             />
           </div>
         </div>
 
-        <div class="nm-kb-ddl-dialog__field nm-kb-ddl-dialog__field--full">
+        <div class="nm-kb-ddl-dialog__field">
           <RsTooltip
             icon
-            :content="t('modules.postgres.ddl.dbLcCtypeHint')"
+            :content="t('modules.postgres.ddl.dbConnLimitHint')"
             side="top"
             align="start"
           >
-            <RsLabel>{{ t('modules.postgres.ddl.dbLcCtype') }}</RsLabel>
+            <RsLabel>{{ t('modules.postgres.ddl.dbConnLimit') }}</RsLabel>
           </RsTooltip>
-          <RsSelect
-            v-model="dbLcCtype"
-            :options="collationOptions"
+          <RsInput
+            v-model="dbConnLimit"
             :disabled="formDisabled"
-            searchable
+            :placeholder="t('modules.postgres.ddl.dbConnLimitPh')"
           />
         </div>
       </form>
@@ -155,3 +203,15 @@ async function onConfirm(): Promise<void> {
 </template>
 
 <style scoped src="./postgres-ddl-dialog.css"></style>
+<style scoped>
+.nm-pg-create-db__error {
+  margin: 0;
+  color: var(--rs-danger, var(--rs-color-danger));
+  font-size: var(--rs-font-size-xs);
+}
+.nm-pg-create-db__hint {
+  margin: 0;
+  color: var(--rs-muted);
+  font-size: var(--rs-font-size-xs);
+}
+</style>

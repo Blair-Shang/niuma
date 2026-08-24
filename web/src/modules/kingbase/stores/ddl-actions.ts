@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { KingbaseDdlAction } from '@/api/types/kingbase'
+import {
+  dismissOtherDdlDialogs,
+  registerDdlDialogClear,
+} from '@/modules/ops/conn-tree/ddl-dialog-exclusive'
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
@@ -46,6 +50,7 @@ export const useKingbaseDdlActionStore = defineStore('kingbase-ddl-actions', () 
   const busy = ref(false)
 
   function request(action: KingbasePendingDdlAction): void {
+    dismissOtherDdlDialogs('kingbase-ddl-actions')
     pending.value = {
       kind: 'danger',
       ...action,
@@ -56,6 +61,8 @@ export const useKingbaseDdlActionStore = defineStore('kingbase-ddl-actions', () 
     pending.value = null
     busy.value = false
   }
+
+  registerDdlDialogClear('kingbase-ddl-actions', clear)
 
   return { pending, busy, request, clear }
 })

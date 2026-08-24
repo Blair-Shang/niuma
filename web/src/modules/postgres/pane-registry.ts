@@ -18,7 +18,7 @@ export interface PostgresPaneScope {
   isView?: boolean
   routine?: string
   routineKind?: 'function' | 'procedure'
-  objectKind?: 'view' | 'function' | 'procedure' | 'sequence'
+  objectKind?: 'view' | 'materialized_view' | 'function' | 'procedure' | 'sequence' | 'trigger'
   objectName?: string
   sequence?: string
   args?: string
@@ -97,6 +97,7 @@ function objectScriptProps(ctx: PostgresPaneContext): Record<string, unknown> {
     schema: ctx.schema,
     objectName: ctx.objectName ?? ctx.routine ?? ctx.sequence ?? ctx.table,
     objectKind,
+    table: ctx.table,
     args: ctx.args,
     oid: ctx.oid,
     designMode: ctx.designMode ?? 'alter',

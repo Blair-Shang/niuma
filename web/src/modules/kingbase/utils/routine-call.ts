@@ -230,10 +230,11 @@ function quoteIdent(name: string): string {
 const NM_CALL_OUT_TABLE = 'nm_call_out'
 
 /**
- * 根据 identity args / 参数网格生成可执行调用脚本。
- * - 函数：SELECT schema.fn(…)（查询页走分页 query.exec）
- * - 无 OUT 过程：CALL schema.proc(…)（同上）
- * - 有 OUT/INOUT：DO + 临时表 + SELECT（脚本带 `-- niuma:exec=batch`；调试「运行调用」走 routine.call）
+ * 根据 identity args / 参数网格生成可执行调用脚本（查询页「复制调用脚本」）。
+ * 「运行调用」走 kingbase.routine.call，不依赖本脚本。
+ * - 函数：SELECT * FROM schema.fn(…)（SETOF / TABLE / 标量均可；查询页走 query.exec）
+ * - 无 OUT 过程：CALL schema.proc(…)
+ * - 有 OUT/INOUT：DO + 临时表 + SELECT（脚本带 `-- niuma:exec=batch`）
  */
 export function buildRoutineCallSql(options: {
   schema: string
@@ -249,10 +250,11 @@ export function buildRoutineCallSql(options: {
   const kind = options.kind === 'procedure' ? 'procedure' : 'function'
 
   if (kind === 'function') {
+    const fnParams = params.filter((p) => p.mode !== 'out')
     const argList = options.params
-      ? serializeCallParams(params)
+      ? serializeCallParams(fnParams)
       : buildCallPlaceholders(options.args)
-    return `-- Call function ${qn}\nSELECT ${qn}(${wrapArgList(argList)});\n`
+    return `-- Call function ${qn}\nSELECT * FROM ${qn}(${wrapArgList(argList)});\n`
   }
 
   const hasOut = params.some((p) => p.mode === 'out' || p.mode === 'inout')

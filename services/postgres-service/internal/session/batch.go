@@ -119,8 +119,19 @@ func execOneOnConn(
 	limit int,
 	requestID string,
 ) (*QueryExecResult, error) {
+	return execOneOnConnArgs(ctx, conn, sqlText, nil, limit, requestID)
+}
+
+func execOneOnConnArgs(
+	ctx context.Context,
+	conn *pgxpool.Conn,
+	sqlText string,
+	args []any,
+	limit int,
+	requestID string,
+) (*QueryExecResult, error) {
 	start := time.Now()
-	rows, err := conn.Query(ctx, sqlText)
+	rows, err := conn.Query(ctx, sqlText, args...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: query: %w", err)
 	}
