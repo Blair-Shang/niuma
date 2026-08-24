@@ -4,7 +4,11 @@
  */
 import type { RsTableColumn } from '@niuma/ui'
 import type { BrowseDataRow } from '../types/browse-data'
-import { formatBrowseCellValue, isBrowseBinCell } from './browse-cell-format'
+import {
+  formatBrowseCellValue,
+  isBrowseBinCell,
+  isBrowseBinaryLobCell,
+} from './browse-cell-format'
 import {
   alignForValueType,
   isSqlBinaryLobType,
@@ -22,9 +26,11 @@ export interface BuildBrowseResultColumnOptions {
   nullable?: boolean
   /** TINYINT(1) / BIT(1) 等 */
   typeLength?: number | null
+  /** 方言：Oracle DATE → datetime 等 */
+  dialect?: ResolveSqlValueTypeOptions['dialect']
   /** 当前表是否允许编辑（无主键 / 视图时为 false） */
   canEdit: boolean
-  /** 方言二进制单元格检测；默认认 `{ $bin }` */
+  /** 方言二进制单元格检测；默认认 `{ $bin }` / `{ $lob: { type: BLOB } }` */
   isBinCell?: (value: unknown) => boolean
   sortable?: boolean
   filterable?: boolean
@@ -42,13 +48,16 @@ export function buildBrowseResultColumn(
     minWidth = 80,
     nullable = true,
     typeLength,
+    dialect,
     canEdit,
     sortable = true,
     filterable = true,
   } = options
-  const isBin = options.isBinCell ?? isBrowseBinCell
+  const isBin = options.isBinCell ?? ((value: unknown) => isBrowseBinaryLobCell(value) || isBrowseBinCell(value))
   const resolveOpts: ResolveSqlValueTypeOptions | undefined =
-    typeLength != null ? { length: typeLength } : undefined
+    typeLength != null || dialect != null
+      ? { length: typeLength, dialect }
+      : undefined
   const valueType = resolveSqlValueType(dataType, resolveOpts)
   const binaryLob = isSqlBinaryLobType(dataType)
   const textLob = !binaryLob && (valueType === 'textarea' || isSqlTextLobType(dataType))

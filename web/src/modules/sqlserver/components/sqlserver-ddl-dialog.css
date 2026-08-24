@@ -1,0 +1,66 @@
+.nm-sqlserver-ddl-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-md);
+}
+
+.nm-sqlserver-ddl-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--rs-space-md);
+}
+
+.nm-sqlserver-ddl-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-xs);
+}
+
+.nm-sqlserver-ddl-dialog__field--full {
+  width: 100%;
+}
+
+.nm-sqlserver-ddl-dialog__error {
+  margin: 0;
+  font-size: var(--rs-font-size-xs);
+  color: var(--rs-danger);
+}
+
+.nm-sqlserver-ddl-dialog__hint {
+  margin: 0;
+  font-size: var(--rs-font-size-xs);
+  color: var(--rs-muted);
+}
+
+.nm-sqlserver-ddl-dialog__files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-md);
+  padding: var(--rs-space-sm) 0 0;
+  border-top: 1px solid var(--rs-border-subtle);
+}
+
+.nm-sqlserver-ddl-dialog__files-title {
+  font-size: var(--rs-font-size-sm);
+  font-weight: 600;
+}
+
+.nm-sqlserver-ddl-dialog__preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rs-space-sm);
+}
+
+.nm-sqlserver-ddl-dialog__preview {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: var(--rs-space-sm);
+  border: 1px solid var(--rs-border-subtle);
+  border-radius: var(--rs-radius-sm);
+  font-family: var(--rs-font-mono);
+  font-size: var(--rs-font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

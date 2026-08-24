@@ -6,15 +6,18 @@ package session
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	mssql "github.com/microsoft/go-mssqldb"
+	"github.com/microsoft/go-mssqldb/azuread"
 
 	"niuma/pkg/netproxy"
 	"niuma/pkg/tunnel"
@@ -36,18 +39,18 @@ const (
 
 // ConnectOptions 与 Web connection_options JSON 对齐（协议字段 snake_case）。
 type ConnectOptions struct {
-	Database                string `json:"database"`
-	Instance                string `json:"instance"`
-	AuthType                string `json:"auth_type"`
-	Encrypt                 string `json:"encrypt"`
-	TrustServerCertificate  *bool  `json:"trust_server_certificate,omitempty"`
-	HostNameInCertificate   string `json:"host_name_in_certificate"`
-	ApplicationName         string `json:"application_name"`
-	ConnectTimeoutSeconds   int    `json:"connect_timeout_seconds"`
-	TimeoutSecondsLegacy    int    `json:"timeout_seconds"`
-	ExcludeSystemSchemas    *bool  `json:"exclude_system_schemas,omitempty"`
-	Proxy                   *netproxy.Options `json:"proxy,omitempty"`
-	Tunnel                  *tunnel.Options   `json:"tunnel,omitempty"`
+	Database               string            `json:"database"`
+	Instance               string            `json:"instance"`
+	AuthType               string            `json:"auth_type"`
+	Encrypt                string            `json:"encrypt"`
+	TrustServerCertificate *bool             `json:"trust_server_certificate,omitempty"`
+	HostNameInCertificate  string            `json:"host_name_in_certificate"`
+	ApplicationName        string            `json:"application_name"`
+	ConnectTimeoutSeconds  int               `json:"connect_timeout_seconds"`
+	TimeoutSecondsLegacy   int               `json:"timeout_seconds"`
+	ExcludeSystemSchemas   *bool             `json:"exclude_system_schemas,omitempty"`
+	Proxy                  *netproxy.Options `json:"proxy,omitempty"`
+	Tunnel                 *tunnel.Options   `json:"tunnel,omitempty"`
 }
 
 func (o ConnectOptions) effectiveTimeout() time.Duration {
@@ -133,6 +136,7 @@ func (p *ConnectParams) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		alias
 		Password string `json:"password"`
+		Database string `json:"database"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -140,6 +144,9 @@ func (p *ConnectParams) UnmarshalJSON(data []byte) error {
 	*p = ConnectParams(raw.alias)
 	if p.Secret == "" && raw.Password != "" {
 		p.Secret = raw.Password
+	}
+	if db := strings.TrimSpace(raw.Database); db != "" {
+		p.Options.Database = db
 	}
 	return nil
 }
@@ -158,6 +165,9 @@ func Connect(ctx context.Context, params ConnectParams) (*sql.DB, func(), error)
 	var tunnelStop func()
 
 	if p.Options.Tunnel != nil && p.Options.Tunnel.Enabled() {
+		if inst := p.Options.InstanceOrEmpty(); inst != "" {
+			return nil, nil, fmt.Errorf("sqlserver: named instance %q cannot be used with SSH tunnel; clear instance or disable tunnel", inst)
+		}
 		host, port, stop, err := tunnel.StartSSHTunnel(
 			ctx,
 			p.Options.Tunnel,
@@ -169,12 +179,16 @@ func Connect(ctx context.Context, params ConnectParams) (*sql.DB, func(), error)
 		}
 		p.HostAddress = host
 		p.PortNumber = port
-		// 隧道已到固定端口，清除命名实例以免再走 SQL Browser。
-		p.Options.Instance = ""
 		tunnelStop = stop
 	}
 
 	if err := validateAuth(p); err != nil {
+		if tunnelStop != nil {
+			tunnelStop()
+		}
+		return nil, nil, err
+	}
+	if err := validateConnectOptions(p); err != nil {
 		if tunnelStop != nil {
 			tunnelStop()
 		}
@@ -189,7 +203,7 @@ func Connect(ctx context.Context, params ConnectParams) (*sql.DB, func(), error)
 		return nil, nil, err
 	}
 
-	connector, err := mssql.NewConnector(dsn)
+	connector, err := newConnector(p.Options.authTypeOrDefault(), dsn)
 	if err != nil {
 		if tunnelStop != nil {
 			tunnelStop()
@@ -200,14 +214,16 @@ func Connect(ctx context.Context, params ConnectParams) (*sql.DB, func(), error)
 	tunnelActive := p.Options.Tunnel != nil && p.Options.Tunnel.Enabled()
 	timeout := p.Options.effectiveTimeout()
 	if !tunnelActive && p.Options.Proxy != nil {
-		dialer, derr := netproxy.ContextDialer(p.Options.Proxy, timeout)
-		if derr != nil {
-			if tunnelStop != nil {
-				tunnelStop()
+		if mssqlConn, ok := connector.(*mssql.Connector); ok {
+			dialer, derr := netproxy.ContextDialer(p.Options.Proxy, timeout)
+			if derr != nil {
+				if tunnelStop != nil {
+					tunnelStop()
+				}
+				return nil, nil, fmt.Errorf("sqlserver: proxy: %w", derr)
 			}
-			return nil, nil, fmt.Errorf("sqlserver: proxy: %w", derr)
+			mssqlConn.Dialer = dialContextAdapter{d: dialer}
 		}
-		connector.Dialer = dialContextAdapter{d: dialer}
 	}
 
 	db := sql.OpenDB(connector)
@@ -222,7 +238,7 @@ func Connect(ctx context.Context, params ConnectParams) (*sql.DB, func(), error)
 		if tunnelStop != nil {
 			tunnelStop()
 		}
-		return nil, nil, fmt.Errorf("sqlserver: ping: %w", err)
+		return nil, nil, fmt.Errorf("%s", FormatConnectError(fmt.Errorf("ping: %w", err)))
 	}
 	return db, tunnelStop, nil
 }
@@ -238,17 +254,75 @@ func (a dialContextAdapter) DialContext(ctx context.Context, network, address st
 }
 
 func validateAuth(params ConnectParams) error {
-	switch params.Options.authTypeOrDefault() {
+	auth := params.Options.authTypeOrDefault()
+	tunnelOn := params.Options.Tunnel != nil && params.Options.Tunnel.Enabled()
+	switch auth {
 	case "sql":
 		if strings.TrimSpace(params.LoginAccount) == "" {
 			return fmt.Errorf("sqlserver: login account required for sql auth")
 		}
 		return nil
-	case "windows", "aad_password", "aad_integrated", "aad_msi", "aad_service_principal":
-		return fmt.Errorf("sqlserver: auth_type %q is not implemented in P0; use sql auth", params.Options.authTypeOrDefault())
+	case "windows":
+		if runtime.GOOS != "windows" {
+			return fmt.Errorf("sqlserver: windows auth is only available on Windows")
+		}
+		if tunnelOn {
+			return fmt.Errorf("sqlserver: windows auth cannot be used with SSH tunnel")
+		}
+		return nil
+	case "aad_password":
+		if strings.TrimSpace(params.LoginAccount) == "" {
+			return fmt.Errorf("sqlserver: login account required for Azure AD password auth")
+		}
+		if strings.TrimSpace(params.Secret) == "" {
+			return fmt.Errorf("sqlserver: password required for Azure AD password auth")
+		}
+		return nil
+	case "aad_integrated":
+		if tunnelOn {
+			return fmt.Errorf("sqlserver: Azure AD integrated auth cannot be used with SSH tunnel")
+		}
+		return nil
+	case "aad_msi":
+		return nil
+	case "aad_service_principal":
+		if strings.TrimSpace(params.LoginAccount) == "" {
+			return fmt.Errorf("sqlserver: client id required for Azure AD service principal")
+		}
+		if strings.TrimSpace(params.Secret) == "" {
+			return fmt.Errorf("sqlserver: client secret required for Azure AD service principal")
+		}
+		return nil
 	default:
 		return fmt.Errorf("sqlserver: unsupported auth_type %q", params.Options.AuthType)
 	}
+}
+
+func authUsesPassword(authType string) bool {
+	return authType == "sql" || authType == "aad_password" || authType == "aad_service_principal"
+}
+
+func newConnector(authType, dsn string) (driver.Connector, error) {
+	switch authType {
+	case "aad_password", "aad_integrated", "aad_msi", "aad_service_principal":
+		return azuread.NewConnector(dsn)
+	default:
+		return mssql.NewConnector(dsn)
+	}
+}
+
+func validateConnectOptions(params ConnectParams) error {
+	host := strings.ToLower(strings.TrimSpace(params.HostAddress))
+	encrypt := params.Options.encryptOrDefault()
+	if isAzureSQLHost(host) && (encrypt == "disable" || encrypt == "optional") {
+		return fmt.Errorf("sqlserver: Azure SQL requires encrypt=mandatory or strict (got %q)", encrypt)
+	}
+	return nil
+}
+
+func isAzureSQLHost(host string) bool {
+	return strings.Contains(host, ".database.windows.net") ||
+		strings.Contains(host, ".database.chinacloudapi.cn")
 }
 
 func buildDSN(params ConnectParams) (string, error) {
@@ -273,12 +347,35 @@ func buildDSN(params ConnectParams) (string, error) {
 	if timeoutSecs < 1 {
 		timeoutSecs = defaultTimeoutSeconds
 	}
+	// 只限制 TCP/登录拨号。connection timeout 会对后续每个 TDS 包 SetDeadline，
+	// context 取消时驱动等 Attention 确认也会被掐断，表现为
+	// Invalid TDS stream: did not get cancellation confirmation。
+	// 查询生命周期由调用方 context 控制（树操作见 treeOpTimeout）。
 	q.Set("dial timeout", strconv.Itoa(timeoutSecs))
+	q.Set("connection timeout", "0")
+
+	auth := params.Options.authTypeOrDefault()
+	switch auth {
+	case "windows":
+		q.Set("authenticator", "winsspi")
+	case "aad_password":
+		q.Set("fedauth", "ActiveDirectoryPassword")
+	case "aad_integrated":
+		q.Set("fedauth", "ActiveDirectoryIntegrated")
+	case "aad_msi":
+		q.Set("fedauth", "ActiveDirectoryMSI")
+	case "aad_service_principal":
+		q.Set("fedauth", "ActiveDirectoryServicePrincipal")
+	}
 
 	u := &url.URL{
 		Scheme:   "sqlserver",
-		User:     url.UserPassword(strings.TrimSpace(params.LoginAccount), params.Secret),
 		RawQuery: q.Encode(),
+	}
+	if authUsesPassword(auth) {
+		u.User = url.UserPassword(strings.TrimSpace(params.LoginAccount), params.Secret)
+	} else if user := strings.TrimSpace(params.LoginAccount); user != "" && auth == "aad_msi" {
+		u.User = url.User(user)
 	}
 
 	instance := params.Options.InstanceOrEmpty()

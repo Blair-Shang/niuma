@@ -20,7 +20,7 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 	db, tunnelStop, err := session.Connect(ctx, params)
 	if err != nil {
 		logOpError(MethodSessionOpen, err, "host", params.HostAddress, "port", params.PortOrDefault())
-		return errorResponse(req.ID, err.Error())
+		return errorResponse(req.ID, session.FormatConnectError(err))
 	}
 	profile, perr := dialect.Probe(ctx, db)
 	if perr != nil {
@@ -60,6 +60,9 @@ func (d *Dispatcher) sessionClose(ctx context.Context, req Request) Response {
 		logOpError(MethodSessionClose, err, "session", params.SessionID)
 		return errorResponse(req.ID, err.Error())
 	}
+	if d.io != nil {
+		d.io.CancelBySession(params.SessionID)
+	}
 	if d.lspConns != nil {
 		d.lspConns.CloseBySession(params.SessionID)
 	}
@@ -75,7 +78,10 @@ func (d *Dispatcher) sessionTest(ctx context.Context, req Request) Response {
 	db, tunnelStop, err := session.Connect(ctx, params)
 	if err != nil {
 		logOpError(MethodSessionTest, err, "host", params.HostAddress, "port", params.PortOrDefault(), "ok", false)
-		return okResponse(req.ID, map[string]any{"ok": false, "message": err.Error()})
+		return okResponse(req.ID, map[string]any{
+			"ok":      false,
+			"message": session.FormatConnectError(err),
+		})
 	}
 	defer func() {
 		_ = db.Close()
@@ -97,10 +103,14 @@ func (d *Dispatcher) sessionTest(ctx context.Context, req Request) Response {
 	if version == "" {
 		version, _ = session.ProbeVersion(ctx, db)
 	}
-	logOpInfo(MethodSessionTest, "host", params.HostAddress, "port", params.PortOrDefault(), "ok", true)
+	message := "connected"
+	if strings.TrimSpace(version) != "" {
+		message = "connected · " + strings.TrimSpace(version)
+	}
+	logOpInfo(MethodSessionTest, "host", params.HostAddress, "port", params.PortOrDefault(), "ok", true, "version", version)
 	return okResponse(req.ID, map[string]any{
 		"ok":      true,
-		"message": "connected",
+		"message": message,
 		"version": version,
 		"dialect": profile,
 	})

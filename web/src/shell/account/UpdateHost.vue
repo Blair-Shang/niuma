@@ -45,7 +45,7 @@ function onOpenChange(open: boolean) {
       :open="store.dialogOpen"
       :title="title"
       width="md"
-      layout="confirm"
+      layout="form"
       teleport-to="#nm-update-portal"
       :resizable="false"
       :draggable="false"

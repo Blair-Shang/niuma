@@ -25,5 +25,7 @@ struct PackageRef {
 
 nlohmann::json GetRoutineSource(session::Session& session, const RoutineRef& ref, std::string& error);
 nlohmann::json GetPackageSource(session::Session& session, const PackageRef& ref, std::string& error);
+/** ALL_ARGUMENTS 形参列表（含 OUT/IN OUT）；函数返回值放 returnType。 */
+nlohmann::json ListRoutineParameters(session::Session& session, const RoutineRef& ref, std::string& error);
 
 }  // namespace niuma::oracle::meta

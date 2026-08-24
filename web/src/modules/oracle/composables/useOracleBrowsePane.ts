@@ -5,14 +5,14 @@ import {
   copyTextToClipboard, readClipboardText, useRsToast,
   type RsCodeEditorSqlConfig, type RsContextMenuItem, type RsTableColumn,
 } from '@niuma/ui'
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { connectionApi } from '@/api'
+import { connectionApi, dialogApi, fsApi } from '@/api'
 import { oracleApi } from '@/api/oracle'
 import type { OracleColumnInfo, OracleQueryExecResult } from '@/api/types/oracle'
 import {
-  buildBrowseResultColumn, formatRowsAsTsv, mapPasteToColumnRecords,
-  parseClipboardMatrix, parseEditValue,
+  buildBrowseResultColumn, formatRowsAsTsv, isBrowseFilterCompletionOpen,
+  mapPasteToColumnRecords, parseClipboardMatrix, parseEditValue,
   type BrowseDataRow, type BrowseDataShellLabels,
 } from '@/modules/database'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
@@ -21,10 +21,16 @@ import type { ConnItem } from '@/modules/ops/types'
 import { qualifiedName, quoteIdent } from '@/modules/oracle/sql-seed'
 import {
   acceptExtensionsForFormat, buildBrowseExportPayload, buildDeleteSqlText, buildInsertSqlText,
-  buildUpdateSqlText, parseBrowseImport,
+  buildUpdateSqlText, looksLikeOfficeZip, parseBrowseImport,
   type BrowseDataFormat,
 } from '@/modules/oracle/utils/browse-io'
+import {
+  buildBrowseLobSelectSql,
+  isTruncatedLobCell,
+  loadOracleLobFull,
+} from '@/modules/oracle/utils/load-lob'
 import { isBinCell, sqlWhereEquals, toSqlLiteral } from '@/modules/oracle/utils/sql-literal'
+import { isSqlBinaryLobType, isSqlTextLobType } from '@/modules/database/utils/column-value-type'
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 500] as const
 const IO_FORMATS: BrowseDataFormat[] = ['csv', 'sql', 'xls', 'json']
@@ -120,20 +126,48 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
     }
   })
   const columnMeta = computed(() => new Map(tableColumns.value.map((column) => [column.name.toLowerCase(), column])))
-  const resultColumns = computed((): RsTableColumn<BrowseDataRow>[] => displayColumnNames.value.map((name) => {
+  function columnDataType(name: string): string | undefined {
     const meta = columnMeta.value.get(name.toLowerCase())
-    const dataType = queryColumns.value.find((column) => column.name === name)?.dataType ?? meta?.dataType
-    return buildBrowseResultColumn({
-      name,
-      dataType,
-      headerTip: `${t('modules.oracle.browse.colTipField', { name })}${dataType ? `\n${t('modules.oracle.browse.colTipType', { type: dataType })}` : ''}`,
-      width: 120,
-      minWidth: 80,
-      nullable: meta?.nullable !== false,
-      canEdit: canEdit.value,
-      isBinCell,
+    const queryType = queryColumns.value.find((column) => column.name === name)?.dataType
+    // 元数据含长度（VARCHAR2(50 CHAR)）；查询结果多为驱动裸类型名
+    return (meta?.dataType || queryType || '').trim() || undefined
+  }
+  const resultColumns = computed((): RsTableColumn<BrowseDataRow>[] => {
+    const pk = new Set(pkColumns.value.map((n) => n.toLowerCase()))
+    return displayColumnNames.value.map((name) => {
+      const meta = columnMeta.value.get(name.toLowerCase())
+      const typeLabel = columnDataType(name) ?? ''
+      const isPk = pk.has(name.toLowerCase())
+      const nullable = meta?.nullable
+      const tipLines = [t('modules.oracle.browse.colTipField', { name })]
+      if (typeLabel) tipLines.push(t('modules.oracle.browse.colTipType', { type: typeLabel }))
+      tipLines.push(
+        t('modules.oracle.browse.colTipPrimary', {
+          value: isPk ? t('modules.oracle.browse.colTipYes') : t('modules.oracle.browse.colTipNo'),
+        }),
+      )
+      if (typeof nullable === 'boolean') {
+        tipLines.push(
+          t('modules.oracle.browse.colTipNullable', {
+            value: nullable
+              ? t('modules.oracle.browse.colTipYes')
+              : t('modules.oracle.browse.colTipNo'),
+          }),
+        )
+      }
+      return buildBrowseResultColumn({
+        name,
+        dataType: typeLabel || undefined,
+        dialect: 'oracle',
+        headerTip: tipLines.join('\n'),
+        width: 120,
+        minWidth: 80,
+        nullable: nullable !== false,
+        canEdit: canEdit.value,
+        isBinCell,
+      })
     })
-  }))
+  })
 
   function stableRowKey(row: unknown[], index: number): string {
     const values = pkColumns.value.map((key) => row[queryColumns.value.findIndex((column) => column.name === key)])
@@ -148,15 +182,68 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
     })
     resultRows.value = draft ? [draft, ...rows] : rows
   }
-  function locateWhere(index: number): string | null {
-    if (!canEdit.value) return null
+  function locateWhere(index: number, opts?: { forMutate?: boolean }): string | null {
+    if (opts?.forMutate !== false && !canEdit.value) return null
     const raw = rawRows.value[index]
     if (!raw) return null
-    const parts = pkColumns.value.map((key) => {
+    const keys =
+      pkColumns.value.length > 0
+        ? pkColumns.value
+        : queryColumns.value
+            .map((c) => c.name)
+            .filter((name) => {
+              const dt = queryColumns.value.find((c) => c.name === name)?.dataType
+              return !isSqlBinaryLobType(dt) && !isSqlTextLobType(dt)
+            })
+    if (!keys.length) return null
+    const parts = keys.map((key) => {
       const columnIndex = queryColumns.value.findIndex((column) => column.name === key)
-      return columnIndex < 0 ? null : sqlWhereEquals(key, raw[columnIndex])
+      return columnIndex < 0 ? null : sqlWhereEquals(key, raw[columnIndex], columnDataType(key))
     })
     return parts.some((part) => !part) ? null : parts.join(' AND ')
+  }
+
+  async function resolveFullCellValue(ctx: {
+    row: BrowseDataRow
+    column: RsTableColumn<BrowseDataRow>
+    index: number
+    raw: unknown
+  }): Promise<unknown | null> {
+    if (!props.sessionId || !schemaName.value || !props.table) return null
+    if (!isTruncatedLobCell(ctx.raw)) return null
+    const index = Number(ctx.row.__rowIndex ?? ctx.index)
+    const where = locateWhere(index, { forMutate: false })
+    if (!where) {
+      toast.warning(t('modules.oracle.browse.lobNeedKey'))
+      return null
+    }
+    try {
+      const loaded = await loadOracleLobFull({
+        sessionId: props.sessionId,
+        schema: schemaName.value,
+        sql: buildBrowseLobSelectSql(
+          schemaName.value,
+          props.table,
+          String(ctx.column.key),
+          where,
+        ),
+      })
+      // 同步 rawRows，便于后续编辑/保存用全量
+      if (Number.isFinite(index) && index >= 0 && rawRows.value[index]) {
+        const colIndex = queryColumns.value.findIndex((c) => c.name === String(ctx.column.key))
+        if (colIndex >= 0) {
+          const next = [...rawRows.value]
+          const row = [...(next[index] ?? [])]
+          row[colIndex] = loaded.value
+          next[index] = row
+          rawRows.value = next
+        }
+      }
+      return loaded.value
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.lobLoadFailed'))
+      return null
+    }
   }
   async function ensureMeta(): Promise<void> {
     if (!scopeOk.value || metaReady.value) return
@@ -204,7 +291,12 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
   }
   function applyFilters(): void { appliedWhereSql.value = normalizeWhere(filterDraft.value); page.value = 1; void loadData() }
   function onFilterKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); applyFilters() }
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+    // 补全打开时 Enter 交给编辑器接受选项，勿应用过滤/刷新
+    if (isBrowseFilterCompletionOpen(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    applyFilters()
   }
   function refresh(): void { metaReady.value = false; page.value = 1; void loadData() }
 
@@ -219,8 +311,17 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
   ): Promise<void> {
     if (!changes.length) return
     if (row.__isNew) {
-      for (const ch of changes) row[ch.colKey] = parseEditValue(ch.value, ch.previous)
-      void flushNewRow(row)
+      const idx = resultRows.value.findIndex((r) => r.__rowKey === row.__rowKey)
+      if (idx >= 0) {
+        const nextRow: BrowseDataRow = { ...resultRows.value[idx]! }
+        for (const ch of changes) {
+          nextRow[ch.colKey] = parseEditValue(ch.value, ch.previous)
+        }
+        const copy = [...resultRows.value]
+        copy[idx] = nextRow
+        resultRows.value = copy
+        void flushNewRow(nextRow)
+      }
       return
     }
     const index = row.__rowIndex
@@ -236,11 +337,22 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
       if (columnIndex < 0) continue
       const before = rawRows.value[index]?.[columnIndex]
       const after = parseEditValue(ch.value, before)
-      if (toSqlLiteral(before) === toSqlLiteral(after)) continue
-      setParts.push(`${quoteIdent(ch.colKey)} = ${toSqlLiteral(after)}`)
+      const dataType = columnDataType(ch.colKey)
+      if (toSqlLiteral(before, dataType) === toSqlLiteral(after, dataType)) continue
+      setParts.push(`${quoteIdent(ch.colKey)} = ${toSqlLiteral(after, dataType)}`)
       applied.push({ columnIndex, after, before })
     }
     if (!setParts.length) return
+
+    // 与 MySQL 一致：先乐观写回再请求。RsTable row-commit 会先清草稿回到 props，
+    // 若等 queryExec 成功才改 rawRows，中间会闪回旧值。
+    const next = [...rawRows.value]
+    const nextRow = [...(next[index] ?? [])]
+    for (const item of applied) nextRow[item.columnIndex] = item.after
+    next[index] = nextRow
+    rawRows.value = next
+    rebuildRows()
+
     saving.value = true
     try {
       await oracleApi.queryExec({
@@ -248,10 +360,14 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
         schema: schemaName.value,
         sql: `UPDATE ${qualifiedName(schemaName.value, props.table)}\nSET ${setParts.join(', ')}\nWHERE ${where}`,
       })
-      for (const item of applied) rawRows.value[index]![item.columnIndex] = item.after
-      rebuildRows()
       toast.success(t('modules.oracle.browse.cellSaved'))
     } catch (error) {
+      const rollback = [...rawRows.value]
+      const rollbackRow = [...(rollback[index] ?? [])]
+      for (const item of applied) rollbackRow[item.columnIndex] = item.before
+      rollback[index] = rollbackRow
+      rawRows.value = rollback
+      rebuildRows()
       toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.cellSaveError'))
     } finally {
       saving.value = false
@@ -270,7 +386,11 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
     if (missing) { toast.error(t('modules.oracle.browse.insertRequired', { name: missing.name })); return false }
     saving.value = true
     try {
-      await oracleApi.queryExec({ sessionId: props.sessionId, schema: schemaName.value, sql: `INSERT INTO ${qualifiedName(schemaName.value, props.table)} (${filled.map((column) => quoteIdent(column.name)).join(', ')}) VALUES (${filled.map((column) => toSqlLiteral(parseEditValue(row[column.name]))).join(', ')})` })
+      await oracleApi.queryExec({
+        sessionId: props.sessionId,
+        schema: schemaName.value,
+        sql: `INSERT INTO ${qualifiedName(schemaName.value, props.table)} (${filled.map((column) => quoteIdent(column.name)).join(', ')}) VALUES (${filled.map((column) => toSqlLiteral(parseEditValue(row[column.name]), column.dataType || columnDataType(column.name))).join(', ')})`,
+      })
       toast.success(t('modules.oracle.browse.insertDone')); await loadData(); return true
     } catch (error) { toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.insertError')); return false }
     finally { saving.value = false }
@@ -295,7 +415,11 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
         const where = locateWhere(index)
         if (where) await oracleApi.queryExec({ sessionId: props.sessionId!, schema: schemaName.value, sql: `DELETE FROM ${qualifiedName(schemaName.value, props.table)}\nWHERE ${where}` })
       }
-      deleteConfirm.value = false; selectedRowKeys.value = []; await loadData()
+      const deleted = indexes.length
+      deleteConfirm.value = false
+      selectedRowKeys.value = []
+      toast.success(t('modules.oracle.browse.deleteDone', { count: deleted }))
+      await loadData()
     } catch (error) { toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.deleteError')) }
     finally { saving.value = false }
   }
@@ -308,44 +432,182 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
     void applyRowChanges(row, changes)
   }
   function onBrowseRowEditRollback(row: BrowseDataRow): void { if (row.__isNew) discardNewRow(row.__rowKey) }
-  function rowsForCopy(row: BrowseDataRow | null, selected: BrowseDataRow[]): BrowseDataRow[] {
-    return (selected.length ? selected : row ? [row] : resultRows.value.filter((item) => selectedRowKeys.value.includes(item.__rowKey))).filter((item) => !item.__isNew)
+
+  function isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false
+    const tag = target.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+    if (target.isContentEditable) return true
+    return Boolean(
+      target.closest(
+        '.cm-editor, .rs-code-editor, .rs-table__td--editing, [contenteditable="true"]',
+      ),
+    )
   }
-  async function copyText(text: string, count: number): Promise<void> {
-    if (await copyTextToClipboard(text)) toast.success(t('modules.oracle.browse.copyDone', { count }))
-    else toast.error(t('modules.oracle.browse.copyError'))
+
+  function columnNamesForClipboard(): string[] {
+    return (lastResult.value?.columns ?? []).map((c) => c.name)
   }
-  function contextMenuItems(row: BrowseDataRow | null, selected: BrowseDataRow[]): RsContextMenuItem[] {
-    const rows = rowsForCopy(row, selected)
-    const columns = displayColumnNames.value
-    return [{ key: 'copy', label: t('modules.oracle.browse.copy'), icon: 'copy', disabled: !rows.length, children: [
-      { key: 'copy:tsv', label: t('modules.oracle.browse.copyRows'), icon: 'copy' },
-      { key: 'copy:insert', label: t('modules.oracle.browse.copyAsInsert'), icon: 'square-plus', disabled: isView.value },
-      { key: 'copy:update', label: t('modules.oracle.browse.copyAsUpdate'), icon: 'pencil', disabled: isView.value || !pkColumns.value.length },
-      { key: 'copy:delete', label: t('modules.oracle.browse.copyAsDelete'), icon: 'trash-2', disabled: isView.value || !pkColumns.value.length },
-    ] }, { key: 'paste', label: t('modules.oracle.browse.pasteRows'), icon: 'clipboard-paste', disabled: !canInsert.value }]
+
+  function selectedRowsForCopy(): BrowseDataRow[] {
+    const selected = new Set(selectedRowKeys.value)
+    return resultRows.value.filter((r) => selected.has(r.__rowKey))
   }
-  function onContextMenuSelect(key: string, row: BrowseDataRow | null, selected: BrowseDataRow[]): void {
-    if (key === 'paste') {
-      void pasteIntoInsertRows()
+
+  /** 右键菜单：优先选中行，否则用当前行；排除未提交草稿。 */
+  function resolveRowsForCopy(
+    row: BrowseDataRow | null,
+    selected: BrowseDataRow[],
+  ): BrowseDataRow[] {
+    const fromSelected = (selected.length > 0 ? selected : selectedRowsForCopy()).filter(
+      (item) => !item.__isNew,
+    )
+    if (fromSelected.length > 0) return fromSelected
+    if (row && !row.__isNew) return [row]
+    return []
+  }
+
+  async function writeClipboardRows(text: string, count: number): Promise<void> {
+    const ok = await copyTextToClipboard(text)
+    if (!ok) {
+      toast.error(t('modules.oracle.browse.copyError'))
       return
     }
-    const rows = rowsForCopy(row, selected); const columns = displayColumnNames.value
-    if (key === 'copy:tsv') void copyText(formatRowsAsTsv(columns, rows.map((item) => columns.map((name) => item[name]))), rows.length)
-    if (key === 'copy:insert' && props.table) void copyText(buildInsertSqlText(schemaName.value, props.table, columns.map((name) => ({ name })), rows.map((item) => columns.map((name) => item[name]))), rows.length)
-    if (key === 'copy:update' && props.table) void copyText(buildUpdateSqlText(schemaName.value, props.table, columns, pkColumns.value, rows, columns), rows.length)
-    if (key === 'copy:delete' && props.table) void copyText(buildDeleteSqlText(schemaName.value, props.table, pkColumns.value, rows, columns), rows.length)
+    toast.success(t('modules.oracle.browse.copyDone', { count }))
   }
+
+  async function copySelectedRows(
+    row: BrowseDataRow | null = null,
+    selected: BrowseDataRow[] = [],
+  ): Promise<void> {
+    const cols = columnNamesForClipboard()
+    const rows =
+      row || selected.length > 0 ? resolveRowsForCopy(row, selected) : selectedRowsForCopy()
+    if (cols.length === 0 || rows.length === 0) {
+      toast.info(t('modules.oracle.browse.copyEmpty'))
+      return
+    }
+    const matrix = rows.map((item) => cols.map((name) => item[name]))
+    await writeClipboardRows(formatRowsAsTsv(cols, matrix), rows.length)
+  }
+
+  async function copySelectedAsInsert(
+    row: BrowseDataRow | null,
+    selected: BrowseDataRow[],
+  ): Promise<void> {
+    if (!schemaName.value || !props.table) return
+    const cols = columnNamesForClipboard()
+    const rows = resolveRowsForCopy(row, selected)
+    if (cols.length === 0 || rows.length === 0) {
+      toast.info(t('modules.oracle.browse.copyEmpty'))
+      return
+    }
+    const matrix = rows.map((item) => cols.map((name) => item[name]))
+    await writeClipboardRows(
+      buildInsertSqlText(schemaName.value, props.table, cols.map((name) => ({ name })), matrix),
+      rows.length,
+    )
+  }
+
+  async function copySelectedAsUpdate(
+    row: BrowseDataRow | null,
+    selected: BrowseDataRow[],
+  ): Promise<void> {
+    if (!schemaName.value || !props.table) return
+    const cols = columnNamesForClipboard()
+    const rows = resolveRowsForCopy(row, selected)
+    if (cols.length === 0 || rows.length === 0) {
+      toast.info(t('modules.oracle.browse.copyEmpty'))
+      return
+    }
+    // 无主键时用全列 WHERE（对齐 MySQL / DBeaver）
+    await writeClipboardRows(
+      buildUpdateSqlText(schemaName.value, props.table, cols, pkColumns.value, rows, cols),
+      rows.length,
+    )
+  }
+
+  async function copySelectedAsDelete(
+    row: BrowseDataRow | null,
+    selected: BrowseDataRow[],
+  ): Promise<void> {
+    if (!schemaName.value || !props.table) return
+    const rows = resolveRowsForCopy(row, selected)
+    if (rows.length === 0) {
+      toast.info(t('modules.oracle.browse.copyEmpty'))
+      return
+    }
+    await writeClipboardRows(
+      buildDeleteSqlText(schemaName.value, props.table, pkColumns.value, rows, columnNamesForClipboard()),
+      rows.length,
+    )
+  }
+
   async function pasteIntoInsertRows(): Promise<void> {
+    if (!canInsert.value || !lastResult.value) return
     const text = await readClipboardText()
-    if (!text?.trim()) return
-    const records = mapPasteToColumnRecords(displayColumnNames.value, parseClipboardMatrix(text))
-    resultRows.value = [...records.map((record) => ({ ...createDraft(), ...record })), ...resultRows.value.filter((row) => !row.__isNew)]
+    if (!text?.trim()) {
+      toast.info(t('modules.oracle.browse.pasteEmpty'))
+      return
+    }
+    const cols = columnNamesForClipboard()
+    const records = mapPasteToColumnRecords(cols, parseClipboardMatrix(text))
+    if (records.length === 0) {
+      toast.info(t('modules.oracle.browse.pasteEmpty'))
+      return
+    }
+
+    flushingNewRow = true
+    const existingDrafts = resultRows.value.filter((row) => row.__isNew)
+    const rest = resultRows.value.filter((row) => !row.__isNew)
+    const filled: BrowseDataRow[] = []
+    for (let i = 0; i < records.length; i++) {
+      const base = existingDrafts[i] ?? createDraft()
+      const next: BrowseDataRow = { ...base, __isNew: true }
+      for (const [name, raw] of Object.entries(records[i]!)) {
+        next[name] = raw.trim() === '' ? null : parseEditValue(raw)
+      }
+      filled.push(next)
+    }
+    resultRows.value = [...filled, ...rest]
+    selectedRowKeys.value = filled.map((row) => row.__rowKey)
+    await nextTick()
+    flushingNewRow = false
+    toast.success(t('modules.oracle.browse.pasteDone', { count: filled.length }))
   }
+
   function onBrowseKeydown(event: KeyboardEvent): void {
-    if (!props.active || !(event.ctrlKey || event.metaKey)) return
-    if (event.key.toLowerCase() === 'v') { event.preventDefault(); void pasteIntoInsertRows() }
+    if (!props.active || isTypingTarget(event.target)) return
+    const mod = event.ctrlKey || event.metaKey
+    if (!mod || event.altKey || event.shiftKey) return
+    const key = event.key.toLowerCase()
+    if (key === 'c') {
+      if (selectedRowKeys.value.length === 0) return
+      event.preventDefault()
+      void copySelectedRows()
+      return
+    }
+    if (key === 'v') {
+      if (!canInsert.value) return
+      event.preventDefault()
+      void pasteIntoInsertRows()
+    }
   }
+
+  function formatLabel(format: BrowseDataFormat): string {
+    if (format === 'csv') return t('modules.oracle.browse.formatCsv')
+    if (format === 'sql') return t('modules.oracle.browse.formatSql')
+    if (format === 'json') return t('modules.oracle.browse.formatJson')
+    return t('modules.oracle.browse.formatXls')
+  }
+
+  function formatIcon(format: BrowseDataFormat): string {
+    if (format === 'csv') return 'file-text'
+    if (format === 'sql') return 'file-code'
+    if (format === 'json') return 'braces'
+    return 'file-spreadsheet'
+  }
+
   function openBrowseIo(kind: 'export_csv' | 'import_csv'): void {
     if (!props.profileId) {
       toast.error(t(kind === 'export_csv' ? 'modules.oracle.browse.exportNeedProfile' : 'modules.oracle.browse.importNeedProfile'))
@@ -372,85 +634,330 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
       })
     })
   }
-  const importMenuItems = computed(() => [
-    { key: 'fullCsv', label: t('modules.oracle.browse.importFullCsv'), icon: 'upload', disabled: isView.value || saving.value },
-    ...IO_FORMATS.map((format) => ({
-      key: format, label: format.toUpperCase(), icon: 'upload', disabled: !canInsert.value || saving.value,
+
+  const importMenuItems = computed(() =>
+    IO_FORMATS.map((format) => ({
+      key: format,
+      label: formatLabel(format),
+      icon: formatIcon(format),
+      disabled: !canInsert.value || saving.value,
     })),
-  ])
+  )
+
   const exportMenuItems = computed(() => [
-    { key: 'fullCsv', label: t('modules.oracle.browse.exportFullCsv'), icon: 'download', disabled: !schemaName.value || !props.table },
-    ...IO_FORMATS.map((format) => ({ key: format, label: format.toUpperCase(), icon: 'download', disabled: !rawRows.value.length })),
+    ...IO_FORMATS.map((format) => ({
+      key: format,
+      label: formatLabel(format),
+      icon: formatIcon(format),
+      disabled: rawRows.value.length === 0 || saving.value,
+    })),
+    {
+      key: 'fullCsv',
+      label: t('modules.oracle.browse.formatCsvFull'),
+      icon: 'database',
+      disabled: !props.profileId || !schemaName.value || !props.table || saving.value,
+    },
   ])
-  function downloadPage(format: BrowseDataFormat): void {
-    if (!props.table) return
-    const payload = buildBrowseExportPayload(format, { schema: schemaName.value, table: props.table, columns: queryColumns.value, rows: rawRows.value, baseName: `${schemaName.value}_${props.table}` })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(new Blob([payload.content], { type: 'text/plain;charset=utf-8' }))
-    link.download = payload.filename; link.click(); URL.revokeObjectURL(link.href)
+
+  async function exportPage(format: BrowseDataFormat): Promise<void> {
+    exportMenuOpen.value = false
+    if (!schemaName.value || !props.table) {
+      toast.error(t('modules.oracle.browse.needTable'))
+      return
+    }
+    if (rawRows.value.length === 0 || !lastResult.value) {
+      toast.info(t('modules.oracle.browse.empty'))
+      return
+    }
+    const payload = buildBrowseExportPayload(format, {
+      schema: schemaName.value,
+      table: props.table,
+      columns: queryColumns.value,
+      rows: rawRows.value,
+      baseName: `${schemaName.value}_${props.table}`,
+    })
+    await nextTick()
+    try {
+      const picked = await dialogApi.saveFile({
+        title: t('modules.oracle.browse.export'),
+        defaultPath: payload.filename,
+        accept: payload.accept,
+      })
+      if (picked.canceled || !picked.filePaths[0]) return
+      await fsApi.writeText({ path: picked.filePaths[0], content: payload.content })
+      const formatName = formatLabel(format)
+      const pageCount = rawRows.value.length
+      if (totalRows.value > pageCount) {
+        toast.success(t('modules.oracle.browse.exportPagePartialDone', { page: pageCount, format: formatName }))
+      } else {
+        toast.success(t('modules.oracle.browse.exportDone', { count: pageCount, format: formatName }))
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.exportError'))
+    }
   }
+
+  async function triggerImport(format: BrowseDataFormat): Promise<void> {
+    importMenuOpen.value = false
+    if (!canInsert.value || !props.sessionId || !schemaName.value || !props.table) return
+    await nextTick()
+    try {
+      const picked = await dialogApi.openFile({
+        title: t('modules.oracle.browse.import'),
+        accept: acceptExtensionsForFormat(format),
+      })
+      if (picked.canceled || !picked.filePaths[0]) return
+      const file = await fsApi.readText({ path: picked.filePaths[0] })
+      await importFromText(format, file.content ?? '')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.importError'))
+    }
+  }
+
+  async function importFromText(format: BrowseDataFormat, text: string): Promise<void> {
+    if (!props.sessionId || !schemaName.value || !props.table) return
+    if (!text.trim()) {
+      toast.error(t('modules.oracle.browse.importEmpty'))
+      return
+    }
+    if (format === 'xls' && looksLikeOfficeZip(text)) {
+      toast.error(t('modules.oracle.browse.importNeedSpreadsheetMl'))
+      return
+    }
+    const parsed = parseBrowseImport(format, text)
+    if (parsed.columns.length === 0) {
+      toast.error(t('modules.oracle.browse.importParseError', { format: formatLabel(format) }))
+      return
+    }
+    if (parsed.rows.length === 0) {
+      toast.error(t('modules.oracle.browse.importEmpty'))
+      return
+    }
+    // Oracle 未加引号标识符通常为大写；导入表头做大小写不敏感匹配
+    const colMap = new Map(tableColumns.value.map((c) => [c.name.toLowerCase(), c.name]))
+    const mapped = parsed.columns
+      .map((h, i) => {
+        const name = colMap.get(h.toLowerCase())
+        return name ? { name, index: i } : null
+      })
+      .filter((c): c is { name: string; index: number } => Boolean(c))
+    if (mapped.length === 0) {
+      toast.error(t('modules.oracle.browse.importNoColumns'))
+      return
+    }
+
+    saving.value = true
+    let inserted = 0
+    try {
+      // Oracle 经典语法不支持多行 VALUES；逐条 INSERT（同会话串行）
+      for (const row of parsed.rows) {
+        const names = mapped.map((m) => quoteIdent(m.name)).join(', ')
+        const values = mapped.map((m) => {
+          const cell = row[m.index]
+          if (cell === undefined || cell === '') return 'NULL'
+          return toSqlLiteral(cell, columnDataType(m.name))
+        }).join(', ')
+        await oracleApi.queryExec({
+          sessionId: props.sessionId,
+          schema: schemaName.value,
+          sql: `INSERT INTO ${qualifiedName(schemaName.value, props.table)} (${names}) VALUES (${values})`,
+        })
+        inserted += 1
+      }
+      toast.success(t('modules.oracle.browse.importDone', { count: inserted }))
+      await loadData()
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? `${error.message} (${t('modules.oracle.browse.importPartial', { count: inserted })})`
+          : t('modules.oracle.browse.importError'),
+      )
+      if (inserted > 0) await loadData()
+    } finally {
+      saving.value = false
+    }
+  }
+
+  function onImportMenuSelect(key: string): void {
+    if (IO_FORMATS.includes(key as BrowseDataFormat)) {
+      void triggerImport(key as BrowseDataFormat)
+    }
+  }
+
   function onExportMenuSelect(key: string): void {
     if (key === 'fullCsv') {
+      exportMenuOpen.value = false
       openBrowseIo('export_csv')
       return
     }
-    if (IO_FORMATS.includes(key as BrowseDataFormat)) downloadPage(key as BrowseDataFormat)
+    if (IO_FORMATS.includes(key as BrowseDataFormat)) {
+      void exportPage(key as BrowseDataFormat)
+    }
   }
-  async function importText(format: BrowseDataFormat, text: string): Promise<void> {
-    if (!props.sessionId || !props.table) return
-    const parsed = parseBrowseImport(format, text)
-    const columns = parsed.columns
-      .map((name, index) => ({ name, index }))
-      .filter((column) => tableColumns.value.some((meta) => meta.name === column.name))
-    if (!columns.length || !parsed.rows.length) {
-      toast.error(t('modules.oracle.browse.importParseError', { format: format.toUpperCase() }))
+
+  function contextMenuItems(
+    row: BrowseDataRow | null,
+    selected: BrowseDataRow[],
+  ): RsContextMenuItem[] {
+    const items: RsContextMenuItem[] = []
+    const canExport = Boolean(lastResult.value && rawRows.value.length > 0)
+    const copyTargets = resolveRowsForCopy(row, selected)
+    const canCopy = copyTargets.length > 0 || selected.length > 0 || Boolean(row && !row.__isNew)
+
+    items.push({
+      key: 'copy',
+      label: t('modules.oracle.browse.copy'),
+      icon: 'copy',
+      disabled: !canCopy,
+      children: [
+        {
+          key: 'copy:tsv',
+          label: t('modules.oracle.browse.copyRows'),
+          icon: 'copy',
+          shortcut: 'Ctrl+C',
+          disabled: !canCopy,
+        },
+        {
+          key: 'copy:insert',
+          label: t('modules.oracle.browse.copyAsInsert'),
+          icon: 'square-plus',
+          disabled: !canCopy || !schemaName.value || !props.table,
+        },
+        {
+          key: 'copy:update',
+          label: t('modules.oracle.browse.copyAsUpdate'),
+          icon: 'pencil',
+          disabled: !canCopy || !schemaName.value || !props.table,
+        },
+        {
+          key: 'copy:delete',
+          label: t('modules.oracle.browse.copyAsDelete'),
+          icon: 'trash-2',
+          disabled: !canCopy || !schemaName.value || !props.table,
+        },
+      ],
+    })
+
+    if (canInsert.value) {
+      items.push({
+        key: 'paste',
+        label: t('modules.oracle.browse.pasteRows'),
+        icon: 'clipboard-paste',
+        shortcut: 'Ctrl+V',
+      })
+      items.push({ key: 'sep-io', label: '', separator: true })
+      items.push({
+        key: 'import',
+        label: t('modules.oracle.browse.import'),
+        icon: 'upload',
+        children: IO_FORMATS.map((fmt) => ({
+          key: `import:${fmt}`,
+          label: formatLabel(fmt),
+          icon: formatIcon(fmt),
+          disabled: saving.value,
+        })),
+      })
+    } else {
+      items.push({ key: 'sep-io', label: '', separator: true })
+    }
+
+    items.push({
+      key: 'export',
+      label: t('modules.oracle.browse.export'),
+      icon: 'download',
+      disabled: !canExport,
+      children: [
+        ...IO_FORMATS.map((fmt) => ({
+          key: `export:${fmt}`,
+          label: formatLabel(fmt),
+          icon: formatIcon(fmt),
+          disabled: !canExport || saving.value,
+        })),
+        {
+          key: 'export:fullCsv',
+          label: t('modules.oracle.browse.formatCsvFull'),
+          icon: 'database',
+          disabled: !props.profileId || !schemaName.value || !props.table || saving.value,
+        },
+      ],
+    })
+
+    const hasDraft = Boolean(row?.__isNew) || selected.some((item) => item.__isNew)
+    // 写库删除仍需主键；草稿可直接丢弃
+    const canCtxDelete =
+      hasDraft || (canEdit.value && (selected.length > 0 || Boolean(row)))
+    if (canCtxDelete) {
+      items.push({ key: 'sep-delete', label: '', separator: true })
+      items.push({
+        key: 'delete',
+        label: t('modules.oracle.browse.deleteRows'),
+        icon: 'trash-2',
+        danger: true,
+        disabled: selected.length === 0 && !row,
+      })
+    }
+    return items
+  }
+
+  function onContextMenuSelect(key: string, row: BrowseDataRow | null, selected: BrowseDataRow[]): void {
+    if (key === 'copy:tsv') {
+      void copySelectedRows(row, selected)
       return
     }
-    saving.value = true
-    try {
-      for (const row of parsed.rows) {
-        const names = columns.map((column) => quoteIdent(column.name)).join(', ')
-        const values = columns.map((column) => toSqlLiteral(row[column.index] || null)).join(', ')
-        await oracleApi.queryExec({
-          sessionId: props.sessionId, schema: schemaName.value,
-          sql: `INSERT INTO ${qualifiedName(schemaName.value, props.table)} (${names}) VALUES (${values})`,
-        })
-      }
-      toast.success(t('modules.oracle.browse.importDone', { count: parsed.rows.length }))
-      await loadData()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('modules.oracle.browse.importError'))
-    } finally { saving.value = false }
-  }
-  function onImportMenuSelect(key: string): void {
-    if (key === 'fullCsv') {
-      openBrowseIo('import_csv')
+    if (key === 'copy:insert') {
+      void copySelectedAsInsert(row, selected)
       return
     }
-    if (!IO_FORMATS.includes(key as BrowseDataFormat) || !canInsert.value) return
-    const format = key as BrowseDataFormat
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = acceptExtensionsForFormat(format).join(',')
-    input.onchange = () => {
-      const file = input.files?.[0]
-      if (!file) return
-      const reader = new FileReader()
-      reader.onload = () => void importText(format, String(reader.result ?? ''))
-      reader.readAsText(file, 'utf-8')
+    if (key === 'copy:update') {
+      void copySelectedAsUpdate(row, selected)
+      return
     }
-    input.click()
+    if (key === 'copy:delete') {
+      void copySelectedAsDelete(row, selected)
+      return
+    }
+    if (key === 'paste') {
+      void pasteIntoInsertRows()
+      return
+    }
+    if (key === 'delete') {
+      if (selected.length === 0 && row) selectedRowKeys.value = [row.__rowKey]
+      requestDelete()
+      return
+    }
+    if (key.startsWith('import:')) {
+      const format = key.slice('import:'.length) as BrowseDataFormat
+      if (IO_FORMATS.includes(format)) void triggerImport(format)
+      return
+    }
+    if (key === 'export:fullCsv') {
+      openBrowseIo('export_csv')
+      return
+    }
+    if (key.startsWith('export:')) {
+      const format = key.slice('export:'.length) as BrowseDataFormat
+      if (IO_FORMATS.includes(format)) void exportPage(format)
+    }
   }
+
   async function loadBrowseDdl(): Promise<void> {
     if (!scopeOk.value) return
     ddlLoading.value = true
     try {
-      const result = await oracleApi.metaDDL({ sessionId: props.sessionId!, schema: schemaName.value, table: props.table! })
+      const result = await oracleApi.metaDDL({
+        sessionId: props.sessionId!,
+        schema: schemaName.value,
+        table: props.table!,
+        objectType: isView.value ? 'view' : 'table',
+      })
       ddlText.value = result.ddl; objectType.value = result.objectType ?? (isView.value ? 'view' : 'table')
     } catch (error) { toast.error(error instanceof Error ? error.message : t('modules.oracle.ddl.loadError')) }
     finally { ddlLoading.value = false }
   }
-  async function copyBrowseDdl(): Promise<void> { if (ddlText.value) await copyText(ddlText.value, 1) }
+  async function copyBrowseDdl(): Promise<void> {
+    if (!ddlText.value) return
+    await writeClipboardRows(ddlText.value, 1)
+  }
   function currentTablePath(): ConnResourcePath | null {
     if (!schemaName.value || !props.table) return null
     return {
@@ -503,6 +1010,6 @@ export function useOracleBrowsePane(props: OracleBrowsePaneProps) {
     if (prior && !keys.includes(prior)) { const row = resultRows.value.find((item) => item.__rowKey === prior); if (row) await flushNewRow(row) }
   })
   return {
-    t, BROWSE_GUTTER_WIDTH, loading, saving, page, pageSize, pageSizeOptions: PAGE_SIZE_OPTIONS, totalRows, filterOpen, filterDraft, appliedWhereSql, importMenuOpen, exportMenuOpen, lastDataSql, lastResult, selectedRowKeys, resultRows, resultColumns, deleteConfirm, scopeOk, isView, scopeLabel, shellLabels, statusMeta, statusHint, filterSqlConfig, canInsert, canEdit, canDeleteSelection, tableEditable, loadData, applyFilters, onFilterKeydown, refresh, importMenuItems, exportMenuItems, onImportMenuSelect, onExportMenuSelect, openBrowseIo, openInsert, requestDelete, confirmDelete, onCellEditCommit, isBrowseRowPending, onBrowseRowEditCommit, onBrowseRowEditRollback, onBrowseKeydown, contextMenuItems, onContextMenuSelect, ddlMenuOpen, ddlLoading, ddlText, objectType, canOpenDesign, copyBrowseDdl, openDesignTable, openDdlTab,
+    t, BROWSE_GUTTER_WIDTH, loading, saving, page, pageSize, pageSizeOptions: PAGE_SIZE_OPTIONS, totalRows, filterOpen, filterDraft, appliedWhereSql, importMenuOpen, exportMenuOpen, lastDataSql, lastResult, selectedRowKeys, resultRows, resultColumns, deleteConfirm, scopeOk, isView, scopeLabel, shellLabels, statusMeta, statusHint, filterSqlConfig, canInsert, canEdit, canDeleteSelection, tableEditable, loadData, applyFilters, onFilterKeydown, refresh, importMenuItems, exportMenuItems, onImportMenuSelect, onExportMenuSelect, openBrowseIo, openInsert, requestDelete, confirmDelete, onCellEditCommit, isBrowseRowPending, onBrowseRowEditCommit, onBrowseRowEditRollback, onBrowseKeydown, contextMenuItems, onContextMenuSelect, ddlMenuOpen, ddlLoading, ddlText, objectType, canOpenDesign, copyBrowseDdl, openDesignTable, openDdlTab, resolveFullCellValue,
   }
 }

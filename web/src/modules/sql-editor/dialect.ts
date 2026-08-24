@@ -2,7 +2,7 @@
  * 产品侧 SQL 方言（可扩展 MySQL / Oracle / 达梦等）。
  * Monaco languageId 与 sql-formatter language 在此集中映射，调用方只认 SqlDialect。
  *
- * Monaco：MySQL / Dameng / Kingbase / ClickHouse 走 Bridge LSP（languageId=mysql|dameng|kingbase|clickhouse）；其余静默内置 sql，待各库 LSP。
+ * Monaco：MySQL / Dameng / Kingbase / PostgreSQL / ClickHouse / SQLite / SQL Server / Oracle 走 Bridge LSP；其余静默内置 sql，待各库 LSP。
  */
 
 /** 业务方言（连接 kind / 模块维度） */
@@ -38,14 +38,16 @@ export type SqlFormatterLanguage =
   | 'redshift'
   | 'n1ql'
 
-/** Monaco languageId（LSP mysql/dameng/kingbase/clickhouse/sqlite/sqlserver 或内置 sql） */
+/** Monaco languageId（LSP mysql/dameng/kingbase/postgresql/clickhouse/sqlite/sqlserver/oracle 或内置 sql） */
 export type SqlMonacoLanguageId =
   | 'mysql'
   | 'dameng'
   | 'kingbase'
+  | 'postgresql'
   | 'clickhouse'
   | 'sqlite'
   | 'sqlserver'
+  | 'oracle'
   | 'sql'
 
 export interface SqlDialectProfile {
@@ -68,7 +70,7 @@ const PROFILES: Record<SqlDialect, SqlDialectProfile> = {
   },
   postgresql: {
     formatterLanguage: 'postgresql',
-    monacoLanguageId: 'sql',
+    monacoLanguageId: 'postgresql',
     monacoSqlLanguages: false,
   },
   mysql: {
@@ -78,7 +80,7 @@ const PROFILES: Record<SqlDialect, SqlDialectProfile> = {
   },
   oracle: {
     formatterLanguage: 'plsql',
-    monacoLanguageId: 'sql',
+    monacoLanguageId: 'oracle',
     monacoSqlLanguages: false,
   },
   dameng: {

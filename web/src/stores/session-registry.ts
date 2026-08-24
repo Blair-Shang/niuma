@@ -52,6 +52,7 @@ import {
   mongodbApi,
   mysqlApi,
   oracleApi,
+  postgresApi,
   redisApi,
   sqliteApi,
   sqlserverApi,
@@ -72,6 +73,7 @@ import {
   defaultKingbaseProfile,
   defaultMySQLProfile,
   defaultOracleProfile,
+  defaultPostgreSQLProfile,
   defaultSqliteProfile,
   defaultSqlServerProfile,
   defaultVastbaseProfile,
@@ -229,10 +231,17 @@ export const useSessionRegistry = defineStore('session-registry', () => {
         }
       }
       case 'sqlserver': {
-        const r = await sqlserverApi.sessionOpen({ profileId })
+        const r = await sqlserverApi.sessionOpen({ profileId, database: db })
         return {
           sessionId: r.sessionId,
           dialect: toSqlServerProfile(r.dialect) ?? defaultSqlServerProfile(),
+        }
+      }
+      case 'postgres': {
+        const r = await postgresApi.sessionOpen({ profileId, database: db })
+        return {
+          sessionId: r.sessionId,
+          dialect: toSqlServerProfile(r.dialect) ?? defaultPostgreSQLProfile(),
         }
       }
     }
@@ -277,6 +286,9 @@ export const useSessionRegistry = defineStore('session-registry', () => {
           break
         case 'sqlserver':
           await sqlserverApi.sessionClose({ sessionId })
+          break
+        case 'postgres':
+          await postgresApi.sessionClose({ sessionId })
           break
       }
     } catch {
@@ -372,7 +384,7 @@ export const useSessionRegistry = defineStore('session-registry', () => {
    * 1. 按 key 查找已有 lease → 追加 tabBinding，取消 idle 计时
    * 2. 否则 `session.open` 后新建 lease
    *
-   * @param opts - kind / profileId / tabId / database(Redis) / connectDatabase(MySQL·Kingbase)
+   * @param opts - kind / profileId / tabId / database(Redis) / connectDatabase(MySQL·Kingbase·SQL Server)
    * @param hooks.onRelease - 该 Tab 被 release 时执行的清理（停流、unregister transferHub）
    */
   async function acquire(opts: AcquireOpts, hooks?: AcquireHooks): Promise<AcquireResult> {

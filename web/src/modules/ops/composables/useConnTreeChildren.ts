@@ -28,13 +28,20 @@ function descriptorToNode(conn: ConnItem, descriptor: ConnResourceDescriptor): C
   }
 }
 
+const EMPTY_CHILD_CACHE: ReadonlyMap<string, ConnResourceNode[]> = new Map()
+const EMPTY_LOADING_SET: ReadonlySet<string> = new Set()
+
 function applyChildCache(
   nodes: readonly ConnTreeNode[],
-  cache: ReadonlyMap<string, ConnResourceNode[]>,
+  cache?: ReadonlyMap<string, ConnResourceNode[]>,
+  loadingSet?: ReadonlySet<string>,
   visiting: Set<string> = new Set(),
 ): ConnTreeNode[] {
+  const cacheMap = cache ?? EMPTY_CHILD_CACHE
+  const loadingKeysSet = loadingSet ?? EMPTY_LOADING_SET
   return nodes.map((node) => {
     const key = node.key
+    const loading = Boolean(key && loadingKeysSet.has(key))
     if (!key) {
       return node
     }
@@ -45,21 +52,23 @@ function applyChildCache(
         ...node,
         isLeaf: true,
         children: undefined,
+        loading,
       }
     }
 
-    const cached = cache.get(key)
+    const cached = cacheMap.get(key)
     if (cached) {
       // 叶子节点不应拥有子列表（误刷新表/视图时曾把兄弟挂到叶子下）
       if (node.isLeaf) {
-        return { ...node, children: undefined, isLeaf: true }
+        return { ...node, children: undefined, isLeaf: true, loading }
       }
       visiting.add(key)
       try {
         return {
           ...node,
           isLeaf: false,
-          children: applyChildCache(cached, cache, visiting),
+          children: applyChildCache(cached, cacheMap, loadingKeysSet, visiting),
+          loading,
         }
       } finally {
         visiting.delete(key)
@@ -72,7 +81,8 @@ function applyChildCache(
       try {
         return {
           ...node,
-          children: applyChildCache(children, cache, visiting),
+          children: applyChildCache(children, cacheMap, loadingKeysSet, visiting),
+          loading,
         }
       } finally {
         visiting.delete(key)
@@ -80,7 +90,7 @@ function applyChildCache(
     }
 
     // 勿把 cache 内对象直接交给树：避免 RsTree / 业务侧就地改 children 污染单例缓存
-    return { ...node }
+    return { ...node, loading }
   })
 }
 
@@ -109,6 +119,26 @@ function cacheKey(conn: ConnItem, parentPath?: ConnResourceDescriptor['path']): 
  * - **多协议**：单例共享 ≠ 数据混用；见 `invalidateConnTreeChildren` 注释。
  */
 const childCache = shallowRef(new Map<string, ConnResourceNode[]>())
+/** 正在刷新的树节点 key；写入节点 `loading`，复用 RsTree 展开箭头转圈。 */
+const loadingKeys = shallowRef(new Set<string>())
+const loadingCounts = new Map<string, number>()
+
+function markNodeLoading(key: string, on: boolean): void {
+  const current = loadingCounts.get(key) ?? 0
+  const nextCount = on ? current + 1 : Math.max(0, current - 1)
+  if (nextCount <= 0) loadingCounts.delete(key)
+  else loadingCounts.set(key, nextCount)
+  loadingKeys.value = new Set(loadingCounts.keys())
+}
+
+async function withNodeLoading(key: string, task: () => Promise<void>): Promise<void> {
+  markNodeLoading(key, true)
+  try {
+    await task()
+  } finally {
+    markNodeLoading(key, false)
+  }
+}
 
 /**
  * 失效对象子树缓存。
@@ -126,6 +156,8 @@ const childCache = shallowRef(new Map<string, ConnResourceNode[]>())
 export function invalidateConnTreeChildren(profileId?: string): void {
   if (!profileId) {
     childCache.value = new Map()
+    loadingCounts.clear()
+    loadingKeys.value = new Set()
     connMetadataCache.invalidate()
     return
   }
@@ -143,7 +175,7 @@ export function invalidateConnTreeChildren(profileId?: string): void {
 }
 
 function displayNodes(base: readonly ConnTreeNode[]): ConnTreeNode[] {
-  return applyChildCache(base, childCache.value)
+  return applyChildCache(base, childCache.value ?? EMPTY_CHILD_CACHE, loadingKeys.value ?? EMPTY_LOADING_SET)
 }
 
 /** 路径尾部仅标识对象本身、从未作为可展开文件夹出现的 kind。 */
@@ -152,6 +184,7 @@ const PATH_LEAF_KINDS = new Set([
   'function',
   'procedure',
   'sequence',
+  'synonym',
   'collection',
   'oid',
   'args',
@@ -269,8 +302,8 @@ function isLoaded(key: string): boolean {
 }
 
 /**
- * 强制刷新单个节点的子列表：清除该节点对应的 metadata 缓存条目，
- * 从 childCache 中移除（触发树重新渲染），再重新拉取数据。
+ * 强制刷新单个节点的子列表：清除该节点对应的 metadata 缓存条目后重新拉取。
+ * 刷新期间给节点打 `loading`，RsTree 在展开箭头上显示转圈（与首次懒加载同一套样式）。
  *
  * 叶子资源（表 / 视图 / 集合等）无子节点：改为刷新其父容器的子列表，
  * 避免 loadChildren(叶子 path) 把整表/视图列表错误挂到该叶子下。
@@ -293,25 +326,23 @@ async function refreshNode(key: string, node: RsTreeNode): Promise<void> {
     return
   }
 
-  const newCache = new Map(childCache.value)
-  newCache.delete(key)
-  childCache.value = newCache
-
-  if (n._type === 'resource') {
-    connMetadataCache.invalidate(cacheKey(n._conn, n._path))
-  } else if (n._type === 'conn') {
-    connMetadataCache.invalidate(cacheKey(n._conn))
-  }
-
-  await loadChildrenForKey(key, node)
-
-  // 分类夹右键刷新只重拉 children，不会重拉 categoryCounts；用子节点数同步「字典 (n)」徽章
-  if (n._type === 'resource') {
-    const last = n._path.segments.at(-1)
-    if (last?.kind === 'category') {
-      patchCategoryObjectCount(n._conn, n._path)
+  await withNodeLoading(key, async () => {
+    if (n._type === 'resource') {
+      connMetadataCache.invalidate(cacheKey(n._conn, n._path))
+    } else if (n._type === 'conn') {
+      connMetadataCache.invalidate(cacheKey(n._conn))
     }
-  }
+
+    await loadChildrenForKey(key, node)
+
+    // 分类夹右键刷新只重拉 children，不会重拉 categoryCounts；用子节点数同步「字典 (n)」徽章
+    if (n._type === 'resource') {
+      const last = n._path.segments.at(-1)
+      if (last?.kind === 'category') {
+        patchCategoryObjectCount(n._conn, n._path)
+      }
+    }
+  })
 }
 
 /**
@@ -362,16 +393,18 @@ export async function refreshConnTreeRoot(
   if (!wasLoaded) {
     return
   }
-  await ensureConnKind(conn.kind)
-  const provider = getConnTreeProvider(conn.kind)
-  if (!provider?.canExpand(conn)) {
-    return
-  }
-  const descriptors = await connMetadataCache.fetch(cacheKey(conn), () => provider.loadChildren(conn))
-  childCache.value = new Map(childCache.value).set(
-    key,
-    descriptors.map((d) => descriptorToNode(conn, d)),
-  )
+  await withNodeLoading(key, async () => {
+    await ensureConnKind(conn.kind)
+    const provider = getConnTreeProvider(conn.kind)
+    if (!provider?.canExpand(conn)) {
+      return
+    }
+    const descriptors = await connMetadataCache.fetch(cacheKey(conn), () => provider.loadChildren(conn))
+    childCache.value = new Map(childCache.value).set(
+      key,
+      descriptors.map((d) => descriptorToNode(conn, d)),
+    )
+  })
 }
 
 /** DDL 后刷新指定资源节点（若已展开加载过），否则仅失效该子树缓存。 */
@@ -394,23 +427,25 @@ export async function refreshResourceIfLoaded(
   if (!wasLoaded) {
     return
   }
-  await ensureConnKind(conn.kind)
-  const provider = getConnTreeProvider(conn.kind)
-  if (!provider) {
-    return
-  }
-  const descriptors = await connMetadataCache.fetch(cacheKey(conn, path), () =>
-    provider.loadChildren(conn, path),
-  )
-  childCache.value = new Map(childCache.value).set(
-    key,
-    descriptors.map((d) => descriptorToNode(conn, d)),
-  )
-  // 与 refreshNode 一致：分类列表刷新后同步父级徽章
-  const last = path.segments.at(-1)
-  if (last?.kind === 'category') {
-    patchCategoryObjectCount(conn, path)
-  }
+  await withNodeLoading(key, async () => {
+    await ensureConnKind(conn.kind)
+    const provider = getConnTreeProvider(conn.kind)
+    if (!provider) {
+      return
+    }
+    const descriptors = await connMetadataCache.fetch(cacheKey(conn, path), () =>
+      provider.loadChildren(conn, path),
+    )
+    childCache.value = new Map(childCache.value).set(
+      key,
+      descriptors.map((d) => descriptorToNode(conn, d)),
+    )
+    // 与 refreshNode 一致：分类列表刷新后同步父级徽章
+    const last = path.segments.at(-1)
+    if (last?.kind === 'category') {
+      patchCategoryObjectCount(conn, path)
+    }
+  })
 }
 
 function parseCategoryCount(node: ConnResourceNode): number | undefined {

@@ -1,5 +1,6 @@
 #include "session/explain.hpp"
 
+#include "dataio/script_split.hpp"
 #include "util/idgen.hpp"
 #include "util/sql_literal.hpp"
 
@@ -22,7 +23,7 @@ std::string Trim(std::string s) {
 }  // namespace
 
 nlohmann::json ExplainQuery(Session& session, const QueryExecParams& params, std::string& error) {
-  const std::string sql = Trim(params.sql);
+  std::string sql = dataio::StripSqlPlusTerminator(Trim(params.sql));
   if (sql.empty()) {
     error = "oracle: sql required";
     return {};

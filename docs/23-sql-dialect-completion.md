@@ -5,7 +5,7 @@
 > **迁移**：MySQL 已上 LSP；其余方言 **静默内置 `sql`**（不高亮 Worker、不报错），待各库 LSP 落地  
 > 参考：DBeaver、Navicat（解析槽位 + 元数据）；协议形态对齐 Language Server Protocol  
 > 关联：[14 — 能力连接](./14-capability-connection-framework.md) · [21 — 会话注册表](./21-session-registry.md) · [20 — 工具组件](./20-tool-components.md)  
-> 各库实现：[22 — Vastbase](./22-vastbase-module.md) · [25 — MySQL](./25-mysql-module.md) · [26 — MariaDB](./26-mariadb-module.md) · [27 — SQLite](./27-sqlite-module.md) · [28 — Dameng](./28-dameng-module.md) · [29 — Oracle](./29-oracle-module.md) · [30 — ClickHouse](./30-clickhouse-module.md) · [31 — Kingbase](./31-kingbase-module.md)
+> 各库实现：[22 — Vastbase](./22-vastbase-module.md) · [25 — MySQL](./25-mysql-module.md) · [26 — MariaDB](./26-mariadb-module.md) · [27 — SQLite](./27-sqlite-module.md) · [28 — Dameng](./28-dameng-module.md) · [29 — Oracle](./29-oracle-module.md) · [30 — ClickHouse](./30-clickhouse-module.md) · [31 — Kingbase](./31-kingbase-module.md) · [34 — PostgreSQL](./34-postgresql-module.md)
 
 ---
 
@@ -44,9 +44,11 @@
 | **MySQL** | Bridge LSP + TiDB parser（`editor.sql_lsp`） |
 | Dameng | Bridge LSP + `dmparser`（分类/DML/例程诊断 + 工作 AST；`editor.sql_lsp`） |
 | **Kingbase** | Bridge LSP + `kingbaseparser`（工作 AST + 兼容模式隔离；`editor.sql_lsp`） |
+| **PostgreSQL** | Bridge LSP + `postgresparser`（工作 AST；`editor.sql_lsp`；Web Monaco 语言待接线） |
 | **ClickHouse** | Bridge LSP + `clickhouseparser`（启发式 + 反引号；`editor.sql_lsp`） |
 | **SQLite** | Bridge LSP + `sqliteparser`（启发式 + 双引号；`editor.sql_lsp`） |
-| 其余（Vastbase / PG / Oracle…） | **静默**内置 Monaco `sql`（无 sql-languages Worker）；对象补全等 LSP 落地后再开 |
+| 其余（Vastbase…） | **静默**内置 Monaco `sql`（无 sql-languages Worker）；对象补全等 LSP 落地后再开 |
+| **Oracle** | Bridge LSP + `packages/cpp/sqllsp` 启发式（富词表/片段、PACKAGE、序列伪列、层次/窗口槽；`editor.sql_lsp`） |
 
 ---
 
@@ -145,6 +147,7 @@ Dameng 兼容模式约定：
 - **Dameng**（[28](./28-dameng-module.md)）：`schema` 对应达梦用户 / schema；目录由独立 `dameng.catalog.*` 提供，遵循同一 prefix、limit 与 truncated 契约。LSP：`dameng.lsp.*` + 事件 `dameng.lsp`；补全默认 schema 经协议字段 `database` 传递。
 - **ClickHouse**（[30](./30-clickhouse-module.md)）：`schema` ≈ **database**（无独立 schema 层）；`catalog.schemas` ← `system.databases`；tables/columns ← `system.tables` / `system.columns`。
 - **Kingbase**（[31](./31-kingbase-module.md)）：与 Vastbase 同形（database → schema → 对象）；目录由独立 `kingbase.catalog.*` 提供；**禁止**用 vastbase catalog 冒充。LSP：`kingbase.lsp.*` + 事件 `kingbase.lsp`；解析器为进程内 `kingbaseparser`（工作 AST + `sqlCompatibility` 隔离）；补全默认 schema 经协议字段 `database` 传递。
+- **PostgreSQL**（[34](./34-postgresql-module.md)）：与金仓同形（database → schema → 对象）；目录由独立 `postgres.catalog.*` 提供；**禁止**用 vastbase / kingbase catalog 冒充。LSP：`postgres.lsp.*` + 事件 `postgres.lsp`；解析器为进程内 `postgresparser`；`family` 恒为 `postgresql`。
 
 可选后期：`catalog.invalidate` / UI「刷新元数据」。
 

@@ -14,10 +14,10 @@ namespace niuma::oracle::dataio {
  * 按 Oracle SQL*Plus 脚本规则拆句：
  * - 独占一行的 / 始终作为批结束（不把 / 写入语句）
  * - 普通 SQL 在引号/注释外的 ; 处分句
- * - CREATE PROCEDURE/FUNCTION/PACKAGE/TRIGGER/TYPE、DECLARE、匿名 BEGIN 视为 PL/SQL，
- *   体内 ; 不拆句，只等 / 或文件结束
+ * - CREATE [OR REPLACE] [EDITIONABLE|NONEDITIONABLE] PROCEDURE/FUNCTION/PACKAGE/TRIGGER/TYPE、
+ *   DECLARE、匿名 BEGIN 视为 PL/SQL，体内 ; 不拆句，只等 / 或文件结束
  *
- * 返回的语句已 Trim，不含结尾 ; 或 /。
+ * 返回的语句已 Trim、不含结尾 /。普通 SQL 不含尾 `;`；PL/SQL 单元保留尾 `END;`。
  */
 std::vector<std::string> SplitSqlScript(const std::string& text);
 
@@ -68,5 +68,23 @@ bool SplitSqlScript(std::istream& input, const SqlScriptSplitter::StatementCallb
 
 /** 判断缓冲是否以需 / 结束的 PL/SQL 单元开头（供单测）。 */
 bool LooksLikePlsqlUnit(const std::string& sql);
+
+// 去掉语句前导空白与 Oracle 注释（-- 行注释、斜杠星号块注释）。
+// 仅用于识别落点，不得改写待执行 SQL；前导优化提示（/*+ ... */）识别时也会被剥掉。
+std::string StripSqlLeadingTrivia(std::string sql);
+
+/**
+ * 去掉 SQL*Plus 客户端终止符 `/`（OCI 不认）：
+ * - 末尾独占一行的 `/`
+ * - 同行尾部的 `END;/` / `END; /`
+ * 供 query.exec / explain / 拆句 Emit / 转储共用。
+ */
+std::string StripSqlPlusTerminator(std::string sql);
+
+/**
+ * 将 DBMS_METADATA.GET_DDL('PACKAGE') 可能合并的「包规格 + 包体」拆开。
+ * 若无独立 CREATE … PACKAGE BODY，则 body 为空、spec 为整段（已剥尾 `/`）。
+ */
+void SplitPackageSpecBody(const std::string& ddl, std::string& spec, std::string& body);
 
 }  // namespace niuma::oracle::dataio

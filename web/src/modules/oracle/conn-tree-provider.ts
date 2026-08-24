@@ -1,7 +1,7 @@
 /**
  * Oracle 连接树 Provider：
- * connection → schema → {Tables|Views|Procedures|Functions|Packages|Sequences} → object
- * 菜单结构对齐达梦常用集（含 createSchema；无 synonym / trigger）。
+ * connection → schema → {Tables|Views|Procedures|Functions|Packages|Synonyms|Triggers|Sequences} → object
+ * 菜单结构对齐达梦常用集（含 createSchema / synonym / trigger）。
  */
 import type { RsContextMenuItem } from '@niuma/ui'
 import { oracleApi } from '@/api/oracle'
@@ -11,8 +11,8 @@ import {
   openCreateObjectScript,
   openCreateSequence,
   openCreateTableDesign,
+  openFeature,
   openMonitor,
-  openQuery,
   requestCreateSchema,
 } from '@/modules/oracle/conn-tree-actions'
 import {
@@ -24,7 +24,10 @@ import {
   type CategoryId,
 } from '@/modules/oracle/conn-tree-shared'
 import { isObjectCategory } from '@/modules/oracle/types/object-script'
-import type { ConnTreeChildProvider } from '@/modules/ops/conn-tree/registry'
+import {
+  registerConnTreeProvider,
+  type ConnTreeChildProvider,
+} from '@/modules/ops/conn-tree/registry'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
 const label = (key: string) => treeT(`modules.oracle.tree.${key}`)
@@ -38,7 +41,11 @@ function isRoutineLike(path: ConnResourcePath | undefined): boolean {
   const category = segmentName(path, 'category')
   return Boolean(
     (segmentName(path, 'routine') || segmentName(path, 'package')) &&
-      (category === 'procedures' || category === 'functions' || category === 'packages'),
+      (category === 'procedures' ||
+        category === 'functions' ||
+        category === 'packages' ||
+        category === 'synonyms' ||
+        category === 'triggers'),
   )
 }
 
@@ -118,6 +125,8 @@ function schemaCreateMenus(): RsContextMenuItem {
       { key: 'createProcedure', label: label('create.procedures'), icon: 'workflow' },
       { key: 'createFunction', label: label('create.functions'), icon: 'square-function' },
       { key: 'createPackage', label: label('create.packages'), icon: 'package' },
+      { key: 'createSynonym', label: label('create.synonyms'), icon: 'link-2' },
+      { key: 'createTrigger', label: label('create.triggers'), icon: 'zap' },
       { key: 'createSequence', label: label('create.sequences'), icon: 'list-ordered' },
     ],
   }
@@ -143,10 +152,15 @@ function tableMenus(isView: boolean): RsContextMenuItem[] {
     { key: 'open', label: label('openBrowse'), icon: isView ? 'eye' : 'table' },
     { key: 'sep-query', label: '', separator: true },
     { key: 'query', label: label('openQuery'), icon: 'code-2' },
-    { key: 'ddl', label: label('openDdl'), icon: 'file-code' },
+    // 视图用「编辑视图」替代「查看 DDL」（对齐 MySQL）；表保留 DDL + 设计器
+    {
+      key: isView ? 'editView' : 'ddl',
+      label: label(isView ? 'editView' : 'openDdl'),
+      icon: isView ? 'file-pen' : 'file-code',
+    },
     ...(!isView
       ? ([{ key: 'design', label: label('design'), icon: 'layout-list' }] as RsContextMenuItem[])
-      : [{ key: 'editView', label: label('editView'), icon: 'file-pen' }]),
+      : []),
     scriptMenus(!isView),
     ...dataIoMenus(isView),
     { key: 'sep-mutate', label: '', separator: true },
@@ -221,6 +235,36 @@ function packageMenus(): RsContextMenuItem[] {
   ]
 }
 
+function synonymMenus(): RsContextMenuItem[] {
+  return [
+    { key: 'source', label: label('editSource'), icon: 'file-pen' },
+    { key: 'query', label: label('openQuery'), icon: 'code-2' },
+    { key: 'sep-io', label: '', separator: true },
+    { key: 'dumpSql', label: label('dumpSql'), icon: 'file-down' },
+    { key: 'sep-mutate', label: '', separator: true },
+    { key: 'drop', label: label('dropSynonym'), icon: 'trash-2', danger: true },
+    { key: 'sep-clipboard', label: '', separator: true },
+    { key: 'copyName', label: label('copyName'), icon: 'copy' },
+    { key: 'copyQualified', label: label('copyQualified'), icon: 'clipboard-copy' },
+    { key: 'copyDdl', label: label('copyDdl'), icon: 'clipboard' },
+  ]
+}
+
+function triggerMenus(): RsContextMenuItem[] {
+  return [
+    { key: 'source', label: label('editSource'), icon: 'file-pen' },
+    { key: 'query', label: label('openQuery'), icon: 'code-2' },
+    { key: 'sep-io', label: '', separator: true },
+    { key: 'dumpSql', label: label('dumpSql'), icon: 'file-down' },
+    { key: 'sep-mutate', label: '', separator: true },
+    { key: 'drop', label: label('dropTrigger'), icon: 'trash-2', danger: true },
+    { key: 'sep-clipboard', label: '', separator: true },
+    { key: 'copyName', label: label('copyName'), icon: 'copy' },
+    { key: 'copyQualified', label: label('copyQualified'), icon: 'clipboard-copy' },
+    { key: 'copyDdl', label: label('copyDdl'), icon: 'clipboard' },
+  ]
+}
+
 function sequenceScriptMenus(): RsContextMenuItem {
   return {
     key: 'scripts',
@@ -235,6 +279,7 @@ function sequenceScriptMenus(): RsContextMenuItem {
 
 function sequenceMenus(): RsContextMenuItem[] {
   return [
+    { key: 'source', label: label('editSource'), icon: 'file-pen' },
     { key: 'query', label: label('openQuery'), icon: 'code-2' },
     sequenceScriptMenus(),
     { key: 'sep-io', label: '', separator: true },
@@ -256,6 +301,8 @@ function categorySupportsDump(category: CategoryId): boolean {
     category === 'procedures' ||
     category === 'functions' ||
     category === 'packages' ||
+    category === 'synonyms' ||
+    category === 'triggers' ||
     category === 'sequences'
   )
 }
@@ -267,6 +314,8 @@ function categoryCreateKey(category: CategoryId): string | null {
   if (category === 'procedures') return 'createProcedure'
   if (category === 'functions') return 'createFunction'
   if (category === 'packages') return 'createPackage'
+  if (category === 'synonyms') return 'createSynonym'
+  if (category === 'triggers') return 'createTrigger'
   return null
 }
 
@@ -307,7 +356,6 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
   connMenuItems(): RsContextMenuItem[] {
     return [
       { key: 'createSchema', label: label('createSchema'), icon: 'database' },
-      { key: 'query', label: label('openQuery'), icon: 'code-2' },
       { key: 'monitor', label: label('openMonitor'), icon: 'activity' },
     ]
   },
@@ -315,10 +363,6 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
   onConnMenuSelect(conn, key) {
     if (key === 'createSchema') {
       requestCreateSchema(conn)
-      return true
-    }
-    if (key === 'query') {
-      openQuery(conn)
       return true
     }
     if (key === 'monitor') {
@@ -342,6 +386,8 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
         { key: 'query', label: label('openQuery'), icon: 'code-2' },
         schemaCreateMenus(),
         ...schemaToolsMenus(),
+        { key: 'sep-mutate', label: '', separator: true },
+        { key: 'dropSchema', label: label('dropSchema'), icon: 'trash-2', danger: true },
         { key: 'sep-clipboard', label: '', separator: true },
         { key: 'copyName', label: label('copyName'), icon: 'copy' },
         { key: 'copyQualified', label: label('copyQualified'), icon: 'clipboard-copy' },
@@ -381,6 +427,10 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
         items.push(...routineMenus(category === 'functions'))
       } else if (category === 'packages') {
         items.push(...packageMenus())
+      } else if (category === 'synonyms') {
+        items.push(...synonymMenus())
+      } else if (category === 'triggers') {
+        items.push(...triggerMenus())
       }
     } else if (isSequenceLike(path)) {
       items.push(...sequenceMenus())
@@ -418,6 +468,12 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
       case 'createPackage':
         openCreateObjectScript(conn, schema, 'packages')
         return
+      case 'createSynonym':
+        openCreateObjectScript(conn, schema, 'synonyms')
+        return
+      case 'createTrigger':
+        openCreateObjectScript(conn, schema, 'triggers')
+        return
       case 'create': {
         const category = segmentName(path, 'category')
         if (isObjectCategory(category)) {
@@ -425,8 +481,25 @@ export const oracleConnTreeProvider: ConnTreeChildProvider = {
         }
         return
       }
+      case 'call': {
+        // 执行调用面板（feature id = call；routine.call bind OUT）
+        const routine = segmentName(path, 'routine')
+        const category = segmentName(path, 'category')
+        if (routine && (category === 'procedures' || category === 'functions')) {
+          openFeature(conn, path, 'call', undefined, {
+            objectKind: category === 'functions' ? 'function' : 'procedure',
+          })
+        }
+        return
+      }
       default:
         void handleResourceMenuSelect(conn, path, key)
     }
   },
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    registerConnTreeProvider('oracle', oracleConnTreeProvider)
+  })
 }

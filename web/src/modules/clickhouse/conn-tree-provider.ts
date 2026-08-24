@@ -358,8 +358,6 @@ export const clickhouseConnTreeProvider: ConnTreeChildProvider = {
   connMenuItems(): RsContextMenuItem[] {
     return [
       { key: 'createDatabase', label: label('createDatabase'), icon: 'database' },
-      sep('sep-query'),
-      { key: 'query', label: label('openQuery'), icon: 'code-2' },
       { key: 'monitor', label: label('openMonitor'), icon: 'activity' },
       sep('sep-tools'),
       { key: 'tools', label: label('openTools'), icon: 'archive' },

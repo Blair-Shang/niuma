@@ -308,7 +308,7 @@ function buildMysqlTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
 }
 
 /**
- * MySQL：查询可多开；browse/ddl/objectScript/monitor/tools/debug 按 profile+资源+feature 去重。
+ * MySQL：查询可多开；browse/ddl/objectScript/monitor/tools/call 按 profile+资源+feature 去重。
  */
 export const mysqlConnectionNavStrategy: ConnectionNavStrategy = {
   kind: 'mysql',
@@ -369,6 +369,21 @@ export const mysqlConnectionNavStrategy: ConnectionNavStrategy = {
           tabName === objectName &&
           tabDesignMode === designMode
         )
+      }
+      if (feature === 'call') {
+        // 同一过程/函数只开一个调用页；不同对象各自独立
+        const routineKind = resolveRoutineKind(ctx) ?? 'procedure'
+        const routine = segmentName(ctx, 'routine')
+        const tabDb = typeof tab.props.database === 'string' ? tab.props.database : undefined
+        const tabRoutine =
+          (typeof tab.props.routine === 'string' && tab.props.routine)
+          || (typeof tab.props.objectName === 'string' && tab.props.objectName)
+          || undefined
+        const tabKind =
+          tab.props.routineKind === 'function' || tab.props.objectKind === 'function'
+            ? 'function'
+            : 'procedure'
+        return tabDb === database && tabRoutine === routine && tabKind === routineKind
       }
       const tabDb = typeof tab.props.database === 'string' ? tab.props.database : undefined
       const tabTable = typeof tab.props.table === 'string' ? tab.props.table : undefined

@@ -16,6 +16,7 @@ use (
 	./services/mcp-vastbase-readonly
 	./services/mongodb-service
 	./services/mysql-service
+	./services/postgres-service
 	./services/sqlite-service
 	./services/sqlserver-service
 	./services/vastbase-service

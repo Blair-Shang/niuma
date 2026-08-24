@@ -32,12 +32,11 @@ func HeuristicCompletionContext(text string, pos Position, keywords []string) Co
 
 	// schema.table 或 db.table. 或 alias.col；CALL db.| → 例程
 	if dotSchema, rest, ok := splitTrailingDotIdent(before); ok {
-		if table, colPrefix, ok2 := splitTrailingDotIdent(before[:len(before)-len(rest)-1]); ok2 {
+		if schema, table, ok2 := splitTrailingDotIdent(before[:len(before)-len(rest)-1]); ok2 {
 			// a.b.|c  → column in table b of schema a
-			_ = table
-			cc.Schema = strings.Trim(dotSchema, "`\"")
-			cc.Table = strings.Trim(rest, "`\"")
-			cc.Prefix = colPrefix
+			cc.Schema = stripIdent(schema)
+			cc.Table = stripIdent(table)
+			cc.Prefix = stripIdent(rest)
 			if cc.Prefix == "" {
 				cc.Prefix = prefix
 			}
@@ -45,7 +44,7 @@ func HeuristicCompletionContext(text string, pos Position, keywords []string) Co
 			return cc
 		}
 		// x.| → 优先别名/表名 → 仅列；否则 schema 下表 + 列双义
-		name := strings.Trim(dotSchema, "`\"")
+		name := stripIdent(dotSchema)
 		if inCallClause(lower) {
 			cc.Schema = name
 			cc.Expect = []CompletionKind{KindRoutine}
@@ -131,7 +130,7 @@ func inCallClause(lower string) bool {
 		if r == '(' {
 			return false
 		}
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' || r == '.' || unicode.IsSpace(r) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' || r == '[' || r == ']' || r == '.' || unicode.IsSpace(r) {
 			continue
 		}
 		return false
@@ -140,29 +139,12 @@ func inCallClause(lower string) bool {
 }
 
 func splitTrailingDotIdent(before string) (left, right string, ok bool) {
-	// 找最后一个非标识符中的 '.'
-	i := len(before) - 1
-	for i >= 0 {
-		r := rune(before[i])
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' {
-			i--
-			continue
-		}
-		break
-	}
+	i := skipIdentBackward(before, len(before)-1)
 	right = before[i+1:]
 	if i < 0 || before[i] != '.' {
 		return "", "", false
 	}
-	j := i - 1
-	for j >= 0 {
-		r := rune(before[j])
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' {
-			j--
-			continue
-		}
-		break
-	}
+	j := skipIdentBackward(before, i-1)
 	left = before[j+1 : i]
 	if left == "" {
 		return "", "", false
@@ -170,26 +152,54 @@ func splitTrailingDotIdent(before string) (left, right string, ok bool) {
 	return left, right, true
 }
 
-func splitQual(name string) (schema, table string, ok bool) {
-	name = strings.Trim(name, "`\"")
-	if i := strings.LastIndex(name, "."); i > 0 {
-		return name[:i], name[i+1:], true
+// skipIdentBackward 从 i 向左跳过一个标识符（含 [bracket] / `backtick` / "quote"），返回标识符前一字节下标。
+func skipIdentBackward(s string, i int) int {
+	if i < 0 || i >= len(s) {
+		return i
 	}
-	return "", name, false
-}
-
-func lastIdent(s string) string {
-	s = strings.TrimSpace(s)
-	i := len(s) - 1
+	if s[i] == ']' {
+		for j := i - 1; j >= 0; j-- {
+			if s[j] == '[' {
+				return j - 1
+			}
+		}
+		return -1
+	}
 	for i >= 0 {
 		r := rune(s[i])
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' || r == '.' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' {
 			i--
 			continue
 		}
 		break
 	}
-	return strings.Trim(s[i+1:], "`\"")
+	return i
+}
+
+func splitQual(name string) (schema, table string, ok bool) {
+	name = strings.TrimSpace(name)
+	if i := strings.LastIndex(name, "."); i > 0 {
+		return stripIdent(name[:i]), stripIdent(name[i+1:]), true
+	}
+	return "", stripIdent(name), false
+}
+
+func lastIdent(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	i := skipIdentBackward(s, len(s)-1)
+	if i >= 0 && s[i] == '.' {
+		j := skipIdentBackward(s, i-1)
+		left := stripIdent(s[j+1 : i])
+		right := stripIdent(s[i+1:])
+		if left != "" && right != "" {
+			return left + "." + right
+		}
+		return right
+	}
+	return stripIdent(s[i+1:])
 }
 
 func lastIndexKeyword(lower, kw string) int {
@@ -227,7 +237,7 @@ func hasTrailingClause(lower string, markers []string) bool {
 
 func isIdentOnly(s string) bool {
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' || r == '.' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$' || r == '`' || r == '"' || r == '[' || r == ']' || r == '.' {
 			continue
 		}
 		if unicode.IsSpace(r) {

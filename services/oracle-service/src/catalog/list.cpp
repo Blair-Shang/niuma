@@ -74,10 +74,11 @@ nlohmann::json ListTables(session::Session& session, const ListParams& params, s
   const int limit = util::ClampListLimit(params.limit, 200, 2000);
   const std::string owner = util::QuoteLiteral(params.schema);
   const std::string like = util::QuoteLiteral(util::LikePrefixPattern(params.prefix));
+  // 未加引号的标识符在数据字典中为大写；补全输入大小写不定，比较时统一 UPPER。
   const std::string sql =
-      "SELECT OBJECT_NAME, OBJECT_TYPE FROM ALL_OBJECTS WHERE OWNER = " + owner +
-      " AND OBJECT_TYPE IN ('TABLE','VIEW') AND OBJECT_NAME LIKE " + like +
-      " ESCAPE '\\' ORDER BY OBJECT_NAME";
+      "SELECT OBJECT_NAME, OBJECT_TYPE FROM ALL_OBJECTS WHERE UPPER(OWNER) = UPPER(" + owner +
+      ") AND OBJECT_TYPE IN ('TABLE','VIEW') AND UPPER(OBJECT_NAME) LIKE UPPER(" + like +
+      ") ESCAPE '\\' ORDER BY OBJECT_NAME";
 
   session::SqlRowsResult rows;
   if (!session::ExecStringRows(session, sql, limit + 1, rows, error)) {
@@ -121,9 +122,9 @@ nlohmann::json ListColumns(session::Session& session, const ListParams& params, 
   const std::string table = util::QuoteLiteral(params.table);
   const std::string like = util::QuoteLiteral(util::LikePrefixPattern(params.prefix));
   const std::string sql =
-      "SELECT COLUMN_NAME, DATA_TYPE FROM ALL_TAB_COLUMNS WHERE OWNER = " + owner +
-      " AND TABLE_NAME = " + table + " AND COLUMN_NAME LIKE " + like +
-      " ESCAPE '\\' ORDER BY COLUMN_ID";
+      "SELECT COLUMN_NAME, DATA_TYPE FROM ALL_TAB_COLUMNS WHERE UPPER(OWNER) = UPPER(" + owner +
+      ") AND UPPER(TABLE_NAME) = UPPER(" + table + ") AND UPPER(COLUMN_NAME) LIKE UPPER(" + like +
+      ") ESCAPE '\\' ORDER BY COLUMN_ID";
 
   session::SqlRowsResult rows;
   if (!session::ExecStringRows(session, sql, limit + 1, rows, error)) {

@@ -93,7 +93,7 @@ defineExpose({
       class="nm-ssh-term-group__grid"
       :style="{
         gridTemplateColumns:
-          effectivePaneCount === 1 ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+          effectivePaneCount === 1 ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))',
       }"
     >
       <SshTerminalPane

@@ -64,8 +64,8 @@ ServerProfile ResolveCapabilities(const std::string& version, bool cdb_pdb) {
   p.version_num = ParseVersionNum(version);
   p.capabilities = {
       kCapDoubleQuoteIdent,       kCapQQuote,           kCapProcPlsqlBare, kCapSplitPlsqlBlocks,
-      kCapScriptOracleSlash,      kCapFormatPlsql,      kCapEditorBuiltinSql, kCapRoutineCreateProcedure,
-      kCapRoutineCreateFunction,  kCapOraclePackage,    kCapSequenceNative,
+      kCapScriptOracleSlash,      kCapFormatPlsql,      kCapEditorBuiltinSql, kCapEditorSqlLsp,
+      kCapRoutineCreateProcedure, kCapRoutineCreateFunction, kCapOraclePackage, kCapSequenceNative,
   };
 
   const int major = MajorFromVersion(version);

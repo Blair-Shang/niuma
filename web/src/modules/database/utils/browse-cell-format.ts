@@ -22,6 +22,59 @@ export function isBrowseBinCell(value: unknown): boolean {
   )
 }
 
+/** Oracle 等：超预览上限的 LOB 单元格 `{ $lob: { type, preview, truncated, byteLength } }` */
+export type BrowseLobMarker = {
+  type?: string
+  preview?: unknown
+  value?: unknown
+  truncated?: boolean
+  byteLength?: number
+}
+
+export function getBrowseLobMarker(value: unknown): BrowseLobMarker | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  if (!('$lob' in (value as Record<string, unknown>))) return null
+  const lob = (value as { $lob?: unknown }).$lob
+  if (!lob || typeof lob !== 'object' || Array.isArray(lob)) return null
+  return lob as BrowseLobMarker
+}
+
+export function isBrowseLobCell(value: unknown): boolean {
+  return getBrowseLobMarker(value) != null
+}
+
+export function isBrowseBinaryLobCell(value: unknown): boolean {
+  if (isBrowseBinCell(value)) return true
+  const lob = getBrowseLobMarker(value)
+  if (!lob) return false
+  return String(lob.type ?? '').toUpperCase() === 'BLOB'
+}
+
+/** CLOB `$lob` → 可编辑/展示的文本（preview）；BLOB `$lob` 不走此路径。 */
+export function extractBrowseLobText(value: unknown): string {
+  const lob = getBrowseLobMarker(value)
+  if (!lob) return ''
+  const raw = lob.preview ?? lob.value ?? ''
+  return typeof raw === 'string' ? raw : JSON.stringify(raw)
+}
+
+export function formatBrowseLobSummary(value: unknown): string {
+  const lob = getBrowseLobMarker(value)
+  if (!lob) return 'LOB'
+  const type = String(lob.type ?? 'LOB').toUpperCase()
+  const size =
+    typeof lob.byteLength === 'number' && Number.isFinite(lob.byteLength)
+      ? formatByteSize(lob.byteLength)
+      : undefined
+  if (type === 'BLOB') {
+    return size ? `BLOB · ${size}` : 'BLOB'
+  }
+  const preview = extractBrowseLobText(value)
+  const head = truncateBrowsePreview(preview)
+  if (!lob.truncated) return head
+  return size ? `${head} … [CLOB · ${size}]` : `${head} … [CLOB truncated]`
+}
+
 function formatByteSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
   if (bytes < 1024) return `${bytes} B`
@@ -82,6 +135,7 @@ export function formatBrowseCellValue(
   if (value === null || value === undefined) return 'NULL'
 
   if (isBrowseBinCell(value)) return formatBrowseBinSummary(value)
+  if (isBrowseLobCell(value)) return formatBrowseLobSummary(value)
 
   if (valueType === 'date') {
     if (typeof value === 'string') {

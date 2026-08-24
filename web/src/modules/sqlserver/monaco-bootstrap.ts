@@ -44,13 +44,14 @@ export function bootstrapSqlServerMonaco(): Promise<string> {
 
 /**
  * 将编辑器 Model 绑定到 sqlserver-service LSP（session 级连接复用）。
- * `database` = SQL Server database（协议字段；无独立 schema）。
+ * `database` = SQL Server 库名；`schema` = 默认 schema（常见 dbo）。
  */
 export async function attachSqlServerSqlLsp(options: {
   model: Monaco.editor.ITextModel
   sessionId: string
   editorId: string
   database?: string
+  schema?: string
 }): Promise<() => void> {
   await bootstrapSqlServerMonaco()
   return attachSqlLsp({
@@ -59,6 +60,7 @@ export async function attachSqlServerSqlLsp(options: {
     sessionId: options.sessionId,
     editorId: options.editorId,
     database: options.database,
+    schema: options.schema?.trim() || 'dbo',
     api: sqlserverLspApi,
     ensureLanguage: ensureSqlServerLspLanguage,
   })

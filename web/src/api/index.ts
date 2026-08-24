@@ -31,6 +31,7 @@ export { oracleApi } from './oracle'
 export { clickhouseApi } from './clickhouse'
 export { kingbaseApi } from './kingbase'
 export { sqlserverApi } from './sqlserver'
+export { postgresApi } from './postgres'
 export { fileEditorApi } from './file-editor'
 
 export type * from './types'

@@ -126,6 +126,7 @@ export function useDamengBrowsePane(props: DamengBrowsePaneProps) {
     return buildBrowseResultColumn({
       name,
       dataType,
+      dialect: 'dameng',
       headerTip: `${t('modules.dameng.browse.colTipField', { name })}${dataType ? `\n${t('modules.dameng.browse.colTipType', { type: dataType })}` : ''}`,
       width: 120,
       minWidth: 80,

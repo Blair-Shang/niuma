@@ -300,7 +300,7 @@ func isNumericTok(s string) bool {
 
 // FindTableRef 按别名或表名查找（优先别名）。
 func FindTableRef(refs []TableRef, name string) *TableRef {
-	name = strings.Trim(strings.TrimSpace(name), "`\"")
+	name = stripIdent(strings.TrimSpace(name))
 	if name == "" {
 		return nil
 	}

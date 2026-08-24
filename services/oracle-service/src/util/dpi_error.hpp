@@ -11,4 +11,7 @@ namespace niuma::oracle::util {
  */
 std::string FormatDpiError(dpiContext* ctx, const char* fallback = "oracle: ODPI error");
 
+/** 将已取出的 dpiErrorInfo 格式化为 "oracle: ..."。 */
+std::string FormatDpiErrorInfo(const dpiErrorInfo& info, const char* fallback = "oracle: ODPI error");
+
 }  // namespace niuma::oracle::util

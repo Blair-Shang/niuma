@@ -309,6 +309,32 @@ func TestHeuristicOnAliasDotEmptyPrefix(t *testing.T) {
 	}
 }
 
+func TestHeuristicBracketQualifiedColumnDot(t *testing.T) {
+	sql := "CREATE VIEW [dbo].[NewView]\nAS\nSELECT\n  [dbo].[Users]."
+	cc := sqllsp.HeuristicCompletionContext(sql, sqllsp.OffsetToPosition(sql, len(sql)), nil)
+	if len(cc.Expect) != 1 || cc.Expect[0] != sqllsp.KindColumn {
+		t.Fatalf("expect column-only after [schema].[table]., got %#v", cc.Expect)
+	}
+	if cc.Schema != "dbo" || cc.Table != "Users" {
+		t.Fatalf("schema.table=%q.%q tables=%#v", cc.Schema, cc.Table, cc.Tables)
+	}
+	if cc.Prefix != "" {
+		t.Fatalf("prefix=%q", cc.Prefix)
+	}
+}
+
+func TestHeuristicBracketAliasColumnDot(t *testing.T) {
+	sql := "CREATE PROCEDURE [dbo].[NewProcedure]\nAS\nBEGIN\n  SELECT u.\n  FROM [dbo].[Users] u\nEND"
+	offset := strings.Index(sql, "u.") + 2
+	cc := sqllsp.HeuristicCompletionContext(sql, sqllsp.OffsetToPosition(sql, offset), nil)
+	if len(cc.Expect) != 1 || cc.Expect[0] != sqllsp.KindColumn {
+		t.Fatalf("expect column-only after alias., got %#v", cc.Expect)
+	}
+	if cc.Table != "Users" || cc.Schema != "dbo" {
+		t.Fatalf("alias u -> %s.%s tables=%#v", cc.Schema, cc.Table, cc.Tables)
+	}
+}
+
 // SELECT 多列（含逗号）仍应提示列；CREATE VIEW … AS SELECT 同样适用。
 func TestHeuristicSelectListWithComma(t *testing.T) {
 	sql := "CREATE VIEW `test2`.`new_view` AS\nSELECT\n    organizationId,activef"

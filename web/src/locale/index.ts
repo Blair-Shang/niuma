@@ -27,6 +27,8 @@ import kingbaseZh from '../modules/kingbase/locale/zh-CN'
 import kingbaseEn from '../modules/kingbase/locale/en-US'
 import sqlserverZh from '../modules/sqlserver/locale/zh-CN'
 import sqlserverEn from '../modules/sqlserver/locale/en-US'
+import postgresZh from '../modules/postgres/locale/zh-CN'
+import postgresEn from '../modules/postgres/locale/en-US'
 
 const zhMessages = mergeMessages(
   zhCN,
@@ -42,6 +44,7 @@ const zhMessages = mergeMessages(
   clickhouseZh,
   kingbaseZh,
   sqlserverZh,
+  postgresZh,
 ) as typeof zhCN
 
 const enMessages = mergeMessages(
@@ -58,6 +61,7 @@ const enMessages = mergeMessages(
   clickhouseEn,
   kingbaseEn,
   sqlserverEn,
+  postgresEn,
 ) as typeof enUS
 
 export const i18n = createI18n({

@@ -15,6 +15,7 @@ inline constexpr const char* kCapSplitPlsqlBlocks = "split.plsql_blocks";
 inline constexpr const char* kCapScriptOracleSlash = "script.oracle_slash";
 inline constexpr const char* kCapFormatPlsql = "format.plsql";
 inline constexpr const char* kCapEditorBuiltinSql = "editor.builtin_sql";
+inline constexpr const char* kCapEditorSqlLsp = "editor.sql_lsp";
 inline constexpr const char* kCapRoutineCreateProcedure = "routine.create_procedure";
 inline constexpr const char* kCapRoutineCreateFunction = "routine.create_function";
 inline constexpr const char* kCapOraclePackage = "oracle.package";

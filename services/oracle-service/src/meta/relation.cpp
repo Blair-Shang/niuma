@@ -1,5 +1,7 @@
 #include "meta/relation.hpp"
 
+#include "meta/column_type.hpp"
+#include "meta/metadata_ddl.hpp"
 #include "session/sql_rows.hpp"
 #include "util/dpi_error.hpp"
 #include "util/ident.hpp"
@@ -28,48 +30,57 @@ bool RequireRelation(const RelationRef& ref, std::string& error) {
   return true;
 }
 
-std::string ReadLobOrBytes(dpiContext* ctx, dpiNativeTypeNum native, dpiData* data, std::string& error) {
-  if (data == nullptr || data->isNull) {
-    return {};
-  }
-  if (native == DPI_NATIVE_TYPE_BYTES) {
-    return std::string(reinterpret_cast<const char*>(data->value.asBytes.ptr), data->value.asBytes.length);
-  }
-  if (native == DPI_NATIVE_TYPE_LOB) {
-    dpiLob* lob = data->value.asLOB;
-    uint64_t size = 0;
-    if (dpiLob_getSize(lob, &size) < 0) {
-      error = DpiError(ctx);
-      return {};
-    }
-    // 防护：过大 DDL 截断到 4MiB
-    constexpr uint64_t kMax = 4ull * 1024 * 1024;
-    const uint64_t to_read = size > kMax ? kMax : size;
-    std::string out;
-    out.resize(static_cast<size_t>(to_read));
-    uint64_t amount = to_read;
-    if (dpiLob_readBytes(lob, 1, to_read, out.data(), &amount) < 0) {
-      error = DpiError(ctx);
-      return {};
-    }
-    out.resize(static_cast<size_t>(amount));
-    return out;
-  }
-  return {};
-}
-
 std::string DetectObjectType(session::Session& session, const RelationRef& ref) {
+  // 大小写不敏感匹配；同名优先精确 OBJECT_NAME，其次 VIEW（避免视图误判为表后拼 CREATE TABLE）。
   const std::string sql =
-      "SELECT OBJECT_TYPE FROM ALL_OBJECTS WHERE OWNER = " + util::QuoteLiteral(ref.schema) +
-      " AND OBJECT_NAME = " + util::QuoteLiteral(ref.name) +
-      " AND OBJECT_TYPE IN ('TABLE','VIEW') ORDER BY CASE OBJECT_TYPE WHEN 'TABLE' THEN 1 ELSE 2 END "
-      "FETCH FIRST 1 ROWS ONLY";
+      "SELECT OBJECT_TYPE FROM ALL_OBJECTS WHERE UPPER(OWNER) = UPPER(" + util::QuoteLiteral(ref.schema) +
+      ") AND OBJECT_NAME IN (" + util::QuoteLiteral(ref.name) + ", UPPER(" + util::QuoteLiteral(ref.name) +
+      ")) AND OBJECT_TYPE IN ('TABLE','VIEW') ORDER BY CASE "
+      "WHEN OBJECT_NAME = " + util::QuoteLiteral(ref.name) + " AND OBJECT_TYPE = 'VIEW' THEN 0 "
+      "WHEN OBJECT_NAME = " + util::QuoteLiteral(ref.name) + " THEN 1 "
+      "WHEN OBJECT_TYPE = 'VIEW' THEN 2 ELSE 3 END FETCH FIRST 1 ROWS ONLY";
   session::SqlRowsResult rows;
   std::string err;
   if (!session::ExecStringRows(session, sql, 2, rows, err) || rows.rows.empty() || rows.rows[0].empty()) {
-    return "TABLE";
+    return {};
   }
   return rows.rows[0][0];
+}
+
+/** 从 ALL_VIEWS 拼 CREATE OR REPLACE VIEW（GET_DDL 失败时的降级，绝不拼成 TABLE）。 */
+nlohmann::json RebuildViewDDL(session::Session& session, const RelationRef& ref, std::string& error) {
+  const std::string sql =
+      "SELECT VIEW_NAME, TEXT FROM ALL_VIEWS WHERE UPPER(OWNER) = UPPER(" +
+      util::QuoteLiteral(ref.schema) + ") AND VIEW_NAME IN (" + util::QuoteLiteral(ref.name) +
+      ", UPPER(" + util::QuoteLiteral(ref.name) + ")) ORDER BY CASE WHEN VIEW_NAME = " +
+      util::QuoteLiteral(ref.name) + " THEN 0 ELSE 1 END FETCH FIRST 1 ROWS ONLY";
+  session::SqlRowsResult rows;
+  if (!session::ExecStringRows(session, sql, 2, rows, error) || rows.rows.empty() ||
+      rows.rows[0].size() < 2) {
+    if (error.empty()) {
+      error = "oracle: view ddl not found: " + ref.schema + "." + ref.name;
+    }
+    return {};
+  }
+  const std::string& view_name = rows.rows[0][0];
+  const std::string& text = rows.rows[0][1];
+  if (text.empty()) {
+    error = "oracle: view text empty (LONG may be truncated); check DBMS_METADATA privileges: " +
+            ref.schema + "." + ref.name;
+    return {};
+  }
+  std::ostringstream oss;
+  oss << "CREATE OR REPLACE VIEW " << util::QuoteIdent(ref.schema) << "." << util::QuoteIdent(view_name)
+      << " AS\n"
+      << text;
+  std::string ddl = oss.str();
+  while (!ddl.empty() && (ddl.back() == '\n' || ddl.back() == '\r' || ddl.back() == ' ')) {
+    ddl.pop_back();
+  }
+  if (!ddl.empty() && ddl.back() != ';') {
+    ddl.push_back(';');
+  }
+  return nlohmann::json{{"objectType", "view"}, {"ddl", ddl}};
 }
 
 nlohmann::json RebuildTableDDL(session::Session& session, const RelationRef& ref, std::string& error) {
@@ -77,22 +88,43 @@ nlohmann::json RebuildTableDDL(session::Session& session, const RelationRef& ref
   if (!error.empty()) {
     return {};
   }
+  std::string pk_err;
+  const auto pk = GetPrimaryKey(session, ref, pk_err);
+  const auto& pk_cols = pk.value("columns", nlohmann::json::array());
+
   std::ostringstream oss;
   oss << "CREATE TABLE " << util::QuoteIdent(ref.schema) << "." << util::QuoteIdent(ref.name) << " (\n";
   const auto& arr = cols["columns"];
   for (size_t i = 0; i < arr.size(); ++i) {
     const auto& c = arr[i];
-    oss << "  " << util::QuoteIdent(c.value("name", "")) << " " << c.value("dataType", "VARCHAR2");
+    oss << "  " << util::QuoteIdent(c.value("name", "")) << " " << c.value("dataType", "VARCHAR2(1)");
+    if (c.contains("default") && !c["default"].is_null()) {
+      const std::string def = TrimOracleDefault(c["default"].get<std::string>());
+      if (!def.empty()) {
+        oss << " DEFAULT " << def;
+      }
+    }
     if (!c.value("nullable", true)) {
       oss << " NOT NULL";
     }
-    if (c.contains("default") && !c["default"].is_null()) {
-      oss << " DEFAULT " << c["default"].get<std::string>();
-    }
-    if (i + 1 < arr.size()) {
+    const bool more_cols = i + 1 < arr.size();
+    const bool has_pk = !pk_cols.empty();
+    if (more_cols || has_pk) {
       oss << ",";
     }
     oss << "\n";
+  }
+  if (!pk_cols.empty()) {
+    oss << "  CONSTRAINT ";
+    oss << util::QuoteIdent("PK_" + ref.name);
+    oss << " PRIMARY KEY (";
+    for (size_t i = 0; i < pk_cols.size(); ++i) {
+      if (i) {
+        oss << ", ";
+      }
+      oss << util::QuoteIdent(pk_cols[i].get<std::string>());
+    }
+    oss << ")\n";
   }
   oss << ");\n";
   return nlohmann::json{{"objectType", "table"}, {"ddl", oss.str()}};
@@ -112,6 +144,11 @@ RelationRef RelationRef::FromJson(const nlohmann::json& j) {
   } else if (j.contains("name") && j["name"].is_string()) {
     r.name = j["name"].get<std::string>();
   }
+  if (j.contains("objectType") && j["objectType"].is_string()) {
+    r.object_type = j["objectType"].get<std::string>();
+  } else if (j.contains("object_type") && j["object_type"].is_string()) {
+    r.object_type = j["object_type"].get<std::string>();
+  }
   return r;
 }
 
@@ -120,7 +157,8 @@ nlohmann::json ListColumns(session::Session& session, const RelationRef& ref, st
     return {};
   }
   const std::string sql =
-      "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.NULLABLE, c.DATA_DEFAULT, c.COLUMN_ID, "
+      "SELECT c.COLUMN_NAME, " + std::string(kAllTabColumnsTypeExpr) +
+      ", c.NULLABLE, c.DATA_DEFAULT, c.COLUMN_ID, "
       "COALESCE(cm.COMMENTS, '') "
       "FROM ALL_TAB_COLUMNS c "
       "LEFT JOIN ALL_COL_COMMENTS cm ON cm.OWNER = c.OWNER AND cm.TABLE_NAME = c.TABLE_NAME "
@@ -150,7 +188,7 @@ nlohmann::json ListColumns(session::Session& session, const RelationRef& ref, st
       col["ordinal"] = static_cast<int>(columns.size() + 1);
     }
     if (row.size() > 3 && !row[3].empty()) {
-      col["default"] = row[3];
+      col["default"] = TrimOracleDefault(row[3]);
     }
     if (row.size() > 5 && !row[5].empty()) {
       col["comment"] = row[5];
@@ -281,51 +319,68 @@ nlohmann::json GetDDL(session::Session& session, const RelationRef& ref, std::st
     return {};
   }
 
+  std::string hint = ref.object_type;
+  for (char& c : hint) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+
+  // 同义词 / 触发器 / 序列：按调用方提示走 DBMS_METADATA，勿降级成表重建。
+  if (hint == "synonym" || hint == "trigger" || hint == "sequence") {
+    std::string obj_type = hint;
+    for (char& c : obj_type) {
+      c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    std::string resolve_err;
+    std::string dict_owner;
+    std::string dict_name;
+    if (!ResolveDictionaryObject(session, ref.schema, ref.name, obj_type, dict_owner, dict_name,
+                                 resolve_err)) {
+      dict_owner = ref.schema;
+      dict_name = ref.name;
+    }
+    std::string ddl;
+    if (!FetchDbmsMetadataDdl(session, obj_type, dict_owner, dict_name, ddl, error)) {
+      return {};
+    }
+    return nlohmann::json{{"objectType", hint}, {"ddl", ddl}};
+  }
+
   std::string obj_type = DetectObjectType(session, ref);
   for (char& c : obj_type) {
     c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
   }
-  if (obj_type != "VIEW") {
+  if (obj_type != "VIEW" && obj_type != "TABLE") {
+    // 字典未命中时：尊重调用方提示（编辑视图），否则默认 TABLE
+    obj_type = hint == "view" ? "VIEW" : "TABLE";
+  } else if (hint == "view") {
+    // 明确要求视图时，即使误检成 TABLE 也按 VIEW 取 DDL
+    obj_type = "VIEW";
+  } else if (hint == "table") {
     obj_type = "TABLE";
   }
 
-  const std::string sql = "SELECT DBMS_METADATA.GET_DDL(" + util::QuoteLiteral(obj_type) + ", " +
-                          util::QuoteLiteral(ref.name) + ", " + util::QuoteLiteral(ref.schema) +
-                          ") FROM DUAL";
+  std::string resolve_err;
+  std::string dict_owner;
+  std::string dict_name;
+  if (!ResolveDictionaryObject(session, ref.schema, ref.name, obj_type, dict_owner, dict_name,
+                               resolve_err)) {
+    dict_owner = ref.schema;
+    dict_name = ref.name;
+  }
 
-  util::StmtGuard stmt;
-  dpiStmt* raw = nullptr;
-  auto* ctx = session.ctx.get();
-  auto* conn = session.conn.get();
-  if (dpiConn_prepareStmt(conn, 0, sql.c_str(), static_cast<uint32_t>(sql.size()), nullptr, 0, &raw) < 0) {
-    error.clear();
-    return RebuildTableDDL(session, ref, error);
+  std::string ddl;
+  if (FetchDbmsMetadataDdl(session, obj_type, dict_owner, dict_name, ddl, error)) {
+    return nlohmann::json{{"objectType", obj_type == "VIEW" ? "view" : "table"}, {"ddl", ddl}};
   }
-  stmt.Reset(raw);
-  uint32_t num_cols = 0;
-  if (dpiStmt_execute(stmt.Get(), DPI_MODE_EXEC_DEFAULT, &num_cols) < 0) {
+
+  // 视图：GET_DDL 失败时用 ALL_VIEWS 重建，绝不可降级成 CREATE TABLE（列投影会误导编辑页）。
+  if (obj_type == "VIEW") {
     error.clear();
-    return RebuildTableDDL(session, ref, error);
+    return RebuildViewDDL(session, ref, error);
   }
-  int found = 0;
-  uint32_t buffer_row = 0;
-  if (dpiStmt_fetch(stmt.Get(), &found, &buffer_row) < 0 || !found) {
-    error.clear();
-    return RebuildTableDDL(session, ref, error);
-  }
-  dpiNativeTypeNum native = DPI_NATIVE_TYPE_BYTES;
-  dpiData* data = nullptr;
-  if (dpiStmt_getQueryValue(stmt.Get(), 1, &native, &data) < 0) {
-    error.clear();
-    return RebuildTableDDL(session, ref, error);
-  }
-  std::string ddl = ReadLobOrBytes(ctx, native, data, error);
-  if (!error.empty() || ddl.empty()) {
-    error.clear();
-    return RebuildTableDDL(session, ref, error);
-  }
-  std::string type_out = obj_type == "VIEW" ? "view" : "table";
-  return nlohmann::json{{"objectType", type_out}, {"ddl", ddl}};
+
+  error.clear();
+  return RebuildTableDDL(session, ref, error);
 }
 
 }  // namespace niuma::oracle::meta

@@ -36,6 +36,8 @@ ResolvedSession ResolveSession(Manager& sessions, const nlohmann::json& params) 
   auto s = std::make_shared<Session>();
   s->id = util::NextId("tmp");
   s->conn = std::move(opened.conn);
+  s->proxy_relay = std::move(opened.proxy_relay);
+  s->ssh_tunnel = std::move(opened.ssh_tunnel);
   s->ctx = SharedContext(err);
   s->params = std::move(cp);
   s->profile = std::move(opened.profile);

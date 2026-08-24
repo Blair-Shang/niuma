@@ -20,6 +20,8 @@ const props = defineProps<{
   isView?: boolean
   objectKind?: import('@/modules/oracle/types/object-script').OracleObjectKind
   objectName?: string
+  routine?: string
+  routineKind?: import('@/modules/oracle/types/object-script').OracleObjectKind
   designMode?: import('@/modules/oracle/types/object-script').OracleObjectScriptMode
   draftSql?: string
   initialTab?: OracleSessionTab
@@ -69,6 +71,8 @@ onMounted(() => {
     :is-view="props.isView"
     :object-kind="props.objectKind"
     :object-name="props.objectName"
+    :routine="props.routine"
+    :routine-kind="props.routineKind"
     :design-mode="props.designMode"
     :draft-sql="props.draftSql"
     :initial-tab="props.initialTab"

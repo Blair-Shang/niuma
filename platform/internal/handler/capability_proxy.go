@@ -138,6 +138,7 @@ func (r *CapabilityRegistry) dispatchWithCredentials(
 	case capabilityMethodSessionOpen, capabilityMethodSessionTest:
 		// 透传服务端完整结果（含 dialect / version / capabilities），
 		// 禁止再裁剪为仅 sessionId 或 ok/message，否则前端 Capability 模型失效。
+		// SSH 隧道由各能力服务自行消费 options.tunnel（platform 仅 InjectSSHProfile）。
 		var result json.RawMessage
 		if err := route.client.Invoke(ctx, action, connect, &result); err != nil {
 			return errorResponse(req.ID, err.Error())

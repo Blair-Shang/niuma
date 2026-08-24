@@ -163,7 +163,7 @@ func OpenPagedQuery(
 		return finishDML(affected)
 	}
 
-	columns, cerr := columnMetasFromRows(rows)
+	columns, cerr := skipEmptyLeadingSets(rows)
 	if cerr != nil {
 		_ = rows.Close()
 		releaseConn()
@@ -204,12 +204,24 @@ func OpenPagedQuery(
 
 	duration := time.Since(start).Milliseconds()
 	if !hasMore {
+		rs.mu.Lock()
+		follow := rs.rows
+		rs.mu.Unlock()
+		var extra []QueryResultSet
+		var derr error
+		if follow != nil {
+			extra, derr = drainFollowingResultSets(follow, pageSize)
+		}
 		rs.forceClose()
 		sess.mu.Lock()
 		if cur, ok := sess.inflight[requestID]; ok && cur == entry {
 			delete(sess.inflight, requestID)
 		}
 		sess.mu.Unlock()
+		if derr != nil {
+			return nil, derr
+		}
+		primary := QueryResultSet{Columns: columns, Rows: page, RowCount: len(page)}
 		return &QueryExecResult{
 			RequestID:    requestID,
 			Columns:      columns,
@@ -220,6 +232,7 @@ func OpenPagedQuery(
 			Truncated:    truncated,
 			DurationMS:   duration,
 			CommandTag:   commandTagForSQL(sqlText),
+			ResultSets:   withResultSets(primary, extra),
 		}, nil
 	}
 
@@ -400,7 +413,6 @@ func (rs *ResultSet) readPage(limit int) (page [][]any, hasMore bool, truncated 
 	}
 
 	if len(page) < limit {
-		rs.finishLocked()
 		return page, false, false, nil
 	}
 
@@ -420,7 +432,6 @@ func (rs *ResultSet) readPage(limit int) (page [][]any, hasMore bool, truncated 
 	if err := rs.rows.Err(); err != nil {
 		return nil, false, false, fmt.Errorf("sqlserver: rows: %w", err)
 	}
-	rs.finishLocked()
 	return page, false, false, nil
 }
 

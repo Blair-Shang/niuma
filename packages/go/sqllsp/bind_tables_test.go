@@ -1,6 +1,7 @@
 package sqllsp_test
 
 import (
+	"strings"
 	"testing"
 
 	"niuma/pkg/sqllsp"
@@ -98,5 +99,20 @@ func TestResolveDotQualifierTableName(t *testing.T) {
 	_, tbl, ok := sqllsp.ResolveDotQualifier(refs, "users", "app")
 	if !ok || tbl != "users" {
 		t.Fatalf("table name resolve failed")
+	}
+}
+
+func TestExtractTableRefsBracketQualified(t *testing.T) {
+	sql := "CREATE VIEW [dbo].[NewView]\nAS\nSELECT u.\nFROM [dbo].[Users] u"
+	refs := sqllsp.ExtractTableRefs(sql, strings.Index(sql, "u.")+2)
+	if len(refs) != 1 {
+		t.Fatalf("want 1 ref, got %#v", refs)
+	}
+	if refs[0].Schema != "dbo" || refs[0].Name != "Users" || refs[0].Alias != "u" {
+		t.Fatalf("ref=%#v", refs[0])
+	}
+	sch, tbl, ok := sqllsp.ResolveDotQualifier(refs, "u", "dbo")
+	if !ok || sch != "dbo" || tbl != "Users" {
+		t.Fatalf("alias u -> %s.%s ok=%v", sch, tbl, ok)
 	}
 }

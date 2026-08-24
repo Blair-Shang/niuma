@@ -60,7 +60,7 @@ export default {
         tabNewProcedure: 'New procedure',
         tabNewFunction: 'New function',
         tabTools: 'Tools',
-        tabDebug: 'Debug assist',
+        tabCall: 'Execute call',
       },
       tree: {
         connQuery: 'New query',
@@ -90,8 +90,6 @@ export default {
         dropView: 'Drop view',
         procCall: 'Call procedure',
         funcCall: 'Call function',
-        procDebug: 'Debug assist',
-        funcDebug: 'Debug assist',
         editSource: 'Edit source',
         dropProc: 'Drop procedure',
         dropFunc: 'Drop function',

@@ -10,11 +10,11 @@ import type { SqlSplitFeatures } from '../split/types'
 
 /**
  * Capability 解析实际产出、且 `@niuma/ui` RsMonacoEditor 已登记的语言 ID。
- * mysql / dameng = Bridge LSP；sql = 未迁方言静默内置。
+ * mysql / dameng / postgresql 等 = Bridge LSP；sql = 未迁方言静默内置。
  */
 export type ResolvedMonacoLanguageId = Extract<
   SqlMonacoLanguageId,
-  'sql' | 'mysql' | 'dameng' | 'kingbase' | 'clickhouse' | 'sqlite' | 'sqlserver'
+  'sql' | 'mysql' | 'dameng' | 'kingbase' | 'postgresql' | 'clickhouse' | 'sqlite' | 'sqlserver' | 'oracle'
 >
 
 /** Monaco 语言解析结果（由会话 Capability 决定） */
@@ -119,6 +119,12 @@ export const Cap = {
   KingbaseDoubleQuoteIdent: 'kingbase.double_quote_ident',
   KingbaseDollarQuote: 'kingbase.dollar_quote',
   CompatSqlserver: 'compat.sqlserver',
+  // —— PostgreSQL（docs/34；与 postgres-service/internal/dialect 对齐）——
+  PostgresDoubleQuoteIdent: 'postgres.double_quote_ident',
+  PostgresDollarQuote: 'postgres.dollar_quote',
+  FormatPostgresql: 'format.postgresql',
+  PostgresGeneratedIdentity: 'postgres.generated_identity',
+  PostgresListenNotify: 'postgres.listen_notify',
   // —— SQL Server（docs/32；与 sqlserver-service/internal/dialect 对齐）——
   SqlserverBracketIdent: 'sqlserver.bracket_ident',
   SqlserverAtVariable: 'sqlserver.at_variable',
@@ -165,7 +171,23 @@ export function defaultVastbaseProfile(): SqlServerProfile {
 export function defaultPostgreSQLProfile(): SqlServerProfile {
   return {
     family: 'postgresql',
-    capabilities: [Cap.ProcPlpgsqlDollar, Cap.FuncPlpgsqlDollar],
+    capabilities: [
+      Cap.PostgresDoubleQuoteIdent,
+      Cap.PostgresDollarQuote,
+      Cap.ProcPlpgsqlDollar,
+      Cap.FuncPlpgsqlDollar,
+      Cap.EditorSqlLsp,
+      Cap.FormatPostgresql,
+      Cap.CteWindow,
+      Cap.SequenceNative,
+      Cap.JsonNativeType,
+      Cap.PostgresGeneratedIdentity,
+      Cap.DdlIfNotExists,
+      Cap.DdlDesign,
+      Cap.IoCsv,
+      Cap.IoSqlFile,
+      Cap.PostgresListenNotify,
+    ],
   }
 }
 
@@ -274,6 +296,7 @@ export function defaultOracleProfile(): SqlServerProfile {
       Cap.ScriptOracleSlash,
       Cap.FormatPlsql,
       Cap.EditorBuiltinSql,
+      Cap.EditorSqlLsp,
       Cap.RoutineCreateProcedure,
       Cap.RoutineCreateFunction,
       Cap.SequenceNative,
@@ -349,6 +372,7 @@ export function defaultProfileForFamily(family: string): SqlServerProfile {
     case 'vastbase':
       return defaultVastbaseProfile()
     case 'postgresql':
+    case 'postgres':
       return defaultPostgreSQLProfile()
     case 'mysql':
       return defaultMySQL8Profile()
@@ -373,6 +397,7 @@ export function resolveFormatterLanguage(profile: SqlServerProfile | null | unde
   if (hasCapability(profile, Cap.FormatPlsql)) return 'plsql'
   if (hasCapability(profile, Cap.FormatMysql)) return 'mysql'
   if (hasCapability(profile, Cap.FormatSqlite)) return 'sqlite'
+  if (hasCapability(profile, Cap.FormatPostgresql) || profile?.family === 'postgresql') return 'postgresql'
   if (hasCapability(profile, Cap.FormatTransactSQL) || profile?.family === 'sqlserver') return 'transactsql'
   if (hasCapability(profile, Cap.FormatSql) || profile?.family === 'dameng' || profile?.family === 'clickhouse') return 'sql'
   switch (profile?.family) {
@@ -391,18 +416,24 @@ export function resolveFormatterLanguage(profile: SqlServerProfile | null | unde
 }
 
 /**
- * MySQL / Dameng / Kingbase / ClickHouse / SQLite / SQL Server + EditorSqlLsp → Bridge LSP（按 family 显式映射）。
+ * MySQL / Dameng / Kingbase / PostgreSQL / ClickHouse / SQLite / SQL Server / Oracle + EditorSqlLsp → Bridge LSP。
  * 禁止把未落地 LSP 的方言（如 Vastbase）因 Cap 误路由到 mysql。
  * 其余方言：静默走内置 `sql`。
  */
 export function resolveMonacoLanguageFromProfile(
   profile: SqlServerProfile | null | undefined,
 ): MonacoLanguageResolve {
+  if (profile?.family === 'oracle' && hasCapability(profile, Cap.EditorSqlLsp)) {
+    return { monacoLanguageId: 'oracle', monacoSqlLanguages: false, useLsp: true }
+  }
   if (profile?.family === 'dameng' && hasCapability(profile, Cap.EditorSqlLsp)) {
     return { monacoLanguageId: 'dameng', monacoSqlLanguages: false, useLsp: true }
   }
   if (profile?.family === 'kingbase' && hasCapability(profile, Cap.EditorSqlLsp)) {
     return { monacoLanguageId: 'kingbase', monacoSqlLanguages: false, useLsp: true }
+  }
+  if (profile?.family === 'postgresql' && hasCapability(profile, Cap.EditorSqlLsp)) {
+    return { monacoLanguageId: 'postgresql', monacoSqlLanguages: false, useLsp: true }
   }
   if (profile?.family === 'clickhouse' && hasCapability(profile, Cap.EditorSqlLsp)) {
     return { monacoLanguageId: 'clickhouse', monacoSqlLanguages: false, useLsp: true }
@@ -419,7 +450,7 @@ export function resolveMonacoLanguageFromProfile(
   ) {
     return { monacoLanguageId: 'mysql', monacoSqlLanguages: false, useLsp: true }
   }
-  // 未迁 LSP：静默内置 sql（含 PG / Vastbase / Oracle…）
+  // 未迁 LSP：静默内置 sql（含 Vastbase…）
   if (hasCapability(profile, Cap.EditorBuiltinSql)) {
     return { monacoLanguageId: 'sql', monacoSqlLanguages: false, useLsp: false }
   }
@@ -439,7 +470,8 @@ export function resolveSplitFeaturesFromProfile(
     dollarQuotes:
       isPgFamily ||
       hasCapability(profile, Cap.FuncPlpgsqlDollar) ||
-      hasCapability(profile, Cap.KingbaseDollarQuote),
+      hasCapability(profile, Cap.KingbaseDollarQuote) ||
+      hasCapability(profile, Cap.PostgresDollarQuote),
     backticks:
       hasCapability(profile, Cap.MysqlBacktickIdent) ||
       hasCapability(profile, Cap.ClickHouseBacktickIdent) ||
@@ -586,6 +618,13 @@ export function buildAiDialectRules(profile: SqlServerProfile | null | undefined
     }
     lines.push(
       'EXPLAIN: prefer EXPLAIN PLAN (with indexes/header) for logical plans; EXPLAIN ESTIMATE for MergeTree read estimates; EXPLAIN PIPELINE for physical processors; EXPLAIN ANALYZE only when the server advertises clickhouse.explain_analyze.',
+    )
+  }
+  if (profile.family === 'postgresql') {
+    lines.push(
+      'Product: official PostgreSQL. Default port is 5432, default database is postgres. Family must remain postgresql — do not pretend it is vastbase or kingbase.',
+      'Identifiers: use double quotes "name". Dollar-quoted strings $tag$…$tag$ are supported.',
+      'Use LIMIT N for row limits. CREATE PROCEDURE/FUNCTION uses LANGUAGE plpgsql AS $$ … $$.',
     )
   }
   if (profile.family === 'kingbase') {

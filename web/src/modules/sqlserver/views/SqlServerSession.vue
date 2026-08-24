@@ -20,10 +20,21 @@ import {
   sqlserverPaneRegistry,
   type SqlServerSessionTab,
 } from '@/modules/sqlserver/pane-registry'
+import type { SqlServerObjectKind, SqlServerObjectScriptMode } from '@/modules/sqlserver/types/object-script'
 
 const props = defineProps<{
   profileId: string
   database?: string
+  schema?: string
+  table?: string
+  isView?: boolean
+  objectKind?: SqlServerObjectKind
+  objectName?: string
+  routine?: string
+  routineKind?: 'procedure' | 'function'
+  sequence?: string
+  synonym?: string
+  designMode?: SqlServerObjectScriptMode
   draftSql?: string
   initialTab?: SqlServerSessionTab
   initialSql?: string
@@ -37,10 +48,18 @@ const profile = ref<ConnectionProfile | null>(null)
 const connecting = ref(true)
 const error = ref<string | null>(null)
 
+function resolveConnectDatabase(): string | undefined {
+  const fromTab = props.database?.trim()
+  if (fromTab) return fromTab
+  const raw = profile.value?.connectionOptions?.database
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined
+}
+
 const { sessionId, acquireSession, reconnectSession } = useSessionLease({
   kind: 'sqlserver',
   profileId: () => props.profileId,
   tabId: () => props.tabId,
+  connectDatabase: resolveConnectDatabase,
 })
 
 const sessionLabel = computed(() => profile.value?.hostAddress || profile.value?.profileName || 'SQL Server')
@@ -48,6 +67,16 @@ const feature = normalizeSqlServerFeature(props.initialTab)
 const embedsChrome = sqlserverFeatureEmbedsChrome(feature)
 const pane = sqlserverPaneRegistry[feature].resolvePane({
   database: props.database,
+  schema: props.schema,
+  table: props.table,
+  isView: props.isView,
+  objectKind: props.objectKind,
+  objectName: props.objectName,
+  routine: props.routine,
+  routineKind: props.routineKind,
+  sequence: props.sequence,
+  synonym: props.synonym,
+  designMode: props.designMode,
   draftSql: props.draftSql,
 })
 const PaneView = defineAsyncComponent(pane.loader as () => Promise<{ default: Component }>)
@@ -60,6 +89,16 @@ const paneProps = computed(() => ({
     sessionId: sessionId.value,
     profileId: props.profileId,
     database: props.database,
+    schema: props.schema,
+    table: props.table,
+    isView: props.isView,
+    objectKind: props.objectKind,
+    objectName: props.objectName,
+    routine: props.routine,
+    routineKind: props.routineKind,
+    sequence: props.sequence,
+    synonym: props.synonym,
+    designMode: props.designMode,
     draftSql: props.draftSql,
     initialSql: props.initialSql,
     autoRunInitialSql: props.autoRunInitialSql,

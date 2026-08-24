@@ -65,22 +65,105 @@ std::string LockModeName(int64_t mode) {
   }
 }
 
+/** 会话列表 SELECT 列 8：当前 SQL 文本（表达式，可替换为降级空串）。 */
+std::string ProcesslistSqlTextExpr(const char* source_view) {
+  return std::string("SUBSTR(NVL((SELECT sq.SQL_TEXT FROM ") + source_view +
+         " sq WHERE sq.SQL_ID = s.SQL_ID AND ROWNUM = 1),''),1,500)";
+}
+
+std::string BuildProcesslistSQL(const std::string& sql_text_expr) {
+  return "SELECT s.SID, s.SERIAL#, NVL(s.USERNAME,'(background)'), NVL(s.MACHINE,''), "
+         "NVL(s.SCHEMANAME,''), NVL(s.STATUS,''), NVL(s.LAST_CALL_ET,0), " +
+         sql_text_expr +
+         ", NVL(s.EVENT,''), NVL(s.SQL_ID,''), NVL(s.WAIT_CLASS,''), s.BLOCKING_SESSION "
+         "FROM V$SESSION s "
+         "WHERE s.TYPE = 'USER' "
+         "ORDER BY s.LAST_CALL_ET DESC NULLS LAST";
+}
+
+/** 依次尝试 V$SQLAREA / V$SQL / 无 SQL 文本；避免无 V$SQL 权限时整表失败。 */
+bool ExecProcesslist(session::Session& session, session::SqlRowsResult& rows, std::string& error) {
+  const std::string attempts[] = {
+      BuildProcesslistSQL(ProcesslistSqlTextExpr("V$SQLAREA")),
+      BuildProcesslistSQL(ProcesslistSqlTextExpr("V$SQL")),
+      BuildProcesslistSQL("CAST('' AS VARCHAR2(500))"),
+  };
+  std::string last_err;
+  for (const auto& sql : attempts) {
+    rows = {};
+    error.clear();
+    if (session::ExecStringRows(session, sql, 2001, rows, error)) {
+      return true;
+    }
+    last_err = error;
+  }
+  error = last_err;
+  return false;
+}
+
+std::string LocksWaitingQueryExpr(const char* source_view) {
+  return std::string("SUBSTR(NVL((SELECT sq.SQL_TEXT FROM ") + source_view +
+         " sq WHERE sq.SQL_ID = w.SQL_ID AND ROWNUM = 1),''),1,300)";
+}
+
+std::string BuildLocksSQL(const std::string& waiting_query_expr, int limit, bool with_enqueue) {
+  if (with_enqueue) {
+    return "SELECT w.SID, w.SERIAL#, NVL(w.USERNAME,''), b.SID, b.SERIAL#, NVL(b.USERNAME,''), "
+           "NVL(w.EVENT,''), NVL(w.WAIT_CLASS,''), NVL(w.SECONDS_IN_WAIT,0), " +
+           waiting_query_expr +
+           ", NVL(l.TYPE,''), "
+           "CASE WHEN NVL(l.REQUEST,0) > 0 THEN l.REQUEST ELSE NVL(l.LMODE,0) END, "
+           "CASE WHEN o.OWNER IS NOT NULL THEN o.OWNER || '.' || o.OBJECT_NAME ELSE '' END "
+           "FROM V$SESSION w "
+           "JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION "
+           "LEFT JOIN V$LOCK l ON l.SID = w.SID AND l.REQUEST > 0 "
+           "LEFT JOIN ALL_OBJECTS o ON l.TYPE = 'TM' AND o.OBJECT_ID = l.ID1 "
+           "WHERE w.BLOCKING_SESSION IS NOT NULL "
+           "FETCH FIRST " +
+           std::to_string(limit + 1) + " ROWS ONLY";
+  }
+  return "SELECT w.SID, w.SERIAL#, NVL(w.USERNAME,''), b.SID, b.SERIAL#, NVL(b.USERNAME,''), "
+         "NVL(w.EVENT,''), NVL(w.WAIT_CLASS,''), NVL(w.SECONDS_IN_WAIT,0), " +
+         waiting_query_expr +
+         ", CAST(NULL AS VARCHAR2(10)), CAST(NULL AS NUMBER), CAST(NULL AS VARCHAR2(1)) "
+         "FROM V$SESSION w "
+         "JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION "
+         "WHERE w.BLOCKING_SESSION IS NOT NULL "
+         "FETCH FIRST " +
+         std::to_string(limit + 1) + " ROWS ONLY";
+}
+
+bool ExecLocksQuery(session::Session& session, int limit, session::SqlRowsResult& rows,
+                    std::string& error) {
+  const std::string no_sql = "CAST('' AS VARCHAR2(300))";
+  const std::string area = LocksWaitingQueryExpr("V$SQLAREA");
+  const std::string vsql = LocksWaitingQueryExpr("V$SQL");
+  const struct {
+    std::string query_expr;
+    bool enqueue;
+  } attempts[] = {
+      {area, true},  {vsql, true},  {no_sql, true},
+      {area, false}, {vsql, false}, {no_sql, false},
+  };
+  std::string last_err;
+  for (const auto& a : attempts) {
+    rows = {};
+    error.clear();
+    const std::string sql = BuildLocksSQL(a.query_expr, limit, a.enqueue);
+    if (session::ExecStringRows(session, sql, limit + 1, rows, error)) {
+      return true;
+    }
+    last_err = error;
+  }
+  error = last_err;
+  return false;
+}
+
 }  // namespace
 
 nlohmann::json ListProcesslist(session::Session& session, std::string& error) {
-  // SID, SERIAL#, USERNAME, MACHINE, SCHEMANAME, STATUS, LAST_CALL_ET,
-  // SQL_TEXT, EVENT, SQL_ID, WAIT_CLASS, BLOCKING_SESSION
-  const char* sql =
-      "SELECT s.SID, s.SERIAL#, NVL(s.USERNAME,'(background)'), NVL(s.MACHINE,''), "
-      "NVL(s.SCHEMANAME,''), NVL(s.STATUS,''), NVL(s.LAST_CALL_ET,0), "
-      "SUBSTR(NVL((SELECT sq.SQL_TEXT FROM V$SQL sq WHERE sq.SQL_ID = s.SQL_ID AND ROWNUM = 1),''),1,500), "
-      "NVL(s.EVENT,''), NVL(s.SQL_ID,''), NVL(s.WAIT_CLASS,''), s.BLOCKING_SESSION "
-      "FROM V$SESSION s "
-      "WHERE s.TYPE = 'USER' "
-      "ORDER BY s.LAST_CALL_ET DESC NULLS LAST";
-
   session::SqlRowsResult rows;
-  if (!session::ExecStringRows(session, sql, 2001, rows, error)) {
+  if (!ExecProcesslist(session, rows, error)) {
     // 无 V$SESSION 权限时明确告知前端，避免被当成「空进程列表」
     const std::string msg = error.empty()
                                 ? "oracle: processlist unavailable or insufficient privilege"
@@ -271,48 +354,15 @@ nlohmann::json ListLocks(session::Session& session, int limit, std::string& erro
     limit = 200;
   }
 
-  // 阻塞会话链 + 可选 enqueue（V$LOCK）与对象名；列：
-  // waiting SID/SERIAL/user, blocking SID/SERIAL/user,
-  // EVENT, WAIT_CLASS, SECONDS_IN_WAIT, SQL,
-  // lock TYPE, request/lmode, object
-  const std::string sql_full =
-      "SELECT w.SID, w.SERIAL#, NVL(w.USERNAME,''), b.SID, b.SERIAL#, NVL(b.USERNAME,''), "
-      "NVL(w.EVENT,''), NVL(w.WAIT_CLASS,''), NVL(w.SECONDS_IN_WAIT,0), "
-      "SUBSTR(NVL((SELECT sq.SQL_TEXT FROM V$SQL sq WHERE sq.SQL_ID = w.SQL_ID AND ROWNUM = 1),''),1,300), "
-      "NVL(l.TYPE,''), "
-      "CASE WHEN NVL(l.REQUEST,0) > 0 THEN l.REQUEST ELSE NVL(l.LMODE,0) END, "
-      "CASE WHEN o.OWNER IS NOT NULL THEN o.OWNER || '.' || o.OBJECT_NAME ELSE '' END "
-      "FROM V$SESSION w "
-      "JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION "
-      "LEFT JOIN V$LOCK l ON l.SID = w.SID AND l.REQUEST > 0 "
-      "LEFT JOIN ALL_OBJECTS o ON l.TYPE = 'TM' AND o.OBJECT_ID = l.ID1 "
-      "WHERE w.BLOCKING_SESSION IS NOT NULL "
-      "FETCH FIRST " +
-      std::to_string(limit + 1) + " ROWS ONLY";
-
-  const std::string sql_basic =
-      "SELECT w.SID, w.SERIAL#, NVL(w.USERNAME,''), b.SID, b.SERIAL#, NVL(b.USERNAME,''), "
-      "NVL(w.EVENT,''), NVL(w.WAIT_CLASS,''), NVL(w.SECONDS_IN_WAIT,0), "
-      "SUBSTR(NVL((SELECT sq.SQL_TEXT FROM V$SQL sq WHERE sq.SQL_ID = w.SQL_ID AND ROWNUM = 1),''),1,300), "
-      "CAST(NULL AS VARCHAR2(10)), CAST(NULL AS NUMBER), CAST(NULL AS VARCHAR2(1)) "
-      "FROM V$SESSION w "
-      "JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION "
-      "WHERE w.BLOCKING_SESSION IS NOT NULL "
-      "FETCH FIRST " +
-      std::to_string(limit + 1) + " ROWS ONLY";
-
+  // 阻塞会话链 + 可选 enqueue（V$LOCK）与对象名
   session::SqlRowsResult rows;
-  std::string first_err;
-  if (!session::ExecStringRows(session, sql_full, limit + 1, rows, first_err)) {
-    rows = {};
-    if (!session::ExecStringRows(session, sql_basic, limit + 1, rows, error)) {
-      error.clear();
-      return nlohmann::json{{"locks", nlohmann::json::array()},
-                            {"unavailable", true},
-                            {"message", first_err.empty()
-                                            ? "oracle: locks view unavailable or insufficient privilege"
-                                            : first_err}};
-    }
+  if (!ExecLocksQuery(session, limit, rows, error)) {
+    const std::string msg =
+        error.empty() ? "oracle: locks view unavailable or insufficient privilege" : error;
+    error.clear();
+    return nlohmann::json{{"locks", nlohmann::json::array()},
+                          {"unavailable", true},
+                          {"message", msg}};
   }
 
   nlohmann::json locks = nlohmann::json::array();

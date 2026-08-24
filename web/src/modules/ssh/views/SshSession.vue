@@ -1038,7 +1038,7 @@ watch(
       v-model:open="promptOpen"
       :title="promptTitle"
       width="sm"
-      layout="confirm"
+      layout="form"
       :resizable="false"
       :fullscreenable="false"
       :show-close="false"

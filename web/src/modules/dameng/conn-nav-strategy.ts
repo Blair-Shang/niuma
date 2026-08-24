@@ -195,7 +195,7 @@ function buildObjectScriptTabSpec(item: ConnItem, ctx?: ConnOpenContext): Connec
   }
 }
 
-function buildDebugTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNavTabSpec {
+function buildCallTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNavTabSpec {
   const schema = segmentName(ctx, 'schema')
   const objectKind = resolveObjectKind(ctx)
   const routineKind =
@@ -204,7 +204,7 @@ function buildDebugTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
     resolveObjectName(ctx, routineKind) ?? segmentName(ctx, 'routine')
   const props: Record<string, unknown> = {
     profileId: item.profileId,
-    initialTab: 'debug',
+    initialTab: 'call',
     routineKind,
   }
   if (schema) props.schema = schema
@@ -216,7 +216,7 @@ function buildDebugTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
 
   const resource =
     schema && routine ? `${schema}.${routine}` : schema || undefined
-  const paneLabel = featureLabel('debug')
+  const paneLabel = featureLabel('call')
 
   return {
     moduleId: 'dameng',
@@ -236,7 +236,7 @@ function buildDamengTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
   const feature = resolveFeature(ctx)
   if (feature === 'query') return buildQueryTabSpec(item, ctx)
   if (feature === 'objectScript') return buildObjectScriptTabSpec(item, ctx)
-  if (feature === 'debug') return buildDebugTabSpec(item, ctx)
+  if (feature === 'call') return buildCallTabSpec(item, ctx)
 
   if (feature === 'monitor') {
     return {
@@ -305,7 +305,7 @@ function buildDamengTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
 }
 
 /**
- * Dameng：query 可多开；browse/ddl/objectScript/monitor/design/debug 按 profile+资源+feature 去重。
+ * Dameng：query 可多开；browse/ddl/objectScript/monitor/design/call 按 profile+资源+feature 去重。
  */
 export const damengConnectionNavStrategy: ConnectionNavStrategy = {
   kind: 'dameng',
@@ -353,8 +353,8 @@ export const damengConnectionNavStrategy: ConnectionNavStrategy = {
         return tabKind === objectKind && tabName === objectName && tabMode === designMode
       }
 
-      if (feature === 'debug') {
-        // 同一过程/函数只开一个调试页；不同对象各自独立
+      if (feature === 'call') {
+        // 同一过程/函数只开一个调用页；不同对象各自独立
         const objectKind = resolveObjectKind(ctx)
         const routineKind =
           objectKind === 'function' || ctx?.objectKind === 'function' ? 'function' : 'procedure'

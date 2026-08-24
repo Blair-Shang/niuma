@@ -35,7 +35,7 @@ func ExtractTableRefs(text string, offset int) []TableRef {
 // ResolveDotQualifier 将 `x`（来自 x.）解析为真实 schema+table。
 // 优先别名，其次表名；命中返回 ok=true。未命中时调用方可再把 x 当 schema。
 func ResolveDotQualifier(refs []TableRef, name, defaultDB string) (schema, table string, ok bool) {
-	name = strings.Trim(strings.TrimSpace(name), "`\"")
+	name = stripIdent(strings.TrimSpace(name))
 	if name == "" {
 		return "", "", false
 	}
@@ -242,6 +242,22 @@ func tokenizeSQL(s string) []sqlTok {
 			continue
 		}
 		start := i
+		if r == '[' {
+			i++
+			for i < len(s) {
+				if s[i] == ']' {
+					i++
+					if i < len(s) && s[i] == ']' { // escaped ]
+						i++
+						continue
+					}
+					break
+				}
+				i++
+			}
+			out = append(out, sqlTok{raw: s[start:i], start: start, end: i})
+			continue
+		}
 		if r == '`' || r == '"' || r == '\'' {
 			q := byte(r)
 			i++
@@ -297,6 +313,9 @@ func stripIdent(s string) string {
 	if len(s) >= 2 {
 		if (s[0] == '`' && s[len(s)-1] == '`') || (s[0] == '"' && s[len(s)-1] == '"') {
 			return s[1 : len(s)-1]
+		}
+		if s[0] == '[' && s[len(s)-1] == ']' {
+			return strings.ReplaceAll(s[1:len(s)-1], "]]", "]")
 		}
 	}
 	return s
@@ -362,7 +381,7 @@ func isIdentLike(s string) bool {
 	if s == "" || s == "," || s == "(" || s == ")" || s == "." || s == ";" {
 		return false
 	}
-	if s[0] == '`' || s[0] == '"' {
+	if s[0] == '`' || s[0] == '"' || s[0] == '[' {
 		return true
 	}
 	r := rune(s[0])
@@ -400,7 +419,7 @@ func IdentAt(text string, offset int) (name string, start, end int, ok bool) {
 	start = offset
 	for start > 0 {
 		r := rune(text[start-1])
-		if isIdentPart(r) || r == '`' || r == '"' {
+		if isIdentPart(r) || r == '`' || r == '"' || r == '[' || r == ']' {
 			start--
 			continue
 		}
@@ -409,7 +428,7 @@ func IdentAt(text string, offset int) (name string, start, end int, ok bool) {
 	end = offset
 	for end < len(text) {
 		r := rune(text[end])
-		if isIdentPart(r) || r == '`' || r == '"' {
+		if isIdentPart(r) || r == '`' || r == '"' || r == '[' || r == ']' {
 			end++
 			continue
 		}

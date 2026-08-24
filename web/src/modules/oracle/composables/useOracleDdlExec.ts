@@ -1,6 +1,7 @@
 import { useRsToast } from '@niuma/ui'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { oracleApi } from '@/api/oracle'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import {
   invalidateConnTreeChildren,
@@ -8,7 +9,11 @@ import {
   refreshConnTreeRoot,
   refreshResourceIfLoaded,
 } from '@/modules/ops/composables/useConnTreeChildren'
-import { execOracleSql } from '@/modules/oracle/composables/useOracleSessionSql'
+import {
+  execOracleSql,
+  withOracleSession,
+} from '@/modules/oracle/composables/useOracleSessionSql'
+import { stripOracleSqlPlusTerminator } from '@/modules/oracle/utils/normalize-object-ddl'
 import {
   useOracleDdlActionStore,
   type OracleCreateSchemaOptions,
@@ -19,18 +24,82 @@ import {
   dropFunctionSql,
   dropPackageSql,
   dropProcedureSql,
+  dropSchemaSql,
   dropSequenceSql,
+  dropSynonymSql,
   dropTableSql,
+  dropTriggerSql,
   dropViewSql,
   grantSchemaConnectResourceSql,
   renameSequenceSql,
   renameTableSql,
   renameViewSql,
+  rewriteOracleViewDdlForRename,
   truncateTableSql,
 } from '@/modules/oracle/utils/script-templates'
 
 function segmentName(path: ConnResourcePath | undefined, kind: string): string | undefined {
   return path?.segments.find((s) => s.kind === kind)?.name
+}
+
+function isOra03001(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /ORA-03001/i.test(msg)
+}
+
+/**
+ * Oracle：RENAME 要求会话用户即对象属主；DBA + CURRENT_SCHEMA 会 ORA-03001。
+ * 先试 RENAME，失败则建新视图再删旧视图。
+ */
+async function renameViewWithFallback(
+  profileId: string,
+  schema: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  try {
+    await execOracleSql(profileId, renameViewSql(schema, from, to), schema)
+    return
+  } catch (err) {
+    if (!isOra03001(err)) throw err
+  }
+
+  await withOracleSession(profileId, async (sessionId) => {
+    const meta = await oracleApi.metaDDL({
+      sessionId,
+      schema,
+      table: from,
+      objectType: 'view',
+    })
+    const createSql = stripOracleSqlPlusTerminator(
+      rewriteOracleViewDdlForRename(meta.ddl ?? '', schema, from, to),
+    )
+    if (!createSql.trim()) {
+      throw new Error('oracle: view ddl empty; cannot rename by recreate')
+    }
+    const created = await oracleApi.queryExec({
+      sessionId,
+      schema,
+      sql: createSql,
+      limit: 1,
+    })
+    if (created.resultSetId) {
+      await oracleApi
+        .queryClose({ sessionId, resultSetId: created.resultSetId })
+        .catch(() => undefined)
+    }
+    const dropped = await oracleApi.queryExec({
+      sessionId,
+      schema,
+      sql: dropViewSql(schema, from),
+      limit: 1,
+    })
+    if (dropped.resultSetId) {
+      await oracleApi
+        .queryClose({ sessionId, resultSetId: dropped.resultSetId })
+        .catch(() => undefined)
+    }
+  })
 }
 
 function buildDdlSql(req: OraclePendingDdlAction, newName?: string): string {
@@ -48,6 +117,12 @@ function buildDdlSql(req: OraclePendingDdlAction, newName?: string): string {
       return dropSequenceSql(schema, req.name)
     case 'drop_package':
       return dropPackageSql(schema, req.name)
+    case 'drop_synonym':
+      return dropSynonymSql(schema, req.name)
+    case 'drop_trigger':
+      return dropTriggerSql(schema, req.name)
+    case 'drop_schema':
+      return dropSchemaSql(req.name)
     case 'truncate_table':
       return truncateTableSql(schema, req.name)
     case 'rename_table': {
@@ -128,10 +203,18 @@ export function useOracleDdlExec() {
         ...pending,
         createOptions: opts?.createOptions ?? pending.createOptions,
       }
-      const sql = buildDdlSql(req, opts?.newName)
-      // CREATE USER 不绑 CURRENT_SCHEMA
-      const bindSchema = req.action === 'create_schema' ? undefined : req.schema
-      await execOracleSql(req.profileId, sql, bindSchema)
+      if (req.action === 'rename_view') {
+        const to = (opts?.newName ?? req.newName ?? '').trim()
+        const schema = (req.schema ?? '').trim()
+        if (!to || !schema) throw new Error('schema and newName required')
+        await renameViewWithFallback(req.profileId, schema, req.name, to)
+      } else {
+        const sql = buildDdlSql(req, opts?.newName)
+        // CREATE USER 不绑 CURRENT_SCHEMA
+        const bindSchema =
+          req.action === 'create_schema' || req.action === 'drop_schema' ? undefined : req.schema
+        await execOracleSql(req.profileId, sql, bindSchema)
+      }
 
       let grantFailed: string | undefined
       if (req.action === 'create_schema' && req.createOptions?.grantConnectResource !== false) {
@@ -152,7 +235,9 @@ export function useOracleDdlExec() {
 
       if (conn) {
         const countDelta = req.action.startsWith('drop_') ? -1 : 0
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        if (req.action !== 'truncate_table') {
+          await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        }
       } else {
         invalidateConnTreeChildren(req.profileId)
       }

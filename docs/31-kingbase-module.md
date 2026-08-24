@@ -3,7 +3,7 @@
 > 版本：v0.4 · 日期：2026-07-28  
 > 状态：**后端/Web P0–P4 主路径已落地**（Browse 单元格编辑、ObjectScript、CSV/SQL IO、Monitor、表设计器）；**LSP：`kingbaseparser` + `kingbase.lsp.*`（`editor.sql_lsp`）**；过程调试仍不做；驱动锁定 **Go + `jackc/pgx/v5`**  
 > **隔离**：**独立进程 / 独立 kind / 独立 Web 模块 / 独立实现**；禁止与 Vastbase / 其它库服务混用代码或运行时互调  
-> 关联：[13](./13-service-layout.md) · [14](./14-capability-connection-framework.md) · [18](./18-ops-connection-tree.md) · [21](./21-session-registry.md) · [22 — Vastbase](./22-vastbase-module.md)（**PG 线协议与节奏对照，非实现依赖**） · [23](./23-sql-dialect-completion.md) · [30 — ClickHouse](./30-clickhouse-module.md)（**分期骨架对照**）
+> 关联：[13](./13-service-layout.md) · [14](./14-capability-connection-framework.md) · [18](./18-ops-connection-tree.md) · [21](./21-session-registry.md) · [22 — Vastbase](./22-vastbase-module.md)（**PG 线协议与节奏对照，非实现依赖**） · [34 — PostgreSQL](./34-postgresql-module.md)（**原生 PG，禁止混用**） · [23](./23-sql-dialect-completion.md) · [30 — ClickHouse](./30-clickhouse-module.md)（**分期骨架对照**）
 
 ---
 

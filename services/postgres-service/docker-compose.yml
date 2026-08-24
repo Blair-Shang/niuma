@@ -1,0 +1,22 @@
+# 本地 / Linux 服务器 PostgreSQL 联调（官方 postgres:16）。
+# 远端库常有权限 / 审计限制，不适合测 DDL。
+services:
+  postgres:
+    image: postgres:16
+    container_name: niuma-postgres
+    ports:
+      - "65432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - niuma-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  niuma-postgres-data:

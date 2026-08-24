@@ -10,6 +10,8 @@ namespace niuma::oracle::meta {
 struct RelationRef {
   std::string schema;
   std::string name;
+  /** 可选提示：table | view；编辑视图时传入可避免误降级成表 DDL。 */
+  std::string object_type;
 
   static RelationRef FromJson(const nlohmann::json& j);
 };

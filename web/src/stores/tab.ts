@@ -78,7 +78,7 @@ export interface WorkspaceTab {
    * - `table` — 表/视图名（browse / design / ddl / objectScript）
    * - `collection` — MongoDB 集合名
    * - `initialTab` — 打开后固定功能面板，如 query / browse / design / ddl /
-   *   objectScript / monitor / tools / debug / call（方言子集各异；Mongo 另有
+   *   objectScript / monitor / tools / call（执行调用）；Vastbase 另有 debug（真断点）；Mongo 另有
    *   collections / schema / indexes / live / console 等）
    * - `initialSql` — 打开时预填 SQL（树生成 SELECT、AI「在查询中打开」等）
    * - `draftSql` — 查询面板 / 对象脚本未保存正文（`useQueryDraftPersist` 等按 tabId 落盘）

@@ -7,6 +7,7 @@ import type { RsTableStagedCell } from '@niuma/ui'
 import {
   useBrowseCellDialog,
   type BrowseCellEditorDialogLabels,
+  type BrowseResolveFullCellValue,
 } from './useBrowseCellDialog'
 
 export type BrowseStageableTable = {
@@ -16,6 +17,7 @@ export type BrowseStageableTable = {
 export interface UseBrowseGridEditingOptions {
   getLabels?: () => Partial<BrowseCellEditorDialogLabels>
   tableRef?: Ref<BrowseStageableTable | null | undefined>
+  resolveFullCellValue?: BrowseResolveFullCellValue
 }
 
 /** RsTable 浏览编辑的公共 props（方言补 columns/data/事件回调）。 */
@@ -42,7 +44,11 @@ export const BROWSE_GRID_EDIT_PROPS = {
 
 export function useBrowseGridEditing(options: UseBrowseGridEditingOptions = {}) {
   const tableRef = options.tableRef ?? ref<BrowseStageableTable | null>(null)
-  const dialog = useBrowseCellDialog(tableRef, options.getLabels)
+  const dialog = useBrowseCellDialog(
+    tableRef,
+    options.getLabels,
+    options.resolveFullCellValue,
+  )
 
   return {
     tableRef,

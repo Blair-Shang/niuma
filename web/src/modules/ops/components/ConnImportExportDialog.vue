@@ -78,7 +78,7 @@ function onSubmit(): void {
     v-model:open="open"
     :title="title"
     width="md"
-    layout="confirm"
+    layout="form"
     :resizable="false"
     :fullscreenable="false"
     :show-overlay="false"

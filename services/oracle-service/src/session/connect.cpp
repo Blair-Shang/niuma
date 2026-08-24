@@ -141,7 +141,39 @@ ConnectParams ConnectParams::FromJson(const nlohmann::json& j) {
     p.options.proxy.password = JsonString(px, {"password"});
   }
   if (opts.contains("tunnel") && opts["tunnel"].is_object()) {
-    p.options.tunnel.type = JsonString(opts["tunnel"], {"type"});
+    const auto& tn = opts["tunnel"];
+    p.options.tunnel.type = JsonString(tn, {"type"});
+    p.options.tunnel.target_host = JsonString(tn, {"targetHost", "target_host"});
+    p.options.tunnel.target_port = JsonInt(tn, {"targetPort", "target_port"}, 0);
+    if (tn.contains("sshProfile") && tn["sshProfile"].is_object()) {
+      const auto& sp = tn["sshProfile"];
+      p.options.tunnel.has_ssh_profile = true;
+      p.options.tunnel.ssh_profile.host_address = JsonString(sp, {"hostAddress", "host"});
+      p.options.tunnel.ssh_profile.port_number = JsonInt(sp, {"portNumber", "port"}, 22);
+      p.options.tunnel.ssh_profile.login_account = JsonString(sp, {"loginAccount", "user"});
+      p.options.tunnel.ssh_profile.secret = JsonString(sp, {"secret", "password"});
+      nlohmann::json sp_opts = nlohmann::json::object();
+      if (sp.contains("options") && sp["options"].is_object()) {
+        sp_opts = sp["options"];
+      }
+      p.options.tunnel.ssh_profile.timeout_seconds =
+          JsonInt(sp_opts, {"timeout_seconds", "timeoutSeconds"}, 30);
+      p.options.tunnel.ssh_profile.auth_type = JsonString(sp_opts, {"auth_type", "authType"});
+      if (p.options.tunnel.ssh_profile.auth_type.empty()) {
+        p.options.tunnel.ssh_profile.auth_type = "password";
+      }
+      p.options.tunnel.ssh_profile.private_key_path =
+          JsonString(sp_opts, {"private_key_path", "privateKeyPath"});
+      p.options.tunnel.ssh_profile.passphrase = JsonString(sp_opts, {"passphrase"});
+      if (sp_opts.contains("proxy") && sp_opts["proxy"].is_object()) {
+        const auto& jpx = sp_opts["proxy"];
+        p.options.tunnel.ssh_profile.proxy.type = JsonString(jpx, {"type"});
+        p.options.tunnel.ssh_profile.proxy.host = JsonString(jpx, {"host"});
+        p.options.tunnel.ssh_profile.proxy.port = JsonInt(jpx, {"port"}, 0);
+        p.options.tunnel.ssh_profile.proxy.username = JsonString(jpx, {"username", "user"});
+        p.options.tunnel.ssh_profile.proxy.password = JsonString(jpx, {"password"});
+      }
+    }
   }
   p.options.ssl_mode = ToLower(JsonString(opts, {"ssl_mode", "sslMode"}));
   if (p.options.ssl_mode.empty()) {
@@ -332,19 +364,31 @@ OpenedConnection ConnectAndProbe(const ConnectParams& params, std::string& error
     error = "oracle: wallet path required when SSL mode is verify-full";
     return out;
   }
-  // 隧道与代理互斥：都配置时优先隧道（与 MySQL/Redis 一致），但 C++ 侧尚未接入 SSH。
-  if (params.options.tunnel.Enabled()) {
-    error = "oracle: SSH tunnel is not supported yet; use HTTP/SOCKS proxy or connect directly";
-    return out;
-  }
-
+  // 隧道与代理互斥：都配置时优先隧道（与 MySQL/Redis 一致）。
   ConnectParams dial = params;
-  if (params.options.proxy.Enabled()) {
+  const uint16_t target_port =
+      static_cast<uint16_t>(params.port_number > 0 ? params.port_number : 1521);
+  if (params.options.tunnel.Enabled()) {
     std::string local_host;
     uint16_t local_port = 0;
-    auto relay = niuma::netproxy::StartRelay(params.options.proxy, params.host_address,
-                                             static_cast<uint16_t>(params.port_number > 0 ? params.port_number : 1521),
-                                             local_host, local_port, error);
+    auto tunnel = niuma::sshtunnel::StartSSHTunnel(params.options.tunnel, params.host_address, target_port,
+                                                   local_host, local_port, error);
+    if (!tunnel) {
+      if (error.empty()) {
+        error = "oracle: ssh tunnel failed";
+      } else if (error.rfind("oracle:", 0) != 0) {
+        error = "oracle: " + error;
+      }
+      return out;
+    }
+    dial.host_address = local_host;
+    dial.port_number = static_cast<int>(local_port);
+    out.ssh_tunnel = std::move(tunnel);
+  } else if (params.options.proxy.Enabled()) {
+    std::string local_host;
+    uint16_t local_port = 0;
+    auto relay = niuma::netproxy::StartRelay(params.options.proxy, params.host_address, target_port, local_host,
+                                             local_port, error);
     if (!relay) {
       if (error.empty()) {
         error = "oracle: proxy relay failed";
@@ -358,16 +402,22 @@ OpenedConnection ConnectAndProbe(const ConnectParams& params, std::string& error
     out.proxy_relay = std::move(relay);
   }
 
+  auto clear_relays = [&out]() {
+    out.conn.reset();
+    out.proxy_relay.reset();
+    out.ssh_tunnel.reset();
+  };
+
   auto ctx = SharedContext(error);
   if (!ctx) {
-    out.proxy_relay.reset();
+    clear_relays();
     return out;
   }
 
   const std::string conn_str = dial.BuildConnectString();
   if (conn_str.empty()) {
     error = "oracle: service name or SID required";
-    out.proxy_relay.reset();
+    clear_relays();
     return out;
   }
   dpiConnCreateParams create{};
@@ -386,7 +436,7 @@ OpenedConnection ConnectAndProbe(const ConnectParams& params, std::string& error
                      static_cast<uint32_t>(dial.secret.size()), conn_str.c_str(),
                      static_cast<uint32_t>(conn_str.size()), &common, &create, &conn) < 0) {
     error = DpiError(ctx.get());
-    out.proxy_relay.reset();
+    clear_relays();
     return out;
   }
   out.conn.reset(conn);
@@ -410,8 +460,7 @@ OpenedConnection ConnectAndProbe(const ConnectParams& params, std::string& error
 
   out.profile = Probe(ctx.get(), conn, error);
   if (!error.empty()) {
-    out.conn.reset();
-    out.proxy_relay.reset();
+    clear_relays();
     return {};
   }
   return out;

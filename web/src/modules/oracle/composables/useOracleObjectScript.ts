@@ -9,17 +9,36 @@ import { oracleApi } from '@/api/oracle'
 import { buildObjectScriptContextMenuItems } from '@/modules/database'
 import { useOracleSqlEditor } from '@/modules/oracle/composables/useOracleSqlEditor'
 import {
+  isRoutineObjectKind,
   objectKindIcon,
   objectKindToCategory,
   type OracleObjectKind,
   type OracleObjectScriptMode,
 } from '@/modules/oracle/types/object-script'
 import {
+  ensureOracleCreateSchema,
+  joinOraclePackageSource,
   normalizeOracleObjectDdlForEdit,
   parseOracleObjectNameFromSql,
+  stripOracleSqlPlusTerminator,
   toReplaceSql,
 } from '@/modules/oracle/utils/normalize-object-ddl'
-import { createObjectTemplate } from '@/modules/oracle/utils/script-templates'
+import {
+  buildOracleRoutineErrorsSql,
+  buildOracleRoutineStatusSql,
+  cellText,
+  formatOracleRoutineErrors,
+  oracleObjectStatusI18nKey,
+} from '@/modules/oracle/utils/oracle-routine-status'
+import {
+  createObjectTemplate,
+  dropFunctionSql,
+  dropPackageSql,
+  dropProcedureSql,
+  dropSequenceSql,
+  dropSynonymSql,
+  dropTriggerSql,
+} from '@/modules/oracle/utils/script-templates'
 import type { ConnItem } from '@/modules/ops/types'
 import {
   patchCategoryObjectCount,
@@ -122,6 +141,9 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     if (objectKind.value === 'procedure') return t('modules.oracle.session.tabProcedure')
     if (objectKind.value === 'function') return t('modules.oracle.session.tabFunction')
     if (objectKind.value === 'package') return t('modules.oracle.session.tabPackage')
+    if (objectKind.value === 'synonym') return t('modules.oracle.session.tabSynonym')
+    if (objectKind.value === 'trigger') return t('modules.oracle.session.tabTrigger')
+    if (objectKind.value === 'sequence') return t('modules.oracle.session.tabSequence')
     return t('modules.oracle.session.tabView')
   })
 
@@ -191,19 +213,7 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     loading.value = true
     try {
       let loaded = ''
-      if (objectKind.value === 'view') {
-        const result = await oracleApi.metaDDL({
-          sessionId: props.sessionId,
-          schema: schemaName.value,
-          table: objectName.value,
-        })
-        const cleaned = normalizeOracleObjectDdlForEdit(result.ddl)
-        try {
-          loaded = formatSql(cleaned, { dialect: 'oracle' })
-        } catch {
-          loaded = cleaned
-        }
-      } else if (objectKind.value === 'package') {
+      if (objectKind.value === 'package') {
         const result = await oracleApi.metaPackageSource({
           sessionId: props.sessionId,
           schema: schemaName.value,
@@ -211,16 +221,44 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
           part: 'both',
         })
         loaded = normalizeOracleObjectDdlForEdit(
-          [result.definition, result.bodyDefinition].filter(Boolean).join('\n/\n\n'),
+          joinOraclePackageSource(result.definition, result.bodyDefinition),
+          schemaName.value,
+          'package',
         )
+      } else if (
+        objectKind.value === 'view' ||
+        objectKind.value === 'synonym' ||
+        objectKind.value === 'trigger' ||
+        objectKind.value === 'sequence'
+      ) {
+        const result = await oracleApi.metaDDL({
+          sessionId: props.sessionId,
+          schema: schemaName.value,
+          table: objectName.value,
+          objectType: objectKind.value,
+        })
+        const cleaned = normalizeOracleObjectDdlForEdit(
+          result.ddl,
+          schemaName.value,
+          objectKind.value,
+        )
+        try {
+          loaded = formatSql(cleaned, { dialect: 'oracle' })
+        } catch {
+          loaded = cleaned
+        }
       } else {
         const result = await oracleApi.metaRoutineSource({
           sessionId: props.sessionId,
           schema: schemaName.value,
           name: objectName.value,
-          kind: objectKind.value,
+          kind: objectKind.value === 'function' ? 'function' : 'procedure',
         })
-        const cleaned = normalizeOracleObjectDdlForEdit(result.definition)
+        const cleaned = normalizeOracleObjectDdlForEdit(
+          result.definition,
+          schemaName.value,
+          objectKind.value,
+        )
         try {
           loaded = formatSql(cleaned, { dialect: 'oracle' })
         } catch {
@@ -244,7 +282,7 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     if (!props.sessionId) {
       throw new Error(t('modules.oracle.objectScript.needSession'))
     }
-    const stmt = sql.trim()
+    const stmt = stripOracleSqlPlusTerminator(sql)
     if (!stmt) {
       throw new Error(t('modules.oracle.objectScript.empty'))
     }
@@ -274,19 +312,146 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     }
   }
 
-  async function applyRoutineFullScript(
-    raw: string,
-    _schema: string,
-    _namesToDrop: Iterable<string>,
-  ): Promise<void> {
-    if (/^\s*create\b/i.test(raw) && /\b(procedure|function)\b/i.test(raw)) {
-      await execOne(toReplaceSql(raw))
-      return
+  async function enrichCompileFailure(
+    err: unknown,
+    schema: string,
+    name: string,
+    kind: 'procedure' | 'function',
+  ): Promise<Error> {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!/24344|compilation\s+error|INVALID|PLS-00905/i.test(msg) || !schema.trim() || !name.trim()) {
+      return err instanceof Error ? err : new Error(msg)
     }
-    await execStatements(raw)
+    try {
+      const result = await oracleApi.queryExec({
+        sessionId: props.sessionId!,
+        schema: schema || undefined,
+        sql: buildOracleRoutineErrorsSql(schema, name, kind),
+        limit: 50,
+        requestId: `oracle-all-errors-${Date.now()}`,
+      })
+      if (result.resultSetId) {
+        await oracleApi
+          .queryClose({ sessionId: props.sessionId!, resultSetId: result.resultSetId })
+          .catch(() => undefined)
+      }
+      const detail = formatOracleRoutineErrors(result.rows)
+      if (detail) {
+        return new Error(`${msg}\n${detail}`)
+      }
+    } catch {
+      // 附带 ALL_ERRORS 失败时仍返回原错误
+    }
+    return err instanceof Error ? err : new Error(msg)
   }
 
-  /** @param updateCounts 新建时就地 patch 分类徽章，不重拉 schema */
+  /** CREATE/ALTER 后核对 STATUS；仍 INVALID 则带 ALL_ERRORS（避免「保存成功」但调用 PLS-00905）。 */
+  async function assertRoutineValidAfterApply(
+    schema: string,
+    name: string,
+    kind: 'procedure' | 'function',
+  ): Promise<void> {
+    if (!props.sessionId || !schema.trim() || !name.trim()) return
+    const statusRes = await oracleApi.queryExec({
+      sessionId: props.sessionId,
+      schema,
+      sql: buildOracleRoutineStatusSql(schema, name, kind),
+      limit: 5,
+      requestId: `oracle-status-${Date.now()}`,
+    })
+    if (statusRes.resultSetId) {
+      await oracleApi
+        .queryClose({ sessionId: props.sessionId, resultSetId: statusRes.resultSetId })
+        .catch(() => undefined)
+    }
+    const status = cellText(statusRes.rows?.[0]?.[0]).toUpperCase()
+    if (!status || status === 'VALID') return
+    const errRes = await oracleApi.queryExec({
+      sessionId: props.sessionId,
+      schema,
+      sql: buildOracleRoutineErrorsSql(schema, name, kind),
+      limit: 50,
+      requestId: `oracle-errors-${Date.now()}`,
+    })
+    if (errRes.resultSetId) {
+      await oracleApi
+        .queryClose({ sessionId: props.sessionId, resultSetId: errRes.resultSetId })
+        .catch(() => undefined)
+    }
+    const detail = formatOracleRoutineErrors(errRes.rows)
+    const statusKey = oracleObjectStatusI18nKey(status)
+    const statusLabel = statusKey ? t(`modules.oracle.debug.${statusKey}`) : status
+    const base = t('modules.oracle.objectScript.stillInvalid', { status: statusLabel })
+    throw new Error(detail ? `${base}\n${detail}` : base)
+  }
+
+  function dropSqlForKind(kind: OracleObjectKind, schema: string, name: string): string {
+    switch (kind) {
+      case 'function':
+        return dropFunctionSql(schema, name)
+      case 'package':
+        return dropPackageSql(schema, name)
+      case 'trigger':
+        return dropTriggerSql(schema, name)
+      case 'synonym':
+        return dropSynonymSql(schema, name)
+      case 'sequence':
+        return dropSequenceSql(schema, name)
+      case 'procedure':
+      default:
+        return dropProcedureSql(schema, name)
+    }
+  }
+
+  /**
+   * 保存对象脚本：
+   * - 序列无可用 OR REPLACE（23ai 前 ORA-00922）→ 先 DROP 再 CREATE
+   * - 包/同义词/触发器/过程/函数 → CREATE OR REPLACE + schema；过程/函数另校验 STATUS
+   */
+  async function applyObjectFullScript(
+    raw: string,
+    schema: string,
+    namesToDrop: Iterable<string>,
+  ): Promise<void> {
+    const kind = objectKind.value
+    const normalized = ensureOracleCreateSchema(raw, schema)
+    const hasReplace = /^create\s+or\s+replace\b/i.test(normalized.trim())
+    // 序列必须 DROP；其余若编辑器里仍是裸 CREATE（无 OR REPLACE）也先 DROP 再重建
+    const needDrop = kind === 'sequence' || !hasReplace
+    if (needDrop) {
+      for (const name of namesToDrop) {
+        if (!name.trim()) continue
+        try {
+          await execOne(dropSqlForKind(kind, schema, name))
+        } catch {
+          // 对象可能不存在；继续 CREATE
+        }
+      }
+    }
+
+    if (kind === 'procedure' || kind === 'function') {
+      const routineKind = kind === 'function' ? 'function' : ('procedure' as const)
+      const name =
+        parseOracleObjectNameFromSql(normalized, kind) || objectName.value || ''
+      try {
+        // 必须走拆句（独立行 / 是 SQL*Plus 终止符，不能送给 OCI）
+        await execStatements(hasReplace ? normalized : toReplaceSql(normalized))
+        await assertRoutineValidAfterApply(schema, name, routineKind)
+      } catch (e) {
+        throw await enrichCompileFailure(e, schema, name, routineKind)
+      }
+      return
+    }
+
+    // package / synonym / trigger / sequence
+    await execStatements(kind === 'sequence' || hasReplace ? normalized : toReplaceSql(normalized))
+  }
+
+  /**
+   * 仅在树结构可能变化时调用：新建，或编辑时对象名变更。
+   * 同名 CREATE OR REPLACE 不刷树。
+   * @param updateCounts 新建时就地 patch 分类徽章，不重拉 schema
+   */
   async function refreshTree(updateCounts: boolean): Promise<void> {
     if (!props.profileId || !schemaName.value) return
     const conn = { profileId: props.profileId, kind: 'oracle' } as ConnItem
@@ -303,6 +468,14 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     }
   }
 
+  function objectIdentityChanged(previousName: string, nextName: string): boolean {
+    const prev = previousName.trim()
+    const next = nextName.trim()
+    if (!next) return false
+    if (!prev) return true
+    return prev.toLowerCase() !== next.toLowerCase()
+  }
+
   function switchToAlterAfterCreate(name: string): void {
     localDesignMode.value = 'alter'
     localObjectName.value = name
@@ -316,9 +489,14 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     if (objectKind.value === 'view') {
       nextProps.table = name
       nextProps.isView = true
-    } else {
+    } else if (objectKind.value === 'sequence') {
+      nextProps.sequence = name
+    } else if (isRoutineObjectKind(objectKind.value)) {
       nextProps.routine = name
       nextProps.routineKind = objectKind.value
+      if (objectKind.value === 'package') {
+        nextProps.package = name
+      }
     }
     tabs.updateTabProps(tabId, nextProps)
     const tab = tabs.allTabs.find((item) => item.tabId === tabId)
@@ -348,23 +526,29 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
     try {
       if (!selectionOnly && schemaName.value && appliedName) {
         if (objectKind.value === 'view') {
-          await execStatements(toReplaceSql(raw))
-        } else if (objectKind.value === 'package') {
-          await execStatements(raw)
+          await execStatements(ensureOracleCreateSchema(raw, schemaName.value))
         } else {
           const namesToDrop = new Set<string>([appliedName])
           if (!wasCreate && objectName.value) namesToDrop.add(objectName.value)
-          await applyRoutineFullScript(raw, schemaName.value, namesToDrop)
+          await applyObjectFullScript(raw, schemaName.value, namesToDrop)
         }
       } else {
-        await execStatements(raw)
+        // 无对象名时仍尽量补 schema，避免 CREATE "new_func" 落到登录用户、树上 NIUMA 对象仍 INVALID
+        const prepared =
+          schemaName.value && !selectionOnly
+            ? ensureOracleCreateSchema(raw, schemaName.value)
+            : raw
+        await execStatements(prepared)
       }
       const okMsg = wasCreate
         ? t('modules.oracle.objectScript.createOk', { name: appliedName })
         : t('modules.oracle.objectScript.saveOk')
       lastMessage.value = okMsg
       toast.success(okMsg)
-      await refreshTree(wasCreate)
+      // 编辑源码且对象名未变：树节点集合不变，跳过刷新
+      if (wasCreate || objectIdentityChanged(objectName.value, appliedName)) {
+        await refreshTree(wasCreate)
+      }
 
       if (!selectionOnly) {
         if (objectKind.value === 'view') {
@@ -373,7 +557,11 @@ export function useOracleObjectScript(props: OracleObjectScriptProps) {
           void nextTick(() => {
             suppressDraftPersist = false
           })
-        } else if (/^\s*create\b/i.test(sqlText.value) && !/^create\s+or\s+replace\b/i.test(sqlText.value.trim())) {
+        } else if (
+          objectKind.value !== 'sequence' &&
+          /^\s*create\b/i.test(sqlText.value) &&
+          !/^create\s+or\s+replace\b/i.test(sqlText.value.trim())
+        ) {
           suppressDraftPersist = true
           sqlText.value = toReplaceSql(sqlText.value)
           void nextTick(() => {

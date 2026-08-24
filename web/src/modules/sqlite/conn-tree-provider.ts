@@ -203,7 +203,6 @@ async function loadCategoryChildren(
 }
 
 const CONN_MENU_KEYS = new Set([
-  'query',
   'backup',
   'vacuum',
   'analyze',
@@ -565,9 +564,8 @@ export const sqliteConnTreeProvider: ConnTreeChildProvider = {
   },
 
   connMenuItems(): RsContextMenuItem[] {
-    // 对齐 MySQL 连接节点密度：查询 + 备份 + 维护（壳层另附连接/刷新等）
+    // 对齐 MySQL 连接节点密度：备份 + 维护（壳层另附连接/刷新等）
     return [
-      { key: 'query', label: t('modules.sqlite.tree.connQuery'), icon: 'code-2' },
       { key: 'backup', label: t('modules.sqlite.tree.backup'), icon: 'archive' },
       maintenanceMenus('conn'),
     ]

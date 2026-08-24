@@ -66,6 +66,38 @@ func (d *Dispatcher) queryExec(ctx context.Context, req Request) Response {
 	return okResponse(req.ID, result)
 }
 
+func (d *Dispatcher) routineCall(ctx context.Context, req Request) Response {
+	var params session.RoutineCallParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	if params.SessionID == "" {
+		return errorResponse(req.ID, errSessionIDRequired)
+	}
+
+	db, sess, release, err := d.resolveDBForDatabase(ctx, req.Params, params.Database)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	if sess == nil {
+		release()
+		return errorResponse(req.ID, errSessionIDRequired)
+	}
+	defer release()
+
+	result, err := session.CallRoutine(ctx, sess, db, params)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled") {
+			logOpInfo(MethodRoutineCall, "session", params.SessionID, "canceled", true)
+			return errorResponse(req.ID, err.Error())
+		}
+		logOpWarn(MethodRoutineCall, err, "session", params.SessionID, "routine", params.Schema+"."+params.Name)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodRoutineCall, "session", params.SessionID, "routine", params.Schema+"."+params.Name, "rows", result.RowCount)
+	return okResponse(req.ID, result)
+}
+
 func logQueryExecErr(err error, sessionID, database string) {
 	if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled") {
 		logOpInfo(MethodQueryExec, "session", sessionID, "database", database, "canceled", true)

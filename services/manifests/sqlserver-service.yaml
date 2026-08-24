@@ -12,7 +12,31 @@ session:
     - lsp.open
     - lsp.rpc
     - lsp.close
-    - lsp.lexicon
+    - tree.databases
+    - tree.schemas
+    - tree.tables
+    - tree.routines
+    - tree.sequences
+    - tree.categoryCounts
+    - meta.columns
+    - meta.indexes
+    - meta.primaryKey
+    - meta.ddl
+    - meta.routineSource
+    - meta.foreignKeys
+    - meta.checks
+    - catalog.schemas
+    - catalog.tables
+    - catalog.columns
+    - ddl.designPreview
+    - ddl.designApply
+    - ddl.createTable
+    - ddl.createTablePreview
+    - io.exportCsv
+    - io.importCsv
+    - io.dumpSql
+    - io.execSqlFile
+    - io.cancel
 runtime:
   executable: bin/niuma-sqlserver-service.exe
   executable_windows: bin/niuma-sqlserver-service.exe

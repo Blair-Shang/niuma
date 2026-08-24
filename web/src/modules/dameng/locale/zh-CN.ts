@@ -46,7 +46,7 @@ export default {
         tabNewTrigger: '新建触发器',
         tabNewSynonym: '新建同义词',
         tabNewSequence: '新建序列',
-        tabDebug: '调试辅助',
+        tabCall: '执行调用',
       },
       tree: {
         openQuery: '新建查询',
@@ -89,8 +89,6 @@ export default {
         dropTrigger: '删除触发器',
         procCall: '调用过程',
         funcCall: '调用函数',
-        procDebug: '调试辅助',
-        funcDebug: '调试辅助',
         copyName: '复制名称',
         copyQualified: '复制限定名',
         copyDdl: '复制 DDL',

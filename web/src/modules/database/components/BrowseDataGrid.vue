@@ -9,7 +9,10 @@ import { toRef } from 'vue'
 import type { BrowseDataRow } from '../types/browse-data'
 import BrowseCellEditorDialog from './BrowseCellEditorDialog.vue'
 import { useBrowseGridEditing } from '../composables/useBrowseGridEditing'
-import type { BrowseCellEditorDialogLabels } from '../composables/useBrowseCellDialog'
+import type {
+  BrowseCellEditorDialogLabels,
+  BrowseResolveFullCellValue,
+} from '../composables/useBrowseCellDialog'
 import type { BrowseRowChange } from '../utils/browse-result-column'
 
 const selectedRowKeys = defineModel<string[]>('selectedRowKeys', { default: () => [] })
@@ -27,6 +30,8 @@ const props = withDefaults(
     gutterWidth?: number
     dialogLabels?: Partial<BrowseCellEditorDialogLabels>
     emptyText?: string
+    /** 方言异步加载截断 LOB 全量（如 Oracle query.loadLob） */
+    resolveFullCellValue?: BrowseResolveFullCellValue
   }>(),
   {
     loading: false,
@@ -65,6 +70,7 @@ const {
   gridEditProps,
 } = useBrowseGridEditing({
   getLabels: () => props.dialogLabels ?? {},
+  resolveFullCellValue: props.resolveFullCellValue,
 })
 
 const layoutActive = toRef(props, 'layoutActive')

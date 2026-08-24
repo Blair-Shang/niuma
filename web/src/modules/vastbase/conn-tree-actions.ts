@@ -970,9 +970,7 @@ export function onConnMenuSelect(conn: ConnItem, key: string): boolean {
     useConnectionNavigation().connect(conn, { initialTab: 'tools' })
     return true
   }
-  if (key !== 'query') return false
-  openQuery(conn, undefined)
-  return true
+  return false
 }
 
 export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key: string): void {
@@ -1177,6 +1175,7 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
       design: 'design',
       deps: 'deps',
       source: 'source',
+      // call = 生成/执行 CALL（查询面板）；debug = 真断点调试器（VastDebugPane）
       call: 'call',
       debug: 'debug',
       monitor: 'monitor',

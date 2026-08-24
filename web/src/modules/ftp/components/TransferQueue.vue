@@ -38,7 +38,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-interface TransferQueueRow {
+interface TransferQueueRow extends Record<string, unknown> {
   taskId: string
   direction: 'upload' | 'download'
   source: string
@@ -156,7 +156,6 @@ const columns = computed((): RsTableColumn<TransferQueueRow>[] => {
       title: t('modules.ftp.transfer.colSource'),
       width: 110,
       ellipsis: true,
-      tooltip: (row) => row.source,
     })
   }
   cols.push(
@@ -165,14 +164,13 @@ const columns = computed((): RsTableColumn<TransferQueueRow>[] => {
       title: t('modules.ftp.transfer.colName'),
       minWidth: 120,
       ellipsis: true,
-      tooltip: (row) => row.name,
+      tooltip: (row) => (row.error ? `${row.name}\n${row.error}` : undefined),
     },
     {
       key: 'remotePath',
       title: t('modules.ftp.transfer.colRemotePath'),
       minWidth: 160,
       ellipsis: true,
-      tooltip: (row) => row.remotePath || undefined,
     },
     {
       key: 'progressLabel',
@@ -186,7 +184,6 @@ const columns = computed((): RsTableColumn<TransferQueueRow>[] => {
       width: 168,
       align: 'right',
       ellipsis: true,
-      tooltip: (row) => row.sizeLabel,
     },
     {
       key: 'speedLabel',
@@ -239,6 +236,11 @@ async function onContextMenuSelect(key: string, row: TransferQueueRow | null): P
     await copyTextToClipboard(row.localPath)
   }
 }
+
+/** RsTable 动态列 slot 的 row 推断为 object，这里收窄回本表面类型。 */
+function asQueueRow(row: object): TransferQueueRow {
+  return row as TransferQueueRow
+}
 </script>
 
 <template>
@@ -284,29 +286,31 @@ async function onContextMenuSelect(key: string, row: TransferQueueRow | null): P
         fill
         :bordered="false"
         :context-menu-items="buildCtxItems"
+        cell-tooltip
         @context-menu-select="(key, row) => void onContextMenuSelect(key, row)"
       >
         <template #direction="{ row }">
           <span
             class="tq-dir"
-            :class="row.direction === 'upload' ? 'tq-dir--up' : 'tq-dir--down'"
+            :class="asQueueRow(row).direction === 'upload' ? 'tq-dir--up' : 'tq-dir--down'"
           >
             <RsIcon
-              :name="row.direction === 'upload' ? 'upload' : 'download'"
+              :name="asQueueRow(row).direction === 'upload' ? 'upload' : 'download'"
               :size="12"
             />
           </span>
         </template>
 
         <template #name="{ row }">
-          <span class="tq-name" :title="row.name">{{ row.name }}</span>
-          <span v-if="row.error" class="tq-error" :title="row.error">{{ row.error }}</span>
+          <template v-if="asQueueRow(row).error">
+            <span class="tq-name">{{ asQueueRow(row).name }}</span>
+            <span class="tq-error">{{ asQueueRow(row).error }}</span>
+          </template>
+          <template v-else>{{ asQueueRow(row).name }}</template>
         </template>
 
         <template #remotePath="{ row }">
-          <span class="tq-remote" :title="row.remotePath || undefined">
-            {{ row.remotePath || '—' }}
-          </span>
+          <span class="tq-remote">{{ asQueueRow(row).remotePath || '—' }}</span>
         </template>
 
         <template #progressLabel="{ row }">
@@ -315,56 +319,58 @@ async function onContextMenuSelect(key: string, row: TransferQueueRow | null): P
               <div
                 class="tq-bar-fill"
                 :class="{
-                  'tq-bar-fill--done': row.state === 'done',
-                  'tq-bar-fill--failed': row.state === 'failed',
+                  'tq-bar-fill--done': asQueueRow(row).state === 'done',
+                  'tq-bar-fill--failed': asQueueRow(row).state === 'failed',
                 }"
-                :style="{ width: `${row.progress}%` }"
+                :style="{ width: `${asQueueRow(row).progress}%` }"
               />
             </div>
-            <span class="tq-pct">{{ row.progressLabel }}</span>
+            <span class="tq-pct">{{ asQueueRow(row).progressLabel }}</span>
           </div>
         </template>
 
         <template #sizeLabel="{ row }">
-          <span class="tq-meta">{{ row.sizeLabel }}</span>
+          <span class="tq-meta">{{ asQueueRow(row).sizeLabel }}</span>
         </template>
 
         <template #speedLabel="{ row }">
-          <span class="tq-meta">{{ row.speedLabel }}</span>
+          <span class="tq-meta">{{ asQueueRow(row).speedLabel }}</span>
         </template>
 
         <template #stateLabel="{ row }">
-          <span class="tq-state" :class="stateClass(row.state)">{{ row.stateLabel }}</span>
+          <span class="tq-state" :class="stateClass(asQueueRow(row).state)">{{
+            asQueueRow(row).stateLabel
+          }}</span>
         </template>
 
         <template #actions="{ row }">
           <div class="tq-actions">
             <RsButton
-              v-if="row.canPause"
+              v-if="asQueueRow(row).canPause"
               size="sm"
               variant="ghost"
               icon="pause"
               icon-only
               :tooltip="t('modules.ftp.transfer.pause')"
-              @click="emit('pause', row.taskId)"
+              @click="emit('pause', asQueueRow(row).taskId)"
             />
             <RsButton
-              v-if="row.canResume"
+              v-if="asQueueRow(row).canResume"
               size="sm"
               variant="ghost"
               icon="play"
               icon-only
               :tooltip="t('modules.ftp.transfer.resume')"
-              @click="emit('resume', row.taskId)"
+              @click="emit('resume', asQueueRow(row).taskId)"
             />
             <RsButton
-              v-if="row.canCancel"
+              v-if="asQueueRow(row).canCancel"
               size="sm"
               variant="ghost"
               icon="x"
               icon-only
               :tooltip="t('modules.ftp.transfer.cancel')"
-              @click="emit('cancel', row.taskId)"
+              @click="emit('cancel', asQueueRow(row).taskId)"
             />
           </div>
         </template>
@@ -511,26 +517,16 @@ async function onContextMenuSelect(key: string, row: TransferQueueRow | null): P
 
 .tq-name {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--rs-text);
 }
 
 .tq-error {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 0.65rem;
   color: var(--rs-danger);
 }
 
 .tq-remote {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--rs-muted);
 }
 

@@ -1,6 +1,6 @@
 /**
  * MySQL Session 功能面板标识。
- * query / browse / ddl / objectScript / monitor / design / tools / debug。
+ * query / browse / ddl / objectScript / monitor / design / tools / call。
  */
 import type { MysqlObjectKind, MysqlObjectScriptMode } from '@/modules/mysql/types/object-script'
 
@@ -12,7 +12,7 @@ export type MysqlSessionTab =
   | 'monitor'
   | 'design'
   | 'tools'
-  | 'debug'
+  | 'call'
 
 /** 面板解析所需的静态资源范围。 */
 export interface MysqlPaneScope {
@@ -73,7 +73,7 @@ function relationProps(ctx: MysqlPaneContext): Record<string, unknown> {
   }
 }
 
-function debugProps(ctx: MysqlPaneContext): Record<string, unknown> {
+function callProps(ctx: MysqlPaneContext): Record<string, unknown> {
   return {
     sessionId: ctx.sessionId,
     profileId: ctx.profileId,
@@ -183,12 +183,13 @@ export const mysqlPaneRegistry: Record<MysqlSessionTab, MysqlFeatureDef> = {
       buildProps: toolsProps,
     }),
   },
-  debug: {
+  call: {
     icon: 'bug',
-    labelKey: 'modules.mysql.session.tabDebug',
+    labelKey: 'modules.mysql.session.tabCall',
     resolvePane: () => ({
+      // 组件名历史为 DebugPane，实际是执行调用（非断点调试器）
       loader: () => import('@/modules/mysql/components/MysqlDebugPane.vue'),
-      buildProps: debugProps,
+      buildProps: callProps,
     }),
   },
 }
@@ -202,7 +203,7 @@ export function normalizeMysqlFeature(tab: string | undefined): MysqlSessionTab 
     tab === 'monitor' ||
     tab === 'design' ||
     tab === 'tools' ||
-    tab === 'debug'
+    tab === 'call'
   ) {
     return tab
   }
@@ -219,6 +220,6 @@ export function mysqlFeatureEmbedsChrome(tab: MysqlSessionTab): boolean {
     tab === 'monitor' ||
     tab === 'design' ||
     tab === 'tools' ||
-    tab === 'debug'
+    tab === 'call'
   )
 }

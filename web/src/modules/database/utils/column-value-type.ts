@@ -117,6 +117,11 @@ const BINARY_LOB_TYPES = new Set([
 export interface ResolveSqlValueTypeOptions {
   /** 列显示宽度（TINYINT(1) / BIT(1) 等） */
   length?: number | null
+  /**
+   * 方言提示。Oracle DATE 含时分秒，需 datetime 选择器；
+   * MySQL/PG 的 DATE 仍为纯日期。
+   */
+  dialect?: 'oracle' | 'mysql' | 'postgres' | 'dameng' | 'kingbase' | 'vastbase' | string
 }
 
 /** 是否为二进制 LOB / RAW（非 CLOB 文本）。 */
@@ -157,7 +162,16 @@ export function resolveSqlValueType(
   }
 
   if (BOOLEAN_TYPES.has(t)) return 'boolean'
-  if (DATE_TYPES.has(t)) return 'date'
+  if (DATE_TYPES.has(t)) {
+    // Oracle / 达梦 DATE = datetime（含秒）；勿用纯日期面板丢掉时分秒
+    if (
+      t === 'date' &&
+      (options?.dialect === 'oracle' || options?.dialect === 'dameng')
+    ) {
+      return 'datetime'
+    }
+    return 'date'
+  }
   if (DATETIME_TYPES.has(t)) return 'datetime'
   if (NUMBER_TYPES.has(t)) return 'number'
   if (isSqlBinaryLobType(t)) return 'text'

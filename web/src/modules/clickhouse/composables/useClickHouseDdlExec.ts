@@ -108,7 +108,9 @@ export function useClickHouseDdlExec() {
       await execClickHouseSql(req.profileId, sql, database)
       toast.success(t('modules.clickhouse.ddl.done'))
       if (conn) {
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths)
+        if (req.action !== 'truncate_table') {
+          await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths)
+        }
       } else {
         invalidateConnTreeChildren(req.profileId)
       }

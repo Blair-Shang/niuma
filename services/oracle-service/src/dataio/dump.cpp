@@ -1,6 +1,10 @@
 #include "dataio/ops.hpp"
 
 #include "dataio/atomic_output.hpp"
+#include "dataio/script_split.hpp"
+#include "meta/metadata_ddl.hpp"
+#include "meta/relation.hpp"
+#include "meta/routines.hpp"
 #include "session/connect.hpp"
 #include "session/sql_rows.hpp"
 #include "util/dpi_error.hpp"
@@ -33,6 +37,8 @@ bool OpenIoSession(const session::ConnectParams& connect, session::Session& out,
     return false;
   }
   out.conn = std::move(opened.conn);
+  out.proxy_relay = std::move(opened.proxy_relay);
+  out.ssh_tunnel = std::move(opened.ssh_tunnel);
   out.ctx = session::SharedContext(error);
   out.params = connect;
   out.profile = std::move(opened.profile);
@@ -60,13 +66,41 @@ bool ExecSimple(session::Session& s, const std::string& sql, std::string& error)
   return true;
 }
 
-/** 关闭 GET_DDL 的 schema 前缀，便于跨 schema 还原（依赖 CURRENT_SCHEMA）。 */
-bool DisableEmitSchema(session::Session& s) {
+/** 配置 GET_DDL 变换，便于跨环境还原。 */
+bool ConfigureMetadataTransforms(session::Session& s) {
   std::string err;
+  // EMIT_SCHEMA=FALSE：对象名不加 schema，还原时靠 CURRENT_SCHEMA。
+  // SEGMENT_ATTRIBUTES/STORAGE/TABLESPACE=FALSE：去掉表空间与物理属性，避免目标库
+  // 无同名 tablespace 时 CREATE 失败，随后 INSERT 全员 ORA-00942。
+  // REF_CONSTRAINTS=FALSE：单表/子集还原时外键常缺父表；PK/UK/CHECK 仍保留。
+  // 各参数独立设置，旧版本不支持某项时不拖垮其余。
   return ExecSimple(s,
                     "BEGIN\n"
-                    "  DBMS_METADATA.SET_TRANSFORM_PARAM("
+                    "  BEGIN\n"
+                    "    DBMS_METADATA.SET_TRANSFORM_PARAM("
                     "DBMS_METADATA.SESSION_TRANSFORM, 'EMIT_SCHEMA', FALSE);\n"
+                    "  EXCEPTION WHEN OTHERS THEN NULL;\n"
+                    "  END;\n"
+                    "  BEGIN\n"
+                    "    DBMS_METADATA.SET_TRANSFORM_PARAM("
+                    "DBMS_METADATA.SESSION_TRANSFORM, 'SEGMENT_ATTRIBUTES', FALSE);\n"
+                    "  EXCEPTION WHEN OTHERS THEN NULL;\n"
+                    "  END;\n"
+                    "  BEGIN\n"
+                    "    DBMS_METADATA.SET_TRANSFORM_PARAM("
+                    "DBMS_METADATA.SESSION_TRANSFORM, 'STORAGE', FALSE);\n"
+                    "  EXCEPTION WHEN OTHERS THEN NULL;\n"
+                    "  END;\n"
+                    "  BEGIN\n"
+                    "    DBMS_METADATA.SET_TRANSFORM_PARAM("
+                    "DBMS_METADATA.SESSION_TRANSFORM, 'TABLESPACE', FALSE);\n"
+                    "  EXCEPTION WHEN OTHERS THEN NULL;\n"
+                    "  END;\n"
+                    "  BEGIN\n"
+                    "    DBMS_METADATA.SET_TRANSFORM_PARAM("
+                    "DBMS_METADATA.SESSION_TRANSFORM, 'REF_CONSTRAINTS', FALSE);\n"
+                    "  EXCEPTION WHEN OTHERS THEN NULL;\n"
+                    "  END;\n"
                     "END;",
                     err);
 }
@@ -158,27 +192,18 @@ std::string TrimRight(std::string s) {
   return s;
 }
 
+std::string TrimLeft(std::string s) {
+  size_t i = 0;
+  while (i < s.size() &&
+         (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) {
+    ++i;
+  }
+  return i == 0 ? s : s.substr(i);
+}
+
 /** 去掉末尾独占行的 /（GET_DDL 偶发自带；转储会再补）。保留 PL/SQL 的 END;。 */
 std::string TrimTrailingSlashLines(std::string s) {
-  s = TrimRight(std::move(s));
-  while (!s.empty()) {
-    const size_t nl = s.find_last_of("\n");
-    std::string last = nl == std::string::npos ? s : s.substr(nl + 1);
-    // trim last line spaces
-    while (!last.empty() && (last.back() == ' ' || last.back() == '\t' || last.back() == '\r')) {
-      last.pop_back();
-    }
-    size_t start = 0;
-    while (start < last.size() && (last[start] == ' ' || last[start] == '\t')) {
-      ++start;
-    }
-    last = last.substr(start);
-    if (last != "/") {
-      break;
-    }
-    s = nl == std::string::npos ? std::string{} : TrimRight(s.substr(0, nl));
-  }
-  return s;
+  return StripSqlPlusTerminator(std::move(s));
 }
 
 /** 非 PL/SQL：去掉末尾 ;，写文件时再统一补上。 */
@@ -191,16 +216,19 @@ std::string TrimTrailingSemicolons(std::string s) {
   return s;
 }
 
-/** ALL_SOURCE 回退文本补 CREATE OR REPLACE。 */
+/** ALL_SOURCE 回退文本补 CREATE OR REPLACE。
+ * GET_DDL 常带前导换行/空格；必须先 TrimLeft，否则会误判并再包一层
+ * `CREATE OR REPLACE FUNCTION`，执行时报 ORA-04050。 */
 std::string EnsureCreateOrReplace(std::string ddl, const std::string& object_type) {
-  ddl = TrimRight(std::move(ddl));
+  ddl = TrimLeft(TrimRight(std::move(ddl)));
   if (ddl.empty()) return ddl;
-  std::string upper = Upper(ddl.substr(0, 64));
+  const size_t probe = std::min<size_t>(ddl.size(), 96);
+  std::string upper = Upper(ddl.substr(0, probe));
   if (upper.rfind("CREATE", 0) == 0) {
     if (upper.rfind("CREATE OR REPLACE", 0) == 0) {
       return ddl;
     }
-    // CREATE XXX → CREATE OR REPLACE XXX
+    // CREATE [EDITIONABLE] XXX → CREATE OR REPLACE [EDITIONABLE] XXX
     return "CREATE OR REPLACE" + ddl.substr(6);
   }
   const std::string ot = Upper(object_type);
@@ -228,16 +256,18 @@ std::string StripSchemaQualifier(std::string sql, const std::string& schema) {
 
 int CreateRank(const std::string& type) {
   if (type == "sequence") return 1;
-  if (type == "table") return 2;
-  if (type == "view") return 3;
-  if (type == "procedure") return 4;
-  if (type == "function") return 5;
-  if (type == "package") return 6;
+  if (type == "synonym") return 2;
+  if (type == "table") return 3;
+  if (type == "view") return 4;
+  if (type == "procedure") return 5;
+  if (type == "function") return 6;
+  if (type == "package") return 7;
+  if (type == "trigger") return 8;
   return 9;
 }
 
 bool IsPlsqlType(const std::string& type) {
-  return type == "procedure" || type == "function" || type == "package";
+  return type == "procedure" || type == "function" || type == "package" || type == "trigger";
 }
 
 std::string DropStatement(const std::string& type, const std::string& qn) {
@@ -259,6 +289,12 @@ std::string DropStatement(const std::string& type, const std::string& qn) {
   if (type == "sequence") {
     return "DROP SEQUENCE " + qn + ";\n";
   }
+  if (type == "synonym") {
+    return "DROP SYNONYM " + qn + ";\n";
+  }
+  if (type == "trigger") {
+    return "DROP TRIGGER " + qn + ";\n";
+  }
   return {};
 }
 
@@ -270,12 +306,14 @@ std::string DumpObjectType(const std::string& object_type) {
   if (t == "FUNCTION") return "function";
   if (t == "PACKAGE" || t == "PACKAGE BODY") return "package";
   if (t == "SEQUENCE") return "sequence";
+  if (t == "SYNONYM") return "synonym";
+  if (t == "TRIGGER") return "trigger";
   return {};
 }
 
 struct DumpObject {
   std::string name;
-  std::string type;  // table | view | procedure | function | package | sequence
+  std::string type;  // table | view | procedure | function | package | sequence | synonym | trigger
   bool has_package_body = false;
 };
 
@@ -293,133 +331,17 @@ bool NameAllowed(const std::string& obj_type, const std::string& name,
   return false;
 }
 
-bool ReadCompleteLob(session::Session& session, dpiOracleTypeNum oracle_type,
-                     dpiNativeTypeNum native, dpiData* data, uint64_t max_bytes,
-                     std::string& value, std::string& error) {
-  value.clear();
-  if (!data || data->isNull) return true;
-  if (native == DPI_NATIVE_TYPE_BYTES) {
-    const uint64_t length = data->value.asBytes.length;
-    if (length > max_bytes) {
-      error = "oracle: LOB exceeds supported size";
-      return false;
-    }
-    value.assign(reinterpret_cast<const char*>(data->value.asBytes.ptr),
-                 data->value.asBytes.length);
-    return true;
-  }
-  if (native != DPI_NATIVE_TYPE_LOB || !data->value.asLOB) {
-    error = "oracle: unsupported LOB native type";
-    return false;
-  }
-
-  uint64_t units = 0;
-  if (dpiLob_getSize(data->value.asLOB, &units) < 0) {
-    error = util::FormatDpiError(session.ctx.get(), "oracle: failed to get LOB size");
-    return false;
-  }
-  uint64_t bytes_per_unit = 1;
-  if (oracle_type != DPI_ORACLE_TYPE_BLOB) {
-    dpiEncodingInfo encoding{};
-    if (dpiConn_getEncodingInfo(session.conn.get(), &encoding) < 0) {
-      error = util::FormatDpiError(session.ctx.get(), "oracle: failed to get LOB encoding");
-      return false;
-    }
-    const int32_t width =
-        oracle_type == DPI_ORACLE_TYPE_NCLOB ? encoding.nmaxBytesPerCharacter
-                                             : encoding.maxBytesPerCharacter;
-    bytes_per_unit = width > 0 ? static_cast<uint64_t>(width) : 4;
-  }
-  if (units > std::numeric_limits<uint64_t>::max() / bytes_per_unit) {
-    error = "oracle: LOB size overflow";
-    return false;
-  }
-  if (max_bytes != std::numeric_limits<uint64_t>::max() && units > max_bytes) {
-    error = "oracle: LOB exceeds supported size";
-    return false;
-  }
-  const uint64_t capacity = units * bytes_per_unit;
-  if (capacity > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-    error = "oracle: LOB is too large for this process";
-    return false;
-  }
-  try {
-    value.resize(static_cast<size_t>(capacity));
-  } catch (const std::bad_alloc&) {
-    error = "oracle: insufficient memory to read LOB";
-    return false;
-  }
-  uint64_t value_length = capacity;
-  if (units > 0 &&
-      dpiLob_readBytes(data->value.asLOB, 1, units, value.data(), &value_length) < 0) {
-    error = util::FormatDpiError(session.ctx.get(), "oracle: failed to read LOB");
-    return false;
-  }
-  if (value_length > capacity) {
-    error = "oracle: invalid LOB length returned by driver";
-    return false;
-  }
-  value.resize(static_cast<size_t>(value_length));
-  if (value_length > max_bytes) {
-    error = "oracle: LOB exceeds supported size";
-    return false;
-  }
-  return true;
-}
-
 bool GetMetadataDdl(session::Session& session, const std::string& object_type,
                     const std::string& schema, const std::string& name, std::string& ddl,
                     std::string& error) {
-  if (!session.conn || !session.ctx) {
-    error = "oracle: session has no connection";
+  std::string raw;
+  if (!meta::FetchDbmsMetadataDdl(session, object_type, schema, name, raw, error)) {
+    if (!error.empty()) {
+      error += " for " + object_type + " " + schema + "." + name;
+    }
     return false;
   }
-  const std::string sql = "SELECT DBMS_METADATA.GET_DDL(" + util::QuoteLiteral(object_type) + ", " +
-                          util::QuoteLiteral(name) + ", " + util::QuoteLiteral(schema) + ") FROM DUAL";
-  util::StmtGuard stmt;
-  dpiStmt* raw = nullptr;
-  if (dpiConn_prepareStmt(session.conn.get(), 0, sql.c_str(), static_cast<uint32_t>(sql.size()), nullptr, 0,
-                          &raw) < 0) {
-    error = util::FormatDpiError(session.ctx.get(), "oracle: failed to prepare DDL query");
-    return false;
-  }
-  stmt.Reset(raw);
-  uint32_t cols = 0;
-  if (dpiStmt_execute(stmt.Get(), DPI_MODE_EXEC_DEFAULT, &cols) < 0) {
-    error = util::FormatDpiError(session.ctx.get(), "oracle: failed to execute DDL query");
-    return false;
-  }
-  if (cols != 1) {
-    error = "oracle: DDL query returned unexpected metadata";
-    return false;
-  }
-  int found = 0;
-  uint32_t buffer_row = 0;
-  if (dpiStmt_fetch(stmt.Get(), &found, &buffer_row) < 0) {
-    error = util::FormatDpiError(session.ctx.get(), "oracle: failed to fetch DDL");
-    return false;
-  }
-  if (!found) {
-    error = "oracle: DDL not found for " + object_type + " " + schema + "." + name;
-    return false;
-  }
-  dpiNativeTypeNum native = DPI_NATIVE_TYPE_BYTES;
-  dpiData* data = nullptr;
-  if (dpiStmt_getQueryValue(stmt.Get(), 1, &native, &data) < 0) {
-    error = util::FormatDpiError(session.ctx.get(), "oracle: failed to read DDL value");
-    return false;
-  }
-  std::string lob;
-  if (!ReadCompleteLob(session, DPI_ORACLE_TYPE_CLOB, native, data, util::kLobFullMax, lob,
-                       error)) {
-    error += " for " + object_type + " " + schema + "." + name;
-    return false;
-  }
-  ddl = TrimTrailingSlashLines(std::move(lob));
-  if (ddl.empty()) {
-    error = "oracle: empty DDL for " + object_type + " " + schema + "." + name;
-    return false;
-  }
+  ddl = TrimTrailingSlashLines(std::move(raw));
   return true;
 }
 
@@ -428,31 +350,72 @@ bool LoadObjectBlocks(session::Session& s, const std::string& schema, const std:
                       std::vector<std::string>& blocks, std::string& error) {
   blocks.clear();
   const std::string t = Upper(oracle_type);
+  // 表/视图：走 meta.GetDDL（GET_DDL 失败时视图降级 ALL_VIEWS、表降级列重建）。
   if (t == "TABLE" || t == "VIEW") {
+    meta::RelationRef ref;
+    ref.schema = schema;
+    ref.name = name;
+    ref.object_type = t == "VIEW" ? "view" : "table";
+    const auto j = meta::GetDDL(s, ref, error);
+    if (!error.empty() || !j.contains("ddl") || !j["ddl"].is_string()) {
+      if (error.empty()) {
+        error = "oracle: no DDL generated for " + t + " " + schema + "." + name;
+      }
+      return false;
+    }
+    blocks.push_back(TrimTrailingSemicolons(j["ddl"].get<std::string>()));
+    return true;
+  }
+  if (t == "SEQUENCE" || t == "SYNONYM") {
     std::string ddl;
     if (!GetMetadataDdl(s, t, schema, name, ddl, error)) return false;
     blocks.push_back(TrimTrailingSemicolons(std::move(ddl)));
     return true;
   }
-  if (t == "SEQUENCE") {
+  if (t == "TRIGGER") {
     std::string ddl;
-    if (!GetMetadataDdl(s, "SEQUENCE", schema, name, ddl, error)) return false;
-    blocks.push_back(TrimTrailingSemicolons(std::move(ddl)));
+    if (!GetMetadataDdl(s, "TRIGGER", schema, name, ddl, error)) return false;
+    blocks.push_back(EnsureCreateOrReplace(std::move(ddl), "TRIGGER"));
     return true;
   }
+  // 过程/函数：与编辑源码一致——GET_DDL 失败则拼 ALL_SOURCE（避免仅 GET_DDL 路径硬失败）。
   if (t == "PROCEDURE" || t == "FUNCTION") {
-    std::string ddl;
-    if (!GetMetadataDdl(s, t, schema, name, ddl, error)) return false;
-    blocks.push_back(EnsureCreateOrReplace(std::move(ddl), t));
+    meta::RoutineRef ref;
+    ref.schema = schema;
+    ref.name = name;
+    ref.kind = t == "FUNCTION" ? "function" : "procedure";
+    const auto j = meta::GetRoutineSource(s, ref, error);
+    if (!error.empty() || !j.contains("definition") || !j["definition"].is_string()) {
+      if (error.empty()) {
+        error = "oracle: no DDL generated for " + t + " " + schema + "." + name;
+      }
+      return false;
+    }
+    blocks.push_back(EnsureCreateOrReplace(j["definition"].get<std::string>(), t));
     return true;
   }
+  // 包：GET_DDL 失败则 ALL_SOURCE（包头/包体）。
   if (t == "PACKAGE") {
-    std::string ddl;
-    if (!GetMetadataDdl(s, "PACKAGE", schema, name, ddl, error)) return false;
-    blocks.push_back(EnsureCreateOrReplace(std::move(ddl), "PACKAGE"));
-    if (has_package_body) {
-      if (!GetMetadataDdl(s, "PACKAGE_BODY", schema, name, ddl, error)) return false;
-      blocks.push_back(EnsureCreateOrReplace(std::move(ddl), "PACKAGE BODY"));
+    meta::PackageRef ref;
+    ref.schema = schema;
+    ref.name = name;
+    ref.part = "both";
+    const auto j = meta::GetPackageSource(s, ref, error);
+    if (!error.empty()) {
+      return false;
+    }
+    if (j.contains("definition") && j["definition"].is_string()) {
+      blocks.push_back(EnsureCreateOrReplace(j["definition"].get<std::string>(), "PACKAGE"));
+    }
+    if (j.contains("bodyDefinition") && j["bodyDefinition"].is_string()) {
+      blocks.push_back(EnsureCreateOrReplace(j["bodyDefinition"].get<std::string>(), "PACKAGE BODY"));
+    } else if (has_package_body) {
+      error = "oracle: package body not found: " + schema + "." + name;
+      return false;
+    }
+    if (blocks.empty()) {
+      error = "oracle: no DDL generated for PACKAGE " + schema + "." + name;
+      return false;
     }
     return true;
   }
@@ -483,6 +446,8 @@ bool ResolveDumpObjects(session::Session& s, const DumpParams& dump, std::vector
     type_specs.push_back("PACKAGE BODY");
   }
   if (dump.include_sequences) type_specs.push_back("SEQUENCE");
+  if (dump.include_synonyms) type_specs.push_back("SYNONYM");
+  if (dump.include_triggers) type_specs.push_back("TRIGGER");
   if (type_specs.empty()) {
     return true;
   }
@@ -711,8 +676,8 @@ bool DataLiteral(session::Session& session, const DumpColumn& column, dpiNativeT
   if (type == DPI_ORACLE_TYPE_CLOB || type == DPI_ORACLE_TYPE_NCLOB ||
       type == DPI_ORACLE_TYPE_BLOB) {
     std::string lob;
-    if (!ReadCompleteLob(session, type, native, data, std::numeric_limits<uint64_t>::max(), lob,
-                         error)) {
+    if (!util::ReadCompleteLob(session.conn.get(), session.ctx.get(), type, native, data,
+                               std::numeric_limits<uint64_t>::max(), lob, error)) {
       error += " for column " + column.name;
       return false;
     }
@@ -788,6 +753,13 @@ bool WriteInsertData(session::Session& s, std::ofstream& out, const std::string&
         dpiStmt_defineValue(stmt.Get(), i, DPI_ORACLE_TYPE_NUMBER, DPI_NATIVE_TYPE_BYTES, 256, 1,
                             nullptr) < 0) {
       error = util::FormatDpiError(s.ctx.get(), "oracle: failed to define NUMBER fetch type");
+      return false;
+    }
+    if ((column.oracle_type == DPI_ORACLE_TYPE_CLOB || column.oracle_type == DPI_ORACLE_TYPE_NCLOB ||
+         column.oracle_type == DPI_ORACLE_TYPE_BLOB) &&
+        dpiStmt_defineValue(stmt.Get(), i, column.oracle_type, DPI_NATIVE_TYPE_LOB, 0, 0,
+                            nullptr) < 0) {
+      error = util::FormatDpiError(s.ctx.get(), "oracle: failed to define LOB fetch type");
       return false;
     }
     columns.push_back(std::move(column));
@@ -885,8 +857,8 @@ bool RunDumpSql(const session::ConnectParams& connect, const DumpParams& dump, C
     return false;
   }
   IoCancelRegistration cancel_registration(cancel, s.conn.get());
-  // 尽力关闭 schema 前缀；失败时仍靠 StripSchemaQualifier 兜底。
-  (void)DisableEmitSchema(s);
+  // 尽力配置可移植 DDL；失败时仍靠 StripSchemaQualifier 兜底。
+  (void)ConfigureMetadataTransforms(s);
   if (progress) {
     progress(0, 0, "resolving objects in " + dump.schema);
   }
@@ -927,6 +899,7 @@ bool RunDumpSql(const session::ConnectParams& connect, const DumpParams& dump, C
       << "-- truncateBeforeData: " << (dump.truncate_before_data ? "true" : "false") << "\n"
       << "-- note: object names are unqualified so restore can target another schema via "
          "CURRENT_SCHEMA\n"
+      << "-- note: physical attributes (tablespace/storage) are omitted for portable restore\n"
       << "-- note: PL/SQL units (procedure/function/package) are terminated with a lone /\n\n";
 
   int64_t bytes = 0;

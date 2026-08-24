@@ -59,6 +59,8 @@ const SINGLE_OBJECT_SCOPES = new Set([
   'procedure',
   'function',
   'package',
+  'synonym',
+  'trigger',
   'sequence',
 ])
 const CATEGORY_SCOPES = new Set([
@@ -67,6 +69,8 @@ const CATEGORY_SCOPES = new Set([
   'functions',
   'procedures',
   'packages',
+  'synonyms',
+  'triggers',
   'sequences',
 ])
 
@@ -90,6 +94,8 @@ const includeViews = ref(true)
 const includeProcedures = ref(true)
 const includeFunctions = ref(true)
 const includePackages = ref(true)
+const includeSynonyms = ref(true)
+const includeTriggers = ref(true)
 const includeSequences = ref(true)
 const dropIfExists = ref(true)
 const truncateBeforeData = ref(false)
@@ -138,6 +144,8 @@ const scopeLabel = computed(() => {
     functions: 'modules.oracle.io.dumpScopeFunctions',
     procedures: 'modules.oracle.io.dumpScopeProcedures',
     packages: 'modules.oracle.io.dumpScopePackages',
+    synonyms: 'modules.oracle.io.dumpScopeSynonyms',
+    triggers: 'modules.oracle.io.dumpScopeTriggers',
     sequences: 'modules.oracle.io.dumpScopeSequences',
   }
   const key = scope?.dumpScope ? keyByScope[scope.dumpScope] : undefined
@@ -176,6 +184,8 @@ function resetIncludes(opts: {
   procedures?: boolean
   functions?: boolean
   packages?: boolean
+  synonyms?: boolean
+  triggers?: boolean
   sequences?: boolean
 }): void {
   includeTables.value = !!opts.tables
@@ -183,6 +193,8 @@ function resetIncludes(opts: {
   includeProcedures.value = !!opts.procedures
   includeFunctions.value = !!opts.functions
   includePackages.value = !!opts.packages
+  includeSynonyms.value = !!opts.synonyms
+  includeTriggers.value = !!opts.triggers
   includeSequences.value = !!opts.sequences
 }
 
@@ -218,6 +230,16 @@ function applyDumpScopeDefaults(): void {
     mode.value = 'structure_only'
     return
   }
+  if (scope === 'synonyms' || scope === 'synonym') {
+    resetIncludes({ synonyms: true })
+    mode.value = 'structure_only'
+    return
+  }
+  if (scope === 'triggers' || scope === 'trigger') {
+    resetIncludes({ triggers: true })
+    mode.value = 'structure_only'
+    return
+  }
   if (scope === 'table') {
     resetIncludes({ tables: true })
     return
@@ -232,6 +254,8 @@ function applyDumpScopeDefaults(): void {
     procedures: true,
     functions: true,
     packages: true,
+    synonyms: true,
+    triggers: true,
     sequences: true,
   })
 }
@@ -293,6 +317,8 @@ function reset(): void {
   includeProcedures.value = true
   includeFunctions.value = true
   includePackages.value = true
+  includeSynonyms.value = true
+  includeTriggers.value = true
   includeSequences.value = true
   dropIfExists.value = true
   truncateBeforeData.value = false
@@ -337,6 +363,8 @@ function dumpDefaultFileName(): string {
     functions: 'functions',
     procedures: 'procedures',
     packages: 'packages',
+    synonyms: 'synonyms',
+    triggers: 'triggers',
     sequences: 'sequences',
   }
   const suffix = scope.dumpScope ? suffixByScope[scope.dumpScope] : undefined
@@ -397,6 +425,8 @@ async function onConfirm(): Promise<void> {
             includeProcedures: includeProcedures.value,
             includeFunctions: includeFunctions.value,
             includePackages: includePackages.value,
+            includeSynonyms: includeSynonyms.value,
+            includeTriggers: includeTriggers.value,
             includeSequences: includeSequences.value,
           },
         })
@@ -518,6 +548,20 @@ async function onCancelTask(): Promise<void> {
               v-model="includePackages"
               variant="chip"
               :label="t('modules.oracle.io.dumpIncludePackages')"
+              :disabled="busy || objectFiltersLocked"
+            />
+            <DataTransferCheck
+              v-if="isSchemaScope || ctx?.dumpScope === 'synonyms'"
+              v-model="includeSynonyms"
+              variant="chip"
+              :label="t('modules.oracle.io.dumpIncludeSynonyms')"
+              :disabled="busy || objectFiltersLocked"
+            />
+            <DataTransferCheck
+              v-if="isSchemaScope || ctx?.dumpScope === 'triggers'"
+              v-model="includeTriggers"
+              variant="chip"
+              :label="t('modules.oracle.io.dumpIncludeTriggers')"
               :disabled="busy || objectFiltersLocked"
             />
             <DataTransferCheck

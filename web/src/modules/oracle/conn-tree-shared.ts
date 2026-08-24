@@ -25,6 +25,8 @@ export type CategoryId =
   | 'procedures'
   | 'functions'
   | 'packages'
+  | 'synonyms'
+  | 'triggers'
   | 'sequences'
 
 export const SCHEMA_CATEGORIES: Array<{
@@ -37,6 +39,8 @@ export const SCHEMA_CATEGORIES: Array<{
   { id: 'procedures', labelKey: 'modules.oracle.tree.procedures', icon: 'workflow' },
   { id: 'functions', labelKey: 'modules.oracle.tree.functions', icon: 'square-function' },
   { id: 'packages', labelKey: 'modules.oracle.tree.packages', icon: 'package' },
+  { id: 'synonyms', labelKey: 'modules.oracle.tree.synonyms', icon: 'link-2' },
+  { id: 'triggers', labelKey: 'modules.oracle.tree.triggers', icon: 'zap' },
   { id: 'sequences', labelKey: 'modules.oracle.tree.sequences', icon: 'list-ordered' },
 ]
 
@@ -47,6 +51,8 @@ export function isCategoryId(name: string | undefined): name is CategoryId {
     name === 'procedures' ||
     name === 'functions' ||
     name === 'packages' ||
+    name === 'synonyms' ||
+    name === 'triggers' ||
     name === 'sequences'
   )
 }
@@ -84,6 +90,8 @@ function countForCategory(
     procedures: number
     packages: number
     sequences: number
+    synonyms?: number
+    triggers?: number
   } | null,
   id: CategoryId,
 ): number | undefined {
@@ -93,6 +101,8 @@ function countForCategory(
   if (id === 'functions') return counts.functions
   if (id === 'procedures') return counts.procedures
   if (id === 'packages') return counts.packages
+  if (id === 'synonyms') return counts.synonyms
+  if (id === 'triggers') return counts.triggers
   return counts.sequences
 }
 
@@ -102,11 +112,20 @@ function objectIcon(category: CategoryId): string {
   if (category === 'procedures') return 'workflow'
   if (category === 'functions') return 'square-function'
   if (category === 'packages') return 'package'
+  if (category === 'synonyms') return 'link-2'
+  if (category === 'triggers') return 'zap'
   return 'table'
 }
 
 function leafKind(category: CategoryId): 'table' | 'routine' | 'package' | 'sequence' {
-  if (category === 'procedures' || category === 'functions') return 'routine'
+  if (
+    category === 'procedures' ||
+    category === 'functions' ||
+    category === 'synonyms' ||
+    category === 'triggers'
+  ) {
+    return 'routine'
+  }
   if (category === 'packages') return 'package'
   if (category === 'sequences') return 'sequence'
   return 'table'
@@ -170,6 +189,13 @@ export async function loadCategoryChildren(
     result = await oracleApi.treePackages({
       profileId: conn.profileId,
       schema,
+      limit: TREE_CHILDREN_LIMIT,
+    })
+  } else if (category === 'synonyms' || category === 'triggers') {
+    result = await oracleApi.treeRoutines({
+      profileId: conn.profileId,
+      schema,
+      types: [category === 'synonyms' ? 'synonym' : 'trigger'],
       limit: TREE_CHILDREN_LIMIT,
     })
   } else {

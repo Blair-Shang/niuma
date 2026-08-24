@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsButton, RsDialog } from '@niuma/ui'
+import { RsConfirmDialog } from '@niuma/ui'
 import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -30,31 +30,19 @@ async function onConfirm(): Promise<void> {
 </script>
 
 <template>
-  <RsDialog
+  <RsConfirmDialog
     v-model:open="open"
     :title="title"
+    :description="description"
     width="sm"
-    layout="confirm"
     :tone="isDanger ? 'danger' : 'default'"
+    :confirm-variant="isDanger ? 'danger' : 'primary'"
+    :confirm-text="t('modules.sqlite.maintain.confirmExec')"
+    :cancel-text="t('common.cancel')"
+    :confirm-loading="busy"
+    :auto-close-on-confirm="false"
     :show-overlay="false"
-    :show-close="true"
-    :close-on-overlay-click="false"
-  >
-    <template #body>
-      {{ description }}
-    </template>
-
-    <template #footer>
-      <RsButton variant="ghost" :disabled="busy" @click="store.clear()">
-        {{ t('common.cancel') }}
-      </RsButton>
-      <RsButton
-        :variant="isDanger ? 'danger' : 'primary'"
-        :loading="busy"
-        @click="onConfirm"
-      >
-        {{ t('modules.sqlite.maintain.confirmExec') }}
-      </RsButton>
-    </template>
-  </RsDialog>
+    @confirm="onConfirm"
+    @cancel="store.clear()"
+  />
 </template>

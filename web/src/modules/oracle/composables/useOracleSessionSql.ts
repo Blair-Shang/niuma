@@ -4,6 +4,7 @@
  */
 import { oracleApi } from '@/api/oracle'
 import type { OracleQueryExecResult } from '@/api/types/oracle'
+import { stripOracleSqlPlusTerminator } from '@/modules/oracle/utils/normalize-object-ddl'
 
 export async function withOracleSession<T>(
   profileId: string,
@@ -26,7 +27,7 @@ export async function execOracleSql(
     const result = await oracleApi.queryExec({
       sessionId,
       schema: schema?.trim() || undefined,
-      sql,
+      sql: stripOracleSqlPlusTerminator(sql),
       limit: 50,
     })
     if (result.resultSetId) {

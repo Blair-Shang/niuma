@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsButton, RsDialog } from '@niuma/ui'
+import { RsConfirmDialog } from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOracleDdlDialog } from '@/modules/oracle/composables/useOracleDdlDialog'
@@ -20,27 +20,19 @@ async function onConfirm(): Promise<void> {
 </script>
 
 <template>
-  <RsDialog
+  <RsConfirmDialog
     v-model:open="open"
     :title="title"
+    :description="description"
     width="sm"
-    layout="confirm"
     tone="danger"
+    confirm-variant="danger"
+    :confirm-text="t('modules.oracle.ddl.confirmExec')"
+    :cancel-text="t('common.cancel')"
+    :confirm-loading="busy"
+    :auto-close-on-confirm="false"
     :show-overlay="false"
-    :show-close="true"
-    :close-on-overlay-click="false"
-  >
-    <template #body>
-      {{ description }}
-    </template>
-
-    <template #footer>
-      <RsButton variant="ghost" :disabled="busy" @click="store.clear()">
-        {{ t('common.cancel') }}
-      </RsButton>
-      <RsButton variant="danger" :loading="busy" @click="onConfirm">
-        {{ t('modules.oracle.ddl.confirmExec') }}
-      </RsButton>
-    </template>
-  </RsDialog>
+    @confirm="onConfirm"
+    @cancel="store.clear()"
+  />
 </template>

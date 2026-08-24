@@ -32,7 +32,7 @@ export function sequenceCurrvalSeed(schema: string, name: string): string {
   )
 }
 
-/** 无参元数据时的回退调用模板。 */
+/** 无参元数据时的回退调用模板。Oracle 禁止空 DECLARE 段。 */
 export function callRoutineSeed(schema: string, name: string, isFunction: boolean): string {
   const q = qualifiedName(schema, name)
   if (isFunction) {
@@ -40,7 +40,6 @@ export function callRoutineSeed(schema: string, name: string, isFunction: boolea
   }
   return (
     `-- Call procedure ${q}\n` +
-    `DECLARE\n` +
     `BEGIN\n` +
     `  ${q}();\n` +
     `END;\n` +

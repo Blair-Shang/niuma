@@ -116,6 +116,7 @@ const columns = computed((): RsTableColumn<FtpTableRow>[] => {
       sortable: true,
       align: 'right',
       width: 96,
+      ellipsis: true,
     },
   ]
   if (props.showModified) {
@@ -125,6 +126,7 @@ const columns = computed((): RsTableColumn<FtpTableRow>[] => {
       sortable: true,
       align: 'right',
       width: 152,
+      ellipsis: true,
     })
   }
   return cols
@@ -301,6 +303,11 @@ function onPaneKeydown(event: KeyboardEvent): void {
 
 function entryIconForRow(row: FtpTableRow) {
   return resolveEntryIcon(row.kind, row.name)
+}
+
+/** RsTable 动态列 slot 的 row 推断为 object，这里收窄回本表面类型。 */
+function asFtpRow(row: object): FtpTableRow {
+  return row as FtpTableRow
 }
 
 const statusText = computed(() => {
@@ -522,22 +529,22 @@ defineExpose({ resetOnNavigate, clearSelection })
           <template #name="{ row }">
             <span
               class="nm-ftp-pane__file-name"
-              :class="{ 'nm-ftp-pane__file-name--parent': row.kind === 'parent' }"
+              :class="{ 'nm-ftp-pane__file-name--parent': asFtpRow(row).kind === 'parent' }"
             >
               <RsIcon
-                :name="entryIconForRow(row).icon"
+                :name="entryIconForRow(asFtpRow(row)).icon"
                 :size="16"
                 class="nm-ftp-pane__file-icon"
-                :class="`nm-ftp-pane__file-icon--${entryIconForRow(row).tone}`"
+                :class="`nm-ftp-pane__file-icon--${entryIconForRow(asFtpRow(row)).tone}`"
               />
-              <span class="nm-ftp-pane__file-text">{{ row.name }}</span>
+              {{ asFtpRow(row).name }}
             </span>
           </template>
           <template #sizeLabel="{ row }">
-            <span class="nm-ftp-pane__meta">{{ row.sizeLabel }}</span>
+            <span class="nm-ftp-pane__meta">{{ asFtpRow(row).sizeLabel }}</span>
           </template>
           <template #modifiedLabel="{ row }">
-            <span class="nm-ftp-pane__meta">{{ row.modifiedLabel }}</span>
+            <span class="nm-ftp-pane__meta">{{ asFtpRow(row).modifiedLabel }}</span>
           </template>
         </RsTable>
       </div>
@@ -613,11 +620,6 @@ defineExpose({ resetOnNavigate, clearSelection })
   flex-direction: column;
 }
 
-.nm-ftp-pane__table-wrap :deep(.rs-table-shell--ctx) {
-  flex: 1;
-  min-height: 0;
-}
-
 .nm-ftp-pane__loading {
   flex: 1;
   display: flex;
@@ -626,11 +628,7 @@ defineExpose({ resetOnNavigate, clearSelection })
 }
 
 .nm-ftp-pane__file-name {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  min-width: 0;
-  max-width: 100%;
+  display: contents;
 }
 
 .nm-ftp-pane__file-name--parent {
@@ -639,7 +637,9 @@ defineExpose({ resetOnNavigate, clearSelection })
 }
 
 .nm-ftp-pane__file-icon {
-  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: -3px;
+  margin-right: var(--rs-space-sm);
 }
 
 .nm-ftp-pane__file-icon--dir {
@@ -707,15 +707,14 @@ defineExpose({ resetOnNavigate, clearSelection })
   color: #8b5cf6;
 }
 
-.nm-ftp-pane__file-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .nm-ftp-pane__meta {
+  display: inline-block;
   color: var(--rs-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
 }
 
 .nm-ftp-pane__status {

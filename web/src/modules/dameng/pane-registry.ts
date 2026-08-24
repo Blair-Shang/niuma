@@ -1,5 +1,5 @@
 /**
- * Dameng Session 功能面板：query / browse / ddl / objectScript / monitor / design / debug。
+ * Dameng Session 功能面板：query / browse / ddl / objectScript / monitor / design / call。
  */
 import type { DamengObjectKind, DamengObjectScriptMode } from '@/modules/dameng/types/object-script'
 
@@ -10,7 +10,7 @@ export type DamengSessionTab =
   | 'objectScript'
   | 'monitor'
   | 'design'
-  | 'debug'
+  | 'call'
 
 export interface DamengPaneScope {
   schema?: string
@@ -87,7 +87,7 @@ function designProps(ctx: DamengPaneContext): Record<string, unknown> {
   }
 }
 
-function debugProps(ctx: DamengPaneContext): Record<string, unknown> {
+function callProps(ctx: DamengPaneContext): Record<string, unknown> {
   const routineKind =
     ctx.routineKind === 'function' || ctx.objectKind === 'function' ? 'function' : 'procedure'
   return {
@@ -190,12 +190,13 @@ export const damengPaneRegistry: Record<DamengSessionTab, DamengFeatureDef> = {
       buildProps: designProps,
     }),
   },
-  debug: {
+  call: {
     icon: 'bug',
-    labelKey: 'modules.dameng.session.tabDebug',
+    labelKey: 'modules.dameng.session.tabCall',
     resolvePane: () => ({
+      // 组件名历史为 DebugPane，实际是执行调用（非断点调试器）
       loader: () => import('@/modules/dameng/components/DamengDebugPane.vue'),
-      buildProps: debugProps,
+      buildProps: callProps,
     }),
   },
 }
@@ -208,7 +209,7 @@ export function normalizeDamengFeature(tab: string | undefined): DamengSessionTa
     tab === 'objectScript' ||
     tab === 'monitor' ||
     tab === 'design' ||
-    tab === 'debug'
+    tab === 'call'
   ) {
     return tab
   }

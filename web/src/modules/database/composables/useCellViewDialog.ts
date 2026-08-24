@@ -8,10 +8,21 @@ import { copyTextToClipboard, type RsTableColumn } from '@niuma/ui'
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  extractBrowseLobText,
   formatBrowseBinSummary,
   formatBrowseBinViewText,
+  formatBrowseLobSummary,
+  getBrowseLobMarker,
   isBrowseBinCell,
+  isBrowseBinaryLobCell,
+  isBrowseLobCell,
 } from '../utils/browse-cell-format'
+
+export type CellViewResolveFullValue = (ctx: {
+  row: Record<string, unknown>
+  column: RsTableColumn<Record<string, unknown>>
+  raw: unknown
+}) => Promise<unknown | null | undefined>
 
 export interface CellViewDialogLabels {
   viewTitle: string
@@ -31,6 +42,12 @@ function rawToEditorText(raw: unknown): string {
   if (typeof raw === 'number' || typeof raw === 'boolean' || typeof raw === 'bigint') {
     return String(raw)
   }
+  if (isBrowseBinaryLobCell(raw)) {
+    return isBrowseBinCell(raw) ? formatBrowseBinViewText(raw) : formatBrowseLobSummary(raw)
+  }
+  if (isBrowseLobCell(raw)) {
+    return extractBrowseLobText(raw)
+  }
   if (typeof raw === 'object') {
     try {
       return JSON.stringify(raw, null, 2)
@@ -41,11 +58,15 @@ function rawToEditorText(raw: unknown): string {
   return String(raw)
 }
 
-export function useCellViewDialog(getLabels?: () => Partial<CellViewDialogLabels>) {
+export function useCellViewDialog(
+  getLabels?: () => Partial<CellViewDialogLabels>,
+  resolveFullCellValue?: CellViewResolveFullValue,
+) {
   const { t } = useI18n()
   const open = ref(false)
   const draft = ref('')
   const title = ref('')
+  const loadingFull = ref(false)
   /** 原始单元格引用（非拷贝），供复制全文；关闭时置空 */
   const sourceRaw = ref<unknown>(undefined)
 
@@ -69,20 +90,43 @@ export function useCellViewDialog(getLabels?: () => Partial<CellViewDialogLabels
     clearPayload()
   })
 
+  function paintCell(raw: unknown, columnTitle: string): void {
+    sourceRaw.value = raw
+    title.value = columnTitle
+    if (isBrowseBinCell(raw)) {
+      draft.value = formatBrowseBinViewText(raw)
+    } else if (isBrowseBinaryLobCell(raw)) {
+      draft.value = formatBrowseLobSummary(raw)
+    } else {
+      draft.value = rawToEditorText(raw)
+    }
+  }
+
   function openCell<T extends Record<string, unknown>>(
     row: T,
     column: RsTableColumn<T>,
   ): void {
     const raw = row[String(column.key)]
-    sourceRaw.value = raw
-    title.value = String(column.title ?? column.key)
-
-    if (isBrowseBinCell(raw)) {
-      draft.value = formatBrowseBinViewText(raw)
-    } else {
-      draft.value = rawToEditorText(raw)
-    }
+    const columnTitle = String(column.title ?? column.key)
+    paintCell(raw, columnTitle)
     open.value = true
+
+    if (!resolveFullCellValue || !getBrowseLobMarker(raw)?.truncated) return
+    loadingFull.value = true
+    void resolveFullCellValue({
+      row: row as Record<string, unknown>,
+      column: column as RsTableColumn<Record<string, unknown>>,
+      raw,
+    })
+      .then((full) => {
+        if (full === undefined || full === null || !open.value) return
+        paintCell(full, columnTitle)
+        row[String(column.key) as keyof T] = full as T[keyof T]
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        loadingFull.value = false
+      })
   }
 
   async function copyFull(): Promise<boolean> {
@@ -91,6 +135,9 @@ export function useCellViewDialog(getLabels?: () => Partial<CellViewDialogLabels
       // 二进制不复制整段 base64（体积大）；复制摘要
       return copyTextToClipboard(formatBrowseBinSummary(raw))
     }
+    if (isBrowseBinaryLobCell(raw)) {
+      return copyTextToClipboard(formatBrowseLobSummary(raw))
+    }
     return copyTextToClipboard(rawToEditorText(raw))
   }
 
@@ -98,6 +145,7 @@ export function useCellViewDialog(getLabels?: () => Partial<CellViewDialogLabels
     open,
     draft,
     title,
+    loadingFull,
     labels,
     openCell,
     copyFull,

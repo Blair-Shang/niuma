@@ -32,7 +32,7 @@ function loadActions(): Promise<ActionsModule> {
   return actionsPromise
 }
 
-const CONN_MENU_KEYS = new Set(['createDatabase', 'query', 'monitor', 'tools'])
+const CONN_MENU_KEYS = new Set(['createDatabase', 'monitor', 'tools'])
 
 
 function scriptMenus(allowMutating: boolean): RsContextMenuItem {
@@ -236,11 +236,6 @@ function routineMenus(isFunction: boolean): RsContextMenuItem[] {
       label: t('modules.mysql.tree.editSource'),
       icon: 'file-code',
     },
-    {
-      key: 'debug',
-      label: t(isFunction ? 'modules.mysql.tree.funcDebug' : 'modules.mysql.tree.procDebug'),
-      icon: 'bug',
-    },
     { key: 'sep-io', label: '', separator: true },
     {
       key: 'dumpSql',
@@ -313,8 +308,6 @@ export const mysqlConnTreeProvider: ConnTreeChildProvider = {
   connMenuItems(): RsContextMenuItem[] {
     return [
       { key: 'createDatabase', label: t('modules.mysql.tree.createDatabase'), icon: 'database' },
-      { key: 'sep-query', label: '', separator: true },
-      { key: 'query', label: t('modules.mysql.tree.connQuery'), icon: 'code-2' },
       { key: 'monitor', label: t('modules.mysql.tree.connMonitor'), icon: 'activity' },
       { key: 'tools', label: t('modules.mysql.tree.openTools'), icon: 'archive' },
     ]

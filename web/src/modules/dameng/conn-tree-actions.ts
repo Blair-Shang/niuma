@@ -8,7 +8,6 @@ import { useConnectionNavigation } from '@/modules/ops/composables/useConnection
 import type { ConnOpenContext, ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import type { ConnItem } from '@/modules/ops/types'
 import {
-  callRoutineSeed,
   damengSelectSeed,
   qualifiedName,
   quoteIdent,
@@ -34,7 +33,6 @@ import {
   type DamengObjectKind,
   type DamengObjectScriptMode,
 } from '@/modules/dameng/types/object-script'
-import { buildDamengRoutineCallSql } from '@/modules/dameng/utils/routine-call'
 import {
   countSql,
   compileFunctionSql,
@@ -71,7 +69,7 @@ async function copyText(text: string): Promise<void> {
 export function openFeature(
   conn: ConnItem,
   path: ConnResourcePath | undefined,
-  initialTab: 'query' | 'browse' | 'ddl' | 'objectScript' | 'monitor' | 'design' | 'debug',
+  initialTab: 'query' | 'browse' | 'ddl' | 'objectScript' | 'monitor' | 'design' | 'call',
   initialSql?: string,
   options?: {
     autoRun?: boolean
@@ -345,38 +343,6 @@ async function fetchRoutineSource(
   }
 }
 
-async function openRoutineCall(
-  conn: ConnItem,
-  path: ConnResourcePath,
-  schema: string,
-  routine: string,
-  isFunction: boolean,
-): Promise<void> {
-  const kind = isFunction ? 'function' : 'procedure'
-  try {
-    const sql = await withDamengSession(conn.profileId, async (sessionId) => {
-      const { damengApi } = await import('@/api/dameng')
-      const meta = await damengApi.metaRoutineParameters({
-        sessionId,
-        schema,
-        name: routine,
-        kind,
-      })
-      return buildDamengRoutineCallSql({
-        schema,
-        name: routine,
-        kind,
-        parameters: meta.parameters ?? [],
-        returnType: meta.returnType,
-      })
-    })
-    openQuery(conn, path, sql)
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : t('modules.dameng.tree.callFailed'))
-    openQuery(conn, path, callRoutineSeed(schema, routine, isFunction))
-  }
-}
-
 function requestDanger(
   conn: ConnItem,
   path: ConnResourcePath,
@@ -549,12 +515,7 @@ export async function onResourceMenuSelect(
       return
     case 'call':
       if (schema && routine) {
-        void openRoutineCall(conn, path, schema, routine, isFunction)
-      }
-      return
-    case 'debug':
-      if (schema && routine) {
-        openFeature(conn, path, 'debug', undefined, {
+        openFeature(conn, path, 'call', undefined, {
           objectKind: isFunction ? 'function' : 'procedure',
         })
       }

@@ -145,6 +145,7 @@
       "script.oracle_slash",
       "format.plsql",
       "editor.builtin_sql",
+      "editor.sql_lsp",
       "routine.create_procedure",
       "routine.create_function",
       "oracle.package",
@@ -170,7 +171,8 @@
 | `script.oracle_slash` | 独立行 `/` 提交 | ✓ | P0 |
 | `format.plsql` | plsql 格式化规则 | ✓ | P0 |
 | `editor.builtin_sql` | P0 默认编辑器 | ✓ | P0 |
-| `editor.genericsql_monaco` | genericsql + Worker | — | P1+ |
+| `editor.sql_lsp` | Bridge LSP（C++ sqllsp） | ✓ | P1 |
+| `editor.genericsql_monaco` | ~~genericsql + Worker~~（已废弃，见 docs/23） | — | — |
 | `routine.create_procedure` / `routine.create_function` | 对象脚本模板 | ✓ | P3 |
 | `oracle.package` | 包头/包体对象 | ✓ | P2/P3 |
 | `sequence.native` | 序列 | ✓ | P2 |
@@ -460,7 +462,7 @@ IO 约束：
 | **Spike** | Instant Client + ODPI-C 连通、版本 SQL、取消、CLOB/NUMBER/DATE | 选型已锁定 §1.2；写出链接命令与 runtime 布局 |
 | **文档** | 本稿 | Cap / 系统视图名固化 |
 | **P0** | 服务骨架、manifest、IPC、`session.*`、Probe、Query、Home/Session、注册 | 直连执行 SELECT；dialect 整包返回 |
-| **P1** | tree / categoryCounts / catalog / 轻量补全 | schema→表展开；补全可用 |
+| **P1** | tree / categoryCounts / catalog / Bridge LSP 补全 | schema→表展开；查询/对象脚本智能提示 |
 | **P2** | meta、Browse、tx.*、packages/sequences 节点、LOB 策略 | Browse/DDL；事务 |
 | **P3** | routine/package 源码、ObjectScript、AI 规则 | 过程/包编辑保存刷新树 |
 | **P4** | Monitor、Explain、设计器、CSV/SQL IO | 常用集对齐 MySQL P4 密度 |
@@ -558,6 +560,9 @@ permissions: []
 - [x] `tree.schemas|tables|routines|sequences|categoryCounts`  
 - [x] `catalog.schemas|tables|columns`  
 - [x] Web 连接树 provider  
+- [x] Bridge LSP：`oracle.lsp.open|rpc|close|lexicon` + `packages/cpp/sqllsp` 启发式补全  
+- [x] Oracle 词表深化：内置函数片段 / CREATE 片段；PACKAGE；序列 `NEXTVAL`/`CURRVAL`；CONNECT BY / OVER / FETCH 槽  
+- [x] Cap `editor.sql_lsp`；前端 `monaco-bootstrap` / `useOracleSqlEditor` attach  
 - [x] 查询层资源安全：`StmtGuard`、peek `hasMore`、`timeoutMs`/`requestId` 取消、标识符转义  
 
 ### 后端 / 前端 P2

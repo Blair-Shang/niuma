@@ -27,7 +27,8 @@ type ColumnsResult struct {
 
 func ListColumns(ctx context.Context, db *sql.DB, r RelationRef) (ColumnsResult, error) {
 	// 达梦兼容 Oracle：空串 '' 即 NULL，COALESCE(x,'') 在无注释时仍可能为 NULL，故注释列用 NullString 扫描。
-	q := `SELECT c.COLUMN_NAME,c.DATA_TYPE,c.NULLABLE,c.DATA_DEFAULT,c.COLUMN_ID,cm.COMMENTS FROM ALL_TAB_COLUMNS c LEFT JOIN ALL_COL_COMMENTS cm ON cm.OWNER=c.OWNER AND cm.TABLE_NAME=c.TABLE_NAME AND cm.COLUMN_NAME=c.COLUMN_NAME WHERE c.OWNER=? AND c.TABLE_NAME=? ORDER BY c.COLUMN_ID`
+	// 未加引号标识符在字典中为大写；补全/SQL 输入大小写不定，比较时统一 UPPER。
+	q := `SELECT c.COLUMN_NAME,c.DATA_TYPE,c.NULLABLE,c.DATA_DEFAULT,c.COLUMN_ID,cm.COMMENTS FROM ALL_TAB_COLUMNS c LEFT JOIN ALL_COL_COMMENTS cm ON cm.OWNER=c.OWNER AND cm.TABLE_NAME=c.TABLE_NAME AND cm.COLUMN_NAME=c.COLUMN_NAME WHERE UPPER(c.OWNER)=UPPER(?) AND UPPER(c.TABLE_NAME)=UPPER(?) ORDER BY c.COLUMN_ID`
 	rows, e := db.QueryContext(ctx, q, r.Schema, r.Name)
 	if e != nil {
 		return ColumnsResult{}, fmt.Errorf("dameng: list columns: %w", e)
@@ -76,7 +77,7 @@ SELECT COL.NAME
 FROM SYS.SYSCOLUMNS COL
 INNER JOIN SYS.SYSOBJECTS TAB ON COL.ID = TAB.ID
 INNER JOIN SYS.SYSOBJECTS SCH ON TAB.SCHID = SCH.ID
-WHERE SCH.NAME = ? AND TAB.NAME = ? AND BITAND(COL.INFO2, 1) = 1`
+WHERE UPPER(SCH.NAME) = UPPER(?) AND UPPER(TAB.NAME) = UPPER(?) AND BITAND(COL.INFO2, 1) = 1`
 	rows, err := db.QueryContext(ctx, q, schema, table)
 	if err != nil {
 		return nil

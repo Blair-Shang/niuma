@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildSqlMonarch, normalizeLexicon, wordRules } from './lexicon'
-import { FALLBACK_MYSQL_LEXICON } from './fallback-lexicon'
+import { FALLBACK_MYSQL_LEXICON, FALLBACK_POSTGRES_LEXICON } from './fallback-lexicon'
 
 describe('sql lexicon monarch', () => {
   it('normalizeLexicon dedupes case-insensitively', () => {
@@ -28,5 +28,14 @@ describe('sql lexicon monarch', () => {
     const tokens = root.map((r) => (Array.isArray(r) ? r[1] : null))
     expect(tokens).toContain('keyword')
     expect(tokens).toContain('predefined')
+  })
+
+  it('postgresql monarch includes dollar-quote tokens', () => {
+    const monarch = buildSqlMonarch('postgresql', FALLBACK_POSTGRES_LEXICON)
+    const root = monarch.tokenizer.root as Array<[RegExp, string] | unknown>
+    const quoteRules = root.filter(
+      (r) => Array.isArray(r) && r[1] === 'string.quote',
+    )
+    expect(quoteRules.length).toBeGreaterThanOrEqual(2)
   })
 })

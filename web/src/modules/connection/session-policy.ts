@@ -46,6 +46,8 @@ export const SESSION_POLICY: Record<ConnKind, SessionPolicy> = {
   kingbase: { sharing: 'per_tab', closeOnRelease: true },
   // SQL Server：每查询 Tab 独立物理连接与事务（docs/32）。
   sqlserver: { sharing: 'per_tab', closeOnRelease: true },
+  // 官方 PostgreSQL：每查询/浏览 Tab 独立物理连接，多页签事务隔离（docs/34）。
+  postgres: { sharing: 'per_tab', closeOnRelease: true },
 }
 
 export interface AcquireOpts {
@@ -55,7 +57,7 @@ export interface AcquireOpts {
   /** Redis：逻辑库编号，参与 scoped session key */
   database?: number
   /**
-   * MySQL / Kingbase：`session.open` 时覆盖目标库（不参与 session key；per_tab 已隔离）。
+   * MySQL / Kingbase / PostgreSQL：`session.open` 时覆盖目标库（不参与 session key；per_tab 已隔离）。
    * Dameng 无独立 database，走 schema，无需此项。
    */
   connectDatabase?: string

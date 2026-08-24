@@ -263,6 +263,7 @@ $sqliteOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-sqlite-ser
 $damengOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-dameng-service' -PlatformName $Platform)
 $clickhouseOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-clickhouse-service' -PlatformName $Platform)
 $kingbaseOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-kingbase-service' -PlatformName $Platform)
+$postgresOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-postgres-service' -PlatformName $Platform)
 $sqlserverOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-sqlserver-service' -PlatformName $Platform)
 $mcpVastOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'mcp-vastbase-readonly' -PlatformName $Platform)
 
@@ -322,6 +323,10 @@ Build-GoService -ModuleDir (Join-Path $Root 'services/kingbase-service') `
     -Package './cmd/kingbase-service' `
     -Output $kingbaseOut
 
+Build-GoService -ModuleDir (Join-Path $Root 'services/postgres-service') `
+    -Package './cmd/postgres-service' `
+    -Output $postgresOut
+
 Build-GoService -ModuleDir (Join-Path $Root 'services/sqlserver-service') `
     -Package './cmd/sqlserver-service' `
     -Output $sqlserverOut
@@ -370,6 +375,7 @@ if (Should-SyncLegacyBin) {
     $legacyDamengOut = Join-Path $BinDir 'niuma-dameng-service.exe'
     $legacyClickhouseOut = Join-Path $BinDir 'niuma-clickhouse-service.exe'
     $legacyKingbaseOut = Join-Path $BinDir 'niuma-kingbase-service.exe'
+    $legacyPostgresOut = Join-Path $BinDir 'niuma-postgres-service.exe'
     $legacySqlserverOut = Join-Path $BinDir 'niuma-sqlserver-service.exe'
     $legacyMcpVastOut = Join-Path $BinDir 'mcp-vastbase-readonly.exe'
     $legacyOracleOut = Join-Path $BinDir 'niuma-oracle-service.exe'
@@ -382,6 +388,7 @@ if (Should-SyncLegacyBin) {
     Copy-Item -Force $damengOut $legacyDamengOut
     Copy-Item -Force $clickhouseOut $legacyClickhouseOut
     Copy-Item -Force $kingbaseOut $legacyKingbaseOut
+    Copy-Item -Force $postgresOut $legacyPostgresOut
     Copy-Item -Force $sqlserverOut $legacySqlserverOut
     Copy-Item -Force $mcpVastOut $legacyMcpVastOut
     if ($sshBuilt -and (Test-Path $sshOut)) {
@@ -405,6 +412,7 @@ Write-Host "    $sqliteOut"
 Write-Host "    $damengOut"
 Write-Host "    $clickhouseOut"
 Write-Host "    $kingbaseOut"
+Write-Host "    $postgresOut"
 Write-Host "    $sqlserverOut"
 Write-Host "    $mcpVastOut"
 if ($sshBuilt -and (Test-Path $sshOut)) {

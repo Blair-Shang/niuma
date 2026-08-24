@@ -32,6 +32,8 @@ bool OpenIoSession(const session::ConnectParams& connect, session::Session& out,
   auto opened = session::ConnectAndProbe(connect, error);
   if (!opened.conn) return false;
   out.conn = std::move(opened.conn);
+  out.proxy_relay = std::move(opened.proxy_relay);
+  out.ssh_tunnel = std::move(opened.ssh_tunnel);
   out.ctx = session::SharedContext(error);
   out.params = connect;
   out.profile = std::move(opened.profile);
@@ -64,6 +66,54 @@ std::string Upper(std::string value) {
     return static_cast<char>(std::toupper(c));
   });
   return value;
+}
+
+std::string TrimAscii(std::string value) {
+  size_t start = 0;
+  while (start < value.size() &&
+         std::isspace(static_cast<unsigned char>(value[start]))) {
+    ++start;
+  }
+  size_t end = value.size();
+  while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+    --end;
+  }
+  if (start == 0 && end == value.size()) return value;
+  return value.substr(start, end - start);
+}
+
+bool IsNumberLiteral(const std::string& value) {
+  size_t i = 0;
+  if (i < value.size() && (value[i] == '+' || value[i] == '-')) ++i;
+  bool digits = false;
+  while (i < value.size() && std::isdigit(static_cast<unsigned char>(value[i]))) {
+    digits = true;
+    ++i;
+  }
+  if (i < value.size() && value[i] == '.') {
+    ++i;
+    while (i < value.size() && std::isdigit(static_cast<unsigned char>(value[i]))) {
+      digits = true;
+      ++i;
+    }
+  }
+  if (!digits) return false;
+  if (i < value.size() && (value[i] == 'e' || value[i] == 'E')) {
+    ++i;
+    if (i < value.size() && (value[i] == '+' || value[i] == '-')) ++i;
+    const size_t exponent_start = i;
+    while (i < value.size() && std::isdigit(static_cast<unsigned char>(value[i]))) ++i;
+    if (i == exponent_start) return false;
+  }
+  return i == value.size();
+}
+
+bool IsNumericDataType(const std::string& type) {
+  if (type == "NUMBER" || type == "FLOAT" || type == "BINARY_FLOAT" ||
+      type == "BINARY_DOUBLE") {
+    return true;
+  }
+  return type.rfind("NUMBER(", 0) == 0 || type.rfind("FLOAT(", 0) == 0;
 }
 
 std::string Hex(const std::string& raw) {
@@ -127,29 +177,37 @@ std::string TimestampText(const dpiTimestamp& value, bool with_zone) {
   return buffer;
 }
 
-bool CellText(dpiContext* ctx, dpiOracleTypeNum oracle_type, dpiNativeTypeNum native, dpiData* data,
-              const std::string& null_string, std::string& out, std::string& error) {
+bool IsLobOracleType(dpiOracleTypeNum oracle_type) {
+  return oracle_type == DPI_ORACLE_TYPE_CLOB || oracle_type == DPI_ORACLE_TYPE_NCLOB ||
+         oracle_type == DPI_ORACLE_TYPE_BLOB;
+}
+
+bool CellText(dpiConn* conn, dpiContext* ctx, dpiOracleTypeNum oracle_type, dpiNativeTypeNum native,
+              dpiData* data, const std::string& null_string, std::string& out, std::string& error) {
   if (!data || data->isNull) {
     out = null_string;
     return true;
   }
-  if (native == DPI_NATIVE_TYPE_LOB || oracle_type == DPI_ORACLE_TYPE_CLOB ||
-      oracle_type == DPI_ORACLE_TYPE_NCLOB || oracle_type == DPI_ORACLE_TYPE_BLOB) {
-    util::LobReadResult lob;
-    if (!util::ReadLobData(ctx, native, data, std::numeric_limits<uint64_t>::max(), lob, error)) {
+  if (native == DPI_NATIVE_TYPE_LOB || IsLobOracleType(oracle_type)) {
+    const auto lob_type =
+        IsLobOracleType(oracle_type) ? oracle_type : DPI_ORACLE_TYPE_CLOB;
+    std::string lob;
+    if (!util::ReadCompleteLob(conn, ctx, lob_type, native, data, util::kLobFullMax, lob, error)) {
+      if (error == "oracle: LOB exceeds supported size") {
+        error = "oracle: LOB exceeds 4MB export limit";
+      }
       return false;
     }
-    if (lob.truncated) {
-      error = "oracle: LOB too large to export";
-      return false;
-    }
-    out = oracle_type == DPI_ORACLE_TYPE_BLOB ? "0x" + Hex(lob.data) : std::move(lob.data);
+    out = lob_type == DPI_ORACLE_TYPE_BLOB ? "0x" + Hex(lob) : std::move(lob);
     return true;
   }
   switch (native) {
     case DPI_NATIVE_TYPE_BYTES: {
-      const std::string bytes(reinterpret_cast<const char*>(data->value.asBytes.ptr),
-                              data->value.asBytes.length);
+      std::string bytes(reinterpret_cast<const char*>(data->value.asBytes.ptr),
+                        data->value.asBytes.length);
+      if (oracle_type == DPI_ORACLE_TYPE_NUMBER) {
+        bytes = TrimAscii(std::move(bytes));
+      }
       out = oracle_type == DPI_ORACLE_TYPE_RAW || oracle_type == DPI_ORACLE_TYPE_LONG_RAW
                 ? "0x" + Hex(bytes)
                 : bytes;
@@ -209,7 +267,7 @@ bool LoadColumns(session::Session& s, const std::string& schema, const std::stri
     return false;
   }
   for (const auto& row : rows.rows) {
-    if (row.size() >= 2) columns.push_back({row[0], Upper(row[1])});
+    if (row.size() >= 2) columns.push_back({row[0], Upper(TrimAscii(row[1]))});
   }
   if (columns.empty()) {
     error = "oracle: no columns for import";
@@ -249,20 +307,21 @@ std::string ClobLiteral(const std::string& value) {
 
 bool ImportLiteral(const std::string& value, const std::string& type,
                    const std::string& null_string, std::string& out, std::string& error) {
-  if (value == null_string) {
+  const std::string trimmed = TrimAscii(value);
+  if (trimmed == null_string || (null_string.empty() && trimmed.empty())) {
     out = "NULL";
     return true;
   }
   if (type == "DATE") {
-    out = "TO_DATE(" + util::QuoteLiteral(value) + ", 'YYYY-MM-DD HH24:MI:SS')";
+    out = "TO_DATE(" + util::QuoteLiteral(trimmed) + ", 'YYYY-MM-DD HH24:MI:SS')";
   } else if (type.find("TIMESTAMP") == 0 && type.find("TIME ZONE") != std::string::npos) {
-    out = "TO_TIMESTAMP_TZ(" + util::QuoteLiteral(value) +
+    out = "TO_TIMESTAMP_TZ(" + util::QuoteLiteral(trimmed) +
           ", 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM')";
   } else if (type.find("TIMESTAMP") == 0) {
-    out = "TO_TIMESTAMP(" + util::QuoteLiteral(value) + ", 'YYYY-MM-DD HH24:MI:SS.FF')";
+    out = "TO_TIMESTAMP(" + util::QuoteLiteral(trimmed) + ", 'YYYY-MM-DD HH24:MI:SS.FF')";
   } else if (type == "RAW" || type == "LONG RAW" || type == "BLOB") {
     std::string raw;
-    if (!Unhex(value, raw)) {
+    if (!Unhex(trimmed, raw)) {
       error = "oracle: invalid hexadecimal value for " + type;
       return false;
     }
@@ -273,13 +332,24 @@ bool ImportLiteral(const std::string& value, const std::string& type,
     }
     out = type == "BLOB" ? "TO_BLOB(HEXTORAW('" + hex + "'))" : "HEXTORAW('" + hex + "')";
   } else if (type == "CLOB" || type == "NCLOB") {
-    out = ClobLiteral(value);
-  } else if (type == "NUMBER" || type == "FLOAT" || type == "BINARY_FLOAT" ||
-             type == "BINARY_DOUBLE") {
-    out = "TO_NUMBER(" + util::QuoteLiteral(value) +
-          ", 'TM9', 'NLS_NUMERIC_CHARACTERS=''.,''')";
+    out = ClobLiteral(trimmed);
+  } else if (IsNumericDataType(type)) {
+    if (!IsNumberLiteral(trimmed)) {
+      error = "oracle: invalid numeric value for " + type;
+      return false;
+    }
+    out = trimmed;
+  } else if (type == "BOOLEAN") {
+    if (trimmed == "1" || trimmed == "true" || trimmed == "TRUE") {
+      out = "TRUE";
+    } else if (trimmed == "0" || trimmed == "false" || trimmed == "FALSE") {
+      out = "FALSE";
+    } else {
+      error = "oracle: invalid boolean value";
+      return false;
+    }
   } else {
-    out = util::QuoteLiteral(value);
+    out = util::QuoteLiteral(trimmed);
   }
   return true;
 }
@@ -321,6 +391,12 @@ bool RunExportCsv(const session::ConnectParams& connect, const std::string& sche
     }
     names.emplace_back(info.name, info.nameLength);
     oracle_types.push_back(info.typeInfo.oracleTypeNum);
+    if (IsLobOracleType(info.typeInfo.oracleTypeNum) &&
+        dpiStmt_defineValue(stmt.Get(), i, info.typeInfo.oracleTypeNum, DPI_NATIVE_TYPE_LOB, 0, 0,
+                            nullptr) < 0) {
+      error = util::FormatDpiError(s.ctx.get(), "oracle: export LOB column define failed");
+      return false;
+    }
   }
   AtomicOutput atomic(output_path);
   if (!atomic.Open(error)) return false;
@@ -356,8 +432,8 @@ bool RunExportCsv(const session::ConnectParams& connect, const std::string& sche
         return false;
       }
       std::string value;
-      if (!CellText(s.ctx.get(), oracle_types[c - 1], native, data, opts.null_string, value,
-                    error)) {
+      if (!CellText(s.conn.get(), s.ctx.get(), oracle_types[c - 1], native, data, opts.null_string,
+                    value, error)) {
         return false;
       }
       out << CsvEscape(value, delimiter);

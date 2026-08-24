@@ -74,6 +74,28 @@ export interface OracleQueryExecResult {
   durationMs: number
   commandTag?: string
   rowsAffected?: number
+  /** PL/SQL 执行后服务端 Drain 的 DBMS_OUTPUT 行（同时也会填入 columns/rows 网格） */
+  dbmsOutput?: string[]
+}
+
+/** 专业化过程/函数调用参数（ODPI bind OUT，对齐 Kingbase routine.call） */
+export interface OracleRoutineCallArg {
+  name: string
+  type: string
+  mode: string
+  value?: string
+  isNull?: boolean
+}
+
+export interface OracleRoutineCallParams {
+  sessionId: string
+  schema: string
+  name: string
+  kind: 'procedure' | 'function'
+  args: OracleRoutineCallArg[]
+  returnType?: string
+  requestId?: string
+  timeoutMs?: number
 }
 export interface OracleQueryFetchParams { sessionId: string; resultSetId: string; limit?: number }
 export interface OracleQueryFetchResult {
@@ -116,6 +138,8 @@ export interface OracleTreeCategoryCountsResult {
   functions: number
   packages: number
   sequences: number
+  synonyms?: number
+  triggers?: number
 }
 
 export interface OracleCatalogListParams {
@@ -142,6 +166,8 @@ export interface OracleMetaRelationParams {
   database?: string
   table?: string
   name?: string
+  /** 提示后端：table | view（编辑视图时传 view，避免误降级成表 DDL） */
+  objectType?: 'table' | 'view' | 'synonym' | 'trigger' | 'sequence'
 }
 export interface OracleColumnInfo {
   name: string
@@ -195,6 +221,31 @@ export interface OracleMetaRoutineSourceResult {
   name: string
   kind: 'procedure' | 'function'
   definition: string
+}
+
+export interface OracleRoutineParameter {
+  ordinal: number
+  name: string
+  /** IN | OUT | INOUT；返回值伪行无 mode */
+  mode: string
+  dataType: string
+  dtdIdentifier: string
+  isReturn: boolean
+}
+
+export interface OracleMetaRoutineParametersParams {
+  sessionId: string
+  schema?: string
+  name?: string
+  routine?: string
+  kind: 'procedure' | 'function'
+}
+
+export interface OracleMetaRoutineParametersResult {
+  name: string
+  kind: string
+  parameters: OracleRoutineParameter[]
+  returnType?: string
 }
 export interface OracleMetaPackageSourceParams {
   sessionId: string
@@ -452,6 +503,8 @@ export interface OracleIoDumpSqlParams {
     includeFunctions?: boolean
     includePackages?: boolean
     includeSequences?: boolean
+    includeSynonyms?: boolean
+    includeTriggers?: boolean
   }
 }
 
@@ -487,4 +540,40 @@ export interface OracleIoDoneEvent {
   ok: boolean
   message?: string
   outputPath?: string
+}
+
+export interface OracleLspOpenParams {
+  sessionId: string
+  clientId: string
+  /** 编辑器当前 schema（协议字段名 database） */
+  database?: string
+}
+
+export interface OracleLspOpenResult {
+  connectionId: string
+}
+
+export interface OracleLspRpcParams {
+  connectionId: string
+  sessionId: string
+  message: Record<string, unknown>
+}
+
+export interface OracleLspRpcResult {
+  ok?: boolean
+  message?: Record<string, unknown>
+}
+
+export interface OracleLspCloseParams {
+  connectionId: string
+  sessionId?: string
+}
+
+export interface OracleLspLexiconParams {
+  sessionId?: string
+}
+
+export interface OracleLspLexiconResult {
+  keywords: string[]
+  functions: string[]
 }

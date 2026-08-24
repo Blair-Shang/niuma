@@ -599,10 +599,6 @@ export function onConnMenuSelect(conn: ConnItem, key: string): boolean {
     requestCreateDatabase(conn)
     return true
   }
-  if (key === 'query') {
-    openQuery(conn)
-    return true
-  }
   if (key === 'monitor') {
     openMonitor(conn)
     return true

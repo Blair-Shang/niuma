@@ -15,12 +15,16 @@ export type OracleDumpScope =
   | 'procedures'
   | 'functions'
   | 'packages'
+  | 'synonyms'
+  | 'triggers'
   | 'sequences'
   | 'table'
   | 'view'
   | 'procedure'
   | 'function'
   | 'package'
+  | 'synonym'
+  | 'trigger'
   | 'sequence'
 
 const DUMP_SCOPES = new Set<OracleDumpScope>([
@@ -30,12 +34,16 @@ const DUMP_SCOPES = new Set<OracleDumpScope>([
   'procedures',
   'functions',
   'packages',
+  'synonyms',
+  'triggers',
   'sequences',
   'table',
   'view',
   'procedure',
   'function',
   'package',
+  'synonym',
+  'trigger',
   'sequence',
 ])
 

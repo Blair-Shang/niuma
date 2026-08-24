@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"niuma/pkg/sqllsp"
+	"niuma/services/sqlserver-service/internal/dataio"
 	"niuma/services/sqlserver-service/internal/eventpub"
 	"niuma/services/sqlserver-service/internal/idgen"
 	"niuma/services/sqlserver-service/internal/session"
@@ -22,6 +23,63 @@ const (
 	MethodQueryFetch  = "query.fetch"
 	MethodQueryClose  = "query.close"
 	MethodQueryCancel = "query.cancel"
+	// MethodRoutineCall 过程 TDS RPC / 函数绑定 SELECT，不走 query.exec 语言批。
+	MethodRoutineCall = "routine.call"
+
+	// MethodTreeDatabases 列出数据库。
+	MethodTreeDatabases = "tree.databases"
+	// MethodTreeSchemas 列出 schema。
+	MethodTreeSchemas = "tree.schemas"
+	// MethodTreeTables 列出表 / 视图 / 同义词。
+	MethodTreeTables = "tree.tables"
+	// MethodTreeRoutines 列出过程 / 函数。
+	MethodTreeRoutines = "tree.routines"
+	// MethodTreeSequences 列出序列。
+	MethodTreeSequences = "tree.sequences"
+	// MethodTreeCategoryCounts 统计 schema 分类对象数。
+	MethodTreeCategoryCounts = "tree.categoryCounts"
+
+	// MethodCatalogSchemas 补全：schema 列表。
+	MethodCatalogSchemas = "catalog.schemas"
+	// MethodCatalogTables 补全：表 / 视图 / 同义词列表。
+	MethodCatalogTables = "catalog.tables"
+	// MethodCatalogColumns 补全：列列表。
+	MethodCatalogColumns = "catalog.columns"
+
+	// MethodMetaColumns 关系列元数据。
+	MethodMetaColumns = "meta.columns"
+	// MethodMetaIndexes 关系索引元数据。
+	MethodMetaIndexes = "meta.indexes"
+	// MethodMetaPrimaryKey 主键列。
+	MethodMetaPrimaryKey = "meta.primaryKey"
+	// MethodMetaDDL 拼装 / 读取 DDL。
+	MethodMetaDDL = "meta.ddl"
+	// MethodMetaRoutineSource 过程 / 函数 / 序列 / 视图源码。
+	MethodMetaRoutineSource = "meta.routineSource"
+	// MethodMetaRoutineParameters 过程 / 函数形参（含 OUTPUT）。
+	MethodMetaRoutineParameters = "meta.routineParameters"
+	// MethodMetaProcesslist 用户会话 / 请求列表。
+	MethodMetaProcesslist = "meta.processlist"
+	// MethodMetaKill 断开服务器会话（KILL）。
+	MethodMetaKill = "meta.kill"
+	// MethodQueryExplain 估计计划（SHOWPLAN_TEXT）或实际计划（STATISTICS XML）。
+	MethodQueryExplain = "query.explain"
+
+	// MethodMetaForeignKeys 外键（设计器）。
+	MethodMetaForeignKeys = "meta.foreignKeys"
+	// MethodMetaChecks CHECK 约束（设计器）。
+	MethodMetaChecks = "meta.checks"
+
+	MethodDDLDesignPreview      = "ddl.designPreview"
+	MethodDDLDesignApply        = "ddl.designApply"
+	MethodDDLCreateTable        = "ddl.createTable"
+	MethodDDLCreateTablePreview = "ddl.createTablePreview"
+
+	MethodIOExportCsv   = "io.exportCsv"
+	MethodIOImportCsv   = "io.importCsv"
+	MethodIODumpSql     = "io.dumpSql"
+	MethodIOExecSqlFile = "io.execSqlFile"
+	MethodIOCancel      = "io.cancel"
 
 	errInvalidParamsFmt  = "invalid params: %v"
 	errSessionIDRequired = "sessionId required"
@@ -51,16 +109,23 @@ type Dispatcher struct {
 	ids      idgen.Generator
 	sessions *session.Manager
 	events   *eventpub.Async
+	io       *dataio.Manager
 	lsp      *sqllsp.Server
 	lspConns *sqllsp.Manager
 }
 
 // New 创建 Dispatcher。
 func New(ids idgen.Generator, events *eventpub.Async) *Dispatcher {
+	emit := func(payload map[string]any) {
+		if events != nil {
+			events.Emit(payload)
+		}
+	}
 	return &Dispatcher{
 		ids:      ids,
 		sessions: session.NewManager(),
 		events:   events,
+		io:       dataio.NewManager(ids, emit),
 	}
 }
 
@@ -102,6 +167,66 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.queryClose(ctx, req)
 	case MethodQueryCancel:
 		return d.queryCancel(ctx, req)
+	case MethodRoutineCall:
+		return d.routineCall(ctx, req)
+	case MethodTreeDatabases:
+		return d.treeDatabases(ctx, req)
+	case MethodTreeSchemas:
+		return d.treeSchemas(ctx, req)
+	case MethodTreeTables:
+		return d.treeTables(ctx, req)
+	case MethodTreeRoutines:
+		return d.treeRoutines(ctx, req)
+	case MethodTreeSequences:
+		return d.treeSequences(ctx, req)
+	case MethodTreeCategoryCounts:
+		return d.treeCategoryCounts(ctx, req)
+	case MethodCatalogSchemas:
+		return d.catalogSchemas(ctx, req)
+	case MethodCatalogTables:
+		return d.catalogTables(ctx, req)
+	case MethodCatalogColumns:
+		return d.catalogColumns(ctx, req)
+	case MethodMetaColumns:
+		return d.metaColumns(ctx, req)
+	case MethodMetaIndexes:
+		return d.metaIndexes(ctx, req)
+	case MethodMetaPrimaryKey:
+		return d.metaPrimaryKey(ctx, req)
+	case MethodMetaDDL:
+		return d.metaDDL(ctx, req)
+	case MethodMetaRoutineSource:
+		return d.metaRoutineSource(ctx, req)
+	case MethodMetaRoutineParameters:
+		return d.metaRoutineParameters(ctx, req)
+	case MethodMetaProcesslist:
+		return d.metaProcesslist(ctx, req)
+	case MethodMetaKill:
+		return d.metaKill(ctx, req)
+	case MethodQueryExplain:
+		return d.queryExplain(ctx, req)
+	case MethodMetaForeignKeys:
+		return d.metaForeignKeys(ctx, req)
+	case MethodMetaChecks:
+		return d.metaChecks(ctx, req)
+	case MethodDDLDesignPreview:
+		return d.ddlDesignPreview(ctx, req)
+	case MethodDDLDesignApply:
+		return d.ddlDesignApply(ctx, req)
+	case MethodDDLCreateTablePreview:
+		return d.ddlCreateTablePreview(ctx, req)
+	case MethodDDLCreateTable:
+		return d.ddlCreateTable(ctx, req)
+	case MethodIOExportCsv:
+		return d.ioExportCsv(ctx, req)
+	case MethodIOImportCsv:
+		return d.ioImportCsv(ctx, req)
+	case MethodIODumpSql:
+		return d.ioDumpSql(ctx, req)
+	case MethodIOExecSqlFile:
+		return d.ioExecSqlFile(ctx, req)
+	case MethodIOCancel:
+		return d.ioCancel(ctx, req)
 	case MethodLspOpen:
 		return d.lspOpen(ctx, req)
 	case MethodLspRpc:

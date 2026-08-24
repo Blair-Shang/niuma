@@ -51,6 +51,18 @@ type QueryExecResult struct {
 	DurationMS   int64        `json:"durationMs"`
 	CommandTag   string       `json:"commandTag,omitempty"`
 	RowsAffected *int64       `json:"rowsAffected,omitempty"`
+	// ResultSets 在同一批有多个 TDS 结果集时填入（过程内部 SELECT + 随后的 OUTPUT 回显）。
+	ResultSets []QueryResultSet `json:"resultSets,omitempty"`
+	// Outputs / ReturnValue 仅 routine.call 填写（TDS RPC 协议值，不依赖额外 SELECT）。
+	Outputs     []RoutineOutput `json:"outputs,omitempty"`
+	ReturnValue *int32          `json:"returnValue,omitempty"`
+}
+
+// QueryResultSet 是 query.exec 附加的完整结果集（不含分页游标）。
+type QueryResultSet struct {
+	Columns  []ColumnMeta `json:"columns"`
+	Rows     [][]any      `json:"rows"`
+	RowCount int          `json:"rowCount"`
 }
 
 func clampPageSize(limit int) int {
@@ -64,6 +76,66 @@ func clampPageSize(limit int) int {
 }
 
 func int64Ptr(n int64) *int64 { return &n }
+
+func skipEmptyLeadingSets(rows *sql.Rows) ([]ColumnMeta, error) {
+	for {
+		cols, err := columnMetasFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		if len(cols) > 0 {
+			return cols, nil
+		}
+		if !rows.NextResultSet() {
+			return nil, nil
+		}
+	}
+}
+
+func readAllRows(rows *sql.Rows, columns []ColumnMeta, limit int) ([][]any, error) {
+	pageSize := clampPageSize(limit)
+	out := make([][]any, 0, 8)
+	for len(out) < pageSize && rows.Next() {
+		encoded, err := scanEncodedRow(rows, columns)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, encoded)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlserver: rows: %w", err)
+	}
+	return out, nil
+}
+
+func drainFollowingResultSets(rows *sql.Rows, limit int) ([]QueryResultSet, error) {
+	var extra []QueryResultSet
+	for rows.NextResultSet() {
+		cols, err := columnMetasFromRows(rows)
+		if err != nil {
+			return extra, err
+		}
+		if len(cols) == 0 {
+			continue
+		}
+		page, err := readAllRows(rows, cols, limit)
+		if err != nil {
+			return extra, err
+		}
+		extra = append(extra, QueryResultSet{Columns: cols, Rows: page, RowCount: len(page)})
+	}
+	return extra, nil
+}
+
+func withResultSets(primary QueryResultSet, extra []QueryResultSet) []QueryResultSet {
+	if len(extra) == 0 {
+		return nil
+	}
+	out := make([]QueryResultSet, 0, 1+len(extra))
+	out = append(out, primary)
+	out = append(out, extra...)
+	return out
+}
 
 // ExecOnDB 在给定 *sql.DB 上执行查询（短连 / 无会话取消注册）。
 func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, requestID string) (*QueryExecResult, error) {
@@ -105,7 +177,7 @@ func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, reques
 	}
 	defer rows.Close()
 
-	columns, err := columnMetasFromRows(rows)
+	columns, err := skipEmptyLeadingSets(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -118,23 +190,13 @@ func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, reques
 		}, nil
 	}
 
-	outRows := make([][]any, 0, pageSize)
-	for len(outRows) < pageSize && rows.Next() {
-		encoded, serr := scanEncodedRow(rows, columns)
-		if serr != nil {
-			return nil, serr
-		}
-		outRows = append(outRows, encoded)
+	outRows, err := readAllRows(rows, columns, pageSize)
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("sqlserver: rows: %w", err)
-	}
-	truncated := false
-	if len(outRows) >= pageSize && rows.Next() {
-		truncated = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("sqlserver: rows: %w", err)
+	extra, err := drainFollowingResultSets(rows, pageSize)
+	if err != nil {
+		return nil, err
 	}
 
 	return &QueryExecResult{
@@ -144,9 +206,9 @@ func ExecOnDB(ctx context.Context, db *sql.DB, sqlText string, limit int, reques
 		RowCount:     len(outRows),
 		FetchedCount: len(outRows),
 		HasMore:      false,
-		Truncated:    truncated,
 		DurationMS:   time.Since(start).Milliseconds(),
 		CommandTag:   commandTagForSQL(sqlText),
+		ResultSets:   withResultSets(QueryResultSet{Columns: columns, Rows: outRows, RowCount: len(outRows)}, extra),
 	}, nil
 }
 

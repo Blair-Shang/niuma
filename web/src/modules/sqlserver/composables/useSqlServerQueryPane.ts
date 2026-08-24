@@ -1,6 +1,5 @@
 /**
  * SQL Server 查询面板：走 sqlserver.query.* RPC。
- * P0 无 EXPLAIN / 事务 UI。
  */
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -10,7 +9,6 @@ import type { SqlServerQueryColumn, SqlServerQueryExecResult } from '@/api/types
 import {
   defaultSqlServerProfile,
   resolveSplitFeaturesFromProfile,
-  type SqlServerProfile,
 } from '@/modules/sql-editor/capabilities'
 import { splitSqlStatementsWithFeatures } from '@/modules/sql-editor/split/sql-statement-splitter'
 import { useSqlServerSqlEditor } from '@/modules/sqlserver/composables/useSqlServerSqlEditor'
@@ -107,8 +105,8 @@ export function useSqlServerQueryPane(props: SqlServerQueryPaneProps) {
       if (!props.sessionId) return null
       return {
         sessionId: props.sessionId,
-        schema: props.database?.trim() || undefined,
         database: props.database?.trim() || undefined,
+        schema: 'dbo',
       }
     },
   })
@@ -456,6 +454,65 @@ export function useSqlServerQueryPane(props: SqlServerQueryPaneProps) {
     }
   }
 
+  async function runExplain(analyze: boolean): Promise<void> {
+    if (!props.sessionId || running.value) return
+    const raw = editor.resolveSql()
+    const statements = splitSqlStatementsWithFeatures(
+      raw,
+      resolveSplitFeaturesFromProfile(dialectProfile()),
+    ).filter((s) => s.sql.trim())
+    const sql = statements[0]?.sql.trim() ?? ''
+    if (!sql) {
+      lastError.value = t('modules.sqlserver.query.empty')
+      activePaneTab.value = 'messages'
+      return
+    }
+    running.value = true
+    cancelling.value = false
+    cancelled.value = false
+    lastError.value = null
+    lastExecSummary.value = ''
+    await closeAllGridCursors()
+    gridTabs.value = []
+    batchItems.value = []
+    batchTotalMs.value = 0
+    activePaneTab.value = 'messages'
+    const requestId = `sqlserver-explain-${Date.now()}`
+    activeRequestId.value = requestId
+    try {
+      const result = await sqlserverApi.queryExplain({
+        sessionId: props.sessionId,
+        database: props.database?.trim() || undefined,
+        sql,
+        analyze,
+        limit: PAGE_LIMIT,
+        requestId,
+      })
+      if (cancelled.value) {
+        await closeResultSetQuiet(result.resultSetId)
+        lastExecSummary.value = t('modules.sqlserver.query.cancelled')
+        return
+      }
+      lastExecSummary.value = analyze
+        ? t('modules.sqlserver.query.explainAnalyzeDone')
+        : t('modules.sqlserver.query.explainDone')
+      if (resultHasGrid(result.columns)) {
+        const tab = addGridTab(result, 0, sql)
+        activePaneTab.value = tab.id
+      } else {
+        await closeResultSetQuiet(result.resultSetId)
+        activePaneTab.value = 'messages'
+      }
+    } catch (e) {
+      lastError.value = e instanceof Error ? e.message : String(e)
+      activePaneTab.value = 'messages'
+    } finally {
+      running.value = false
+      cancelling.value = false
+      activeRequestId.value = null
+    }
+  }
+
   async function cancelRun(): Promise<void> {
     if (!running.value || !props.sessionId) return
     cancelling.value = true
@@ -574,8 +631,8 @@ export function useSqlServerQueryPane(props: SqlServerQueryPaneProps) {
         compress: t('modules.sqlserver.query.compress'),
         copy: t('modules.sqlserver.query.copy'),
         paste: t('modules.sqlserver.query.paste'),
-        explain: '',
-        explainAnalyze: '',
+        explain: t('modules.sqlserver.query.explain'),
+        explainAnalyze: t('modules.sqlserver.query.explainAnalyze'),
         askAi: t('modules.sqlserver.query.askAi'),
         exportCsv: t('modules.sqlserver.query.exportCsv'),
         fetchMore: t('modules.sqlserver.query.loadMore'),
@@ -589,7 +646,7 @@ export function useSqlServerQueryPane(props: SqlServerQueryPaneProps) {
       hasMore: hasMore.value,
       loadingMore: loadingMore.value,
       showAskAi: true,
-      showExplain: false,
+      showExplain: true,
     }),
   )
 
@@ -600,6 +657,8 @@ export function useSqlServerQueryPane(props: SqlServerQueryPaneProps) {
     else if (key === 'compress') void editor.compressSql()
     else if (key === 'copy') editor.copyEditor()
     else if (key === 'paste') void editor.pasteEditor()
+    else if (key === 'explain') void runExplain(false)
+    else if (key === 'explainAnalyze') void runExplain(true)
     else if (key === 'askAi') void askAiAboutSelection()
     else if (key === 'exportCsv') exportCsv()
     else if (key === 'fetchMore') void fetchMore()
@@ -615,10 +674,10 @@ export function useSqlServerQueryPane(props: SqlServerQueryPaneProps) {
     cancelTooltip: t('modules.sqlserver.query.cancel'),
     format: t('modules.sqlserver.query.format'),
     formatTooltip: t('modules.sqlserver.query.formatTooltip'),
-    explain: '',
-    explainTooltip: '',
-    explainAnalyze: '',
-    explainAnalyzeTooltip: '',
+    explain: t('modules.sqlserver.query.explain'),
+    explainTooltip: t('modules.sqlserver.query.explainHint'),
+    explainAnalyze: t('modules.sqlserver.query.explainAnalyze'),
+    explainAnalyzeTooltip: t('modules.sqlserver.query.explainAnalyzeHint'),
     history: t('modules.sqlserver.query.history'),
     historyEmpty: t('modules.sqlserver.query.historyEmpty'),
     historyClear: t('modules.sqlserver.query.historyClear'),
@@ -703,6 +762,7 @@ export function useSqlServerQueryPane(props: SqlServerQueryPaneProps) {
     closeResultGridTab,
     openBatchGrid,
     runSql,
+    runExplain,
     cancelRun,
     fetchMore,
     fetchAll,

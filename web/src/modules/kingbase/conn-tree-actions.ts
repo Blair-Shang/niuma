@@ -11,8 +11,6 @@ import { i18n } from '@/locale'
 import {
   kingbaseAnalyzeSql,
   kingbaseBatchDropSql,
-  kingbaseCallFunctionSeed,
-  kingbaseCallProcedureSeed,
   kingbaseCountSeed,
   kingbaseDeleteSeed,
   kingbaseDepsSql,
@@ -686,9 +684,7 @@ export function onConnMenuSelect(conn: ConnItem, key: string): boolean {
     openFeature(conn, undefined, 'monitor')
     return true
   }
-  if (key !== 'query') return false
-  openQuery(conn)
-  return true
+  return false
 }
 
 export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key: string): void {
@@ -849,18 +845,9 @@ export function onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key
   }
 
   if (key === 'call') {
-    const schema = segmentName(path, 'schema')
-    const fn = segmentName(path, 'function')
-    const proc = segmentName(path, 'procedure')
-    const args = segmentName(path, 'args')
-    if (schema && fn) openQuery(conn, path, kingbaseCallFunctionSeed(schema, fn, args))
-    else if (schema && proc) openQuery(conn, path, kingbaseCallProcedureSeed(schema, proc, args))
-    return
-  }
-
-  if (key === 'debug') {
+    // 专业化执行：打开执行面板（routine.call）；不再打开查询脚本
     if (segmentName(path, 'function') || segmentName(path, 'procedure')) {
-      openFeature(conn, path, 'debug')
+      openFeature(conn, path, 'call')
     }
     return
   }

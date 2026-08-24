@@ -27,7 +27,16 @@ import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 
 const CODE_COLLAPSE_LINES = 28
-const SQL_OPEN_LANGS = new Set(['sql', 'pgsql', 'postgres', 'mysql', 'dameng', 'kingbase'])
+const SQL_OPEN_LANGS = new Set([
+  'sql',
+  'pgsql',
+  'postgres',
+  'postgresql',
+  'mysql',
+  'dameng',
+  'kingbase',
+  'sqlserver',
+])
 
 function isSqlOpenLang(lang: string): boolean {
   return SQL_OPEN_LANGS.has(lang)
@@ -72,6 +81,8 @@ hljs.registerLanguage('postgres', sql)
 hljs.registerLanguage('mysql', sql)
 hljs.registerLanguage('dameng', sql)
 hljs.registerLanguage('kingbase', sql)
+hljs.registerLanguage('postgresql', sql)
+hljs.registerLanguage('sqlserver', sql)
 hljs.registerLanguage('typescript', typescript)
 hljs.registerLanguage('ts', typescript)
 hljs.registerLanguage('tsx', typescript)

@@ -10,13 +10,20 @@ let registered = false
 
 /** Oracle 完整自注册（表单 + 导航 + 树 + DDL ActionHost + 数据任务）。 */
 export function registerFull(): void {
+  // Provider / 导航策略可重复覆盖，便于 HMR 后右键菜单拿到最新实现
+  registerConnectionNavStrategy('oracle', oracleConnectionNavStrategy)
+  registerConnTreeProvider('oracle', oracleConnTreeProvider)
   if (registered) return
   registered = true
   registerForm()
   registerOracleDataTasks()
-  registerConnectionNavStrategy('oracle', oracleConnectionNavStrategy)
-  registerConnTreeProvider('oracle', oracleConnTreeProvider)
   registerConnTreeActionHost(
     defineAsyncComponent(() => import('@/modules/oracle/components/OracleDdlActionHost.vue')),
   )
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    registerFull()
+  })
 }

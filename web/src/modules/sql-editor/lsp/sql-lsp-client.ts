@@ -152,7 +152,7 @@ export class SqlLspClient {
     await this.notify('textDocument/didOpen', {
       textDocument: {
         uri,
-        languageId: this.namespace === 'mysql' ? 'mysql' : this.namespace === 'dameng' ? 'dameng' : 'sql',
+        languageId: this.namespace || 'sql',
         version,
         text,
       },

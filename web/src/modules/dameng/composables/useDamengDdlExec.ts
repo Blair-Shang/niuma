@@ -144,7 +144,9 @@ export function useDamengDdlExec() {
       toast.success(t('modules.dameng.ddl.done'))
       if (conn) {
         const countDelta = req.action.startsWith('drop_') ? -1 : 0
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        if (req.action !== 'truncate_table') {
+          await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        }
       } else {
         invalidateConnTreeChildren(req.profileId)
       }

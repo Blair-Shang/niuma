@@ -46,7 +46,7 @@ export default {
         tabNewTrigger: 'New trigger',
         tabNewSynonym: 'New synonym',
         tabNewSequence: 'New sequence',
-        tabDebug: 'Debug assist',
+        tabCall: 'Execute call',
       },
       tree: {
         openQuery: 'New Query',
@@ -89,8 +89,6 @@ export default {
         dropTrigger: 'Drop trigger',
         procCall: 'Call procedure',
         funcCall: 'Call function',
-        procDebug: 'Debug assist',
-        funcDebug: 'Debug assist',
         copyName: 'Copy name',
         copyQualified: 'Copy qualified name',
         copyDdl: 'Copy DDL',

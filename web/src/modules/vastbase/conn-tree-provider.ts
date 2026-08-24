@@ -30,7 +30,7 @@ function loadActions(): Promise<ActionsModule> {
   return actionsPromise
 }
 
-const CONN_MENU_KEYS = new Set(['createDatabase', 'monitor', 'tools', 'query'])
+const CONN_MENU_KEYS = new Set(['createDatabase', 'monitor', 'tools'])
 
 /** 生成脚本：表保留写类模板；视图/外表仅 SELECT / COUNT。 */
 function scriptMenus(allowMutating: boolean): RsContextMenuItem {
@@ -367,8 +367,6 @@ export const vastbaseConnTreeProvider: ConnTreeChildProvider = {
   connMenuItems(): RsContextMenuItem[] {
     return [
       { key: 'createDatabase', label: t('modules.vastbase.tree.createDatabase'), icon: 'database' },
-      { key: 'sep-query', label: '', separator: true },
-      { key: 'query', label: t('modules.vastbase.tree.connQuery'), icon: 'code-2' },
       { key: 'monitor', label: t('modules.vastbase.tree.connMonitor'), icon: 'activity' },
       { key: 'tools', label: t('modules.vastbase.tree.openTools'), icon: 'wrench' },
     ]

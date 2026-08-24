@@ -54,7 +54,9 @@ export function useKingbaseDdlExec() {
       if (conn) {
         const action = pending?.action ?? ''
         const countDelta = action.startsWith('drop_') ? -1 : 0
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        if (action !== 'truncate_table') {
+          await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        }
       } else if (payload.profileId) {
         invalidateConnTreeChildren(payload.profileId)
       }

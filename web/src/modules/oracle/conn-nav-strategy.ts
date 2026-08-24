@@ -1,5 +1,6 @@
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnOpenContext } from '@/modules/ops/conn-tree/types'
+import { registerConnectionNavStrategy } from '@/modules/ops/connection-nav/registry'
 import {
   buildConnectionTabTooltip,
   nextQueryTabIndex,
@@ -39,7 +40,10 @@ function resolveObjectKind(ctx?: ConnOpenContext): OracleObjectKind | undefined 
     ctx?.objectKind === 'view' ||
     ctx?.objectKind === 'procedure' ||
     ctx?.objectKind === 'function' ||
-    ctx?.objectKind === 'package'
+    ctx?.objectKind === 'package' ||
+    ctx?.objectKind === 'synonym' ||
+    ctx?.objectKind === 'trigger' ||
+    ctx?.objectKind === 'sequence'
   ) {
     return ctx.objectKind
   }
@@ -47,15 +51,24 @@ function resolveObjectKind(ctx?: ConnOpenContext): OracleObjectKind | undefined 
   if (isObjectCategory(category)) return categoryToObjectKind(category)
   if (segmentName(ctx, 'routine')) return 'procedure'
   if (segmentName(ctx, 'package')) return 'package'
+  if (segmentName(ctx, 'sequence')) return 'sequence'
   return undefined
 }
 
 function resolveObjectName(ctx?: ConnOpenContext, objectKind?: OracleObjectKind): string | undefined {
-  if (objectKind === 'procedure' || objectKind === 'function') {
+  if (
+    objectKind === 'procedure' ||
+    objectKind === 'function' ||
+    objectKind === 'synonym' ||
+    objectKind === 'trigger'
+  ) {
     return segmentName(ctx, 'routine') ?? segmentName(ctx, 'table')
   }
   if (objectKind === 'package') {
     return segmentName(ctx, 'package') ?? segmentName(ctx, 'routine')
+  }
+  if (objectKind === 'sequence') {
+    return segmentName(ctx, 'sequence')
   }
   return segmentName(ctx, 'table') ?? segmentName(ctx, 'routine')
 }
@@ -68,11 +81,17 @@ function objectScriptFeatureLabel(
     if (objectKind === 'procedure') return i18n.global.t('modules.oracle.session.tabNewProcedure')
     if (objectKind === 'function') return i18n.global.t('modules.oracle.session.tabNewFunction')
     if (objectKind === 'package') return i18n.global.t('modules.oracle.session.tabNewPackage')
+    if (objectKind === 'synonym') return i18n.global.t('modules.oracle.session.tabNewSynonym')
+    if (objectKind === 'trigger') return i18n.global.t('modules.oracle.session.tabNewTrigger')
+    if (objectKind === 'sequence') return i18n.global.t('modules.oracle.session.tabNewSequence')
     return i18n.global.t('modules.oracle.session.tabNewView')
   }
   if (objectKind === 'procedure') return i18n.global.t('modules.oracle.session.tabProcedure')
   if (objectKind === 'function') return i18n.global.t('modules.oracle.session.tabFunction')
   if (objectKind === 'package') return i18n.global.t('modules.oracle.session.tabPackage')
+  if (objectKind === 'synonym') return i18n.global.t('modules.oracle.session.tabSynonym')
+  if (objectKind === 'trigger') return i18n.global.t('modules.oracle.session.tabTrigger')
+  if (objectKind === 'sequence') return i18n.global.t('modules.oracle.session.tabSequence')
   return i18n.global.t('modules.oracle.session.tabView')
 }
 
@@ -85,7 +104,7 @@ function resolveFeature(ctx?: ConnOpenContext): OracleSessionTab {
   if (category === 'views' && segmentName(ctx, 'table') && ctx?.designMode) {
     return 'objectScript'
   }
-  if (segmentName(ctx, 'sequence') || category === 'sequences') return 'query'
+  if (segmentName(ctx, 'sequence')) return 'objectScript'
   if (segmentName(ctx, 'table')) return 'browse'
   return 'query'
 }
@@ -169,10 +188,46 @@ function buildObjectScriptTabSpec(item: ConnItem, ctx?: ConnOpenContext): Connec
   }
 }
 
+function buildCallTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNavTabSpec {
+  const schema = segmentName(ctx, 'schema')
+  const objectKind = resolveObjectKind(ctx)
+  const routineKind =
+    objectKind === 'function' || ctx?.objectKind === 'function' ? 'function' : 'procedure'
+  const routine = resolveObjectName(ctx, routineKind) ?? segmentName(ctx, 'routine')
+  const props: Record<string, unknown> = {
+    profileId: item.profileId,
+    initialTab: 'call',
+    routineKind,
+  }
+  if (schema) props.schema = schema
+  if (routine) {
+    props.routine = routine
+    props.objectName = routine
+    props.objectKind = routineKind
+  }
+
+  const resource = schema && routine ? `${schema}.${routine}` : schema || undefined
+  const paneLabel = featureLabel('call')
+
+  return {
+    moduleId: 'oracle',
+    title: routine ? `${routine} · ${paneLabel}` : paneLabel,
+    tooltip: buildConnectionTabTooltip(
+      item.profileName,
+      item.hostAddress,
+      resource,
+      paneLabel,
+    ),
+    icon: 'play',
+    props,
+  }
+}
+
 function buildOracleTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNavTabSpec {
   const feature = resolveFeature(ctx)
   if (feature === 'query') return buildQueryTabSpec(item, ctx)
   if (feature === 'objectScript') return buildObjectScriptTabSpec(item, ctx)
+  if (feature === 'call') return buildCallTabSpec(item, ctx)
 
   if (feature === 'monitor') {
     const monitorLabel = featureLabel('monitor')
@@ -254,7 +309,7 @@ function buildOracleTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNa
 }
 
 /**
- * Oracle：query 可多开；browse/ddl/objectScript/monitor/design 按 profile+资源+feature 去重。
+ * Oracle：query 可多开；browse/ddl/objectScript/monitor/design/call 按 profile+资源+feature 去重。
  * Tab 标题对齐 MySQL：对象短标题，完整路径放 tooltip。
  */
 export const oracleConnectionNavStrategy: ConnectionNavStrategy = {
@@ -302,9 +357,32 @@ export const oracleConnectionNavStrategy: ConnectionNavStrategy = {
         return tabKind === objectKind && tabName === objectName && tabMode === designMode
       }
 
+      if (feature === 'call') {
+        const objectKind = resolveObjectKind(ctx)
+        const routineKind =
+          objectKind === 'function' || ctx?.objectKind === 'function' ? 'function' : 'procedure'
+        const routine =
+          resolveObjectName(ctx, routineKind) ?? segmentName(ctx, 'routine')
+        const tabRoutine =
+          (typeof tab.props.routine === 'string' && tab.props.routine)
+          || (typeof tab.props.objectName === 'string' && tab.props.objectName)
+          || undefined
+        const tabKind =
+          tab.props.routineKind === 'function' || tab.props.objectKind === 'function'
+            ? 'function'
+            : 'procedure'
+        return tabRoutine === routine && tabKind === routineKind
+      }
+
       const table = segmentName(ctx, 'table')
       const tabTable = typeof tab.props.table === 'string' ? tab.props.table : undefined
       return tabTable === table
     })
   },
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    registerConnectionNavStrategy('oracle', oracleConnectionNavStrategy)
+  })
 }

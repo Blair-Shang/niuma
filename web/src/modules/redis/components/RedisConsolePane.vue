@@ -15,7 +15,7 @@
  * 这个副作用，不需要参与 Vue 的响应式渲染；命令历史上限见 `MAX_HISTORY_ENTRIES`，避免长时间会话
  * 里无限增长。
  */
-import { RsTerminal } from '@niuma/ui'
+import { RsTerminal, type RsTerminalExpose } from '@niuma/ui'
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { redisApi } from '@/api'
@@ -46,7 +46,7 @@ const { t } = useI18n()
 
 const redisDb = inject(redisDatabaseKey, null)
 
-const terminalRef = ref<InstanceType<typeof RsTerminal> | null>(null)
+const terminalRef = ref<RsTerminalExpose | null>(null)
 const overlayText = computed(() => (props.sessionId ? '' : t('modules.redis.console.noSession')))
 
 const { suggestions, schedule: scheduleSuggest, clear: clearSuggest } = useRedisSuggest(() => props.sessionId)
@@ -310,11 +310,10 @@ function longestCommonPrefix(values: string[]): string {
 /** 把候选命令名以多列形式打印到下一行（bash 二次按 Tab 展示候选列表的效果），随后在新行重绘输入框。 */
 function writeCandidateList(items: RedisCommandSuggestion[]): void {
   const term = terminalRef.value
-  const raw = term?.getTerminal()
-  if (!term || !raw) {
+  const cols = term?.getGeometry()?.cols
+  if (!term || !cols) {
     return
   }
-  const cols = raw.cols || 80
   const names = items.map((item) => item.name)
   const colWidth = Math.min(cols, Math.max(...names.map((n) => n.length)) + 2)
   const perRow = Math.max(1, Math.floor(cols / colWidth))

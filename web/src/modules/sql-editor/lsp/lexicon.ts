@@ -4,7 +4,16 @@
  */
 import type * as Monaco from 'monaco-editor'
 
-export type SqlDialect = 'mysql' | 'dameng' | 'kingbase' | 'clickhouse' | 'sqlite' | 'sqlserver'
+export type SqlDialect =
+  | 'mysql'
+  | 'dameng'
+  | 'kingbase'
+  | 'postgresql'
+  | 'clickhouse'
+  | 'sqlite'
+  | 'sqlserver'
+  | 'oracle'
+
 
 export type SqlLexicon = {
   keywords: string[]
@@ -156,7 +165,7 @@ export function buildSqlMonarch(
 
   root.push(...keywordRules, ...functionRules)
 
-  if (dialect === 'kingbase') {
+  if (dialect === 'kingbase' || dialect === 'postgresql') {
     root.push([/\$[a-zA-Z_][\w]*\$/, 'string.quote'], [/\$\$/, 'string.quote'])
   }
 

@@ -28,6 +28,16 @@ if(NOT DEFINED NIUMA_NETPROXY_BUILD_TESTS)
 endif()
 add_subdirectory("${NIUMA_NETPROXY_DIR}" "${CMAKE_BINARY_DIR}/niuma_netproxy")
 
+# 公共 SSH 隧道（对标 packages/go/tunnel、packages/rust/niuma-tunnel）
+set(NIUMA_SSHTUNNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../packages/cpp/sshtunnel")
+if(NOT EXISTS "${NIUMA_SSHTUNNEL_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "packages/cpp/sshtunnel not found at ${NIUMA_SSHTUNNEL_DIR}")
+endif()
+if(NOT DEFINED NIUMA_SSHTUNNEL_BUILD_TESTS)
+  set(NIUMA_SSHTUNNEL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+endif()
+add_subdirectory("${NIUMA_SSHTUNNEL_DIR}" "${CMAKE_BINARY_DIR}/niuma_sshtunnel")
+
 # 公共落盘日志（对标 packages/go/logutil）
 set(NIUMA_LOGUTIL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../packages/cpp/logutil")
 if(NOT EXISTS "${NIUMA_LOGUTIL_DIR}/CMakeLists.txt")
@@ -37,6 +47,15 @@ if(NOT DEFINED NIUMA_LOGUTIL_BUILD_TESTS)
   set(NIUMA_LOGUTIL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 endif()
 add_subdirectory("${NIUMA_LOGUTIL_DIR}" "${CMAKE_BINARY_DIR}/niuma_logutil")
+
+# SQL LSP 核心（对齐 packages/go/sqllsp）
+set(NIUMA_SQLLSP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../packages/cpp/sqllsp")
+if(NOT EXISTS "${NIUMA_SQLLSP_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "packages/cpp/sqllsp not found at ${NIUMA_SQLLSP_DIR}")
+endif()
+set(NIUMA_SQLLSP_NLOHMANN_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "" FORCE)
+set(NIUMA_SQLLSP_BUILD_TESTS ON CACHE BOOL "" FORCE)
+add_subdirectory("${NIUMA_SQLLSP_DIR}" "${CMAKE_BINARY_DIR}/niuma_sqllsp")
 
 set(ODPI_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/odpi/src")
 set(ODPI_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/odpi/include")
@@ -55,6 +74,8 @@ set(ORACLE_SERVICE_SOURCES
   src/session/connect.cpp
   src/session/manager.cpp
   src/session/query.cpp
+  src/session/dbms_output.cpp
+  src/session/routine_call.cpp
   src/session/sql_rows.cpp
   src/session/resolve.cpp
   src/session/tx.cpp
@@ -65,6 +86,8 @@ set(ORACLE_SERVICE_SOURCES
   src/catalog/list.cpp
   src/meta/system_users.cpp
   src/meta/relation.cpp
+  src/meta/metadata_ddl.cpp
+  src/meta/column_type.cpp
   src/meta/routines.cpp
   src/meta/monitor.cpp
   src/ddl/design.cpp
@@ -75,6 +98,9 @@ set(ORACLE_SERVICE_SOURCES
   src/dataio/dump.cpp
   src/dataio/execfile.cpp
   src/dataio/script_split.cpp
+  src/lsp/bridge.cpp
+  src/lsp/oracle_catalog.cpp
+  src/lsp/oracle_parser.cpp
   src/util/paths.cpp
   src/util/idgen.cpp
   src/util/ident.cpp
@@ -95,7 +121,7 @@ target_include_directories(niuma-oracle-service PRIVATE
   ${ODPI_SRC_DIR}
 )
 
-target_link_libraries(niuma-oracle-service PRIVATE niuma::serviceipc niuma::netproxy niuma::logutil)
+target_link_libraries(niuma-oracle-service PRIVATE niuma::serviceipc niuma::netproxy niuma::sshtunnel niuma::logutil niuma::sqllsp)
 
 if(WIN32)
   target_compile_definitions(niuma-oracle-service PRIVATE NIUMA_OS_WIN=1 _CRT_SECURE_NO_WARNINGS)

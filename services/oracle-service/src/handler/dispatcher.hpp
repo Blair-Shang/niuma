@@ -1,8 +1,10 @@
 #pragma once
 
 #include "dataio/manager.hpp"
+#include "lsp/bridge.hpp"
 #include "session/manager.hpp"
 
+#include <memory>
 #include <string>
 
 namespace niuma::oracle::handler {
@@ -15,6 +17,7 @@ class Dispatcher {
  private:
   session::Manager sessions_;
   dataio::Manager io_;
+  std::unique_ptr<lsp::Bridge> lsp_;
 };
 
 }  // namespace niuma::oracle::handler

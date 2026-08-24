@@ -5,8 +5,7 @@ import { useRsToast } from '@niuma/ui'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import type { ConnOpenContext, ConnResourcePath } from '@/modules/ops/conn-tree/types'
 import type { ConnItem } from '@/modules/ops/types'
-import { callRoutineSeed, qualifiedName, quoteIdent } from '@/modules/mysql/sql-seed'
-import { buildMysqlRoutineCallSql } from '@/modules/mysql/utils/routine-call'
+import { qualifiedName, quoteIdent } from '@/modules/mysql/sql-seed'
 import {
   analyzeTableSql,
   checkTableSql,
@@ -39,7 +38,7 @@ import {
 
 const toast = useRsToast()
 
-const CONN_MENU_KEYS = new Set(['createDatabase', 'query', 'monitor', 'tools'])
+const CONN_MENU_KEYS = new Set(['createDatabase', 'monitor', 'tools'])
 
 function openFeature(
   conn: ConnItem,
@@ -52,7 +51,7 @@ function openFeature(
     | 'monitor'
     | 'design'
     | 'tools'
-    | 'debug',
+    | 'call',
   initialSql?: string,
   options?: {
     autoRun?: boolean
@@ -268,39 +267,6 @@ async function fetchRoutineSource(
   }
 }
 
-/** 拉取形参元数据并打开 Query：OUT/INOUT 用用户变量 + SELECT 读回。 */
-async function openRoutineCall(
-  conn: ConnItem,
-  path: ConnResourcePath,
-  database: string,
-  routine: string,
-  isFunction: boolean,
-): Promise<void> {
-  const kind = isFunction ? 'function' : 'procedure'
-  try {
-    const sql = await withMysqlSession(conn.profileId, async (sessionId) => {
-      const { mysqlApi } = await import('@/api')
-      const meta = await mysqlApi.metaRoutineParameters({
-        sessionId,
-        database,
-        name: routine,
-        kind,
-      })
-      return buildMysqlRoutineCallSql({
-        database,
-        name: routine,
-        kind,
-        parameters: meta.parameters ?? [],
-        returnType: meta.returnType,
-      })
-    })
-    openQuery(conn, path, sql)
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : t('modules.mysql.tree.callFailed'))
-    openQuery(conn, path, callRoutineSeed(database, routine, isFunction))
-  }
-}
-
 async function loadTableScriptMeta(
   conn: ConnItem,
   database: string,
@@ -412,10 +378,6 @@ export function onConnMenuSelect(conn: ConnItem, key: string): boolean {
   if (!CONN_MENU_KEYS.has(key)) return false
   if (key === 'createDatabase') {
     requestCreateDatabase(conn)
-    return true
-  }
-  if (key === 'query') {
-    openQuery(conn, undefined)
     return true
   }
   if (key === 'monitor') {
@@ -579,12 +541,7 @@ export async function onResourceMenuSelect(
       return
     case 'call':
       if (database && routine) {
-        void openRoutineCall(conn, path, database, routine, isFunction)
-      }
-      return
-    case 'debug':
-      if (database && routine) {
-        openFeature(conn, path, 'debug', undefined, {
+        openFeature(conn, path, 'call', undefined, {
           objectKind: isFunction ? 'function' : 'procedure',
         })
       }

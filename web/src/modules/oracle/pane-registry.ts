@@ -1,5 +1,5 @@
 /**
- * Oracle Session 功能面板：query / browse / ddl / objectScript / monitor / design。
+ * Oracle Session 功能面板：query / browse / ddl / objectScript / monitor / design / call。
  */
 import type { OracleObjectKind, OracleObjectScriptMode } from '@/modules/oracle/types/object-script'
 
@@ -10,6 +10,7 @@ export type OracleSessionTab =
   | 'objectScript'
   | 'monitor'
   | 'design'
+  | 'call'
 
 export interface OraclePaneScope {
   schema?: string
@@ -86,16 +87,39 @@ function designProps(ctx: OraclePaneContext): Record<string, unknown> {
   }
 }
 
+function callProps(ctx: OraclePaneContext): Record<string, unknown> {
+  const routineKind =
+    ctx.routineKind === 'function' || ctx.objectKind === 'function' ? 'function' : 'procedure'
+  return {
+    sessionId: ctx.sessionId,
+    profileId: ctx.profileId,
+    schema: ctx.schema,
+    routine: ctx.routine ?? ctx.objectName,
+    routineKind,
+    sessionLabel: ctx.sessionLabel,
+  }
+}
+
 function resolveObjectKind(scope: OraclePaneScope): OracleObjectKind {
   if (
     scope.objectKind === 'view' ||
     scope.objectKind === 'procedure' ||
     scope.objectKind === 'function' ||
-    scope.objectKind === 'package'
+    scope.objectKind === 'package' ||
+    scope.objectKind === 'synonym' ||
+    scope.objectKind === 'trigger' ||
+    scope.objectKind === 'sequence'
   ) {
     return scope.objectKind
   }
-  if (scope.routineKind === 'procedure' || scope.routineKind === 'function' || scope.routineKind === 'package') {
+  if (
+    scope.routineKind === 'procedure' ||
+    scope.routineKind === 'function' ||
+    scope.routineKind === 'package' ||
+    scope.routineKind === 'synonym' ||
+    scope.routineKind === 'trigger' ||
+    scope.routineKind === 'sequence'
+  ) {
     return scope.routineKind
   }
   if (scope.isView) return 'view'
@@ -172,6 +196,15 @@ export const oraclePaneRegistry: Record<OracleSessionTab, OracleFeatureDef> = {
       buildProps: designProps,
     }),
   },
+  call: {
+    icon: 'play',
+    labelKey: 'modules.oracle.session.tabCall',
+    resolvePane: () => ({
+      // 组件名历史为 DebugPane，实际是执行调用（非断点调试器）
+      loader: () => import('@/modules/oracle/components/OracleDebugPane.vue'),
+      buildProps: callProps,
+    }),
+  },
 }
 
 export function normalizeOracleFeature(tab: string | undefined): OracleSessionTab {
@@ -181,7 +214,8 @@ export function normalizeOracleFeature(tab: string | undefined): OracleSessionTa
     tab === 'query' ||
     tab === 'objectScript' ||
     tab === 'monitor' ||
-    tab === 'design'
+    tab === 'design' ||
+    tab === 'call'
   ) {
     return tab
   }
@@ -196,6 +230,7 @@ export function oracleFeatureEmbedsChrome(tab: OracleSessionTab): boolean {
     tab === 'ddl' ||
     tab === 'objectScript' ||
     tab === 'monitor' ||
-    tab === 'design'
+    tab === 'design' ||
+    tab === 'call'
   )
 }

@@ -13,7 +13,6 @@ import {
   type OracleDdlAction,
 } from '@/modules/oracle/stores/ddl-actions'
 import {
-  callRoutineSeed,
   oracleSelectSeed,
   qualifiedName,
   quoteIdent,
@@ -36,7 +35,6 @@ import {
   compileProcedureSql,
   countSql,
   createObjectTemplate,
-  createSequenceSql,
   deleteTemplateSql,
   insertTemplateSql,
   selectAllSql,
@@ -44,6 +42,7 @@ import {
   type ScriptColumn,
 } from '@/modules/oracle/utils/script-templates'
 import type { OracleDumpScope } from '@/modules/oracle/data-tasks'
+import { joinOraclePackageSource } from '@/modules/oracle/utils/normalize-object-ddl'
 
 const t = (key: string, params?: Record<string, unknown>) =>
   params ? i18n.global.t(key, params) : i18n.global.t(key)
@@ -66,7 +65,7 @@ async function copyText(text: string): Promise<void> {
 export function openFeature(
   conn: ConnItem,
   path: ConnResourcePath | undefined,
-  initialTab: 'query' | 'browse' | 'ddl' | 'objectScript' | 'monitor' | 'design',
+  initialTab: 'query' | 'browse' | 'ddl' | 'objectScript' | 'monitor' | 'design' | 'call',
   initialSql?: string,
   options?: {
     autoRun?: boolean
@@ -82,7 +81,10 @@ export function openFeature(
     options?.objectKind === 'view' ||
     options?.objectKind === 'procedure' ||
     options?.objectKind === 'function' ||
-    options?.objectKind === 'package'
+    options?.objectKind === 'package' ||
+    options?.objectKind === 'synonym' ||
+    options?.objectKind === 'trigger' ||
+    options?.objectKind === 'sequence'
   ) {
     ctx.objectKind = options.objectKind
   }
@@ -153,6 +155,8 @@ function objectScriptPath(
       segments.push({ kind: 'table', name: objectName })
     } else if (category === 'packages') {
       segments.push({ kind: 'package', name: objectName })
+    } else if (category === 'sequences') {
+      segments.push({ kind: 'sequence', name: objectName })
     } else {
       segments.push({ kind: 'routine', name: objectName })
     }
@@ -160,16 +164,22 @@ function objectScriptPath(
   return { segments }
 }
 
+/** 新建 / 编辑视图·过程·函数·包：统一对象脚本面板（对齐 MySQL / 达梦显式传参）。 */
 export function openObjectScript(
   conn: ConnItem,
-  path?: ConnResourcePath,
-  designMode: OracleObjectScriptMode = 'alter',
-  options?: { objectKind?: OracleObjectKind; initialSql?: string },
+  schema: string,
+  category: OracleObjectCategory,
+  objectName: string | undefined,
+  designMode: OracleObjectScriptMode,
+  initialSql?: string,
 ): void {
-  openFeature(conn, path, 'objectScript', options?.initialSql, {
-    designMode,
-    objectKind: options?.objectKind,
-  })
+  const objectKind = categoryToObjectKind(category)
+  const path = objectScriptPath(schema, category, objectName)
+  const sql =
+    designMode === 'create'
+      ? (initialSql ?? createObjectTemplate(schema, category))
+      : initialSql
+  openFeature(conn, path, 'objectScript', sql, { designMode, objectKind })
 }
 
 export function openCreateObjectScript(
@@ -178,12 +188,7 @@ export function openCreateObjectScript(
   category: OracleObjectCategory,
 ): void {
   const placeholder = ORACLE_CREATE_OBJECT_PLACEHOLDERS[category]
-  const path = objectScriptPath(schema, category, placeholder)
-  const sql = createObjectTemplate(schema, category)
-  openObjectScript(conn, path, 'create', {
-    objectKind: categoryToObjectKind(category),
-    initialSql: sql,
-  })
+  openObjectScript(conn, schema, category, placeholder, 'create')
 }
 
 /** 连接右键：新建 Schema（CREATE USER + 表空间/配额 + 可选 GRANT）。 */
@@ -206,15 +211,16 @@ export function requestCreateSchema(conn: ConnItem): void {
   })
 }
 
-/** 序列暂无 ObjectScript 面板：用查询 Tab 打开 CREATE SEQUENCE 模板。 */
 export function openCreateSequence(conn: ConnItem, schema: string): void {
-  const path: ConnResourcePath = {
-    segments: [
-      { kind: 'schema', name: schema },
-      { kind: 'category', name: 'sequences' },
-    ],
-  }
-  openQuery(conn, path, createSequenceSql(schema))
+  openCreateObjectScript(conn, schema, 'sequences')
+}
+
+export function openCreateSynonym(conn: ConnItem, schema: string): void {
+  openCreateObjectScript(conn, schema, 'synonyms')
+}
+
+export function openCreateTrigger(conn: ConnItem, schema: string): void {
+  openCreateObjectScript(conn, schema, 'triggers')
 }
 
 /** @deprecated 使用 openCreateObjectScript */
@@ -245,6 +251,12 @@ function resolveDumpScope(
   if (pkg && category === 'packages') {
     return { dumpScope: 'package', objectName: pkg }
   }
+  if (routine && category === 'synonyms') {
+    return { dumpScope: 'synonym', objectName: routine }
+  }
+  if (routine && category === 'triggers') {
+    return { dumpScope: 'trigger', objectName: routine }
+  }
   if (sequence) return { dumpScope: 'sequence', objectName: sequence }
   if (
     category === 'tables' ||
@@ -252,6 +264,8 @@ function resolveDumpScope(
     category === 'procedures' ||
     category === 'functions' ||
     category === 'packages' ||
+    category === 'synonyms' ||
+    category === 'triggers' ||
     category === 'sequences'
   ) {
     return { dumpScope: category }
@@ -276,6 +290,8 @@ export function openOracleIoTask(
     'procedure',
     'function',
     'package',
+    'synonym',
+    'trigger',
     'sequence',
   ])
   const useObjectScope =
@@ -304,6 +320,8 @@ export function openOracleIoTask(
     procedures: 'modules.oracle.io.dumpScopeProcedures',
     functions: 'modules.oracle.io.dumpScopeFunctions',
     packages: 'modules.oracle.io.dumpScopePackages',
+    synonyms: 'modules.oracle.io.dumpScopeSynonyms',
+    triggers: 'modules.oracle.io.dumpScopeTriggers',
     sequences: 'modules.oracle.io.dumpScopeSequences',
   }
 
@@ -357,11 +375,22 @@ async function loadTableScriptMeta(
   }
 }
 
-async function fetchMetaDdl(conn: ConnItem, schema: string, name: string): Promise<string | null> {
+async function fetchMetaDdl(
+  conn: ConnItem,
+  schema: string,
+  name: string,
+  objectType?: 'table' | 'view' | 'synonym' | 'trigger' | 'sequence',
+): Promise<string | null> {
   try {
     return await withOracleSession(conn.profileId, async (sessionId) => {
       const { oracleApi } = await import('@/api/oracle')
-      const result = await oracleApi.metaDDL({ sessionId, schema, table: name, name })
+      const result = await oracleApi.metaDDL({
+        sessionId,
+        schema,
+        table: name,
+        name,
+        objectType,
+      })
       if (!result.ddl?.trim()) {
         toast.error(t('modules.oracle.tree.ddlEmpty'))
         return null
@@ -405,7 +434,7 @@ async function fetchPackageSource(
     return await withOracleSession(conn.profileId, async (sessionId) => {
       const { oracleApi } = await import('@/api/oracle')
       const result = await oracleApi.metaPackageSource({ sessionId, schema, name, part: 'both' })
-      const text = [result.definition, result.bodyDefinition].filter((s) => s?.trim()).join('\n/\n')
+      const text = joinOraclePackageSource(result.definition, result.bodyDefinition)
       if (!text.trim()) {
         toast.error(t('modules.oracle.tree.ddlEmpty'))
         return null
@@ -466,18 +495,33 @@ function requestRename(
   })
 }
 
-/** Tables and views open Browse; editable objects open their source script. */
+/** 表/视图 → Browse；过程/函数/包 → ObjectScript；其余 → Query。 */
 export function activate(conn: ConnItem, path: ConnResourcePath): void {
+  const schema = segmentName(path, 'schema')
   const category = segmentName(path, 'category')
   const table = segmentName(path, 'table')
+  const routine = segmentName(path, 'routine')
+  const pkg = segmentName(path, 'package')
+  const sequence = segmentName(path, 'sequence')
+
   if (table && isRelationCategory(category)) {
     openBrowse(conn, path)
     return
   }
-  if (isObjectCategory(category)) {
-    openObjectScript(conn, path, 'alter', {
-      objectKind: categoryToObjectKind(category),
-    })
+  if (schema && routine && (category === 'procedures' || category === 'functions')) {
+    openObjectScript(conn, schema, category, routine, 'alter')
+    return
+  }
+  if (schema && pkg && category === 'packages') {
+    openObjectScript(conn, schema, 'packages', pkg, 'alter')
+    return
+  }
+  if (schema && routine && (category === 'synonyms' || category === 'triggers')) {
+    openObjectScript(conn, schema, category, routine, 'alter')
+    return
+  }
+  if (schema && sequence && category === 'sequences') {
+    openObjectScript(conn, schema, 'sequences', sequence, 'alter')
     return
   }
   openQuery(conn, path)
@@ -515,15 +559,33 @@ export async function onResourceMenuSelect(
       if (schema) openDesign(conn, path, 'alter')
       return
     case 'editView':
-    case 'editSource':
+      if (schema && table) {
+        openObjectScript(conn, schema, 'views', table, 'alter')
+      }
+      return
     case 'source':
-      openObjectScript(conn, path, 'alter', {
-        objectKind: isObjectCategory(category) ? categoryToObjectKind(category) : undefined,
-      })
+      if (schema && pkg && category === 'packages') {
+        openObjectScript(conn, schema, 'packages', pkg, 'alter')
+        return
+      }
+      if (schema && routine && (category === 'procedures' || category === 'functions')) {
+        openObjectScript(conn, schema, category, routine, 'alter')
+        return
+      }
+      if (schema && routine && (category === 'synonyms' || category === 'triggers')) {
+        openObjectScript(conn, schema, category, routine, 'alter')
+        return
+      }
+      if (schema && sequence) {
+        openObjectScript(conn, schema, 'sequences', sequence, 'alter')
+      }
       return
     case 'call':
+      // 专业化执行：参数网格 + routine.call bind OUT（provider 也会直接处理）
       if (schema && routine) {
-        openQuery(conn, path, callRoutineSeed(schema, routine, isFunction))
+        openFeature(conn, path, 'call', undefined, {
+          objectKind: isFunction ? 'function' : 'procedure',
+        })
       }
       return
     case 'genSelect':
@@ -629,6 +691,20 @@ export async function onResourceMenuSelect(
         )
       }
       return
+    case 'dropSchema':
+      if (schema && !category) {
+        useOracleDdlActionStore().request({
+          conn,
+          action: 'drop_schema',
+          profileId: conn.profileId,
+          name: schema,
+          title: t('modules.oracle.tree.dropSchema'),
+          description: t('modules.oracle.ddl.dropSchemaDesc', { name: schema }),
+          kind: 'danger',
+          prunePaths: [path],
+        })
+      }
+      return
     case 'drop':
       if (schema && table) {
         requestDanger(
@@ -638,6 +714,30 @@ export async function onResourceMenuSelect(
           isView ? 'modules.oracle.tree.dropView' : 'modules.oracle.tree.dropTable',
           isView ? 'modules.oracle.ddl.dropViewDesc' : 'modules.oracle.ddl.dropTableDesc',
           table,
+          schema,
+        )
+        return
+      }
+      if (schema && routine && category === 'synonyms') {
+        requestDanger(
+          conn,
+          path,
+          'drop_synonym',
+          'modules.oracle.tree.dropSynonym',
+          'modules.oracle.ddl.dropSynonymDesc',
+          routine,
+          schema,
+        )
+        return
+      }
+      if (schema && routine && category === 'triggers') {
+        requestDanger(
+          conn,
+          path,
+          'drop_trigger',
+          'modules.oracle.tree.dropTrigger',
+          'modules.oracle.ddl.dropTriggerDesc',
+          routine,
           schema,
         )
         return
@@ -687,12 +787,22 @@ export async function onResourceMenuSelect(
       return
     case 'copyDdl': {
       if (schema && table) {
-        const ddl = await fetchMetaDdl(conn, schema, table)
+        const ddl = await fetchMetaDdl(conn, schema, table, isView ? 'view' : 'table')
         if (ddl) void copyText(ddl)
         return
       }
       if (schema && sequence) {
-        const ddl = await fetchMetaDdl(conn, schema, sequence)
+        const ddl = await fetchMetaDdl(conn, schema, sequence, 'sequence')
+        if (ddl) void copyText(ddl)
+        return
+      }
+      if (schema && routine && category === 'synonyms') {
+        const ddl = await fetchMetaDdl(conn, schema, routine, 'synonym')
+        if (ddl) void copyText(ddl)
+        return
+      }
+      if (schema && routine && category === 'triggers') {
+        const ddl = await fetchMetaDdl(conn, schema, routine, 'trigger')
         if (ddl) void copyText(ddl)
         return
       }

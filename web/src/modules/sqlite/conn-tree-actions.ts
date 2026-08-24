@@ -503,10 +503,6 @@ export function activate(conn: ConnItem, path: ConnResourcePath): void {
 }
 
 export function onConnMenuSelect(conn: ConnItem, key: string): void {
-  if (key === 'query') {
-    openFeature(conn, undefined, 'query')
-    return
-  }
   if (key === 'backup') {
     void runBackupCopy(conn)
     return

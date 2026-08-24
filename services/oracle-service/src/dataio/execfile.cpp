@@ -24,6 +24,8 @@ bool OpenIoSession(const session::ConnectParams& connect, session::Session& out,
     return false;
   }
   out.conn = std::move(opened.conn);
+  out.proxy_relay = std::move(opened.proxy_relay);
+  out.ssh_tunnel = std::move(opened.ssh_tunnel);
   out.ctx = session::SharedContext(error);
   out.params = connect;
   out.profile = std::move(opened.profile);
@@ -63,12 +65,7 @@ std::string TrimLeftSpace(std::string s) {
   return s.substr(i);
 }
 
-/** DROP 不存在对象：空目标 schema 上属预期，对齐达梦「可跳过」语义。 */
-bool IsBenignDropMissingError(const std::string& sql_text, const std::string& err) {
-  std::string upper = ToUpperAscii(TrimLeftSpace(sql_text));
-  if (upper.rfind("DROP ", 0) != 0) {
-    return false;
-  }
+bool ErrorIndicatesMissingObject(const std::string& err) {
   const std::string msg = ToUpperAscii(err);
   // ORA-00942 table or view does not exist
   // ORA-04043 object does not exist
@@ -80,10 +77,25 @@ bool IsBenignDropMissingError(const std::string& sql_text, const std::string& er
       msg.find("ORA-04080") != std::string::npos) {
     return true;
   }
-  if (msg.find("DOES NOT EXIST") != std::string::npos) {
-    return true;
+  return msg.find("DOES NOT EXIST") != std::string::npos;
+}
+
+/** DROP 不存在对象：空目标 schema 上属预期，对齐达梦「可跳过」语义。 */
+bool IsBenignDropMissingError(const std::string& sql_text, const std::string& err) {
+  std::string upper = ToUpperAscii(TrimLeftSpace(sql_text));
+  if (upper.rfind("DROP ", 0) != 0) {
+    return false;
   }
-  return false;
+  return ErrorIndicatesMissingObject(err);
+}
+
+/** 数据语句遇到缺表：多半是建表 DDL 已失败或仅导出了 data_only。 */
+bool IsDataAgainstMissingTable(const std::string& sql_text, const std::string& err) {
+  if (!ErrorIndicatesMissingObject(err)) {
+    return false;
+  }
+  std::string upper = ToUpperAscii(TrimLeftSpace(sql_text));
+  return upper.rfind("INSERT ", 0) == 0 || upper.rfind("TRUNCATE ", 0) == 0;
 }
 
 bool HasUtf8Bom(std::string_view text) {
@@ -144,6 +156,7 @@ bool RunExecSqlFile(const session::ConnectParams& connect, const std::string& sc
   int statement_count = 0;
   std::uint64_t total_bytes_read = 0;
   bool stopped = false;
+  std::string first_failure;
   std::string last_failure;
   // continue_on_error 时错误日志限流：前 10 条详报，其后每 100 条一条；连续失败过多则中止。
   constexpr int kErrorDetailCap = 10;
@@ -187,6 +200,9 @@ bool RunExecSqlFile(const session::ConnectParams& connect, const std::string& sc
           }
           ++failed;
           last_failure = "statement " + std::to_string(stmt_no) + ": " + err;
+          if (first_failure.empty()) {
+            first_failure = last_failure;
+          }
           if (progress && (failed <= kErrorDetailCap || failed % kErrorSampleEvery == 0)) {
             std::string short_err = err;
             if (short_err.size() > 160) {
@@ -197,9 +213,24 @@ bool RunExecSqlFile(const session::ConnectParams& connect, const std::string& sc
                      "error near statement " + std::to_string(stmt_no) + " (failed " +
                          std::to_string(failed) + "): " + short_err);
           }
+          // 建表未成功时 INSERT/TRUNCATE 会连环 ORA-00942；勿等满 50 条才停。
+          if (executed == 0 && IsDataAgainstMissingTable(sql, err)) {
+            error = "oracle: exec sql file aborted — target table/view missing while applying data (" +
+                    last_failure + ")";
+            if (!first_failure.empty() && first_failure != last_failure) {
+              error += "; first error: " + first_failure;
+            }
+            error +=
+                "; recreate with structure+data dump, or ensure CREATE TABLE succeeded before data";
+            stopped = true;
+            return false;
+          }
           if (executed == 0 && failed >= kAbortAfterFailsWithNoSuccess) {
             error = "oracle: exec sql file aborted after " + std::to_string(failed) +
                     " consecutive errors with 0 success — last error: " + last_failure;
+            if (!first_failure.empty() && first_failure != last_failure) {
+              error += "; first error: " + first_failure;
+            }
             stopped = true;
             return false;
           }

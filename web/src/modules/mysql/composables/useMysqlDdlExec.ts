@@ -119,7 +119,9 @@ export function useMysqlDdlExec() {
       toast.success(t('modules.mysql.ddl.done'))
       if (conn) {
         const countDelta = req.action.startsWith('drop_') ? -1 : 0
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        if (req.action !== 'truncate_table') {
+          await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
+        }
       } else {
         invalidateConnTreeChildren(req.profileId)
       }

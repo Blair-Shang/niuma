@@ -70,6 +70,7 @@ export function useSqlServerSqlEditor(options: {
     if (!model || unmounted || gen !== attachGen) return
 
     const database = scope?.database?.trim() || undefined
+    const schema = scope?.schema?.trim() || 'dbo'
     let detach: (() => void) | null = null
     try {
       detach = await attachSqlServerSqlLsp({
@@ -77,6 +78,7 @@ export function useSqlServerSqlEditor(options: {
         sessionId,
         editorId,
         database,
+        schema,
       })
     } catch (err) {
       console.warn('[sql-lsp] attach failed', err)
@@ -96,6 +98,7 @@ export function useSqlServerSqlEditor(options: {
       editor.editorRef.value,
       options.getSuggestScope?.()?.sessionId ?? null,
       options.getSuggestScope?.()?.database ?? null,
+      options.getSuggestScope?.()?.schema ?? null,
       options.active(),
     ],
     () => {

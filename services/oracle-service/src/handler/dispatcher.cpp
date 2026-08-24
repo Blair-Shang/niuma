@@ -11,6 +11,7 @@
 #include "session/load_lob.hpp"
 #include "session/query.hpp"
 #include "session/resolve.hpp"
+#include "session/routine_call.hpp"
 #include "session/tx.hpp"
 #include "tree/list.hpp"
 #include "util/idgen.hpp"
@@ -118,6 +119,8 @@ dataio::DumpParams DumpParamsOf(const nlohmann::json& j) {
   dump.include_functions = j.value("includeFunctions", j.value("include_functions", false));
   dump.include_packages = j.value("includePackages", j.value("include_packages", false));
   dump.include_sequences = j.value("includeSequences", j.value("include_sequences", false));
+  dump.include_synonyms = j.value("includeSynonyms", j.value("include_synonyms", false));
+  dump.include_triggers = j.value("includeTriggers", j.value("include_triggers", false));
   if (j.contains("tables") && j["tables"].is_array()) {
     for (const auto& t : j["tables"]) {
       if (t.is_string()) {
@@ -127,13 +130,16 @@ dataio::DumpParams DumpParamsOf(const nlohmann::json& j) {
   }
   // 未指定任何类型时默认全开（兼容旧客户端）。
   if (!dump.include_tables && !dump.include_views && !dump.include_procedures &&
-      !dump.include_functions && !dump.include_packages && !dump.include_sequences) {
+      !dump.include_functions && !dump.include_packages && !dump.include_sequences &&
+      !dump.include_synonyms && !dump.include_triggers) {
     dump.include_tables = true;
     dump.include_views = true;
     dump.include_procedures = true;
     dump.include_functions = true;
     dump.include_packages = true;
     dump.include_sequences = true;
+    dump.include_synonyms = true;
+    dump.include_triggers = true;
   }
   return dump;
 }
@@ -170,7 +176,7 @@ std::string IoOwnerOf(const nlohmann::json& params) {
 
 }  // namespace
 
-Dispatcher::Dispatcher() = default;
+Dispatcher::Dispatcher() : lsp_(std::make_unique<lsp::Bridge>(sessions_)) {}
 
 std::string Dispatcher::HandleFrame(const std::string& raw_json) {
   nlohmann::json req;
@@ -212,6 +218,7 @@ std::string Dispatcher::HandleFrame(const std::string& raw_json) {
       s->params = std::move(cp);
       s->profile = std::move(opened.profile);
       s->proxy_relay = std::move(opened.proxy_relay);
+      s->ssh_tunnel = std::move(opened.ssh_tunnel);
       sessions_.Put(s);
       LogOpInfo(method, {{"session", s->id},
                          {"host", s->params.host_address},
@@ -274,6 +281,29 @@ std::string Dispatcher::HandleFrame(const std::string& raw_json) {
                          {"rows", result.value("rowCount", 0)},
                          {"hasMore", result.value("hasMore", false)},
                          {"resultSet", result.value("resultSetId", "")}});
+      return Ok(id, result);
+    }
+
+    // 专业化过程/函数调用：ODPI bind 读回 OUT（对齐 Kingbase routine.call）
+    if (method == "routine.call") {
+      auto rp = session::RoutineCallParams::FromJson(params);
+      auto s = sessions_.Get(rp.session_id);
+      if (!s) {
+        return Fail(id, "oracle: session not found");
+      }
+      std::lock_guard exec_lock(s->exec_mu);
+      std::string err;
+      auto result = session::CallRoutine(*s, rp, err);
+      if (!err.empty()) {
+        NoteSessionError(sessions_, rp.session_id, err);
+        LogOpWarn(method, err, {{"session", rp.session_id}, {"schema", rp.schema}, {"name", rp.name}});
+        return Fail(id, err);
+      }
+      LogOpInfo(method, {{"session", rp.session_id},
+                         {"schema", rp.schema},
+                         {"name", rp.name},
+                         {"kind", rp.kind},
+                         {"rows", result.value("rowCount", 0)}});
       return Ok(id, result);
     }
 
@@ -406,8 +436,9 @@ std::string Dispatcher::HandleFrame(const std::string& raw_json) {
         method == "catalog.schemas" || method == "catalog.tables" || method == "catalog.columns" ||
         method == "meta.columns" || method == "meta.indexes" || method == "meta.ddl" ||
         method == "meta.primaryKey" || method == "meta.foreignKeys" || method == "meta.routineSource" ||
-        method == "meta.packageSource" || method == "meta.processlist" || method == "meta.kill" ||
-        method == "meta.instanceOverview" || method == "meta.locks") {
+        method == "meta.routineParameters" || method == "meta.packageSource" ||
+        method == "meta.processlist" || method == "meta.kill" || method == "meta.instanceOverview" ||
+        method == "meta.locks") {
       auto resolved = session::ResolveSession(sessions_, params);
       if (!resolved.ok) {
         return Fail(id, resolved.error);
@@ -447,6 +478,8 @@ std::string Dispatcher::HandleFrame(const std::string& raw_json) {
         }
       } else if (method == "meta.routineSource") {
         result = meta::GetRoutineSource(s, meta::RoutineRef::FromJson(params), err);
+      } else if (method == "meta.routineParameters") {
+        result = meta::ListRoutineParameters(s, meta::RoutineRef::FromJson(params), err);
       } else if (method == "meta.packageSource") {
         result = meta::GetPackageSource(s, meta::PackageRef::FromJson(params), err);
       } else if (method == "meta.processlist") {
@@ -635,6 +668,28 @@ std::string Dispatcher::HandleFrame(const std::string& raw_json) {
       const bool canceled = io_.Cancel(task_id, IoOwnerOf(params));
       LogOpInfo(method, {{"session", sid}, {"task", task_id}, {"canceled", canceled}});
       return Ok(id, {{"canceled", canceled}, {"cancelled", canceled}, {"taskId", task_id}});
+    }
+
+    if (method == "lsp.open" || method == "lsp.rpc" || method == "lsp.close" ||
+        method == "lsp.lexicon") {
+      std::string err;
+      nlohmann::json result;
+      if (method == "lsp.open") {
+        result = lsp_->Open(params, err);
+      } else if (method == "lsp.rpc") {
+        result = lsp_->Rpc(params, err);
+      } else if (method == "lsp.close") {
+        result = lsp_->Close(params, err);
+      } else {
+        result = lsp_->Lexicon(params, err);
+      }
+      if (!err.empty()) {
+        LogOpWarn(method, err, {{"session", params.value("sessionId", "")}});
+        return Fail(id, err);
+      }
+      LogOpInfo(method, {{"session", params.value("sessionId", "")},
+                         {"connection", params.value("connectionId", "")}});
+      return Ok(id, result);
     }
 
     return Fail(id, "method not found: " + method);

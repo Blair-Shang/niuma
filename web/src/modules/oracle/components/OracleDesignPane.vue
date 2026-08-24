@@ -943,21 +943,64 @@ async function onApply(): Promise<void> {
   }
 }
 
-watch(
-  () => [props.sessionId, props.schema, props.table, props.active, props.designMode] as const,
-  ([sid, , , active]) => {
-    if (active && (sid || props.profileId)) {
-      if (modeCreate.value) {
-        if (columns.value.length === 0) {
-          columns.value = defaultCreateTableColumns()
-          indexes.value = syncPrimaryIndexFromColumns([], columns.value)
-        }
-      } else {
-        void load()
-      }
+function designScopeKey(): string {
+  return [
+    props.sessionId ?? '',
+    props.profileId ?? '',
+    props.schema ?? '',
+    props.table ?? '',
+    props.designMode ?? 'alter',
+  ].join('\0')
+}
+
+/** 已成功装载的作用域；与 MysqlDesignPane 一致，避免 keep-alive 切回重复请求。 */
+let loadedDesignScope = ''
+
+function ensureDesignLoaded(): void {
+  if (!(props.sessionId || props.profileId)) return
+  if (modeCreate.value) {
+    if (columns.value.length === 0) {
+      columns.value = defaultCreateTableColumns()
+      indexes.value = syncPrimaryIndexFromColumns([], columns.value)
     }
+    loadedDesignScope = designScopeKey()
+    return
+  }
+  void load().then(() => {
+    if (columns.value.length > 0) {
+      loadedDesignScope = designScopeKey()
+    }
+  })
+}
+
+/** 仅作用域变化时重拉；keep-alive 切回 Shell Tab 不重复请求。 */
+watch(
+  () => [props.sessionId, props.schema, props.table, props.designMode] as const,
+  () => {
+    if (designScopeKey() !== loadedDesignScope) {
+      // 失活期间作用域已变：清掉旧草稿，切回时由 active watch 再拉
+      if (!modeCreate.value) {
+        columns.value = []
+        indexes.value = []
+        foreignKeys.value = []
+      }
+      loadedDesignScope = ''
+    }
+    if (!props.active) return
+    ensureDesignLoaded()
   },
   { immediate: true },
+)
+
+watch(
+  () => props.active,
+  (active) => {
+    if (!active) return
+    if (loadedDesignScope === designScopeKey()) {
+      if (modeCreate.value || columns.value.length > 0) return
+    }
+    ensureDesignLoaded()
+  },
 )
 
 onMounted(() => {

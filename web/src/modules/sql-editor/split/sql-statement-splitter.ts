@@ -446,6 +446,16 @@ function tryStartPlsql(
     if (replaceAt < 0) return null
     p = skipWsAndComments(sql, replaceAt, features)
   }
+  // 对齐 oracle-service script_split：跳过 EDITIONABLE / NONEDITIONABLE
+  const editionableAt = matchKeyword(sql, p, 'editionable')
+  if (editionableAt >= 0) {
+    p = skipWsAndComments(sql, editionableAt, features)
+  } else {
+    const nonEditionableAt = matchKeyword(sql, p, 'noneditionable')
+    if (nonEditionableAt >= 0) {
+      p = skipWsAndComments(sql, nonEditionableAt, features)
+    }
+  }
   const procAt = matchKeyword(sql, p, 'procedure')
   if (procAt >= 0) return { next: procAt, mode: { kind: 'await_as_is' } }
   const funcAt = matchKeyword(sql, p, 'function')

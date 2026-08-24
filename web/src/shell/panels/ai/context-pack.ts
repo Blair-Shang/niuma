@@ -22,6 +22,8 @@ const SQL_DIALECT_MODULES = new Set<string>([
   'oracle',
   'clickhouse',
   'kingbase',
+  'sqlserver',
+  'postgres',
 ])
 
 export type AiContextKind = 'tab' | 'selection' | 'connection' | 'diagnostic' | 'schema'

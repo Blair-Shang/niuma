@@ -1,7 +1,7 @@
 # 32 — SQL Server 管理模块（Layer-1 能力服务 + Web 模块）
 
-> 版本：v0.2 · 日期：2026-08-03  
-> 状态：**后端 P0 + LSP 已落地**；**Web P0 已落地**（ConnKind / session / Query / `GO` 拆批 / Monaco LSP）；tree/catalog / Browse 待 P1  
+> 版本：v0.8 · 日期：2026-08-18  
+> 状态：**后端 P0 + LSP + tree.* + `meta.columns/indexes/primaryKey/ddl` 已落地**；**Web P0–P4 树 / Query / Browse / DDL / 设计器 / Monitor / `io.*` 已落地**；**库级 dump 扫全部用户 schema**（`niuma-sqlserver-dump/2`）；catalog 与 Windows/AAD 待后续；P5（Triggers/Types/约束树、重命名、GRANT、sqlcmd/bcp）未做  
 > **隔离**：**独立进程 / 独立 kind / 独立 Web 模块 / 独立实现**；禁止与 MySQL / Oracle / 达梦 / 其它库服务混用代码或运行时互调  
 > 关联：[13](./13-service-layout.md) · [14](./14-capability-connection-framework.md) · [18](./18-ops-connection-tree.md) · [20](./20-tool-components.md) · [21](./21-session-registry.md) · [23](./23-sql-dialect-completion.md) · [25 — MySQL](./25-mysql-module.md)（**分期骨架对照，非实现依赖**） · [31 — 金仓](./31-kingbase-module.md)（**有 schema 层对照，非实现依赖**）
 
@@ -270,6 +270,8 @@ flowchart TD
 services/
 ├── manifests/sqlserver-service.yaml
 └── sqlserver-service/
+    ├── README.md              # 构建 / Docker 联调 / IPC（对照 oracle-service/README）
+    ├── docker-compose.yml     # 本地 SQL Server 2022（宿主机 61433）
     ├── go.mod                 # microsoft/go-mssqldb + niuma/pkg/*
     ├── cmd/sqlserver-service/main.go
     └── internal/
@@ -333,9 +335,9 @@ SQL Server 的 session/query/tree/meta/IO **适配只写在** `modules/sqlserver
 | exclude_system_schemas | `true` | 树/catalog 默认隐藏 `sys` / `INFORMATION_SCHEMA` 等 |
 | tunnel / proxy | 无 | 与其它能力服务同形 |
 
-表单 Tab 建议：常规 · 认证 · 加密 · SSH · 高级（对齐现有 ops 连接表单体系）。
+表单 Tab（已落地，对齐 MySQL/Oracle）：**基础**（库 / 命名实例 / SQL 认证说明）· **SSL**（Encrypt / Trust Cert / 证书主机名）· **高级** · **代理** · **SSH 隧道**。
 
-P0 验收：SQL 认证明文/Encrypt 常见组合 +（若平台已通）SSH 隧道下 `session.test` 成功并返回 `dialect`。  
+P0 验收：SQL 认证明文/Encrypt 常见组合 + Home/Ops 可选 SSH 隧道；`session.test` 成功展示版本并返回 `dialect`；Azure 主机强制 `encrypt=mandatory|strict`；命名实例与隧道互斥。  
 Windows / AAD：**P2+**（驱动支持，但本机环境与 UX 依赖重，不阻塞 P0）。
 
 ---
@@ -388,8 +390,8 @@ connection → database → schema → {Tables|Views|Procedures|Functions|Synony
 
 **树右键（常用集，密度对齐 MySQL 文档级，低于 SSMS）**：
 
-- **库 / schema 节点**：新建查询、新建表/视图/过程/函数、刷新、复制名称；工具（转储 SQL / 执行 SQL 文件）后期挂 IO。  
-- **对象节点**：查询数据、查看/复制 DDL、生成 CRUD、重命名/Truncate/Drop、例程编辑、导入导出。  
+- **库 / schema 节点**：新建查询、新建表/视图/过程/函数、刷新、复制名称；工具（转储 SQL / 执行 SQL 文件）。**库级转储扫全部用户 schema**（不缺省 dbo）；schema 级仍只转当前 schema。  
+- **对象节点**：查询数据、查看/复制 DDL、生成 CRUD、Truncate/Drop、例程编辑、导入导出。重命名 / GRANT 属 P5。  
 - **连接级**：进程/请求监视（Monitor）。
 
 ResourceId（与 [18](./18-ops-connection-tree.md) 对齐）：
@@ -414,13 +416,13 @@ res:{profileId}:database:{db}:schema:{schema}:table:{table}
 
 | 方法 | 说明 |
 |------|------|
-| `meta.columns` / `indexes` / `ddl` | 表级 Browse/DDL |
+| `meta.columns` / `indexes` / `ddl` / `primaryKey` | 表/视图/同义词元数据与拼装 DDL（**已落地**；Browse 已接） |
 | `meta.routineSource` | 过程/函数对象脚本 |
-| `meta.primaryKey` / `meta.foreignKeys` | 设计器辅助 |
+| `meta.foreignKeys` | 设计器辅助 |
 | `meta.processlist` / `meta.kill` | 近似 `sys.dm_exec_sessions` / `requests` + `KILL`（非 `query.cancel`） |
 | `meta.instanceOverview` / `meta.locks` | 实例概览与锁等待（P4） |
 | `ddl.designPreview` / `ddl.designApply` / `ddl.createTable*` | 表设计器（P4） |
-| `io.exportCsv` / `io.importCsv` / `io.dumpSql` / `io.execSqlFile` / `io.cancel` | CSV/SQL 任务（P4；任务进全局 Dock） |
+| `io.exportCsv` / `io.importCsv` / `io.dumpSql` / `io.execSqlFile` / `io.cancel` | CSV/SQL 任务（P4；任务进全局 Dock）。**库级 dump**：`schema` 空则扫全部用户 schema（默认排除系统 schema；可选 `CREATE SCHEMA`）；schema/对象级仍只转指定 schema |
 | `tools.detect` / `tools.dump` / `tools.restore` / `tools.cancel` | 可选 sqlcmd/bcp（P5；[20](./20-tool-components.md)） |
 
 过程模板（P3）：T-SQL `CREATE PROCEDURE … AS BEGIN … END`（**不是** MySQL `DELIMITER` 或 PL/SQL `/`）。
@@ -486,11 +488,11 @@ permissions: []
 | Phase | 内容 | 验收 |
 |-------|------|------|
 | **P0** | 服务骨架、manifest、kind、session、Probe、`query.exec/cancel`、`GO` 拆批、连接表单（SQL 认证 + Encrypt）、最小 Query | Test → 开会话 → 批脚本；lease 有 `capabilities` |
-| **P1** | `tree.databases/schemas/tables/routines`、连接树 Provider + 常用右键；`catalog.*` + Query 轻量补全 | 展开见库/schema/表；补全能出表列 |
-| **P2** | 只读 Browse、`meta.columns/indexes/ddl`；树 open→browse、表 ddl→DDL Tab；Windows/AAD 认证（可选） | 双击表看数据/列/索引；右键 DDL |
+| **P1** | `tree.databases/schemas/tables/routines/sequences/categoryCounts`、连接树 Provider + 常用右键（query / SELECT·COUNT / 复制）— **已落地**；`catalog.*` + Query 轻量补全仍待 | 展开见库/schema/表；补全能出表列 |
+| **P2** | `meta.*` + 只读 Browse（数据/列/索引、WHERE、分页 OFFSET/FETCH、当前页导出）+ DDL Tab + 列感知脚本 — **已落地**；Windows/AAD 认证仍待 | 双击表看数据；右键打开表 / 查看 DDL |
 | **P3** | `meta.routineSource`；对象脚本面板；`query.explain`；可选 `editor.sql_lsp` | 新建/编辑视图·例程；执行计划 |
-| **P4** | Monitor；表设计器；CSV/SQL `io.*` | 监视三页级可用；设计表；导入导出进 Dock |
-| **P5** | `components/sqlserver-tools`（sqlcmd/bcp）；高级 Azure 认证体验打磨 | 设置页可检测路径；大批量工具链可用 |
+| **P4** | Monitor；表设计器；CSV/SQL `io.*`（**库级 dump 扫全部用户 schema 已落地**） | 监视三页级可用；设计表；导入导出进 Dock；库节点转储不缺省 dbo |
+| **P5** | Triggers / Types / 约束树；对象重命名；GRANT；`components/sqlserver-tools`（sqlcmd/bcp）；高级 Azure 认证体验打磨 | 设置页可检测路径；大批量工具链可用 |
 
 **首期明确不做**：SSMS 调试器、Agent Job 全编辑、Always On 管理平面、Profiler/XEvent 设计器、ER 全图。
 
@@ -501,11 +503,11 @@ permissions: []
 | 能力 | DBeaver / Navicat | NiuMa 落点 |
 |------|-------------------|------------|
 | 连接向导（SQL Auth / Encrypt / Tunnel） | ✓ | P0 表单 + Vault + tunnel |
-| 对象树（DB → Schema → 分类计数） | ✓ | P1 `tree.*` |
+| 对象树（DB → Schema → 分类计数） | ✓ | P1 `tree.*`（已落地） |
 | SQL 编辑 + `GO` 批 | ✓ | P0 Cap + splitter |
 | 结果集浏览 / 导出 | ✓ | P2 Browse；P4 `io.*` |
 | 表设计器 | ✓ | P4 `ddl.design*` |
-| Dump / 执行 SQL 文件 | ✓ | P4 纯 Go；P5 可选 sqlcmd |
+| Dump / 执行 SQL 文件 | ✓ | P4 纯 Go（库级扫全部用户 schema）；P5 可选 sqlcmd |
 | 会话监视 / Kill | ✓ | P4 DMV |
 | 调试 / Profiler / Agent | 部分有 | **不做（首期）** |
 
@@ -546,3 +548,6 @@ permissions: []
 | v0.2 | 2026-08-03 | 后端 P0：`services/sqlserver-service` session/query/dialect；manifest + go.work + build-services |
 | v0.3 | 2026-08-03 | 后端 LSP：`sqlserverparser` 关键字/内置函数全量补全 + `lsp.open/rpc/close/lexicon`；Cap `editor.sql_lsp` |
 | v0.4 | 2026-08-03 | Web P0：`modules/sqlserver` Query + ConnKind/session/`GO` 拆批 + Monaco LSP；无对象树（P1） |
+| v0.5 | 2026-08-10 | 服务目录 README + docker-compose（对照 oracle-service 本地联调说明） |
+| v0.6 | 2026-08-10 | 连接对话框专业化：SSL Tab、Home SSH profiles、测连版本、命名实例/Azure 校验；后端错误映射与互斥校验 |
+| v0.8 | 2026-08-18 | 库级 `io.dumpSql`：空 schema 扫全部用户 schema（`excludeSystem` / `createSchema`）；格式 `niuma-sqlserver-dump/2`；P5 仍不含 Triggers/Types/约束树、重命名、GRANT、sqlcmd/bcp |

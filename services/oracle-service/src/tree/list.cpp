@@ -7,6 +7,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <sstream>
 
 namespace niuma::oracle::tree {
 namespace {
@@ -174,9 +175,29 @@ nlohmann::json ListRoutines(session::Session& session, const ListParams& params,
   const int limit = util::ClampListLimit(params.limit);
   const std::string owner = util::QuoteLiteral(params.schema);
   const std::string like = util::QuoteLiteral(util::LikePrefixPattern(params.filter));
+
+  std::vector<std::string> type_specs;
+  const bool default_types = params.types.empty();
+  if (default_types || WantType(params.types, "procedure") || WantType(params.types, "function")) {
+    if (default_types || WantType(params.types, "procedure")) type_specs.push_back("PROCEDURE");
+    if (default_types || WantType(params.types, "function")) type_specs.push_back("FUNCTION");
+  }
+  if (!default_types) {
+    if (WantType(params.types, "synonym")) type_specs.push_back("SYNONYM");
+    if (WantType(params.types, "trigger")) type_specs.push_back("TRIGGER");
+  }
+  if (type_specs.empty()) {
+    return nlohmann::json{{"routines", nlohmann::json::array()}, {"objects", nlohmann::json::array()}};
+  }
+
+  std::ostringstream in_list;
+  for (size_t i = 0; i < type_specs.size(); ++i) {
+    if (i) in_list << ", ";
+    in_list << util::QuoteLiteral(type_specs[i]);
+  }
   const std::string sql =
       "SELECT OBJECT_NAME, OBJECT_TYPE FROM ALL_OBJECTS WHERE OWNER = " + owner +
-      " AND OBJECT_TYPE IN ('PROCEDURE','FUNCTION') AND OBJECT_NAME LIKE " + like +
+      " AND OBJECT_TYPE IN (" + in_list.str() + ") AND OBJECT_NAME LIKE " + like +
       " ESCAPE '\\' ORDER BY OBJECT_NAME";
 
   session::SqlRowsResult rows;
@@ -304,6 +325,8 @@ nlohmann::json CategoryCounts(session::Session& session, const ListParams& param
   int functions = 0;
   int sequences = 0;
   int packages = 0;
+  int synonyms = 0;
+  int triggers = 0;
 
   if (!count_one("SELECT COUNT(*) FROM ALL_TABLES WHERE OWNER = " + owner, tables) ||
       !count_one("SELECT COUNT(*) FROM ALL_VIEWS WHERE OWNER = " + owner, views) ||
@@ -316,7 +339,13 @@ nlohmann::json CategoryCounts(session::Session& session, const ListParams& param
       !count_one("SELECT COUNT(*) FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = " + owner, sequences) ||
       !count_one("SELECT COUNT(*) FROM ALL_OBJECTS WHERE OWNER = " + owner +
                      " AND OBJECT_TYPE = 'PACKAGE'",
-                 packages)) {
+                 packages) ||
+      !count_one("SELECT COUNT(*) FROM ALL_OBJECTS WHERE OWNER = " + owner +
+                     " AND OBJECT_TYPE = 'SYNONYM'",
+                 synonyms) ||
+      !count_one("SELECT COUNT(*) FROM ALL_OBJECTS WHERE OWNER = " + owner +
+                     " AND OBJECT_TYPE = 'TRIGGER'",
+                 triggers)) {
     return {};
   }
 
@@ -327,6 +356,8 @@ nlohmann::json CategoryCounts(session::Session& session, const ListParams& param
       {"functions", functions},
       {"sequences", sequences},
       {"packages", packages},
+      {"synonyms", synonyms},
+      {"triggers", triggers},
   };
 }
 

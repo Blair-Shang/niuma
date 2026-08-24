@@ -1,6 +1,6 @@
 /**
  * 跨 SQL 方言的编辑器能力（格式化 / Monaco / LSP）。
- * MySQL：Bridge LSP；其余方言：静默内置 sql（无 sql-languages Worker）。
+ * MySQL / Dameng / Kingbase / PostgreSQL 等：Bridge LSP；Vastbase 等未迁方言：静默内置 sql。
  * 补全基调见 docs/23-sql-dialect-completion.md。
  */
 export type {

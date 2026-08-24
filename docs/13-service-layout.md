@@ -37,10 +37,14 @@ services/
 │   ├── go.mod
 │   ├── cmd/clickhouse-service/
 │   └── internal/             # dialect · session · tree · catalog · handler（meta 后续）
-├── kingbase-service/       # 人大金仓（pgx/v5，见 docs/31；P0 session/query）
+├── kingbase-service/       # 人大金仓（pgx/v5，见 docs/31）
 │   ├── go.mod
 │   ├── cmd/kingbase-service/
 │   └── internal/             # dialect · session · handler（tree/catalog/meta 后续）
+├── postgres-service/       # 官方 PostgreSQL（pgx/v5，见 docs/34）
+│   ├── go.mod
+│   ├── cmd/postgres-service/
+│   └── internal/             # dialect · session · tree · meta · ddl · dataio · postgresparser
 ├── sqlserver-service/      # SQL Server（go-mssqldb，见 docs/32；P0 session/query）
 │   ├── go.mod
 │   ├── cmd/sqlserver-service/
@@ -75,6 +79,7 @@ packages/
 - `services/dameng-service`
 - `services/clickhouse-service`
 - `services/kingbase-service`
+- `services/postgres-service`
 - `services/sqlserver-service`
 - `packages/go/serviceipc`
 
@@ -129,4 +134,6 @@ Oracle（独立，需 VS + ODPI 源码；Instant Client 仅运行时）：
 - [29 — Oracle 模块](./29-oracle-module.md)
 - [30 — ClickHouse 模块](./30-clickhouse-module.md)
 - [31 — 人大金仓模块](./31-kingbase-module.md)
+- [32 — SQL Server 模块](./32-sqlserver-module.md)
+- [34 — PostgreSQL 模块](./34-postgresql-module.md)
 - [11 — Platform Core](./11-platform-core.md)

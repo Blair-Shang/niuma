@@ -35,4 +35,5 @@ auto guard = niuma::netproxy::StartRelay(proxy, "db.example.com", 1521, local_ho
 
 ## 与隧道的关系
 
-SSH 隧道（`packages/go/tunnel`）与代理互斥时，通常优先隧道。C++ 侧隧道若未实现，应在业务层明确报错或后续再封装。
+SSH 隧道见 `packages/cpp/sshtunnel`（对标 `packages/go/tunnel` / `packages/rust/niuma-tunnel`）。
+与代理互斥时，业务侧通常优先隧道；本库的 `Dial` 可供隧道在连接跳板时复用。

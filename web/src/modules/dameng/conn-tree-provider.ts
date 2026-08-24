@@ -11,7 +11,6 @@ import {
   openCreateTableDesign,
   openCreateTrigger,
   openMonitor,
-  openQuery,
   requestCreateSchema,
 } from '@/modules/dameng/conn-tree-actions'
 import {
@@ -182,11 +181,6 @@ function routineMenus(isFunction: boolean): RsContextMenuItem[] {
       icon: 'play',
     },
     { key: 'source', label: label('editSource'), icon: 'file-pen' },
-    {
-      key: 'debug',
-      label: label(isFunction ? 'funcDebug' : 'procDebug'),
-      icon: 'bug',
-    },
     { key: 'compileRoutine', label: label('compileRoutine'), icon: 'wrench' },
     { key: 'query', label: label('openQuery'), icon: 'code-2' },
     { key: 'sep-io', label: '', separator: true },
@@ -357,8 +351,6 @@ export const damengConnTreeProvider: ConnTreeChildProvider = {
   connMenuItems(): RsContextMenuItem[] {
     return [
       { key: 'createSchema', label: label('createSchema'), icon: 'database' },
-      { key: 'sep-query', label: '', separator: true },
-      { key: 'query', label: label('openQuery'), icon: 'code-2' },
       { key: 'monitor', label: label('openMonitor'), icon: 'activity' },
     ]
   },
@@ -366,10 +358,6 @@ export const damengConnTreeProvider: ConnTreeChildProvider = {
   onConnMenuSelect(conn, key) {
     if (key === 'createSchema') {
       requestCreateSchema(conn)
-      return true
-    }
-    if (key === 'query') {
-      openQuery(conn)
       return true
     }
     if (key === 'monitor') {

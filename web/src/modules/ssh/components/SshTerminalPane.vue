@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsTerminal, containsEscapeSequence } from '@niuma/ui'
+import { RsTerminal, containsEscapeSequence, type RsTerminalExpose } from '@niuma/ui'
 import { useSshTerminal } from '@/modules/ssh/composables/useSshTerminal'
 import {
   clearDiagnostic,
@@ -20,21 +20,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-/** 避免 InstanceType<typeof RsTerminal> 在 Vue 类型上栈溢出 */
-type SshTerminalApi = {
-  write: (data: string) => void
-  clear: () => void
-  fit: () => void | Promise<void>
-  getTerminal: () => {
-    cols?: number
-    rows?: number
-    options?: Record<string, unknown>
-    getSelection?: () => string
-    onSelectionChange?: (cb: () => void) => { dispose: () => void }
-  } | null
-}
-
-const terminalRef = ref<SshTerminalApi | null>(null)
+const terminalRef = ref<RsTerminalExpose | null>(null)
 const terminalReady = ref(false)
 const startupError = ref('')
 let pendingOutput = ''
@@ -67,28 +53,6 @@ const overlayText = computed(() => {
   }
   return ''
 })
-
-function calcGeometry(): { cols: number; rows: number } | null {
-  const terminal = terminalRef.value?.getTerminal()
-  if (!terminal) {
-    return null
-  }
-  const cols = terminal.cols || 80
-  const rows = terminal.rows || 24
-  return { cols, rows }
-}
-
-function applyTerminalLimits(): void {
-  const terminal = terminalRef.value?.getTerminal()
-  if (!terminal) {
-    return
-  }
-  try {
-    terminal.options = { ...terminal.options, scrollback: TERMINAL_SCROLLBACK }
-  } catch {
-    // 兼容不同终端实现，设置失败时保持默认值
-  }
-}
 
 function cancelScheduledFlush(): void {
   if (flushRaf) {
@@ -131,7 +95,7 @@ async function syncPtySize(): Promise<void> {
     return
   }
   await terminalRef.value.fit()
-  const geometry = calcGeometry()
+  const geometry = terminalRef.value.getGeometry()
   if (!geometry) {
     return
   }
@@ -153,7 +117,7 @@ async function openForSession(sessionId: string): Promise<void> {
   terminalRef.value.clear()
   await nextTick()
   await terminalRef.value.fit()
-  const geometry = calcGeometry()
+  const geometry = terminalRef.value.getGeometry()
   if (!geometry) {
     return
   }
@@ -192,14 +156,11 @@ async function sendInput(data: string): Promise<void> {
   pane.input(data)
 }
 
-let selectionDisposable: { dispose: () => void } | null = null
 /** 最近一次非空选区；菜单点击失焦后 live selection 常被清空 */
 let lastNonEmptySelection = ''
 let clearSelectionTimer = 0
 
-function unbindSelection(): void {
-  selectionDisposable?.dispose()
-  selectionDisposable = null
+function cancelScheduledSelectionClear(): void {
   if (clearSelectionTimer) {
     window.clearTimeout(clearSelectionTimer)
     clearSelectionTimer = 0
@@ -219,35 +180,23 @@ function publishTerminalSelection(text: string): void {
   })
 }
 
-function bindSelection(): void {
-  unbindSelection()
-  const term = terminalRef.value?.getTerminal?.() ?? null
-  if (!term || typeof term.onSelectionChange !== 'function') {
+function onSelectionChange(raw: string): void {
+  const text = raw.trim()
+  const tabId = useTabStore().activeTabId || undefined
+  cancelScheduledSelectionClear()
+  if (!text) {
+    // 右键菜单 / 失焦会短暂清空选区；延迟清除，避免 Ask AI 读到空
+    clearSelectionTimer = window.setTimeout(() => {
+      clearSelectionTimer = 0
+      clearEditorSelection(tabId)
+    }, 400)
     return
   }
-  selectionDisposable = term.onSelectionChange(() => {
-    const text = String(term.getSelection?.() ?? '').trim()
-    const tabId = useTabStore().activeTabId || undefined
-    if (!text) {
-      // 右键菜单 / 失焦会短暂清空选区；延迟清除，避免 Ask AI 读到空
-      if (clearSelectionTimer) window.clearTimeout(clearSelectionTimer)
-      clearSelectionTimer = window.setTimeout(() => {
-        clearSelectionTimer = 0
-        clearEditorSelection(tabId)
-      }, 400)
-      return
-    }
-    if (clearSelectionTimer) {
-      window.clearTimeout(clearSelectionTimer)
-      clearSelectionTimer = 0
-    }
-    publishTerminalSelection(text)
-  })
+  publishTerminalSelection(text)
 }
 
 async function askAiAboutSelection(textFromMenu = ''): Promise<void> {
-  const term = terminalRef.value?.getTerminal?.() ?? null
-  const live = String(term?.getSelection?.() ?? '').trim()
+  const live = (terminalRef.value?.getSelection() ?? '').trim()
   const text = (textFromMenu || live || lastNonEmptySelection).trim()
   if (text) {
     publishTerminalSelection(text)
@@ -283,7 +232,6 @@ watch(
 
 onMounted(async () => {
   if (terminalReady.value && props.sessionId) {
-    applyTerminalLimits()
     await openForSession(props.sessionId)
   }
 })
@@ -306,7 +254,7 @@ watch(
 onBeforeUnmount(() => {
   pendingOutput = ''
   cancelScheduledFlush()
-  unbindSelection()
+  cancelScheduledSelectionClear()
   lastNonEmptySelection = ''
   clearEditorSelection(useTabStore().activeTabId || undefined)
   pane.close().catch(() => undefined)
@@ -319,32 +267,23 @@ defineExpose({
 </script>
 
 <template>
-  <section class="nm-ssh-term">
-    <RsTerminal
-      ref="terminalRef"
-      :overlay="overlayText"
-      show-ask-ai
-      :right-click-selects-word="false"
-      :snap-viewport-on-tui-write="false"
-      wheel-scroll-modifier="shift"
-      @ready="async () => {
-        terminalReady = true
-        applyTerminalLimits()
-        bindSelection()
-        if (props.sessionId) {
-          await openForSession(props.sessionId)
-        }
-      }"
-      @data="(data) => { if (syncBroadcast) { emit('broadcastInput', data) } else { pane.input(data) } }"
-      @resize="() => void refreshSize()"
-      @ask-ai="(text) => void askAiAboutSelection(text)"
-    />
-  </section>
+  <RsTerminal
+    ref="terminalRef"
+    :overlay="overlayText"
+    show-ask-ai
+    :scrollback="TERMINAL_SCROLLBACK"
+    :right-click-selects-word="false"
+    :snap-viewport-on-tui-write="false"
+    wheel-scroll-modifier="shift"
+    @ready="async () => {
+      terminalReady = true
+      if (props.sessionId) {
+        await openForSession(props.sessionId)
+      }
+    }"
+    @data="(data) => { if (syncBroadcast) { emit('broadcastInput', data) } else { pane.input(data) } }"
+    @resize="() => void refreshSize()"
+    @selection-change="onSelectionChange"
+    @ask-ai="(text) => void askAiAboutSelection(text)"
+  />
 </template>
-
-<style scoped>
-.nm-ssh-term {
-  height: 100%;
-  min-height: 0;
-}
-</style>

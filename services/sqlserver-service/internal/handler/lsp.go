@@ -2,12 +2,16 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"niuma/pkg/sqllsp"
+	"niuma/services/sqlserver-service/internal/meta"
+	"niuma/services/sqlserver-service/internal/session"
 	"niuma/services/sqlserver-service/internal/sqlserverparser"
+	"niuma/services/sqlserver-service/internal/tree"
 )
 
 const (
@@ -142,36 +146,133 @@ func (d *Dispatcher) lspClose(_ context.Context, req Request) Response {
 	return okResponse(req.ID, map[string]any{"closed": closed})
 }
 
-// sqlserverLSPCatalog：P0 仅占位；表/列/例程补全随 P1 catalog/tree 接入。
-// 关键字与内置函数不依赖本 catalog（由 parser CompletionContext 提供）。
+// sqlserverLSPCatalog 进程内复用 catalog / tree 查询逻辑。
 type sqlserverLSPCatalog struct {
 	d *Dispatcher
 }
 
 func (c *sqlserverLSPCatalog) ListSchemas(ctx context.Context, p sqllsp.CatalogParams) ([]sqllsp.SchemaHit, bool, error) {
-	_ = ctx
-	_ = p
-	_ = c
-	return nil, false, nil
+	db, sess, release, err := c.resolve(ctx, p.SessionID, p.Database)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+
+	exclude := true
+	if sess != nil {
+		exclude = sess.Params.Options.ExcludeSystemSchemasEnabled()
+	}
+	result, err := tree.ListSchemas(ctx, db, tree.ListParams{
+		Filter:        p.Prefix,
+		Limit:         catalogLimit(p.Limit),
+		ExcludeSystem: exclude,
+		Database:      p.Database,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]sqllsp.SchemaHit, 0, len(result.Schemas))
+	for _, item := range result.Schemas {
+		out = append(out, sqllsp.SchemaHit{Name: item.Name})
+	}
+	return out, result.Truncated, nil
 }
 
 func (c *sqlserverLSPCatalog) ListTables(ctx context.Context, p sqllsp.CatalogParams) ([]sqllsp.TableHit, bool, error) {
-	_ = ctx
-	_ = p
-	_ = c
-	return nil, false, nil
+	schema := strings.TrimSpace(p.Schema)
+	if schema == "" {
+		schema = "dbo"
+	}
+	db, _, release, err := c.resolve(ctx, p.SessionID, p.Database)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+
+	result, err := tree.ListTables(ctx, db, tree.ListParams{
+		Filter:   p.Prefix,
+		Limit:    catalogLimit(p.Limit),
+		Database: p.Database,
+		Schema:   schema,
+		Types:    []string{"table", "view", "synonym"},
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]sqllsp.TableHit, 0, len(result.Tables))
+	for _, item := range result.Tables {
+		out = append(out, sqllsp.TableHit{Name: item.Name, Type: item.Type, Schema: schema})
+	}
+	return out, result.Truncated, nil
 }
 
 func (c *sqlserverLSPCatalog) ListColumns(ctx context.Context, p sqllsp.CatalogParams) ([]sqllsp.ColumnHit, bool, error) {
-	_ = ctx
-	_ = p
-	_ = c
-	return nil, false, nil
+	schema := strings.TrimSpace(p.Schema)
+	if schema == "" {
+		schema = "dbo"
+	}
+	table := strings.TrimSpace(p.Table)
+	if table == "" {
+		return nil, false, fmt.Errorf("table required")
+	}
+	db, _, release, err := c.resolve(ctx, p.SessionID, p.Database)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+
+	result, err := meta.ListColumns(ctx, db, meta.RelationRef{
+		Database: p.Database,
+		Schema:   schema,
+		Name:     table,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	prefix := strings.ToLower(strings.TrimSpace(p.Prefix))
+	out := make([]sqllsp.ColumnHit, 0, len(result.Columns))
+	for _, col := range result.Columns {
+		if prefix != "" && !strings.HasPrefix(strings.ToLower(col.Name), prefix) {
+			continue
+		}
+		out = append(out, sqllsp.ColumnHit{
+			Name:     col.Name,
+			DataType: col.DataType,
+			Schema:   schema,
+			Table:    table,
+		})
+	}
+	return out, false, nil
 }
 
 func (c *sqlserverLSPCatalog) ListRoutines(ctx context.Context, p sqllsp.CatalogParams) ([]sqllsp.RoutineHit, bool, error) {
-	_ = ctx
-	_ = p
-	_ = c
-	return nil, false, nil
+	schema := strings.TrimSpace(p.Schema)
+	if schema == "" {
+		schema = "dbo"
+	}
+	db, _, release, err := c.resolve(ctx, p.SessionID, p.Database)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+
+	result, err := tree.ListRoutines(ctx, db, tree.ListParams{
+		Filter:   p.Prefix,
+		Limit:    catalogLimit(p.Limit),
+		Database: p.Database,
+		Schema:   schema,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]sqllsp.RoutineHit, 0, len(result.Routines))
+	for _, item := range result.Routines {
+		out = append(out, sqllsp.RoutineHit{Name: item.Name, Type: item.Kind, Schema: schema})
+	}
+	return out, result.Truncated, nil
+}
+
+func (c *sqlserverLSPCatalog) resolve(ctx context.Context, sessionID, database string) (*sql.DB, *session.Session, func(), error) {
+	raw, _ := json.Marshal(map[string]string{"sessionId": sessionID})
+	return c.d.resolveDBForDatabase(ctx, raw, database)
 }

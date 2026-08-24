@@ -51,7 +51,7 @@ async function onConfirm(): Promise<void> {
     :title="title"
     :description="description"
     width="sm"
-    layout="confirm"
+    layout="form"
     tone="default"
     :show-overlay="false"
     :show-close="true"

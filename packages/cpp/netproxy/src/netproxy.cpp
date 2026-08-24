@@ -609,4 +609,16 @@ std::unique_ptr<RelayGuard> StartRelay(const Options& proxy, const std::string& 
   return guard;
 }
 
+bool Dial(const Options& proxy, const std::string& host, uint16_t port, intptr_t& out_fd, std::string& error) {
+  if (!EnsureWinsock(error)) {
+    return false;
+  }
+  Sock sock = kInvalidSock;
+  if (!DialThroughProxy(proxy, host, port, sock, error)) {
+    return false;
+  }
+  out_fd = static_cast<intptr_t>(sock);
+  return true;
+}
+
 }  // namespace niuma::netproxy

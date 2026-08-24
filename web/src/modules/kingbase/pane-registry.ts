@@ -1,5 +1,5 @@
 /**
- * Kingbase 会话面板（query / browse / ddl / objectScript / monitor / design / debug）。
+ * Kingbase 会话面板（query / browse / ddl / objectScript / monitor / design / call）。
  */
 
 export type KingbaseSessionTab =
@@ -9,7 +9,7 @@ export type KingbaseSessionTab =
   | 'objectScript'
   | 'monitor'
   | 'design'
-  | 'debug'
+  | 'call'
 
 export interface KingbasePaneScope {
   database?: string
@@ -113,19 +113,19 @@ export function normalizeKingbaseFeature(tab?: string): KingbaseSessionTab {
     tab === 'objectScript' ||
     tab === 'monitor' ||
     tab === 'design' ||
-    tab === 'debug'
+    tab === 'call'
   ) {
     return tab
   }
   return 'query'
 }
 
-/** Browse / DDL / debug 等自绘 chrome；query 用会话壳。 */
+/** Browse / DDL / call 等自绘 chrome；query 用会话壳。 */
 export function kingbaseFeatureEmbedsChrome(feature: KingbaseSessionTab): boolean {
   return feature !== 'query'
 }
 
-function debugProps(ctx: KingbasePaneContext): Record<string, unknown> {
+function callProps(ctx: KingbasePaneContext): Record<string, unknown> {
   return {
     sessionId: ctx.sessionId,
     profileId: ctx.profileId,
@@ -182,12 +182,13 @@ export const kingbasePaneRegistry: Record<KingbaseSessionTab, KingbaseFeatureDef
       buildProps: designProps,
     }),
   },
-  debug: {
+  call: {
     icon: 'bug',
-    labelKey: 'modules.kingbase.session.tabDebug',
+    labelKey: 'modules.kingbase.session.tabCall',
     resolvePane: () => ({
+      // 组件名历史为 DebugPane，实际是执行调用（非断点调试器）
       loader: () => import('@/modules/kingbase/components/KingbaseDebugPane.vue'),
-      buildProps: debugProps,
+      buildProps: callProps,
     }),
   },
 }

@@ -16,6 +16,13 @@ import type {
   OracleIoExportCsvParams,
   OracleIoImportCsvParams,
   OracleIoTaskResult,
+  OracleLspCloseParams,
+  OracleLspLexiconParams,
+  OracleLspLexiconResult,
+  OracleLspOpenParams,
+  OracleLspOpenResult,
+  OracleLspRpcParams,
+  OracleLspRpcResult,
   OracleMetaColumnsResult,
   OracleMetaDDLResult,
   OracleMetaForeignKeysResult,
@@ -32,6 +39,8 @@ import type {
   OracleMetaPackageSourceResult,
   OracleMetaProcesslistParams,
   OracleMetaProcesslistResult,
+  OracleMetaRoutineParametersParams,
+  OracleMetaRoutineParametersResult,
   OracleMetaRoutineSourceParams,
   OracleMetaRoutineSourceResult,
   OracleQueryCancelParams,
@@ -43,6 +52,7 @@ import type {
   OracleQueryFetchResult,
   OracleQueryLoadLobParams,
   OracleQueryLoadLobResult,
+  OracleRoutineCallParams,
   OracleSessionCloseParams,
   OracleSessionOpenParams,
   OracleSessionOpenResult,
@@ -67,6 +77,9 @@ export const oracleApi = {
     bridgeInvoke<OracleSessionTestResult>('oracle.session.test', params),
   queryExec: (params: OracleQueryExecParams) =>
     bridgeInvoke<OracleQueryExecResult>('oracle.query.exec', params),
+  /** 同连接 ODPI bind 调用过程/函数并读回 OUT（调试「运行调用」主路径） */
+  routineCall: (params: OracleRoutineCallParams) =>
+    bridgeInvoke<OracleQueryExecResult>('oracle.routine.call', params),
   queryExplain: (params: OracleQueryExplainParams) =>
     bridgeInvoke<OracleQueryExecResult>('oracle.query.explain', params),
   queryLoadLob: (params: OracleQueryLoadLobParams) =>
@@ -107,6 +120,8 @@ export const oracleApi = {
     bridgeInvoke<OracleMetaForeignKeysResult>('oracle.meta.foreignKeys', params),
   metaRoutineSource: (params: OracleMetaRoutineSourceParams) =>
     bridgeInvoke<OracleMetaRoutineSourceResult>('oracle.meta.routineSource', params),
+  metaRoutineParameters: (params: OracleMetaRoutineParametersParams) =>
+    bridgeInvoke<OracleMetaRoutineParametersResult>('oracle.meta.routineParameters', params),
   metaPackageSource: (params: OracleMetaPackageSourceParams) =>
     bridgeInvoke<OracleMetaPackageSourceResult>('oracle.meta.packageSource', params),
   metaProcesslist: (params: OracleMetaProcesslistParams) =>
@@ -143,4 +158,12 @@ export const oracleApi = {
     bridgeInvoke<OracleIoTaskResult>('oracle.io.execSqlFile', params),
   ioCancel: (params: OracleIoCancelParams) =>
     bridgeInvoke<{ cancelled: boolean }>('oracle.io.cancel', params),
+  lspOpen: (params: OracleLspOpenParams) =>
+    bridgeInvoke<OracleLspOpenResult>('oracle.lsp.open', params),
+  lspRpc: (params: OracleLspRpcParams) =>
+    bridgeInvoke<OracleLspRpcResult>('oracle.lsp.rpc', params),
+  lspClose: (params: OracleLspCloseParams) =>
+    bridgeInvoke<{ closed: boolean }>('oracle.lsp.close', params),
+  lspLexicon: (params: OracleLspLexiconParams = {}) =>
+    bridgeInvoke<OracleLspLexiconResult>('oracle.lsp.lexicon', params),
 }

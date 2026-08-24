@@ -4,16 +4,12 @@
 
 #include <dpi.h>
 #include <niuma/netproxy/netproxy.hpp>
+#include <niuma/sshtunnel/sshtunnel.hpp>
 #include <nlohmann/json.hpp>
 #include <memory>
 #include <string>
 
 namespace niuma::oracle::session {
-
-struct TunnelOptions {
-  std::string type;  // none | ssh
-  bool Enabled() const { return !type.empty() && type != "none"; }
-};
 
 struct ConnectOptions {
   std::string schema;
@@ -29,7 +25,7 @@ struct ConnectOptions {
   std::string wallet_path;
   std::string wallet_password;  // 预留；运行时优先使用自动登录钱包（cwallet.sso）
   niuma::netproxy::Options proxy;
-  TunnelOptions tunnel;
+  niuma::sshtunnel::Options tunnel;
 
   bool SslEnabled() const;
   bool SslVerify() const;
@@ -70,7 +66,8 @@ using ConnPtr = std::unique_ptr<dpiConn, DpiConnDeleter>;
 ContextPtr SharedContext(std::string& error);
 
 struct OpenedConnection {
-  // proxy_relay 声明在前：析构时最后释放，避免 ODPI 连接仍经本地转发时端口先关。
+  // ssh_tunnel / proxy_relay 声明在前：析构时最后释放，避免 ODPI 仍经本地转发时端口先关。
+  std::unique_ptr<niuma::sshtunnel::TunnelGuard> ssh_tunnel;
   std::unique_ptr<niuma::netproxy::RelayGuard> proxy_relay;
   ConnPtr conn;
   dialect::ServerProfile profile;

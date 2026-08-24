@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <istream>
 #include <string>
 #include <utility>
@@ -60,9 +61,11 @@ char QQuoteCloser(char open) {
   }
 }
 
-std::string StripSQLLeadingNoise(std::string sql) {
+}  // namespace
+
+std::string StripSqlLeadingTrivia(std::string sql) {
   for (;;) {
-    sql = TrimSpace(sql);
+    sql = TrimSpace(std::move(sql));
     if (sql.size() >= 2 && sql[0] == '-' && sql[1] == '-') {
       const size_t nl = sql.find('\n');
       if (nl == std::string::npos) {
@@ -83,10 +86,8 @@ std::string StripSQLLeadingNoise(std::string sql) {
   }
 }
 
-}  // namespace
-
 bool LooksLikePlsqlUnit(const std::string& sql) {
-  const std::string s = StripSQLLeadingNoise(sql);
+  const std::string s = StripSqlLeadingTrivia(sql);
   if (s.empty()) {
     return false;
   }
@@ -102,6 +103,12 @@ bool LooksLikePlsqlUnit(const std::string& sql) {
     if (rest.rfind("OR REPLACE", 0) == 0) {
       rest = TrimSpace(rest.substr(10));
     }
+    // 12c+ GET_DDL 常带 EDITIONABLE / NONEDITIONABLE；跳过后再认 PROCEDURE/FUNCTION…
+    if (rest.rfind("EDITIONABLE", 0) == 0) {
+      rest = TrimSpace(rest.substr(11));
+    } else if (rest.rfind("NONEDITIONABLE", 0) == 0) {
+      rest = TrimSpace(rest.substr(14));
+    }
     static const char* kws[] = {"PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"};
     for (const char* kw : kws) {
       if (rest.rfind(kw, 0) == 0) {
@@ -110,6 +117,119 @@ bool LooksLikePlsqlUnit(const std::string& sql) {
     }
   }
   return false;
+}
+
+namespace {
+
+bool MatchKeywordAt(const std::string& s, size_t& p, const char* word) {
+  const size_t n = std::strlen(word);
+  if (p + n > s.size()) return false;
+  for (size_t k = 0; k < n; ++k) {
+    if (static_cast<char>(std::toupper(static_cast<unsigned char>(s[p + k]))) != word[k]) {
+      return false;
+    }
+  }
+  if (p + n < s.size()) {
+    const unsigned char next = static_cast<unsigned char>(s[p + n]);
+    if (std::isalnum(next) || next == '_') return false;
+  }
+  p += n;
+  return true;
+}
+
+void SkipAsciiWs(const std::string& s, size_t& p) {
+  while (p < s.size() && IsSpaceByte(static_cast<unsigned char>(s[p]))) {
+    ++p;
+  }
+}
+
+/** 行首是否为 CREATE [OR REPLACE] [(NON)EDITIONABLE] PACKAGE BODY。 */
+bool StartsWithCreatePackageBody(const std::string& s, size_t i) {
+  size_t p = i;
+  if (!MatchKeywordAt(s, p, "CREATE")) return false;
+  SkipAsciiWs(s, p);
+  if (MatchKeywordAt(s, p, "OR")) {
+    SkipAsciiWs(s, p);
+    if (!MatchKeywordAt(s, p, "REPLACE")) return false;
+    SkipAsciiWs(s, p);
+  }
+  if (MatchKeywordAt(s, p, "EDITIONABLE") || MatchKeywordAt(s, p, "NONEDITIONABLE")) {
+    SkipAsciiWs(s, p);
+  }
+  if (!MatchKeywordAt(s, p, "PACKAGE")) return false;
+  SkipAsciiWs(s, p);
+  return MatchKeywordAt(s, p, "BODY");
+}
+
+}  // namespace
+
+void SplitPackageSpecBody(const std::string& ddl, std::string& spec, std::string& body) {
+  spec.clear();
+  body.clear();
+  const std::string raw = TrimSpace(ddl);
+  if (raw.empty()) return;
+
+  size_t body_start = std::string::npos;
+  size_t line = 0;
+  while (line < raw.size()) {
+    size_t content = line;
+    while (content < raw.size() && (raw[content] == ' ' || raw[content] == '\t')) {
+      ++content;
+    }
+    if (StartsWithCreatePackageBody(raw, content)) {
+      body_start = content;
+      break;
+    }
+    const size_t nl = raw.find('\n', line);
+    if (nl == std::string::npos) break;
+    line = nl + 1;
+  }
+
+  if (body_start == std::string::npos) {
+    spec = StripSqlPlusTerminator(raw);
+    return;
+  }
+  spec = StripSqlPlusTerminator(TrimSpace(raw.substr(0, body_start)));
+  body = StripSqlPlusTerminator(TrimSpace(raw.substr(body_start)));
+}
+
+std::string StripSqlPlusTerminator(std::string sql) {
+  auto is_space = [](unsigned char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
+  };
+  auto trim_right = [&](std::string& s) {
+    while (!s.empty() && is_space(static_cast<unsigned char>(s.back()))) {
+      s.pop_back();
+    }
+  };
+  trim_right(sql);
+  // 独占行 /
+  while (!sql.empty()) {
+    const size_t nl = sql.find_last_of("\n");
+    std::string last = nl == std::string::npos ? sql : sql.substr(nl + 1);
+    while (!last.empty() && (last.back() == ' ' || last.back() == '\t' || last.back() == '\r')) {
+      last.pop_back();
+    }
+    size_t start = 0;
+    while (start < last.size() && (last[start] == ' ' || last[start] == '\t')) {
+      ++start;
+    }
+    last = last.substr(start);
+    if (last != "/") {
+      break;
+    }
+    sql = nl == std::string::npos ? std::string{} : sql.substr(0, nl);
+    trim_right(sql);
+  }
+  // 同行尾：END;/ 或 END; /
+  trim_right(sql);
+  if (!sql.empty() && sql.back() == '/') {
+    sql.pop_back();
+    while (!sql.empty() && (sql.back() == ' ' || sql.back() == '\t')) {
+      sql.pop_back();
+    }
+  }
+  return sql;
 }
 
 SqlScriptSplitter::SqlScriptSplitter(StatementCallback callback, std::uint64_t initial_byte_offset)
@@ -122,7 +242,16 @@ bool SqlScriptSplitter::Emit(std::uint64_t end_offset) {
   if (raw.empty()) {
     return true;
   }
-  raw = TrimRightSemicolonAndSpace(std::move(raw));
+  // 普通 SQL：去掉客户端尾 `;`。PL/SQL 单元保留 `END;`（OCI 需要）。
+  if (LooksLikePlsqlUnit(raw)) {
+    while (!raw.empty() && IsSpaceByte(static_cast<unsigned char>(raw.back()))) {
+      raw.pop_back();
+    }
+  } else {
+    raw = TrimRightSemicolonAndSpace(std::move(raw));
+  }
+  // 兜底：同行 END;/ 或残留独占行 /
+  raw = StripSqlPlusTerminator(std::move(raw));
   if (raw.empty()) {
     return true;
   }

@@ -11,6 +11,7 @@ import type { ClickHouseSessionTestParams } from '@/api/types/clickhouse'
 import type { DamengSessionTestParams } from '@/api/types/dameng'
 import type { OracleSessionTestParams } from '@/api/types/oracle'
 import type { SqlServerSessionTestParams } from '@/api/types/sqlserver'
+import type { PostgresSessionTestParams } from '@/api/types/postgres'
 import type { ProxyFormState, TunnelFormState } from '@/modules/connection'
 import type { ConnAccentColor, ConnItem } from '@/modules/ops/types'
 
@@ -73,6 +74,7 @@ export type ConnectionTestParams =
   | DamengSessionTestParams
   | OracleSessionTestParams
   | SqlServerSessionTestParams
+  | PostgresSessionTestParams
 
 /** adapter 构造 connection_options 时可使用的通用上下文。 */
 export interface ConnectionFormAdapterBuildContext {
@@ -108,7 +110,9 @@ export interface ConnectionFormAdapter {
   applyProfile?: (form: ConnectionFormState, profile: ConnItem) => void
   buildOptions: (ctx: ConnectionFormAdapterBuildContext) => ConnectionProfileInput['connectionOptions']
   buildTestParams: (ctx: ConnectionFormAdapterTestContext) => ConnectionTestParams
-  callSessionTest: (params: ConnectionTestParams) => Promise<{ ok: boolean; message: string }>
+  callSessionTest: (
+    params: ConnectionTestParams,
+  ) => Promise<{ ok: boolean; message: string; version?: string }>
   secret?: (ctx: ConnectionFormAdapterSecretContext) => string
   secretRequired?: (ctx: ConnectionFormAdapterSecretContext) => boolean
   credentialKind?: (ctx: ConnectionFormAdapterSecretContext) => CredentialInput['kind']
@@ -116,8 +120,13 @@ export interface ConnectionFormAdapter {
   validate?: (ctx: ConnectionFormAdapterValidateContext) => string | null
   applyLoadedSecret?: (form: ConnectionFormState, secret: string) => void
   /**
-   * 协议专属测试结果文案增强（如缺客户端库引导）。
+   * 协议专属测试结果文案增强（如缺客户端库引导、成功时附带版本）。
    * ops 壳层只调用；禁止在 useConnectionProfiles 内 import 具体协议模块。
    */
-  enrichTestMessage?: (message: string, ok: boolean, t: (key: string) => string) => string
+  enrichTestMessage?: (
+    message: string,
+    ok: boolean,
+    t: (key: string, values?: Record<string, unknown>) => string,
+    result?: { ok: boolean; message: string; version?: string },
+  ) => string
 }

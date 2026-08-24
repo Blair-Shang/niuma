@@ -12,7 +12,10 @@ import {
 } from '@niuma/ui'
 import { computed, ref, watch } from 'vue'
 import BrowseCellEditorDialog from './BrowseCellEditorDialog.vue'
-import { useCellViewDialog } from '../composables/useCellViewDialog'
+import {
+  useCellViewDialog,
+  type CellViewResolveFullValue,
+} from '../composables/useCellViewDialog'
 import type {
   QueryBatchStatementItem,
   QueryResultGridTabSummary,
@@ -40,6 +43,8 @@ const props = withDefaults(
   batchActive?: boolean
   labels: QueryResultPanelLabels
   showFilter?: boolean
+  /** 方言异步加载截断 LOB 全量（如 Oracle query.loadLob） */
+  resolveFullCellValue?: CellViewResolveFullValue
 }>(),
 {
   resultSummaryText: '',
@@ -75,20 +80,23 @@ const {
   labels: cellViewLabels,
   openCell: openCellView,
   copyFull: copyCellFull,
-} = useCellViewDialog(() => {
-  // 仅透传方言已配置的文案；缺省由 useCellViewDialog 走 modules.database 多语言
-  const next: Partial<{
-    viewTitle: string
-    close: string
-    copyFull: string
-    copied: string
-  }> = {}
-  if (props.labels.cellViewTitle) next.viewTitle = props.labels.cellViewTitle
-  if (props.labels.cellViewClose) next.close = props.labels.cellViewClose
-  if (props.labels.cellViewCopyFull) next.copyFull = props.labels.cellViewCopyFull
-  if (props.labels.cellViewCopied) next.copied = props.labels.cellViewCopied
-  return next
-})
+} = useCellViewDialog(
+  () => {
+    // 仅透传方言已配置的文案；缺省由 useCellViewDialog 走 modules.database 多语言
+    const next: Partial<{
+      viewTitle: string
+      close: string
+      copyFull: string
+      copied: string
+    }> = {}
+    if (props.labels.cellViewTitle) next.viewTitle = props.labels.cellViewTitle
+    if (props.labels.cellViewClose) next.close = props.labels.cellViewClose
+    if (props.labels.cellViewCopyFull) next.copyFull = props.labels.cellViewCopyFull
+    if (props.labels.cellViewCopied) next.copied = props.labels.cellViewCopied
+    return next
+  },
+  props.resolveFullCellValue,
+)
 
 function onCellView(
   row: Record<string, unknown>,

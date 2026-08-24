@@ -27,7 +27,7 @@ function loadActions(): Promise<ActionsModule> {
   return actionsPromise
 }
 
-const CONN_MENU_KEYS = new Set(['createDatabase', 'query', 'monitor'])
+const CONN_MENU_KEYS = new Set(['createDatabase', 'monitor'])
 
 function scriptMenus(allowMutating: boolean): RsContextMenuItem {
   const children: RsContextMenuItem[] = [
@@ -186,11 +186,6 @@ function routineMenus(isProcedure: boolean): RsContextMenuItem[] {
       key: 'call',
       label: t(isProcedure ? 'modules.kingbase.tree.procCall' : 'modules.kingbase.tree.funcCall'),
       icon: 'play',
-    },
-    {
-      key: 'debug',
-      label: t(isProcedure ? 'modules.kingbase.tree.procDebug' : 'modules.kingbase.tree.funcDebug'),
-      icon: 'bug',
     },
     { key: 'deps', label: t('modules.kingbase.tree.tableDeps'), icon: 'git-fork' },
     { key: 'sep-mutate', label: '', separator: true },
@@ -353,8 +348,6 @@ export const kingbaseConnTreeProvider: ConnTreeChildProvider = {
   connMenuItems(): RsContextMenuItem[] {
     return [
       { key: 'createDatabase', label: t('modules.kingbase.tree.createDatabase'), icon: 'database' },
-      { key: 'sep-query', label: '', separator: true },
-      { key: 'query', label: t('modules.kingbase.tree.connQuery'), icon: 'code-2' },
       { key: 'monitor', label: t('modules.kingbase.tree.monitor'), icon: 'activity' },
     ]
   },

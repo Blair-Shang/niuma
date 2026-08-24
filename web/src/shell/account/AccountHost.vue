@@ -349,7 +349,7 @@ const primaryLabel = computed(() => {
       :title="dialogTitle"
       :description="authSubtitle"
       width="sm"
-      layout="confirm"
+      layout="form"
       teleport-to="#nm-account-auth-portal"
       :resizable="false"
       :draggable="false"
@@ -478,7 +478,7 @@ const primaryLabel = computed(() => {
       :title="t('account.passwordChangeTitle')"
       :description="t('account.passwordChangeSubtitle')"
       width="sm"
-      layout="confirm"
+      layout="form"
       teleport-to="#nm-account-pwd-portal"
       :resizable="false"
       :draggable="false"
@@ -533,7 +533,7 @@ const primaryLabel = computed(() => {
 </template>
 
 <style scoped>
-/* 收紧 confirm 弹窗 chrome，接近主流 Auth sheet */
+/* 收紧 form 弹窗 chrome，接近主流 Auth sheet */
 .nm-auth-shell :deep(.rs-dialog__overlay) {
   background: rgb(0 0 0 / 0.08);
   backdrop-filter: blur(4px) saturate(110%);

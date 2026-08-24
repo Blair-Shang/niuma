@@ -67,6 +67,7 @@ const {
   commitTx,
   rollbackTx,
   onContextMenuSelect,
+  resolveFullCellValue,
 } = useOracleQueryPane(props)
 </script>
 
@@ -139,6 +140,7 @@ const {
         :batch-items="batchItems"
         :batch-active="batchActive"
         :labels="resultPanelLabels"
+        :resolve-full-cell-value="resolveFullCellValue"
         @select-tab="selectResultTab"
         @close-tab="closeResultGridTab"
         @fetch-more="fetchMore"

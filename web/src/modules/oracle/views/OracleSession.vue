@@ -30,6 +30,8 @@ const props = defineProps<{
   isView?: boolean
   objectKind?: OracleObjectKind
   objectName?: string
+  routine?: string
+  routineKind?: OracleObjectKind
   designMode?: OracleObjectScriptMode
   draftSql?: string
   initialTab?: OracleSessionTab
@@ -42,6 +44,7 @@ const { t } = useI18n()
 const toast = useRsToast()
 const sessionActions = useSessionActionStore()
 
+/** 与 MysqlSession 一致：feature 在 Tab 生命周期内固定，禁止 :key 导致子面板重挂载 */
 const feature = normalizeOracleFeature(props.initialTab)
 const featureDef = oraclePaneRegistry[feature]
 const embedsChrome = oracleFeatureEmbedsChrome(feature)
@@ -68,15 +71,7 @@ const sessionLabel = computed(() => {
   return p?.profileName || p?.hostAddress || 'Oracle'
 })
 
-const pane = featureDef.resolvePane({
-  schema: effectiveSchema.value,
-  table: props.table,
-  isView: props.isView,
-  designMode: props.designMode,
-  objectKind: props.objectKind,
-  objectName: props.objectName,
-  draftSql: props.draftSql,
-})
+const pane = featureDef.resolvePane()
 const PaneView = defineAsyncComponent(pane.loader as () => Promise<{ default: Component }>)
 
 /** keep-alive 可见性：切 Shell Tab 时交接 Monaco layout（对齐 MysqlSession） */
@@ -99,6 +94,8 @@ const paneProps = computed(() => ({
     autoRunInitialSql: props.autoRunInitialSql,
     objectKind: props.objectKind,
     objectName: props.objectName,
+    routine: props.routine,
+    routineKind: props.routineKind,
     designMode: props.designMode,
     draftSql: props.draftSql,
     tabId: props.tabId,
@@ -146,6 +143,7 @@ watch(
   },
 )
 
+/** Oracle 查询/设计断线会 requestReconnect；MySQL Session 暂无此路径，保留监听但不改变挂载结构 */
 watch(
   () => sessionActions.reconnectSignals[props.profileId],
   (val) => {

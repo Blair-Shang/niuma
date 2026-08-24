@@ -58,6 +58,8 @@ export interface ParsedDataType {
   length?: number
   precision?: number
   scale?: number
+  /** 字符型长度语义；BYTE 为库默认，不在字面量中输出。 */
+  lengthSemantics?: 'CHAR'
   raw: string
 }
 
@@ -70,6 +72,8 @@ export interface DesignColumnDraft {
   typeBase: string
   typeLength?: number
   typeScale?: number
+  /** 字符型为 CHAR 语义时保留，保存/预览时输出 VARCHAR2(n CHAR)。 */
+  typeLengthSemantics?: 'CHAR'
   /** @deprecated Oracle 无 UNSIGNED；保留字段以免旧草稿崩溃 */
   unsigned: boolean
   /** @deprecated Oracle 无 ENUM；保留字段以免旧草稿崩溃 */
@@ -201,12 +205,42 @@ export function newEmptyForeignKey(): DesignForeignKeyDraft {
   }
 }
 
-/** 解析 Oracle 类型字符串（支持多词类型 + 精度括号）。 */
+/** 解析 Oracle 类型字符串（支持多词类型 + 精度括号 + BYTE/CHAR 语义）。 */
+const CHAR_LENGTH_BASES = new Set(['VARCHAR2', 'CHAR', 'NVARCHAR2', 'NCHAR'])
+
+function supportsCharLengthSemantics(base: string): boolean {
+  return CHAR_LENGTH_BASES.has(base.trim().toUpperCase())
+}
+
 export function parseDataType(raw: string): ParsedDataType {
   const trimmed = raw.trim().replace(/\s+/g, ' ')
   if (!trimmed) return { base: '', raw }
 
-  const paren = trimmed.match(/^(.+?)\s*\(\s*(\d+)(?:\s*,\s*(\d+))?\s*\)\s*$/i)
+  const tsTz = trimmed.match(
+    /^TIMESTAMP\s*\(\s*(\d+)\s*\)\s+(WITH\s+LOCAL\s+TIME\s+ZONE|WITH\s+TIME\s+ZONE)$/i,
+  )
+  if (tsTz) {
+    const zone = tsTz[2].replace(/\s+/g, ' ').trim().toUpperCase()
+    return {
+      base: `TIMESTAMP ${zone}`,
+      length: parseInt(tsTz[1], 10),
+      raw,
+    }
+  }
+
+  const charUnit = trimmed.match(/^(.+?)\s*\(\s*(\d+)\s+(BYTE|CHAR)\s*\)$/i)
+  if (charUnit) {
+    const base = charUnit[1].trim().toUpperCase()
+    const unit = charUnit[3].toUpperCase()
+    return {
+      base,
+      length: parseInt(charUnit[2], 10),
+      lengthSemantics: unit === 'CHAR' ? 'CHAR' : undefined,
+      raw,
+    }
+  }
+
+  const paren = trimmed.match(/^(.+?)\s*\(\s*(\d+)(?:\s*,\s*(\d+))?\s*\)$/i)
   if (paren) {
     const base = paren[1].trim().toUpperCase()
     const first = parseInt(paren[2], 10)
@@ -225,6 +259,7 @@ export function buildDataType(
   opts?: {
     length?: number
     scale?: number
+    lengthSemantics?: 'CHAR'
   },
 ): string {
   const opt = resolveBaseTypeOption(base)
@@ -232,7 +267,9 @@ export function buildDataType(
   const core = base.trim().toUpperCase()
 
   if (kind === 'length' && opts?.length != null) {
-    return `${core}(${opts.length})`
+    const charSuffix =
+      opts.lengthSemantics === 'CHAR' && supportsCharLengthSemantics(core) ? ' CHAR' : ''
+    return `${core}(${opts.length}${charSuffix})`
   }
   if (kind === 'precision' && opts?.length != null) {
     return opts.scale != null ? `${core}(${opts.length},${opts.scale})` : `${core}(${opts.length})`
@@ -242,11 +279,12 @@ export function buildDataType(
 
 export function syncColumnDataType(col: Pick<
   DesignColumnDraft,
-  'typeBase' | 'typeLength' | 'typeScale'
+  'typeBase' | 'typeLength' | 'typeScale' | 'typeLengthSemantics'
 >): string {
   return buildDataType(col.typeBase, {
     length: col.typeLength,
     scale: col.typeScale,
+    lengthSemantics: col.typeLengthSemantics,
   })
 }
 
@@ -255,6 +293,7 @@ export function splitDataTypeFields(raw: string): {
   typeBase: string
   typeLength?: number
   typeScale?: number
+  typeLengthSemantics?: 'CHAR'
   unsigned: boolean
   enumValues: string
 } {
@@ -265,10 +304,12 @@ export function splitDataTypeFields(raw: string): {
     dataType: buildDataType(typeBase, {
       length: p.length ?? p.precision,
       scale: p.scale,
+      lengthSemantics: p.lengthSemantics,
     }),
     typeBase,
     typeLength: p.length ?? p.precision,
     typeScale: p.scale,
+    typeLengthSemantics: p.lengthSemantics,
     unsigned: false,
     enumValues: '',
   }

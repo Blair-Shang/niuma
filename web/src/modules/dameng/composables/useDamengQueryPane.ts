@@ -153,7 +153,7 @@ export function useDamengQueryPane(props: DamengQueryPaneProps) {
       if (c.dataType?.trim()) {
         tipLines.push(t('modules.dameng.query.colTipType', { type: c.dataType.trim() }))
       }
-      const valueType = resolveSqlValueType(c.dataType)
+      const valueType = resolveSqlValueType(c.dataType, { dialect: 'dameng' })
       return {
         key: name,
         title: name,

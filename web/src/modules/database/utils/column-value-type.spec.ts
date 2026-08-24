@@ -27,6 +27,11 @@ describe('resolveSqlValueType', () => {
     expect(resolveSqlValueType('ORADATE')).toBe('datetime')
     expect(resolveSqlValueType('oratimestamp')).toBe('datetime')
     expect(resolveSqlValueType('oratimestamptz')).toBe('datetime')
+    // 线上海类型名为 DATE；Oracle/达梦需带时分秒编辑器
+    expect(resolveSqlValueType('DATE', { dialect: 'oracle' })).toBe('datetime')
+    expect(resolveSqlValueType('date', { dialect: 'dameng' })).toBe('datetime')
+    expect(resolveSqlValueType('date', { dialect: 'mysql' })).toBe('date')
+    expect(resolveSqlValueType('date')).toBe('date')
     expect(resolveSqlValueType('number')).toBe('number')
     expect(resolveSqlValueType('NUMBER(18,2)')).toBe('number')
     expect(resolveSqlValueType('varchar2')).toBe('text')

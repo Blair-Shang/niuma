@@ -32,6 +32,7 @@ export default {
     clickhouse: 'ClickHouse',
     kingbase: 'Kingbase',
     sqlserver: 'SQL Server',
+    postgres: 'PostgreSQL',
     database: 'Database',
     api: 'API Tester',
     settings: 'Settings',

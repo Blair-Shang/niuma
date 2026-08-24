@@ -8,8 +8,9 @@ void Session::Close() {
   active_request_id.clear();
   result_sets.clear();  // StmtGuard 析构释放 dpiStmt
   conn.reset();
-  // 先关 ODPI 连接，再停本地代理转发，避免半开读写。
+  // 先关 ODPI 连接，再停本地转发（代理 / SSH），避免半开读写。
   proxy_relay.reset();
+  ssh_tunnel.reset();
 }
 
 void Manager::Put(std::shared_ptr<Session> s) {

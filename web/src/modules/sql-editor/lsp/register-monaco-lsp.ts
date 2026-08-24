@@ -7,6 +7,8 @@ import {
   FALLBACK_DAMENG_LEXICON,
   FALLBACK_KINGBASE_LEXICON,
   FALLBACK_MYSQL_LEXICON,
+  FALLBACK_POSTGRES_LEXICON,
+  FALLBACK_ORACLE_LEXICON,
   FALLBACK_SQLITE_LEXICON,
   FALLBACK_SQLSERVER_LEXICON,
 } from './fallback-lexicon'
@@ -15,6 +17,8 @@ import {
   DAMENG_MONACO_LANGUAGE_ID,
   KINGBASE_MONACO_LANGUAGE_ID,
   MYSQL_MONACO_LANGUAGE_ID,
+  POSTGRES_MONACO_LANGUAGE_ID,
+  ORACLE_MONACO_LANGUAGE_ID,
   SQLITE_MONACO_LANGUAGE_ID,
   SQLSERVER_MONACO_LANGUAGE_ID,
 } from './language-ids'
@@ -414,9 +418,11 @@ type LexiconFetcher = FetchSqlLexicon
 let mysqlLexiconFetcher: LexiconFetcher | null = null
 let damengLexiconFetcher: LexiconFetcher | null = null
 let kingbaseLexiconFetcher: LexiconFetcher | null = null
+let postgresLexiconFetcher: LexiconFetcher | null = null
 let clickhouseLexiconFetcher: LexiconFetcher | null = null
 let sqliteLexiconFetcher: LexiconFetcher | null = null
 let sqlserverLexiconFetcher: LexiconFetcher | null = null
+let oracleLexiconFetcher: LexiconFetcher | null = null
 
 /** 由方言 bootstrap 注入 bridge 拉词表实现。 */
 export function setMysqlLexiconFetcher(fn: LexiconFetcher): void {
@@ -428,6 +434,9 @@ export function setDamengLexiconFetcher(fn: LexiconFetcher): void {
 export function setKingbaseLexiconFetcher(fn: LexiconFetcher): void {
   kingbaseLexiconFetcher = fn
 }
+export function setPostgresLexiconFetcher(fn: LexiconFetcher): void {
+  postgresLexiconFetcher = fn
+}
 export function setClickHouseLexiconFetcher(fn: LexiconFetcher): void {
   clickhouseLexiconFetcher = fn
 }
@@ -436,6 +445,9 @@ export function setSqliteLexiconFetcher(fn: LexiconFetcher): void {
 }
 export function setSqlServerLexiconFetcher(fn: LexiconFetcher): void {
   sqlserverLexiconFetcher = fn
+}
+export function setOracleLexiconFetcher(fn: LexiconFetcher): void {
+  oracleLexiconFetcher = fn
 }
 
 function requireFetcher(
@@ -501,6 +513,23 @@ export async function ensureKingbaseLspLanguage(
 }
 
 /**
+ * 注册 `postgresql` 语言（Monarch 高亮 + 格式化 + LSP 补全）。幂等。
+ */
+export async function ensurePostgresLspLanguage(
+  ensureOpts?: EnsureSqlLspLanguageOptions,
+): Promise<string> {
+  return ensureSqlLspLanguage({
+    languageId: POSTGRES_MONACO_LANGUAGE_ID,
+    aliases: ['PostgreSQL', 'Postgres', 'pgsql'],
+    formatDialect: 'postgresql',
+    triggerCharacters: ['.', ' ', '"', '_'],
+    fetchLexicon: ensureOpts?.fetchLexicon ?? requireFetcher('postgresql', () => postgresLexiconFetcher),
+    fallbackLexicon: FALLBACK_POSTGRES_LEXICON,
+    ensureOpts,
+  })
+}
+
+/**
  * 注册 `clickhouse` 语言（Monarch 高亮 + 格式化 + LSP 补全）。幂等。
  */
 export async function ensureClickHouseLspLanguage(
@@ -547,6 +576,23 @@ export async function ensureSqlServerLspLanguage(
     triggerCharacters: ['.', ' ', '[', '@', '_'],
     fetchLexicon: ensureOpts?.fetchLexicon ?? requireFetcher('sqlserver', () => sqlserverLexiconFetcher),
     fallbackLexicon: FALLBACK_SQLSERVER_LEXICON,
+    ensureOpts,
+  })
+}
+
+/**
+ * 注册 `oracle` 语言（Monarch 高亮 + 格式化 + LSP 补全）。幂等。
+ */
+export async function ensureOracleLspLanguage(
+  ensureOpts?: EnsureSqlLspLanguageOptions,
+): Promise<string> {
+  return ensureSqlLspLanguage({
+    languageId: ORACLE_MONACO_LANGUAGE_ID,
+    aliases: ['Oracle', 'PL/SQL'],
+    formatDialect: 'oracle',
+    triggerCharacters: ['.', ' ', '"'],
+    fetchLexicon: ensureOpts?.fetchLexicon ?? requireFetcher('oracle', () => oracleLexiconFetcher),
+    fallbackLexicon: FALLBACK_ORACLE_LEXICON,
     ensureOpts,
   })
 }

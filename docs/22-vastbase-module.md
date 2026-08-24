@@ -37,7 +37,7 @@
 | 服务语言 | **Go（唯一）** | 对齐 `mongodb-service` / `ftp-service`；`pgx` 成熟；不引入 JVM |
 | 驱动 | **`jackc/pgx/v5`** | PG 线协议；Vastbase 公开调试面为 SQL 函数，与连接语言无关 |
 | **禁止 Java / JDBC** | 本模块 **不引入** `vastbase-jdbc`、不启 JVM sidecar | 降低桌面体积与运维复杂度；调试走 `DBE_PLDEBUGGER.*` SQL API |
-| 协议 kind | **`vastbase`**（产品面）；内部包可名 `pg` / `vb` | 便于品牌与默认选项；后续原生 PG 可复用内核 |
+| 协议 kind | **`vastbase`**（产品面）；内部包可名 `pg` / `vb` | 便于品牌与默认选项；原生 PostgreSQL 见独立 [34](./34-postgresql-module.md)，**禁止**复用本服务内核 |
 | Bridge namespace | **`vastbase`** | `vastbase.session.open` 等 |
 | 进程拉起 | **platform-core 按 manifest 懒拉起** | 壳层零业务 |
 | 凭据边界 | **平台注入明文密码，能力服务进程内使用** | 与现有模型一致 |

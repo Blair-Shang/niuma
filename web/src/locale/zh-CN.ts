@@ -32,6 +32,7 @@ export default {
     clickhouse: 'ClickHouse',
     kingbase: '人大金仓',
     sqlserver: 'SQL Server',
+    postgres: 'PostgreSQL',
     database: '数据库',
     api: 'API 测试',
     settings: '设置',

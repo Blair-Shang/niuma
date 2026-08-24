@@ -38,6 +38,8 @@ struct DumpParams {
   bool include_functions = false;
   bool include_packages = false;
   bool include_sequences = false;
+  bool include_synonyms = false;
+  bool include_triggers = false;
 };
 
 class CancelState {

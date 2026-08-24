@@ -215,6 +215,7 @@ const deleteCount = computed(
       :gutter-width="pane.BROWSE_GUTTER_WIDTH"
       :dialog-labels="dialogLabels"
       :empty-text="pane.t('modules.oracle.browse.empty')"
+      :resolve-full-cell-value="pane.resolveFullCellValue"
       @cell-edit-commit="pane.onCellEditCommit"
       @row-edit-commit="pane.onBrowseRowEditCommit"
       @row-edit-rollback="pane.onBrowseRowEditRollback"

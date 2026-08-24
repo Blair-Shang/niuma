@@ -11,6 +11,7 @@ services/
 ├── mysql-service/
 ├── sqlite-service/
 ├── dameng-service/
+├── postgres-service/    # 官方 PostgreSQL（Go + pgx，见 docs/34）
 └── oracle-service/      # C++20 + ODPI-C（见 docs/29）
 ```
 

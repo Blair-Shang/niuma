@@ -118,7 +118,7 @@ export const oracleConnectionFormAdapter: ConnectionFormAdapter = {
     if (/ORA-12514|ORA-12505|service name or SID required/i.test(message)) {
       return `${message}\n${t('modules.oracle.listenerHint')}`
     }
-    if (/SSH tunnel is not supported/i.test(message)) {
+    if (/SSH tunnel|oracle tunnel:/i.test(message)) {
       return `${message}\n${t('modules.oracle.tunnelUnsupportedHint')}`
     }
     if (/wallet path required|ORA-28759|ORA-28862|ORA-29024/i.test(message)) {

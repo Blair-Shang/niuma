@@ -129,7 +129,7 @@ function close(): void {
     v-model:open="open"
     :title="dlgTitle"
     width="lg"
-    layout="confirm"
+    layout="form"
     :resizable="false"
     :fullscreenable="false"
     :show-overlay="false"

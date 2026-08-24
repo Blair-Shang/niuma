@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsTerminal } from '@niuma/ui'
+import { RsTerminal, type RsTerminalExpose } from '@niuma/ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mongodbApi } from '@/api'
@@ -24,7 +24,7 @@ const ANSI_CYAN = '\x1b[36m'
 const ANSI_PROMPT = '\x1b[1;32m'
 
 const { t } = useI18n()
-const terminalRef = ref<InstanceType<typeof RsTerminal> | null>(null)
+const terminalRef = ref<RsTerminalExpose | null>(null)
 const terminalReady = ref(false)
 const mode = ref<'detecting' | 'pty' | 'repl'>('detecting')
 const toolPaths = ref<Record<string, string>>({})
@@ -261,11 +261,10 @@ function longestCommonPrefix(values: string[]): string {
 
 function writeCandidateList(items: string[]): void {
   const term = terminalRef.value
-  const raw = term?.getTerminal()
-  if (!term || !raw) {
+  const cols = term?.getGeometry()?.cols
+  if (!term || !cols) {
     return
   }
-  const cols = raw.cols || 80
   const colWidth = Math.min(cols, Math.max(...items.map((n) => n.length)) + 2)
   const perRow = Math.max(1, Math.floor(cols / colWidth))
   let out = '\r\n'
@@ -348,14 +347,7 @@ function scheduleFlush(): void {
 }
 
 function calcGeometry(): { cols: number; rows: number } | null {
-  const terminal = terminalRef.value?.getTerminal()
-  if (!terminal) {
-    return null
-  }
-  return {
-    cols: terminal.cols || 80,
-    rows: terminal.rows || 24,
-  }
+  return terminalRef.value?.getGeometry() ?? null
 }
 
 async function detectMode(): Promise<void> {

@@ -41,6 +41,23 @@ import { ensureConnKindForm } from '@/modules/ops/conn-kind-loaders'
 
 export type { ConnectionDlgMode, ConnectionFormState } from '@/modules/ops/connection-form/index'
 
+/** 解析表单端口：空 → 协议默认；显式 0 保留（命名实例 / Browser）。 */
+function parseProfilePort(raw: string, kind: ConnKind): number {
+  const trimmed = String(raw ?? '').trim()
+  if (trimmed === '') return defaultPortForKind(kind)
+  const n = Number.parseInt(trimmed, 10)
+  if (!Number.isFinite(n) || n < 0) return defaultPortForKind(kind)
+  return n
+}
+
+/** 回填端口到表单：保留 0，避免被当成 falsy 回退默认端口。 */
+function formatProfilePort(port: number | undefined, kind: ConnKind): string {
+  if (typeof port === 'number' && Number.isFinite(port) && port >= 0) {
+    return String(port)
+  }
+  return String(defaultPortForKind(kind))
+}
+
 function baseEmptyForm(kind: ConnKind): ConnectionFormState {
   return {
     profileName: '',
@@ -173,7 +190,7 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
     resetForm(item.kind)
     form.profileName = profileName
     form.hostAddress = item.hostAddress
-    form.portNumber = String(item.portNumber || defaultPortForKind(item.kind))
+    form.portNumber = formatProfilePort(item.portNumber, item.kind)
     form.loginAccount = item.loginAccount
     form.password = ''
     form.accentColor = profileAccentColor(item.connectionOptions)
@@ -253,7 +270,8 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
       profileName: form.profileName.trim(),
       connectionKind: dlgKind.value,
       hostAddress: form.hostAddress.trim(),
-      portNumber: Number.parseInt(form.portNumber, 10) || defaultPortForKind(dlgKind.value),
+      // 允许显式 0（SQL Server 命名实例走 SQL Browser）；空串才回退默认端口
+      portNumber: parseProfilePort(form.portNumber, dlgKind.value),
       loginAccount: form.loginAccount.trim(),
       connectionOptions,
     }
@@ -372,7 +390,7 @@ export function useConnectionProfiles(kinds: ConnKind[] = CONN_KIND_DEFS.map((k)
       const adapter = getConnectionFormAdapter(dlgKind.value)
       const result = await adapter.callSessionTest(params)
       let text = result.message || (result.ok ? t('connection.form.testOk') : t('connection.form.testFail'))
-      text = adapter.enrichTestMessage?.(text, result.ok, t) ?? text
+      text = adapter.enrichTestMessage?.(text, result.ok, t, result) ?? text
       testMessage.value = { ok: result.ok, text }
     } catch (e) {
       const adapter = getConnectionFormAdapter(dlgKind.value)

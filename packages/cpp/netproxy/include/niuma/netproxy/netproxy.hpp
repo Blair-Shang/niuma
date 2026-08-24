@@ -54,4 +54,8 @@ class RelayGuard {
 std::unique_ptr<RelayGuard> StartRelay(const Options& proxy, const std::string& target_host, uint16_t target_port,
                                        std::string& local_host, uint16_t& local_port, std::string& error);
 
+// 拨号到 host:port；proxy 未启用时直连。成功时 out_fd 为已连接套接字（Windows=SOCKET，
+// Unix=int），调用方负责关闭。供 SSH 隧道等需要自定义 dial 的模块复用。
+bool Dial(const Options& proxy, const std::string& host, uint16_t port, intptr_t& out_fd, std::string& error);
+
 }  // namespace niuma::netproxy

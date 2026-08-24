@@ -71,11 +71,15 @@ const BUILTIN_CONN_KIND_LOADERS: Record<
     loadForm: () => import('@/modules/kingbase/register-conn-form').then((m) => m.registerForm()),
     load: () => import('@/modules/kingbase/register-conn-full').then((m) => m.registerFull()),
   },
-  // P0：无对象树；仅表单 + 查询导航
   sqlserver: {
-    tree: false,
+    tree: true,
     loadForm: () => import('@/modules/sqlserver/register-conn-form').then((m) => m.registerForm()),
     load: () => import('@/modules/sqlserver/register-conn-full').then((m) => m.registerFull()),
+  },
+  postgres: {
+    tree: true,
+    loadForm: () => import('@/modules/postgres/register-conn-form').then((m) => m.registerForm()),
+    load: () => import('@/modules/postgres/register-conn-full').then((m) => m.registerFull()),
   },
 }
 

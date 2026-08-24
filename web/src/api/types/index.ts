@@ -288,6 +288,7 @@ export { DEFAULT_DAMENG_OPTIONS } from './dameng'
 export { DEFAULT_ORACLE_OPTIONS } from './oracle'
 export { DEFAULT_CLICKHOUSE_OPTIONS } from './clickhouse'
 export { DEFAULT_KINGBASE_OPTIONS } from './kingbase'
+export { DEFAULT_POSTGRES_OPTIONS } from './postgres'
 export type {
   KingbaseActivitySession,
   KingbaseCatalogColumnsResult,
@@ -356,6 +357,16 @@ export type {
   KingbaseTreeSchemasResult,
   KingbaseTreeTablesResult,
 } from './kingbase'
+export type {
+  PostgresConnectionOptions,
+  PostgresDialectProfile,
+  PostgresSessionCloseParams,
+  PostgresSessionOpenParams,
+  PostgresSessionOpenResult,
+  PostgresSessionTestParams,
+  PostgresSessionTestResult,
+  PostgresSSLMode,
+} from './postgres'
 export type {
   DamengConnectionOptions,
   DamengDialectProfile,

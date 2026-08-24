@@ -94,13 +94,13 @@ function Stop-ListenProcessOnPort {
     $seen = @{}
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
-        $pid = $c.OwningProcess
-        if (-not $pid -or $pid -eq 0 -or $seen.ContainsKey($pid)) {
+        $owningPid = $c.OwningProcess
+        if (-not $owningPid -or $owningPid -eq 0 -or $seen.ContainsKey($owningPid)) {
             continue
         }
-        $seen[$pid] = $true
-        Write-Host "==> stopping process on port $Port (PID $pid)" -ForegroundColor Yellow
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        $seen[$owningPid] = $true
+        Write-Host "==> stopping process on port $Port (PID $owningPid)" -ForegroundColor Yellow
+        Stop-Process -Id $owningPid -Force -ErrorAction SilentlyContinue
     }
     if ($seen.Count -gt 0) {
         Start-Sleep -Milliseconds 500

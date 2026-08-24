@@ -26,7 +26,8 @@ struct ResultSet {
 
 struct Session {
   std::string id;
-  // proxy_relay 须晚于 conn 析构（声明在前 → 析构在后）。
+  // ssh_tunnel / proxy_relay 须晚于 conn 析构（声明在前 → 析构在后）。
+  std::unique_ptr<niuma::sshtunnel::TunnelGuard> ssh_tunnel;
   std::unique_ptr<niuma::netproxy::RelayGuard> proxy_relay;
   ConnPtr conn;
   ContextPtr ctx;

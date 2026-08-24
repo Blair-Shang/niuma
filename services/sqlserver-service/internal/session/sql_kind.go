@@ -33,6 +33,7 @@ func sqlKind(q string) string {
 func returnsResultSet(q string) bool {
 	switch sqlKind(q) {
 	case "SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "EXEC", "EXECUTE",
+		"DECLARE",              // SSMS 执行过程脚本：DECLARE + EXEC + SELECT 回显 OUTPUT / 返回值
 		"DBCC", "CHECK", "SET": // SET 可能无结果；误判时 OpenPagedQuery 会回退 Exec
 		return true
 	default:

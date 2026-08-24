@@ -54,6 +54,7 @@ const {
   closeResultGridTab,
   openBatchGrid,
   runSql,
+  runExplain,
   cancelRun,
   fetchMore,
   fetchAll,
@@ -76,8 +77,11 @@ const {
     :history-enabled="Boolean(profileId)"
     :history-entries="historyEntries"
     :split-panes="splitPanes"
-    :show-explain="false"
+    :show-explain="true"
+    :show-explain-analyze="true"
     @format="formatEditor"
+    @explain="runExplain(false)"
+    @explain-analyze="runExplain(true)"
     @run="runSql"
     @cancel="cancelRun"
     @history-pick="onHistoryPick"

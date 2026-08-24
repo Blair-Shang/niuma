@@ -60,7 +60,7 @@ export default {
         tabNewProcedure: '新建过程',
         tabNewFunction: '新建函数',
         tabTools: '工具',
-        tabDebug: '调试辅助',
+        tabCall: '执行调用',
       },
       tree: {
         connQuery: '新建查询',
@@ -90,8 +90,6 @@ export default {
         dropView: '删除视图',
         procCall: '调用过程',
         funcCall: '调用函数',
-        procDebug: '调试辅助',
-        funcDebug: '调试辅助',
         editSource: '编辑源码',
         dropProc: '删除过程',
         dropFunc: '删除函数',

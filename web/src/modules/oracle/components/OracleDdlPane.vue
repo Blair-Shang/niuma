@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { RsLoading, RsMonacoEditor, useRsToast } from '@niuma/ui'
+/**
+ * Oracle DDL 只读页：加载/刷新语义与 MysqlDdlPane 保持一致。
+ * - scope（sessionId/schema/table）变化：清空并重拉
+ * - keep-alive 切回（active=true）且已有 ddl：不重拉
+ */
+import { RsMonacoEditor, useRsToast } from '@niuma/ui'
 import type { MonacoLanguage } from '@niuma/ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -18,6 +23,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const toast = useRsToast()
+
 const loading = ref(false)
 const ddl = ref('')
 const objectType = ref('')
@@ -114,15 +120,13 @@ watch(
       class="nm-oracle-ddl__editor"
       height="100%"
       :language="monacoLanguage"
+      embedded
       :options="{
         readOnly: true,
         automaticLayout: active !== false,
         minimap: { enabled: false },
       }"
     />
-    <div v-else class="nm-oracle-ddl__boot">
-      <RsLoading size="sm" />
-    </div>
   </DdlShell>
 </template>
 
@@ -132,13 +136,5 @@ watch(
   min-height: 0;
   border-radius: 0;
   border: none;
-}
-
-.nm-oracle-ddl__boot {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
 }
 </style>

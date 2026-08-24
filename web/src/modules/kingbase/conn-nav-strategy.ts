@@ -102,7 +102,7 @@ function resolveFeature(ctx?: ConnOpenContext): KingbaseSessionTab {
   return 'query'
 }
 
-function buildDebugTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNavTabSpec {
+function buildCallTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNavTabSpec {
   const database = segmentName(ctx, 'database') || ''
   const schema = segmentName(ctx, 'schema') || ''
   const routine =
@@ -112,10 +112,10 @@ function buildDebugTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
     : segmentName(ctx, 'procedure')
       ? 'procedure'
       : undefined
-  const label = featureLabel('debug')
+  const label = featureLabel('call')
   const props: Record<string, unknown> = {
     profileId: item.profileId,
-    initialTab: 'debug',
+    initialTab: 'call',
     database,
     schema,
     routine,
@@ -131,7 +131,7 @@ function buildDebugTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
     moduleId: 'kingbase',
     title,
     tooltip: buildConnectionTabTooltip(item.profileName, item.hostAddress, resource, label),
-    icon: kingbasePaneRegistry.debug.icon,
+    icon: kingbasePaneRegistry.call.icon,
     props,
   }
 }
@@ -320,7 +320,7 @@ function buildKingbaseTabSpec(item: ConnItem, ctx?: ConnOpenContext): Connection
   if (feature === 'query') return buildQueryTabSpec(item, ctx)
   if (feature === 'design') return buildDesignTabSpec(item, ctx)
   if (feature === 'objectScript') return buildObjectScriptTabSpec(item, ctx)
-  if (feature === 'debug') return buildDebugTabSpec(item, ctx)
+  if (feature === 'call') return buildCallTabSpec(item, ctx)
   return buildRelationTabSpec(item, ctx, feature)
 }
 
@@ -384,8 +384,8 @@ export const kingbaseConnectionNavStrategy: ConnectionNavStrategy = {
         )
       }
 
-      if (feature === 'debug') {
-        // 同一过程/函数（含重载签名）只开一个调试页；不同对象各自独立
+      if (feature === 'call') {
+        // 同一过程/函数（含重载签名）只开一个调用页；不同对象各自独立
         const routine =
           segmentName(ctx, 'function') || segmentName(ctx, 'procedure') || ''
         const args = segmentName(ctx, 'args') || ''

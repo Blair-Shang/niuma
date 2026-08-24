@@ -47,9 +47,18 @@ describe('sql-editor capabilities', () => {
     expect(vast.monacoLanguageId).toBe('sql')
     expect(vast.monacoSqlLanguages).toBe(false)
     expect(vast.useLsp).toBe(false)
+  })
+
+  it('postgresql uses Bridge SQL LSP with postgresql languageId', () => {
     const pg = resolveMonacoLanguageFromProfile(defaultPostgreSQLProfile())
-    expect(pg.monacoLanguageId).toBe('sql')
-    expect(pg.useLsp).toBe(false)
+    expect(pg.monacoLanguageId).toBe('postgresql')
+    expect(pg.monacoSqlLanguages).toBe(false)
+    expect(pg.useLsp).toBe(true)
+    expect(hasCapability(defaultPostgreSQLProfile(), Cap.EditorSqlLsp)).toBe(true)
+    expect(resolveFormatterLanguage(defaultPostgreSQLProfile())).toBe('postgresql')
+    const rules = buildAiDialectRules(defaultPostgreSQLProfile())
+    expect(rules).toContain('official PostgreSQL')
+    expect(rules).toContain('LANGUAGE plpgsql')
   })
 
   it('editor.builtin_sql alone falls back to builtin sql', () => {

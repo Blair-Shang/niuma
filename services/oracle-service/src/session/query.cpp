@@ -1,5 +1,7 @@
 #include "session/query.hpp"
 
+#include "dataio/script_split.hpp"
+#include "session/dbms_output.hpp"
 #include "session/tx.hpp"
 #include "util/dpi_error.hpp"
 #include "util/idgen.hpp"
@@ -96,26 +98,6 @@ nlohmann::json CellToJson(dpiContext* ctx, dpiOracleTypeNum oracle_type, dpiNati
     default:
       return nullptr;
   }
-}
-
-bool IsSelectLike(const std::string& sql) {
-  size_t i = 0;
-  while (i < sql.size() && std::isspace(static_cast<unsigned char>(sql[i]))) {
-    ++i;
-  }
-  auto starts = [&](const char* kw) {
-    const size_t n = std::strlen(kw);
-    if (i + n > sql.size()) {
-      return false;
-    }
-    for (size_t k = 0; k < n; ++k) {
-      if (std::tolower(static_cast<unsigned char>(sql[i + k])) != kw[k]) {
-        return false;
-      }
-    }
-    return true;
-  };
-  return starts("select") || starts("with") || starts("show") || starts("describe") || starts("desc");
 }
 
 nlohmann::json ReadRow(dpiContext* ctx, dpiStmt* stmt, uint32_t num_cols,
@@ -278,9 +260,11 @@ nlohmann::json ExecQuery(Session& session, const QueryExecParams& params, std::s
   while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.back()))) {
     sql.pop_back();
   }
-  // ODPI/OCI 不接受语句分隔符 `;`（客户端约定）；带着会报 ORA-00922 / ORA-00911。
-  // 查询页拆句会去掉分号，树 DDL / 单条 exec 可能仍带尾 `;`。
-  if (!sql.empty() && sql.back() == ';') {
+  // SQL*Plus 客户端终止符 / 不得进 OCI（前端应已剥；此处兜底）
+  sql = dataio::StripSqlPlusTerminator(std::move(sql));
+  // ODPI/OCI：普通 SQL 不接受尾 `;`（ORA-00911）；但 PL/SQL 单元的尾 `END;` 是语法必需，
+  // 剥掉会报 PLS-00103 end-of-file（调用过程匿名块 / CREATE PROCEDURE 等）。
+  if (!sql.empty() && sql.back() == ';' && !dataio::LooksLikePlsqlUnit(sql)) {
     sql.pop_back();
     while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.back()))) {
       sql.pop_back();
@@ -330,6 +314,20 @@ nlohmann::json ExecQuery(Session& session, const QueryExecParams& params, std::s
     return {};
   }
 
+  // ORA-24344 等：dpiStmt_execute 仍返回 SUCCESS，警告必须在下一次 ODPI 调用前读取。
+  // 过程/函数带编译错误时对象会落成 INVALID，若当成功会误导「编译没问题」。
+  {
+    dpiErrorInfo warn{};
+    dpiContext_getError(ctx, &warn);
+    if (warn.isWarning && warn.code == 24344) {
+      error = util::FormatDpiErrorInfo(warn, "oracle: ORA-24344: success with compilation error");
+      error += "; object is INVALID — check ALL_ERRORS / recompile";
+      std::lock_guard lock(session.mu);
+      ClearCancel(session);
+      return {};
+    }
+  }
+
   const auto duration_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
 
@@ -341,7 +339,8 @@ nlohmann::json ExecQuery(Session& session, const QueryExecParams& params, std::s
       {"durationMs", duration_ms},
   };
 
-  if (num_cols == 0 || !IsSelectLike(sql)) {
+  // 以 ODPI 查询列数为准。旧逻辑再套关键字启发式，会把前导注释/hint + SELECT 误判成 DML。
+  if (num_cols == 0) {
     uint64_t affected = 0;
     dpiStmt_getRowCount(stmt.Get(), &affected);
     result["commandTag"] = "OK";
@@ -352,6 +351,49 @@ nlohmann::json ExecQuery(Session& session, const QueryExecParams& params, std::s
     }
     if (!AfterDml(session, error)) {
       return {};
+    }
+    // PL/SQL 匿名块 / 过程调用：回收 DBMS_OUTPUT。
+    // 若行均为 name=value（调用脚本约定），收成单行宽表，便于查询面板/KV 展示 OUT。
+    if (dataio::LooksLikePlsqlUnit(sql)) {
+      nlohmann::json out_lines = DrainDbmsOutput(session, 200);
+      if (out_lines.is_array() && !out_lines.empty()) {
+        result["dbmsOutput"] = out_lines;
+        result["commandTag"] = "DBMS_OUTPUT";
+        bool all_kv = true;
+        nlohmann::json columns = nlohmann::json::array();
+        nlohmann::json wide = nlohmann::json::array();
+        for (const auto& line : out_lines) {
+          if (!line.is_string()) {
+            all_kv = false;
+            break;
+          }
+          const std::string s = line.get<std::string>();
+          const auto eq = s.find('=');
+          if (eq == std::string::npos || eq == 0) {
+            all_kv = false;
+            break;
+          }
+          columns.push_back(
+              nlohmann::json{{"name", s.substr(0, eq)}, {"dataType", "VARCHAR2"}});
+          wide.push_back(s.substr(eq + 1));
+        }
+        if (all_kv && !columns.empty()) {
+          result["columns"] = std::move(columns);
+          result["rows"] = nlohmann::json::array({std::move(wide)});
+          result["rowCount"] = 1;
+          result["fetchedCount"] = 1;
+        } else {
+          result["columns"] = nlohmann::json::array(
+              {nlohmann::json{{"name", "DBMS_OUTPUT"}, {"dataType", "VARCHAR2"}}});
+          nlohmann::json rows = nlohmann::json::array();
+          for (const auto& line : out_lines) {
+            rows.push_back(nlohmann::json::array({line.is_string() ? line : nlohmann::json("")}));
+          }
+          result["rows"] = std::move(rows);
+          result["rowCount"] = static_cast<int>(out_lines.size());
+          result["fetchedCount"] = static_cast<int>(out_lines.size());
+        }
+      }
     }
     return result;  // StmtGuard 释放
   }

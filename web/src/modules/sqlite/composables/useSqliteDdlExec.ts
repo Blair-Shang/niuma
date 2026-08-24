@@ -107,7 +107,9 @@ export function useSqliteDdlExec() {
       }
       toast.success(t('modules.sqlite.ddl.done'))
       if (conn) {
-        await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths)
+        if (pending.action !== 'empty_table') {
+          await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths)
+        }
       } else {
         invalidateConnTreeChildren(pending.profileId)
       }

@@ -7,8 +7,17 @@ import { defaultOracleProfile, resolveSplitFeaturesFromProfile } from '@/modules
 import { splitSqlStatementsWithFeatures } from '@/modules/sql-editor/split/sql-statement-splitter'
 import { useOracleSqlEditor } from '@/modules/oracle/composables/useOracleSqlEditor'
 import { isOracleConnectionError } from '@/modules/oracle/utils/oracleConnectionError'
+import {
+  ensureOracleCreateSchema,
+  stripOracleSqlPlusTerminator,
+} from '@/modules/oracle/utils/normalize-object-ddl'
 import { alignForValueType, buildSqlQueryContextMenuItems, formatBrowseCellValue, resolveSqlValueType, useQueryDraftPersist, useSqlQueryHistory, type BatchStatementItem, type QueryResultMessageItem, type QueryResultPanelLabels, type SqlQueryToolbarLabels } from '@/modules/database'
 import { mapResultRowsByName, type QueryResultRow } from '@/modules/database/utils/query-result-tabs'
+import {
+  buildQueryLobSelectSql,
+  isTruncatedLobCell,
+  loadOracleLobFull,
+} from '@/modules/oracle/utils/load-lob'
 import { useSessionActionStore } from '@/stores/session-actions'
 import { useSessionRegistry } from '@/stores/session-registry'
 
@@ -27,6 +36,8 @@ export type OracleQueryPaneProps = {
 type GridTab = {
   id: string
   sqlPreview: string
+  /** 产生该结果集的语句（供 loadLob 嵌套 SELECT） */
+  sourceSql?: string
   columns: OracleQueryColumn[]
   rows: QueryResultRow[]
   rowCount: number
@@ -97,7 +108,7 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
   const activeGrid = computed(() => gridTabs.value.find((tab) => tab.id === activePaneTab.value) ?? null)
   const resultColumns = computed((): RsTableColumn[] => (activeGrid.value?.columns ?? []).map((column, index) => {
     const name = column.name || `col${index + 1}`
-    const valueType = resolveSqlValueType(column.dataType)
+    const valueType = resolveSqlValueType(column.dataType, { dialect: 'oracle' })
     return { key: name, title: name, width: 120, minWidth: 96, ellipsis: true, sortable: true, filterable: true, align: alignForValueType(valueType), valueType, headerTip: [t('modules.oracle.query.colTipField', { name }), column.dataType ? t('modules.oracle.query.colTipType', { type: column.dataType }) : ''].filter(Boolean).join('\n'), formatter: valueType === 'boolean' ? undefined : (value) => formatOracleCellValue(value, valueType) }
   }))
   const resultRows = computed(() => activeGrid.value?.rows ?? [])
@@ -114,11 +125,12 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
     : lastExecSummary.value ? [{ key: 'summary', label: t('modules.oracle.query.msgOk'), value: lastExecSummary.value, tone: 'success' }] : [])
   const hasMessages = computed(() => messageItems.value.length > 0)
 
-  function addGrid(result: OracleQueryExecResult, index: number): GridTab {
+  function addGrid(result: OracleQueryExecResult, index: number, sourceSql?: string): GridTab {
     const columns = result.columns ?? []
     const tab: GridTab = {
       id: `result-${Date.now()}-${index}`,
       sqlPreview: `Result ${index + 1}`,
+      sourceSql,
       columns,
       rows: mapResultRowsByName(columns, result.rows ?? [], 0),
       rowCount: result.rowCount,
@@ -133,6 +145,35 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
     gridTabs.value = [...gridTabs.value, tab]
     activePaneTab.value = tab.id
     return tab
+  }
+
+  async function resolveFullCellValue(ctx: {
+    row: Record<string, unknown>
+    column: RsTableColumn<Record<string, unknown>>
+    raw: unknown
+  }): Promise<unknown | null> {
+    if (!props.sessionId || !isTruncatedLobCell(ctx.raw)) return null
+    const grid = activeGrid.value
+    const sourceSql = grid?.sourceSql?.trim()
+    if (!grid || !sourceSql) {
+      toast.warning(t('modules.oracle.query.lobNeedSource'))
+      return null
+    }
+    const rowIndex = Math.max(
+      0,
+      grid.rows.findIndex((r) => r === ctx.row),
+    )
+    try {
+      const loaded = await loadOracleLobFull({
+        sessionId: props.sessionId,
+        schema: props.schema?.trim() || undefined,
+        sql: buildQueryLobSelectSql(sourceSql, String(ctx.column.key), rowIndex),
+      })
+      return loaded.value
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('modules.oracle.query.lobLoadFailed'))
+      return null
+    }
   }
 
   async function runSql(): Promise<void> {
@@ -166,16 +207,25 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
         }
         const started = performance.now()
         try {
+          // 独立行 / 是 SQL*Plus 终止符；裸 CREATE 无 schema 会落到登录用户，树上目标对象仍 INVALID
+          let wireSql = stripOracleSqlPlusTerminator(statement.sql)
+          const sch = props.schema?.trim()
+          if (sch) wireSql = ensureOracleCreateSchema(wireSql, sch)
           const result = await oracleApi.queryExec({
             sessionId: props.sessionId,
             schema: props.schema?.trim() || undefined,
-            sql: statement.sql,
+            sql: wireSql,
             limit: PAGE_LIMIT,
             requestId,
           })
           const durationMs = Math.round(performance.now() - started)
           if (result.columns?.length) {
-            const tab = addGrid(result, index)
+            const tab = addGrid(result, index, wireSql)
+            if (result.commandTag === 'DBMS_OUTPUT' || (result.dbmsOutput?.length ?? 0) > 0) {
+              lastExecSummary.value = t('modules.oracle.query.dbmsOutput', {
+                n: result.rowCount ?? result.dbmsOutput?.length ?? 0,
+              })
+            }
             batchItems.value[index] = {
               index,
               sqlPreview: statement.sql.trim().slice(0, 120),
@@ -202,7 +252,10 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
           batchItems.value = batchItems.value.slice()
         } catch (stmtErr) {
           const durationMs = Math.round(performance.now() - started)
-          const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr)
+          let msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr)
+          if (/PLS-00905|object\s+\S+\s+is\s+invalid|ORA-0?24344/i.test(msg)) {
+            msg = `${msg}\n${t('modules.oracle.debug.compileHint')}`
+          }
           batchItems.value[index] = {
             index,
             sqlPreview: statement.sql.trim().slice(0, 120),
@@ -236,7 +289,7 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
   }
   async function runExplain(): Promise<void> {
     if (!props.sessionId || running.value) return
-    const sql = editor.resolveSql()
+    const sql = stripOracleSqlPlusTerminator(editor.resolveSql())
     if (!sql.trim()) { toast.warning(t('modules.oracle.query.empty')); return }
     running.value = true; lastError.value = null; lastExecSummary.value = ''; gridTabs.value = []
     try {
@@ -510,5 +563,6 @@ export function useOracleQueryPane(props: OracleQueryPaneProps) {
     commitTx,
     rollbackTx,
     onContextMenuSelect,
+    resolveFullCellValue,
   }
 }

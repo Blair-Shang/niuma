@@ -138,6 +138,7 @@ sqlite_out="$TARGET_BIN_DIR/$(binary_name niuma-sqlite-service "$PLATFORM")"
 dameng_out="$TARGET_BIN_DIR/$(binary_name niuma-dameng-service "$PLATFORM")"
 clickhouse_out="$TARGET_BIN_DIR/$(binary_name niuma-clickhouse-service "$PLATFORM")"
 kingbase_out="$TARGET_BIN_DIR/$(binary_name niuma-kingbase-service "$PLATFORM")"
+postgres_out="$TARGET_BIN_DIR/$(binary_name niuma-postgres-service "$PLATFORM")"
 sqlserver_out="$TARGET_BIN_DIR/$(binary_name niuma-sqlserver-service "$PLATFORM")"
 mcp_vast_out="$TARGET_BIN_DIR/$(binary_name mcp-vastbase-readonly "$PLATFORM")"
 
@@ -154,6 +155,7 @@ fi
 build_go_service "$REPO_ROOT/services/dameng-service" "./cmd/dameng-service" "$dameng_out"
 build_go_service "$REPO_ROOT/services/clickhouse-service" "./cmd/clickhouse-service" "$clickhouse_out"
 build_go_service "$REPO_ROOT/services/kingbase-service" "./cmd/kingbase-service" "$kingbase_out"
+build_go_service "$REPO_ROOT/services/postgres-service" "./cmd/postgres-service" "$postgres_out"
 build_go_service "$REPO_ROOT/services/sqlserver-service" "./cmd/sqlserver-service" "$sqlserver_out"
 build_go_service "$REPO_ROOT/services/mcp-vastbase-readonly" "." "$mcp_vast_out"
 ssh_built="false"
@@ -175,6 +177,7 @@ if should_sync_legacy_bin; then
   cp "$dameng_out" "$BIN_DIR/$(binary_name niuma-dameng-service "$PLATFORM")"
   cp "$clickhouse_out" "$BIN_DIR/$(binary_name niuma-clickhouse-service "$PLATFORM")"
   cp "$kingbase_out" "$BIN_DIR/$(binary_name niuma-kingbase-service "$PLATFORM")"
+  cp "$postgres_out" "$BIN_DIR/$(binary_name niuma-postgres-service "$PLATFORM")"
   cp "$sqlserver_out" "$BIN_DIR/$(binary_name niuma-sqlserver-service "$PLATFORM")"
   cp "$mcp_vast_out" "$BIN_DIR/$(binary_name mcp-vastbase-readonly "$PLATFORM")"
   if [[ "$ssh_built" == "true" && -f "$ssh_out" ]]; then

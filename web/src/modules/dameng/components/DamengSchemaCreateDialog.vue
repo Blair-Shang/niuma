@@ -49,7 +49,7 @@ async function onConfirm(): Promise<void> {
     v-model:open="open"
     :title="title"
     width="md"
-    layout="confirm"
+    layout="form"
     tone="default"
     :show-overlay="false"
     :show-close="true"

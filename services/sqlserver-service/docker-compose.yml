@@ -1,0 +1,72 @@
+# SQL Server 2022（Linux 服务器 / 本机 Docker），供 sqlserver-service / 前端联调。
+# 要求：x86_64（amd64）；主机可用内存建议 ≥ 4GB；勿在 arm64 上跑本镜像。
+#
+#   docker compose -f services/sqlserver-service/docker-compose.yml up -d
+#   docker compose -f services/sqlserver-service/docker-compose.yml logs -f
+# 日志出现 SQL Server is now ready for client connections 后再连（约 10–30s）。
+#
+# 必须同时满足：
+#   1) 用 cpuset 限制「可见核」（只写 cpus 时 sqlservr 仍按宿主机 80 核建 scheduler）
+#   2) 2GB 内存只配 2 核；80 核 + 2GB 会空转 / non-yielding
+#   3) 改可见核后必须 down -v 再首次启动（旧卷是按 80 核初始化的，--force-recreate 不够）
+#   4) 大核机器不要绑 0-3（和 kubelet/中断抢核）
+#
+# 这台机核号奇偶交错：偶数=NODE0/SOCKET0，奇数=NODE1/SOCKET1；N 与 N+40 是超线程对。
+# 默认绑 76,78（同 NODE0、非超线程对、远离 0-3）。不要用 18-19 / 0-3（会跨两个 socket）。
+# 覆盖：MSSQL_CPUSET=72,74 docker compose -f ... up -d
+# 本机只有 2～4 核：MSSQL_CPUSET=0-1
+#
+#   docker compose -f services/sqlserver-service/docker-compose.yml down -v
+#   docker compose -f services/sqlserver-service/docker-compose.yml up -d
+#
+# 若反复崩溃（Capturing core dump / /proc Permission denied）：
+#   1. 确认架构与内存：uname -m；free -h（给容器至少 2GB）
+#   2. 清损坏数据卷后重建：
+#        docker compose -f services/sqlserver-service/docker-compose.yml down -v
+#        docker compose -f services/sqlserver-service/docker-compose.yml pull
+#        docker compose -f services/sqlserver-service/docker-compose.yml up -d
+#   3. 看崩溃原因（不要只看 dump 段）：
+#        docker logs niuma-sqlserver 2>&1 | head -n 80
+#
+# 连接（NiuMa 新建连接 / session.test）：
+#   Host=<服务器IP或127.0.0.1>  Port=61433  Database=master
+#   User=sa / Your_strong_Passw0rd
+#   Auth=sql  Encrypt=disable  Trust Server Certificate=true
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: niuma-sqlserver
+    # 官方镜像默认 mssql(uid=10001)；卷权限异常时 sqlservr 会直接崩，root 更稳
+    user: "0:0"
+    ports:
+      - "61433:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Your_strong_Passw0rd"
+      MSSQL_PID: Developer
+      # 限制引擎内存，避免把主机吃满后被 OOM killer 干掉
+      MSSQL_MEMORY_LIMIT_MB: "2048"
+    volumes:
+      - niuma-sqlserver-data:/var/opt/mssql
+    mem_limit: 3g
+    mem_reservation: 2g
+    # 2 核对齐 2GB；必须同 NODE（偶数或奇数），不要 0-3 / 18-19
+    cpus: 2.0
+    cpuset: ${MSSQL_CPUSET:-76,78}
+    restart: unless-stopped
+    # 官方镜像未必自带 sqlcmd；以 errorlog 就绪行判断即可
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "grep -q \"SQL Server is now ready for client connections\" /var/opt/mssql/log/errorlog || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+
+volumes:
+  niuma-sqlserver-data:

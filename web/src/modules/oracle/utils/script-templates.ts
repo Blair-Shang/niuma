@@ -77,7 +77,8 @@ export function deleteTemplateSql(
 }
 
 export function createObjectTemplate(schema: string, category: OracleObjectCategory): string {
-  const qn = qualifiedName(schema, ORACLE_CREATE_OBJECT_PLACEHOLDERS[category])
+  const placeholder = ORACLE_CREATE_OBJECT_PLACEHOLDERS[category]
+  const qn = qualifiedName(schema, placeholder)
   if (category === 'views') return `CREATE OR REPLACE VIEW ${qn} AS\nSELECT\n  *\nFROM \n`
   if (category === 'procedures') {
     return `CREATE OR REPLACE PROCEDURE ${qn}\nAS\nBEGIN\n  NULL;\nEND;\n/\n`
@@ -85,6 +86,9 @@ export function createObjectTemplate(schema: string, category: OracleObjectCateg
   if (category === 'functions') {
     return `CREATE OR REPLACE FUNCTION ${qn}\nRETURN NUMBER\nAS\nBEGIN\n  RETURN 0;\nEND;\n/\n`
   }
+  if (category === 'synonyms') return createSynonymSql(schema, placeholder)
+  if (category === 'triggers') return createTriggerSql(schema, placeholder)
+  if (category === 'sequences') return createSequenceSql(schema, placeholder)
   return (
     `CREATE OR REPLACE PACKAGE ${qn} AS\n` +
     `  PROCEDURE example;\n` +
@@ -110,6 +114,28 @@ export function createSequenceSql(schema: string, name = 'new_seq'): string {
   )
 }
 
+export function createSynonymSql(schema: string, name = 'new_syn'): string {
+  const qn = qualifiedName(schema, name)
+  return (
+    `-- 请将 target_schema.target_object 替换为真实对象后再执行\n` +
+    `CREATE OR REPLACE SYNONYM ${qn} FOR ${qualifiedName('target_schema', 'target_object')};\n`
+  )
+}
+
+export function createTriggerSql(schema: string, name = 'new_trg'): string {
+  const qn = qualifiedName(schema, name)
+  const tableQn = qualifiedName(schema, 'target_table')
+  return (
+    `CREATE OR REPLACE TRIGGER ${qn}\n` +
+    `BEFORE INSERT ON ${tableQn}\n` +
+    `FOR EACH ROW\n` +
+    `BEGIN\n` +
+    `  NULL;\n` +
+    `END;\n` +
+    `/\n`
+  )
+}
+
 export function dropObjectSql(schema: string, name: string, category: OracleObjectCategory): string {
   const type =
     category === 'views'
@@ -118,7 +144,13 @@ export function dropObjectSql(schema: string, name: string, category: OracleObje
         ? 'PROCEDURE'
         : category === 'functions'
           ? 'FUNCTION'
-          : 'PACKAGE'
+          : category === 'synonyms'
+            ? 'SYNONYM'
+            : category === 'triggers'
+              ? 'TRIGGER'
+              : category === 'sequences'
+                ? 'SEQUENCE'
+                : 'PACKAGE'
   return `DROP ${type} ${qualifiedName(schema, name)};`
 }
 
@@ -146,6 +178,19 @@ export function dropPackageSql(schema: string, name: string): string {
   return `DROP PACKAGE ${qualifiedName(schema, name)};`
 }
 
+export function dropSynonymSql(schema: string, name: string): string {
+  return `DROP SYNONYM ${qualifiedName(schema, name)};`
+}
+
+export function dropTriggerSql(schema: string, name: string): string {
+  return `DROP TRIGGER ${qualifiedName(schema, name)};`
+}
+
+/** 删除 Schema：与 CREATE USER 对称，DROP USER … CASCADE。 */
+export function dropSchemaSql(name: string): string {
+  return `DROP USER ${quoteIdent(name.trim())} CASCADE;`
+}
+
 export function truncateTableSql(schema: string, table: string): string {
   return `TRUNCATE TABLE ${qualifiedName(schema, table)};`
 }
@@ -154,15 +199,57 @@ export function renameTableSql(schema: string, from: string, to: string): string
   return `ALTER TABLE ${qualifiedName(schema, from)} RENAME TO ${quoteIdent(to)};`
 }
 
-/** 依赖会话 current_schema；执行时传入 schema。 */
+/**
+ * 仅当会话用户就是视图属主时可用。
+ * DBA 经 CURRENT_SCHEMA 代管其它 schema 时会 ORA-03001，需走 recreate 回退。
+ */
 export function renameViewSql(_schema: string, from: string, to: string): string {
-  return `RENAME ${quoteIdent(from)} TO ${quoteIdent(to)};`
+  return `RENAME ${quoteIdent(from)} TO ${quoteIdent(to)}`
 }
 
-/** 依赖会话 current_schema；执行时传入 schema。 */
-export function renameSequenceSql(_schema: string, from: string, to: string): string {
-  return `RENAME ${quoteIdent(from)} TO ${quoteIdent(to)};`
+/** 带 schema 限定，避免依赖 CURRENT_SCHEMA / 会话属主。 */
+export function renameSequenceSql(schema: string, from: string, to: string): string {
+  return `ALTER SEQUENCE ${qualifiedName(schema, from)} RENAME TO ${quoteIdent(to)}`
 }
+
+/**
+ * 把 CREATE [OR REPLACE] VIEW [schema.]old 改写为 CREATE OR REPLACE VIEW schema.new。
+ * 用于非属主会话无法 RENAME 时的「建新删旧」回退。
+ */
+export function rewriteOracleViewDdlForRename(
+  ddl: string,
+  schema: string,
+  from: string,
+  to: string,
+): string {
+  let s = (ddl ?? '').trim().replace(/;\s*$/, '')
+  if (!s) return s
+  const qSchema = quoteIdent(schema)
+  const qTo = quoteIdent(to)
+  const fromEsc = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const namePat = `(?:"${fromEsc}"|${fromEsc})`
+  const re = new RegExp(
+    `^(create\\s+(?:or\\s+replace\\s+)?)view\\s+(?:(?:"[^"]+"|[A-Za-z0-9_$#]+)\\s*\\.\\s*)?${namePat}\\b`,
+    'i',
+  )
+  if (re.test(s)) {
+    s = s.replace(re, `$1VIEW ${qSchema}.${qTo}`)
+  } else if (/^create\s+(or\s+replace\s+)?view\b/i.test(s)) {
+    // 未匹配到旧名时仍强制换成目标限定名
+    s = s.replace(
+      /^create\s+(?:or\s+replace\s+)?view\s+(?:(?:"[^"]+"|[A-Za-z0-9_$#]+)\s*\.\s*)?(?:"[^"]+"|[A-Za-z0-9_$#]+)/i,
+      `CREATE OR REPLACE VIEW ${qSchema}.${qTo}`,
+    )
+  } else {
+    // ALL_VIEWS 退化正文：仅有 AS 查询
+    s = `CREATE OR REPLACE VIEW ${qSchema}.${qTo} AS\n${s}`
+  }
+  if (!/^create\s+or\s+replace\s+/i.test(s)) {
+    s = s.replace(/^create\s+/i, 'CREATE OR REPLACE ')
+  }
+  return s
+}
+
 
 export function compilePackageSql(schema: string, name: string): string {
   return `ALTER PACKAGE ${qualifiedName(schema, name)} COMPILE PACKAGE;\n`

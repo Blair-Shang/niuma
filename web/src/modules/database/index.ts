@@ -128,6 +128,10 @@ export { parseEditValue } from './utils/sql-literal'
 export {
   formatBrowseCellValue,
   isBrowseBinCell,
+  isBrowseLobCell,
+  isBrowseBinaryLobCell,
+  extractBrowseLobText,
+  formatBrowseLobSummary,
   formatBrowseBinSummary,
   formatBrowseBinViewText,
   truncateBrowsePreview,

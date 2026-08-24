@@ -1,0 +1,65 @@
+id: com.niuma.postgres
+name: PostgreSQL Service
+version: 0.1.0
+bridge:
+  namespace: postgres
+  connection_kind: postgres
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+    - lsp.open
+    - lsp.rpc
+    - lsp.close
+    - tree.databases
+    - tree.schemas
+    - tree.tables
+    - tree.routines
+    - tree.sequences
+    - tree.categoryCounts
+    - catalog.schemas
+    - catalog.tables
+    - catalog.columns
+    - meta.columns
+    - meta.indexes
+    - meta.constraints
+    - meta.ddl
+    - meta.routineSource
+    - meta.primaryKey
+    - meta.foreignKeys
+    - meta.databaseCreateOptions
+    - meta.instanceOverview
+    - meta.activity
+    - meta.locks
+    - meta.backendCancel
+    - meta.backendTerminate
+    - meta.serverVariables
+    - meta.serverStatus
+    - ddl.script
+    - ddl.exec
+    - ddl.designPreview
+    - ddl.designApply
+    - ddl.createTablePreview
+    - ddl.createTableApply
+    - io.exportCsv
+    - io.importCsv
+    - io.dumpSql
+    - io.execSqlFile
+    - io.cancel
+runtime:
+  executable: bin/niuma-postgres-service.exe
+  executable_windows: bin/niuma-postgres-service.exe
+  executable_unix: bin/niuma-postgres-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.postgres'
+  address_windows: '\\.\pipe\niuma.postgres'
+  address_unix: '/tmp/niuma.postgres.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

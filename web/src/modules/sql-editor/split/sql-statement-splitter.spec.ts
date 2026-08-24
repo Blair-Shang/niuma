@@ -185,6 +185,15 @@ END;`,
     ])
   })
 
+  it('strips same-line slash after END for oracle', () => {
+    const sql = `CREATE OR REPLACE FUNCTION "f" RETURN NUMBER AS BEGIN RETURN 1; END;/
+SELECT 1;`
+    // 同行 / 不作为拆句终止符，但整段仍应能拆出后续 SELECT；执行前 strip 会剥 /
+    const parts = splitSqlTexts(sql, 'oracle')
+    expect(parts.length).toBeGreaterThanOrEqual(1)
+    expect(parts[0]).toContain('END;')
+  })
+
   it('keeps procedure with trailing gsql slash as one statement including END;', () => {
     const sql = `CREATE OR REPLACE PROCEDURE "public"."new_procedure"(
   -- p_arg1 IN integer
@@ -349,6 +358,50 @@ describe('splitSqlTexts · oracle', () => {
     expect(splitSqlTexts("SELECT q'!a;b!'; SELECT 2", 'oracle')).toEqual([
       "SELECT q'!a;b!'",
       'SELECT 2',
+    ])
+  })
+
+  it('keeps CREATE OR REPLACE FUNCTION … END; / without sending slash', () => {
+    const sql = `CREATE OR REPLACE FUNCTION "new_func" (
+  p_in_id IN NUMBER,
+  p_in_name IN VARCHAR2 DEFAULT 'world'
+) RETURN VARCHAR2 AS
+  v_step NUMBER := 0;
+  v_ret VARCHAR2(4000);
+BEGIN
+  RETURN v_ret;
+END;
+/
+SELECT 1;`
+    expect(splitSqlTexts(sql, 'oracle')).toEqual([
+      `CREATE OR REPLACE FUNCTION "new_func" (
+  p_in_id IN NUMBER,
+  p_in_name IN VARCHAR2 DEFAULT 'world'
+) RETURN VARCHAR2 AS
+  v_step NUMBER := 0;
+  v_ret VARCHAR2(4000);
+BEGIN
+  RETURN v_ret;
+END;`,
+      'SELECT 1',
+    ])
+  })
+
+  it('keeps CREATE OR REPLACE EDITIONABLE FUNCTION as one PL/SQL statement', () => {
+    const sql = `CREATE OR REPLACE EDITIONABLE FUNCTION "NIUMA"."new_func"
+RETURN NUMBER
+AS
+BEGIN
+  RETURN 1;
+END;
+/`
+    expect(splitSqlTexts(sql, 'oracle')).toEqual([
+      `CREATE OR REPLACE EDITIONABLE FUNCTION "NIUMA"."new_func"
+RETURN NUMBER
+AS
+BEGIN
+  RETURN 1;
+END;`,
     ])
   })
 })
