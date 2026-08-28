@@ -34,6 +34,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$CEF_PLATFORM" ]] || { usage; nm_die "--cef-platform is required"; }
+# 历史/笔误键：官方 index 只有 linux64，没有 linuxx64
+if [[ "$CEF_PLATFORM" == "linuxx64" ]]; then
+  CEF_PLATFORM="linux64"
+fi
 
 REPO_ROOT="${REPO_ROOT:-$(nm_repo_root "$SCRIPT_DIR")}"
 DEST="$(nm_cef_root "$REPO_ROOT")"
@@ -55,15 +59,15 @@ INDEX_FILE="$CACHE_DIR/cef-index.json"
 curl -fsSL --retry 5 --retry-delay 2 --create-dirs \
   'https://cef-builds.spotifycdn.com/index.json' -o "$INDEX_FILE"
 
-read -r CEF_VERSION ARCHIVE_NAME ARCHIVE_URL < <(
-  INDEX_FILE="$INDEX_FILE" CEF_PLATFORM="$CEF_PLATFORM" CHANNEL="$CHANNEL" node <<'NODE'
+RESOLVE_FILE="$CACHE_DIR/cef-resolve.tsv"
+INDEX_FILE="$INDEX_FILE" CEF_PLATFORM="$CEF_PLATFORM" CHANNEL="$CHANNEL" node <<'NODE' >"$RESOLVE_FILE" || nm_die "failed to resolve CEF artifact from index"
 const fs = require('fs');
 const index = JSON.parse(fs.readFileSync(process.env.INDEX_FILE, 'utf8'));
 const platformKey = process.env.CEF_PLATFORM;
 const channel = process.env.CHANNEL || 'stable';
 const platform = index[platformKey];
 if (!platform) {
-  console.error(`platform not found in index: ${platformKey}`);
+  console.error(`platform not found in index: ${platformKey} (available: ${Object.keys(index).join(', ')})`);
   process.exit(2);
 }
 const versions = (platform.versions || [])
@@ -87,9 +91,10 @@ if (!file) {
   console.error(`no standard distribution for ${version.cef_version}`);
   process.exit(4);
 }
-process.stdout.write(`${version.cef_version} ${file.name} https://cef-builds.spotifycdn.com/${file.name}`);
+process.stdout.write(`${version.cef_version}\t${file.name}\thttps://cef-builds.spotifycdn.com/${file.name}\n`);
 NODE
-)
+IFS=$'\t' read -r CEF_VERSION ARCHIVE_NAME ARCHIVE_URL <"$RESOLVE_FILE" || true
+[[ -n "$CEF_VERSION" && -n "$ARCHIVE_NAME" && -n "$ARCHIVE_URL" ]] || nm_die "invalid CEF resolve output"
 
 nm_log "CEF $CEF_VERSION"
 ARCHIVE_PATH="$CACHE_DIR/$ARCHIVE_NAME"
