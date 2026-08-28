@@ -120,6 +120,58 @@ function Start-CefCmdProcess {
     return $p
 }
 
+function Get-CefExtractInner {
+    param([Parameter(Mandatory = $true)][string]$ExtractDir)
+    return Get-ChildItem -LiteralPath $ExtractDir -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+
+function Write-CefExtractListing {
+    param([Parameter(Mandatory = $true)][string]$ExtractDir)
+    $entries = @(Get-ChildItem -LiteralPath $ExtractDir -Force -ErrorAction SilentlyContinue)
+    if ($entries.Count -eq 0) {
+        Write-Host '  (extract dir empty)'
+        return
+    }
+    foreach ($e in $entries) {
+        $kind = if ($e.PSIsContainer) { '[dir]' } else { '[file]' }
+        Write-Host ("  {0} {1}" -f $kind, $e.Name)
+    }
+}
+
+function Invoke-CefSevenZipExtract {
+    param(
+        [Parameter(Mandatory = $true)][string]$SevenZip,
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$ExtractDir
+    )
+    # 写成 .cmd 再交给 cmd.exe：避免 Start-Process 转义引号，也避免把 -so 写到 -- 后面
+    # （-- 之后的参数会被当成文件名，338MB 包会在 0 秒内“解压成功”且目录是空的）
+    $batchPath = Join-Path $TempDir 'extract-cef.cmd'
+    $batch = @"
+@echo off
+"$SevenZip" x -y -so "$ArchivePath" | "$SevenZip" x -y -aoa -si -ttar -o"$ExtractDir"
+exit /b %ERRORLEVEL%
+"@
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($batchPath, $batch, $utf8NoBom)
+    $quotedBatch = '"{0}"' -f $batchPath.Replace('"', '""')
+    $p = Start-CefCmdProcess -CommandLine $quotedBatch
+    Wait-CefExtractProcess -Process $p -Tool '7-Zip'
+}
+
+function Invoke-CefWindowsTarExtract {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$ExtractDir
+    )
+    $tar = (Get-Command tar.exe -ErrorAction Stop).Source
+    $mode = if ($ArchivePath -match '\.tar\.xz$') { '-xJf' } else { '-xjf' }
+    $sizeMb = [math]::Round((Get-Item -LiteralPath $ArchivePath).Length / 1MB, 1)
+    Write-Host "Extracting ${sizeMb} MB with tar.exe ($mode)."
+    $p = Start-Process -FilePath $tar -ArgumentList @($mode, $ArchivePath, '-C', $ExtractDir) -NoNewWindow -PassThru
+    Wait-CefExtractProcess -Process $p -Tool 'tar.exe'
+}
+
 function Invoke-CefTarExtract {
     param(
         [Parameter(Mandatory = $true)][string]$ArchivePath,
@@ -139,21 +191,19 @@ function Invoke-CefTarExtract {
 
     if ($sevenZip) {
         Write-Host "Extracting ${sizeMb} MB with 7-Zip (piped; no intermediate .tar)."
-        # 必须走 cmd 管道：PowerShell 管道会把整段 tar 缓冲进内存
-        $z = $sevenZip.Replace('"', '""')
-        $archive = $ArchivePath.Replace('"', '""')
-        $out = $ExtractDir.Replace('"', '""')
-        $line = '"{0}" x -y -- "{1}" -so | "{0}" x -y -aoa -si -ttar -o"{2}"' -f $z, $archive, $out
-        $p = Start-CefCmdProcess -CommandLine $line
-        Wait-CefExtractProcess -Process $p -Tool '7-Zip'
-        return
+        Invoke-CefSevenZipExtract -SevenZip $sevenZip -ArchivePath $ArchivePath -ExtractDir $ExtractDir
+        if (Get-CefExtractInner -ExtractDir $ExtractDir) {
+            return
+        }
+        Write-Warning '7-Zip finished but extract dir has no inner folder; listing:'
+        Write-CefExtractListing -ExtractDir $ExtractDir
+        if (Test-Path -LiteralPath $ExtractDir) {
+            Remove-Item -LiteralPath $ExtractDir -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $ExtractDir | Out-Null
     }
 
-    $tar = (Get-Command tar.exe -ErrorAction Stop).Source
-    $mode = if ($ArchivePath -match '\.tar\.xz$') { '-xJf' } else { '-xjf' }
-    Write-Host "7-Zip not found; falling back to tar.exe ($mode, ${sizeMb} MB)."
-    $p = Start-Process -FilePath $tar -ArgumentList @($mode, $ArchivePath, '-C', $ExtractDir) -NoNewWindow -PassThru
-    Wait-CefExtractProcess -Process $p -Tool 'tar.exe'
+    Invoke-CefWindowsTarExtract -ArchivePath $ArchivePath -ExtractDir $ExtractDir
 }
 
 Write-Host "CEF $($CefVersion)"
@@ -190,8 +240,10 @@ if (Test-Path $ExtractDir) { Remove-Item -Recurse -Force $ExtractDir }
 New-Item -ItemType Directory -Force -Path $ExtractDir | Out-Null
 Invoke-CefTarExtract -ArchivePath $ArchivePath -ExtractDir $ExtractDir
 
-$Inner = Get-ChildItem -LiteralPath $ExtractDir -Directory | Select-Object -First 1
+$Inner = Get-CefExtractInner -ExtractDir $ExtractDir
 if (-not $Inner) {
+    Write-Host "Extract dir listing for $ExtractDir"
+    Write-CefExtractListing -ExtractDir $ExtractDir
     throw "CEF archive extracted but no inner directory found in $ExtractDir"
 }
 if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
