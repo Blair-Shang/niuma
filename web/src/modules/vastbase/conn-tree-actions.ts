@@ -159,6 +159,8 @@ function categoryCreateKey(category: CategoryId): VastDdlAction {
       return 'create_function'
     case 'procedures':
       return 'create_procedure'
+    case 'sequences':
+      throw new Error(`DDL create is not wired for category: ${category}`)
   }
 }
 

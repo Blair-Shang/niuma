@@ -28,7 +28,9 @@ describe('echarts-lite', () => {
         { name: 'b', value: 2 },
       ],
     })
-    expect(opt.series?.[0]).toMatchObject({ type: 'pie' })
+    const series = opt.series
+    const first = Array.isArray(series) ? series[0] : series
+    expect(first).toMatchObject({ type: 'pie' })
   })
 
   it('keeps title and legend from overlapping', () => {

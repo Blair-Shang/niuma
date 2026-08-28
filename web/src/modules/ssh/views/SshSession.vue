@@ -12,6 +12,7 @@ import {
   resolveSplitConstraints,
   useRsToast,
   type RsSplitPaneItem,
+  type RsSplitPaneInstance,
   type RsSelectOptions,
 } from '@niuma/ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
@@ -189,7 +190,7 @@ const error = ref<string | null>(null)
 
 const remotePaneRef = ref<InstanceType<typeof FtpFilePane> | null>(null)
 const terminalGroupRef = ref<InstanceType<typeof SshTerminalGroup> | null>(null)
-const sftpSplitRef = ref<InstanceType<typeof RsSplitPane> | null>(null)
+const sftpSplitRef = ref<RsSplitPaneInstance | null>(null)
 const sftpHeadRef = ref<HTMLElement | null>(null)
 
 // ── 分屏（终端 PTY 分屏）──────────────────────────────────────────────

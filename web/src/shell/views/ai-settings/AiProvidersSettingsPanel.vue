@@ -134,8 +134,8 @@ function applyPreset(presetId: string, opts?: { fillName?: boolean }): void {
   }
 }
 
-function onPresetChange(value: string | string[]): void {
-  const presetId = Array.isArray(value) ? (value[0] ?? AI_PROVIDER_PRESET_CUSTOM) : value
+function onPresetChange(value: string): void {
+  const presetId = value || AI_PROVIDER_PRESET_CUSTOM
   if (!presetId || presetId === AI_PROVIDER_PRESET_CUSTOM) {
     formPresetId.value = AI_PROVIDER_PRESET_CUSTOM
     remoteModelIds.value = []
@@ -144,12 +144,8 @@ function onPresetChange(value: string | string[]): void {
   applyPreset(presetId, { fillName: creating.value })
 }
 
-function onModelsSelect(value: string | string[]): void {
-  if (Array.isArray(value)) {
-    formSelectedModels.value = value.map(String).filter(Boolean)
-  } else {
-    formSelectedModels.value = value ? [String(value)] : []
-  }
+function onModelsSelect(value: string[]): void {
+  formSelectedModels.value = value
   modelSearchQuery.value = ''
 }
 

@@ -56,7 +56,7 @@ export function toDesignRows(cols: OracleColumnInfo[], pkCols: string[]): Design
 }
 
 export function toIndexDrafts(indexes: OracleIndexInfo[], pkCols: string[]): DesignIndexDraft[] {
-  const drafts = indexes.map((idx) => {
+  const drafts: DesignIndexDraft[] = indexes.map((idx) => {
     const columnsText = (idx.columns ?? []).join(', ')
     const method = normalizeIndexMethod(idx.method)
     const primary = Boolean(idx.primary)

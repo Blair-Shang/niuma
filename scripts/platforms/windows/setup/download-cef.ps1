@@ -44,31 +44,93 @@ $Url = "https://cef-builds.spotifycdn.com/$ArchiveName"
 New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
 $ArchivePath = Join-Path $TempDir $ArchiveName
 
+function Resolve-SevenZip {
+    $cmd = Get-Command 7z.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($candidate in @(
+            (Join-Path $env:ProgramFiles '7-Zip\7z.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} '7-Zip\7z.exe')
+        )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Invoke-CefDefenderRelax {
+    param(
+        [string[]]$Paths,
+        [string[]]$Processes
+    )
+    if (-not $env:CI) { return }
+    if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) { return }
+
+    foreach ($path in $Paths) {
+        if ($path) {
+            Add-MpPreference -ExclusionPath $path -ErrorAction SilentlyContinue
+        }
+    }
+    foreach ($proc in $Processes) {
+        Add-MpPreference -ExclusionProcess $proc -ErrorAction SilentlyContinue
+    }
+    # 托管 runner 常开 Tamper Protection，失败则忽略，不作为硬依赖
+    if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+        Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+    }
+}
+
+function Wait-CefExtractProcess {
+    param(
+        [Parameter(Mandatory = $true)]$Process,
+        [Parameter(Mandatory = $true)][string]$Tool
+    )
+    $started = Get-Date
+    while (-not $Process.WaitForExit(15000)) {
+        $sec = [int]((Get-Date) - $started).TotalSeconds
+        Write-Host "  still extracting... ${sec}s"
+    }
+    if ($Process.ExitCode -ne 0) {
+        throw "$Tool extract failed with exit code $($Process.ExitCode)"
+    }
+    Write-Host "Extract finished in $([int]((Get-Date) - $started).TotalSeconds)s ($Tool)"
+}
+
 function Invoke-CefTarExtract {
     param(
         [Parameter(Mandatory = $true)][string]$ArchivePath,
         [Parameter(Mandatory = $true)][string]$ExtractDir
     )
+    $sizeMb = [math]::Round((Get-Item -LiteralPath $ArchivePath).Length / 1MB, 1)
+    $sevenZip = Resolve-SevenZip
+
+    Invoke-CefDefenderRelax -Paths @(
+        $ExtractDir
+        (Split-Path -Parent $ArchivePath)
+        $Dest
+        $TempDir
+        $env:GITHUB_WORKSPACE
+        $env:RUNNER_TEMP
+    ) -Processes @('7z.exe', 'tar.exe')
+
+    if ($sevenZip) {
+        Write-Host "Extracting ${sizeMb} MB with 7-Zip (piped; no intermediate .tar)."
+        # 必须走 cmd 管道：PowerShell 管道会把整段 tar 缓冲进内存
+        $z = $sevenZip.Replace('"', '""')
+        $archive = $ArchivePath.Replace('"', '""')
+        $out = $ExtractDir.Replace('"', '""')
+        $line = '"{0}" x "{1}" -so | "{0}" x -aoa -si -ttar "-o{2}"' -f $z, $archive, $out
+        $p = Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" `
+            -ArgumentList @('/C', $line) -NoNewWindow -PassThru
+        Wait-CefExtractProcess -Process $p -Tool '7-Zip'
+        return
+    }
+
     $tar = (Get-Command tar.exe -ErrorAction Stop).Source
     $mode = if ($ArchivePath -match '\.tar\.xz$') { '-xJf' } else { '-xjf' }
-    $sizeMb = [math]::Round((Get-Item -LiteralPath $ArchivePath).Length / 1MB, 1)
-    Write-Host "Extracting ${sizeMb} MB ($mode). Windows tar prints no progress; typically 2-10 minutes on CI."
-
-    if ($env:CI -and (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) {
-        Add-MpPreference -ExclusionPath $ExtractDir -ErrorAction SilentlyContinue
-        Add-MpPreference -ExclusionPath (Split-Path -Parent $ArchivePath) -ErrorAction SilentlyContinue
-    }
-
+    Write-Host "7-Zip not found; falling back to tar.exe ($mode, ${sizeMb} MB)."
     $p = Start-Process -FilePath $tar -ArgumentList @($mode, $ArchivePath, '-C', $ExtractDir) -NoNewWindow -PassThru
-    $started = Get-Date
-    while (-not $p.WaitForExit(15000)) {
-        $sec = [int]((Get-Date) - $started).TotalSeconds
-        Write-Host "  still extracting... ${sec}s"
-    }
-    if ($p.ExitCode -ne 0) {
-        throw "tar extract failed with exit code $($p.ExitCode)"
-    }
-    Write-Host "Extract finished in $([int]((Get-Date) - $started).TotalSeconds)s"
+    Wait-CefExtractProcess -Process $p -Tool 'tar.exe'
 }
 
 Write-Host "CEF $($CefVersion)"

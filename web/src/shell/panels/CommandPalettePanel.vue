@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RsIcon, RsInput } from '@niuma/ui'
+import type { RsInputInstance } from '@niuma/ui'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -14,7 +15,7 @@ const { t } = useI18n()
 
 const query = ref('')
 const activeIndex = ref(0)
-const inputRef = ref<InstanceType<typeof RsInput> | null>(null)
+const inputRef = ref<RsInputInstance | null>(null)
 
 const filtered = computed(() => filterCommands(query.value))
 

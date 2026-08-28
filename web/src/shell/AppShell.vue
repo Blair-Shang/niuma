@@ -14,7 +14,7 @@ import FramelessResizeEdges from '@/shell/widgets/FramelessResizeEdges.vue'
 import { useAccountStore } from '@/stores/account'
 import { useAppUpdateStore } from '@/stores/app-update'
 import { RsSplitPane } from '@niuma/ui'
-import type { RsSplitPaneItem } from '@niuma/ui'
+import type { RsSplitPaneExpose, RsSplitPaneItem } from '@niuma/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useCommandPaletteStore } from '@/stores/command-palette'
 import { useShellStore } from '@/stores/shell'
@@ -27,11 +27,6 @@ const shellStore = useShellStore()
 const accountStore = useAccountStore()
 const appUpdateStore = useAppUpdateStore()
 
-/** 仅取 defineExpose 表面，避免 InstanceType<typeof RsSplitPane> 触发 TS 递归过深 */
-type RsSplitPaneExpose = {
-  collapse: (key: string) => void
-  expand: (key: string, toSize?: number) => void
-}
 const splitRef = ref<RsSplitPaneExpose | null>(null)
 
 /** 默认 AI 面板占比（展开时） */

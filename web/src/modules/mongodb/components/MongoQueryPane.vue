@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RsButton, RsEmpty, RsIcon, RsLoading, RsMonacoEditor, RsSplitPane, MONACO_MONGODB_SHELL_LANGUAGE } from '@niuma/ui'
-import type { RsSplitPaneItem } from '@niuma/ui'
+import type { RsMonacoEditorExpose, RsSplitPaneItem } from '@niuma/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mongodbApi } from '@/api'
@@ -29,7 +29,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const editorRef = ref<InstanceType<typeof RsMonacoEditor> | null>(null)
+const editorRef = ref<RsMonacoEditorExpose | null>(null)
 
 const database = ref(props.initialDatabase ?? '')
 const collection = ref(props.initialCollection ?? '')

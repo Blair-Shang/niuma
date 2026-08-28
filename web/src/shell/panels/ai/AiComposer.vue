@@ -175,7 +175,7 @@ watch(
     if (!first) {
       return
     }
-    const parsed = decodeModelKey(first.value)
+    const parsed = decodeModelKey(String(first.value))
     if (!parsed) {
       return
     }
@@ -413,8 +413,8 @@ function onInput(): void {
   }
 }
 
-function onModelSelect(value: string | string[]): void {
-  selectedModelKey.value = Array.isArray(value) ? (value[0] ?? '') : value
+function onModelSelect(value: string): void {
+  selectedModelKey.value = value
 }
 
 function openMention(): void {

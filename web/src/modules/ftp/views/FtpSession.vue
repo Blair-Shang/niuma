@@ -9,6 +9,8 @@ import {
   expandSplitPane,
   resolveSplitConstraints,
   useRsToast,
+  type RsInputInstance,
+  type RsSplitPaneInstance,
   type RsSplitPaneItem,
 } from '@niuma/ui'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -100,7 +102,7 @@ const promptOpen = ref(false)
 const promptTitle = ref('')
 const promptPlaceholder = ref('')
 const promptValue = ref('')
-const promptInputRef = ref<InstanceType<typeof RsInput> | null>(null)
+const promptInputRef = ref<RsInputInstance | null>(null)
 let resolvePrompt: ((v: string | null) => void) | null = null
 
 function showPrompt(title: string, placeholder: string, defaultValue = ''): Promise<string | null> {
@@ -116,9 +118,7 @@ watch(promptOpen, async (open) => {
     await nextTick()
     // 等 portal 渲染完成后聚焦输入框
     await nextTick()
-    ;(promptInputRef.value as { $el?: HTMLElement } | null)?.$el
-      ?.querySelector('input')
-      ?.focus()
+    promptInputRef.value?.$el?.querySelector('input')?.focus()
   } else if (resolvePrompt) {
     resolvePrompt(null)
     resolvePrompt = null
@@ -303,7 +303,7 @@ const fileSplitSizes = ref([40, 60])
 
 const queueSplitSizes = ref([80, 20])
 const queueUiCollapsed = ref(false)
-const queueSplitRef = ref<InstanceType<typeof RsSplitPane> | null>(null)
+const queueSplitRef = ref<RsSplitPaneInstance | null>(null)
 const transferQueueRef = ref<InstanceType<typeof TransferQueue> | null>(null)
 
 const queueConstraints = computed(() => resolveSplitConstraints(queueSplitPanes.value))

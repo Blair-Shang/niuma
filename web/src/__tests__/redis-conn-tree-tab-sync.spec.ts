@@ -10,6 +10,7 @@ function tab(partial: Partial<WorkspaceTab> & Pick<WorkspaceTab, 'moduleId' | 'p
     tabId: 't1',
     title: 'Redis',
     closable: true,
+    dirty: false,
     ...partial,
   }
 }
