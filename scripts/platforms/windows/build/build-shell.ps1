@@ -173,7 +173,7 @@ if (-not $needsReconfigure) {
     if (Test-Path $vcxproj) {
         $projText = Get-Content $vcxproj -Raw
         if ($projText -match 'copy_if_different [^\s]+/libcef\.dll /libcef\.dll') {
-            Write-Host '    stale CMake cache (CEF copy paths) — reconfiguring' -ForegroundColor Yellow
+            Write-Host '    stale CMake cache (CEF copy paths) - reconfiguring' -ForegroundColor Yellow
             $needsReconfigure = $true
         }
     }

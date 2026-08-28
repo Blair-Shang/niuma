@@ -34,7 +34,7 @@ pnpm dev              # 构建并启动 niuma.exe（真实 CEF 桌面窗口）
 
 | 工具 | 版本 | 用途 | 官网 / 下载 |
 |------|------|------|-------------|
-| Node.js | ≥ 20 | 前端构建、pnpm 脚本 | [nodejs.org](https://nodejs.org/) |
+| Node.js | ≥ 24 | 前端构建、pnpm 脚本 | [nodejs.org](https://nodejs.org/) |
 | pnpm | ≥ 9（推荐 `corepack enable` 锁定 9.15） | Monorepo 包管理 | [pnpm.io](https://pnpm.io/installation) |
 | PowerShell | 5.1+ | `scripts/*.ps1` 入口 | 系统自带；跨平台见 [PowerShell](https://github.com/PowerShell/PowerShell) |
 | winget | 可选 | `setup:desktop` 自动安装 CMake / MSVC | [winget 文档](https://learn.microsoft.com/windows/package-manager/winget/) |

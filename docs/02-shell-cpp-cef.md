@@ -199,7 +199,7 @@ Renderer                Browser (Shell)                    Platform
 | Visual Studio 2022 | C++ 桌面开发 或 Build Tools |
 | CMake | ≥ 3.20 |
 | CEF | `pnpm setup:desktop` 自动下载 |
-| 前端 | Node 20+ / pnpm（构建 `web/dist`） |
+| 前端 | Node 24+ / pnpm（构建 `web/dist`） |
 
 详见根目录 [README.md](../README.md) 环境准备章节。
 

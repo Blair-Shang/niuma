@@ -55,12 +55,12 @@ jobs:
 
     steps:
       - name: Checkout NiuMa
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: NiuMa
 
       - name: Checkout niuma-ui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ github.repository_owner }}/niuma-ui
           ref: ${{ github.event.inputs.niuma_ui_ref || 'v1.1.8' }}
@@ -104,16 +104,16 @@ jobs:
           run_install: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
           cache: pnpm
           cache-dependency-path: |
             NiuMa/pnpm-lock.yaml
             niuma-ui/pnpm-lock.yaml
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: NiuMa/platform/go.mod
           cache-dependency-path: |
@@ -135,7 +135,7 @@ jobs:
             NiuMa/packages/rust
 
       - name: Cache CEF
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             NiuMa/third_party/cef
@@ -184,7 +184,7 @@ jobs:
         run: node .github/scripts/write-sha256.mjs "output/${{ matrix.artifact }}"
 
       - name: Upload pack artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: niuma-${{ matrix.artifact }}
           path: NiuMa/output/${{ matrix.artifact }}/
@@ -200,7 +200,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Download pack artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist
           pattern: niuma-*

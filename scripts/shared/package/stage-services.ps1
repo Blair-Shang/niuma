@@ -47,7 +47,7 @@ $platformExe = if (Test-Path (Join-Path $TargetBinSrc 'niuma-platform-core.exe')
     $null
 }
 if (-not (Test-Path $platformExe)) {
-    throw "platform-core binary missing at $TargetBinSrc — run: scripts/shared/build/build-services.ps1 -Platform $Platform -Arch $Arch"
+    throw "platform-core binary missing at $TargetBinSrc - run: scripts/shared/build/build-services.ps1 -Platform $Platform -Arch $Arch"
 }
 
 New-Item -ItemType Directory -Force -Path $BinDst | Out-Null

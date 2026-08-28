@@ -70,7 +70,7 @@ function Write-DevDebugHints {
         Write-Host '  Go:      pnpm dev:platform / dev:platform:delve (then -SkipServices)' -ForegroundColor Gray
     }
     if ($ExtPlatform) {
-        Write-Host '  Platform: external — pipe reuse, no spawn from shell' -ForegroundColor Gray
+        Write-Host '  Platform: external - pipe reuse, no spawn from shell' -ForegroundColor Gray
     }
     Write-Host '  VS Code: Run and Debug -> Platform Core / FTP Service' -ForegroundColor Gray
     Write-Host '-------------------' -ForegroundColor Yellow
@@ -108,7 +108,7 @@ function Stop-ListenProcessOnPort {
 }
 
 if (-not $SkipSetup -and -not (Test-Path (Join-Path $CefRoot 'CMakeLists.txt'))) {
-    Write-Host 'CEF missing — running setup:desktop' -ForegroundColor Yellow
+    Write-Host 'CEF missing - running setup:desktop' -ForegroundColor Yellow
     & $SetupScript
 }
 
@@ -129,7 +129,7 @@ if ($HotReload) {
 
         foreach ($i in 1..120) {
             if ($viteProc.HasExited) {
-                $portHint = ' Port 5173 may still be in use — close other Vite instances.'
+                $portHint = ' Port 5173 may still be in use - close other Vite instances.'
                 throw "Vite exited early (code $($viteProc.ExitCode)).$portHint Run: pnpm dev:web"
             }
             if (Test-ViteDepsReady -BaseUrl $url) {

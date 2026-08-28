@@ -98,7 +98,7 @@ if (Test-Path $ManSrc) {
 $ServicesBinSrc = Get-ServicesBinDir -RepoRoot $Root -Platform $Platform -Arch $Arch
 $ServicesBinDst = Join-Path $Staging 'services/bin'
 if (-not (Test-Path $ServicesBinSrc)) {
-    throw "services matrix bin missing at $ServicesBinSrc — build services for $Platform/$Arch first (do not fall back to flat services/bin)"
+    throw "services matrix bin missing at $ServicesBinSrc - build services for $Platform/$Arch first (do not fall back to flat services/bin)"
 }
 New-Item -ItemType Directory -Force -Path $ServicesBinDst | Out-Null
 Copy-Item -Recurse -Force "$ServicesBinSrc\*" $ServicesBinDst
@@ -119,7 +119,7 @@ $NiumaExe = Join-Path $ShellBuild 'niuma.exe'
 if (Test-Path $NiumaExe) {
     Copy-Item -Force $NiumaExe $Staging
 } else {
-    Write-Warning "niuma.exe not found at $NiumaExe — pack web-only skeleton"
+    Write-Warning "niuma.exe not found at $NiumaExe - pack web-only skeleton"
 }
 
 $CefRelease = Join-Path $CefRoot 'Release'

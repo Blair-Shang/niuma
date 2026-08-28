@@ -679,7 +679,7 @@ pack/win-x64/
 | 编译器 | Visual Studio 2022（「使用 C++ 的桌面开发」） |
 | 构建 | CMake 3.20+ |
 | CEF | [CEF Builds](https://cef-builds.spotifycdn.com/index.html) 预编译包 |
-| 前端 | Node.js 20+ / pnpm（仅构建 web，非壳层必须） |
+| 前端 | Node.js 24+ / pnpm（仅构建 web，非壳层必须） |
 
 > **最终用户无需安装任何开发环境**，仅安装打包后的安装包。
 

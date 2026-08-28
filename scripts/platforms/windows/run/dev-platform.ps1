@@ -41,7 +41,7 @@ try {
     } elseif ($SkipBuild) {
         $exe = Join-Path $Root 'services/bin/niuma-platform-core.exe'
         if (-not (Test-Path $exe)) {
-            throw "niuma-platform-core.exe not found at $exe — run: pnpm build:services"
+            throw "niuma-platform-core.exe not found at $exe - run: pnpm build:services"
         }
         & $exe
     } else {

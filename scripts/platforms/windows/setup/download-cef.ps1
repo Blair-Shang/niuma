@@ -3,11 +3,12 @@
 .SYNOPSIS
   从官方 index.json 下载 CEF Standard Binary Distribution 到 third_party/cef/
 #>
-$ErrorActionPreference = 'Stop'
 param(
     [string]$Channel = 'stable',
     [string]$CefPlatform = ''
 )
+
+$ErrorActionPreference = 'Stop'
 
 $allowedPlatforms = @('windows64', 'windows32', 'windowsarm64')
 if (-not $CefPlatform) {
@@ -21,7 +22,7 @@ $Dest = Join-Path $Root 'third_party/cef'
 $TempDir = Join-Path $Root 'third_party/.cache'
 
 if (Test-Path $Dest) {
-    Write-Host "CEF already exists at $Dest — delete to re-download" -ForegroundColor Yellow
+    Write-Host "CEF already exists at $Dest - delete to re-download" -ForegroundColor Yellow
     exit 0
 }
 
