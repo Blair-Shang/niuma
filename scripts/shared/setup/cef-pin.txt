@@ -1,4 +1,5 @@
-# GitHub Actions CEF cache identity.
-# Bump cache_id to invalidate restored binaries and fetch a new Spotify build.
+# GitHub Actions CEF cache identity and pinned Standard Binary.
+# Bump cache_id after changing cef_version so CI does not restore a stale SDK.
 cache_id=1
 channel=stable
+cef_version=151.3.24+g2384915+chromium-151.0.7922.174

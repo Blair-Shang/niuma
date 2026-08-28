@@ -13,8 +13,9 @@
 *.exp
 *.ilk
 
-# CEF third party (download via scripts/download-cef.ps1)
+# CEF third party (download via scripts)
 /third_party/cef/
+/third_party/cef-cache/
 
 # Node
 node_modules/

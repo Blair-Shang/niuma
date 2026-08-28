@@ -7,6 +7,8 @@ source "$SCRIPT_DIR/../shared/lib/common.sh"
 
 PLATFORM="$(nm_detect_platform)"
 ARCH="$(nm_detect_arch)"
+MAX_RETRIES=3
+RETRY_DELAY=10
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,4 +20,21 @@ done
 
 TARGET="$SCRIPT_DIR/../platforms/$PLATFORM/setup/download-cef.sh"
 [[ -f "$TARGET" ]] || nm_die "missing platform CEF/runtime download script: $TARGET"
-exec bash "$TARGET" --arch "$ARCH"
+
+attempt=1
+delay="$RETRY_DELAY"
+while [[ "$attempt" -le "$MAX_RETRIES" ]]; do
+  nm_log "CEF download attempt $attempt/$MAX_RETRIES"
+  if bash "$TARGET" --arch "$ARCH"; then
+    exit 0
+  fi
+  if [[ "$attempt" -eq "$MAX_RETRIES" ]]; then
+    break
+  fi
+  nm_warn "CEF download failed, retrying in ${delay}s"
+  sleep "$delay"
+  delay=$((delay * 2))
+  attempt=$((attempt + 1))
+done
+
+nm_die "CEF download failed after $MAX_RETRIES attempts"

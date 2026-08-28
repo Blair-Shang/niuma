@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  从官方 index.json 下载 CEF Standard Binary Distribution 到 third_party/cef/
+  按 cef-pin.txt 下载 CEF Standard Binary 到 third_party/cef/
 #>
 param(
     [string]$Channel = 'stable',
@@ -19,68 +19,96 @@ if (-not $CefPlatform) {
 
 $Root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
 $Dest = Join-Path $Root 'third_party/cef'
-$TempDir = Join-Path $Root 'third_party/.cache'
+$TempDir = Join-Path $Root 'third_party/cef-cache'
 
 if (Test-Path (Join-Path $Dest 'CMakeLists.txt')) {
     Write-Host "CEF already exists at $Dest - delete to re-download" -ForegroundColor Yellow
     exit 0
 }
 
-Write-Host "Fetching CEF build index..."
-$index = Invoke-RestMethod -Uri 'https://cef-builds.spotifycdn.com/index.json'
-$platform = $index.PSObject.Properties[$CefPlatform].Value
-if (-not $platform) {
-    throw "Platform not found in index: $CefPlatform"
+$PinFile = Join-Path $Root 'scripts/shared/setup/cef-pin.txt'
+if (-not (Test-Path -LiteralPath $PinFile)) {
+    throw "missing CEF pin file: $PinFile"
+}
+$CefVersion = $null
+Get-Content -LiteralPath $PinFile | ForEach-Object {
+    if ($_ -match '^cef_version=(.+)$') { $CefVersion = $Matches[1].Trim() }
+}
+if (-not $CefVersion) {
+    throw "cef_version missing in $PinFile"
 }
 
-$version = $platform.versions |
-    Where-Object { $_.channel -eq $Channel } |
-    Sort-Object { [version]$_.chromium_version } |
-    Select-Object -Last 1
-if (-not $version) {
-    throw "No CEF version for channel=$Channel platform=$CefPlatform"
-}
-
-$file = $version.files | Where-Object { $_.type -eq 'standard' } | Select-Object -First 1
-if (-not $file) {
-    throw "No standard distribution for $($version.cef_version)"
-}
-
-$CefVersion = $version.cef_version
-$ArchiveName = $file.name
+$ArchiveName = "cef_binary_${CefVersion}_${CefPlatform}.tar.bz2"
 $Url = "https://cef-builds.spotifycdn.com/$ArchiveName"
 
 New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
 $ArchivePath = Join-Path $TempDir $ArchiveName
+
+function Invoke-CefTarExtract {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$ExtractDir
+    )
+    $tar = (Get-Command tar.exe -ErrorAction Stop).Source
+    $mode = if ($ArchivePath -match '\.tar\.xz$') { '-xJf' } else { '-xjf' }
+    $sizeMb = [math]::Round((Get-Item -LiteralPath $ArchivePath).Length / 1MB, 1)
+    Write-Host "Extracting ${sizeMb} MB ($mode). Windows tar prints no progress; typically 2-10 minutes on CI."
+
+    if ($env:CI -and (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) {
+        Add-MpPreference -ExclusionPath $ExtractDir -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionPath (Split-Path -Parent $ArchivePath) -ErrorAction SilentlyContinue
+    }
+
+    $p = Start-Process -FilePath $tar -ArgumentList @($mode, $ArchivePath, '-C', $ExtractDir) -NoNewWindow -PassThru
+    $started = Get-Date
+    while (-not $p.WaitForExit(15000)) {
+        $sec = [int]((Get-Date) - $started).TotalSeconds
+        Write-Host "  still extracting... ${sec}s"
+    }
+    if ($p.ExitCode -ne 0) {
+        throw "tar extract failed with exit code $($p.ExitCode)"
+    }
+    Write-Host "Extract finished in $([int]((Get-Date) - $started).TotalSeconds)s"
+}
 
 Write-Host "CEF $($CefVersion)"
 if (Test-Path $ArchivePath) {
     Write-Host "Reusing cached archive $ArchivePath"
 } else {
     Write-Host "Downloading $Url ..."
-    # curl.exe: PowerShell `curl` is Invoke-WebRequest and is much slower on CI.
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-    if ($curl) {
-        & $curl.Source -fL --retry 5 --retry-delay 2 -C - --progress-bar --output $ArchivePath $Url
-        if ($LASTEXITCODE -ne 0) {
-            throw "curl.exe failed with exit code $LASTEXITCODE"
+    $ok = $false
+    foreach ($attempt in 1..3) {
+        Write-Host "download attempt $attempt/3"
+        if ($curl) {
+            & $curl.Source -fL --retry 5 --retry-delay 2 -C - --progress-bar --output $ArchivePath $Url
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Warning "curl.exe failed with exit code $LASTEXITCODE"
+        } else {
+            try {
+                Invoke-WebRequest -Uri $Url -OutFile $ArchivePath -UseBasicParsing
+                $ok = $true
+                break
+            } catch {
+                Write-Warning $_
+            }
         }
-    } else {
-        Invoke-WebRequest -Uri $Url -OutFile $ArchivePath -UseBasicParsing
+        if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+    }
+    if (-not $ok) {
+        throw "CEF archive download failed after 3 attempts"
     }
 }
 
-Write-Host 'Extracting (tar)...'
 $ExtractDir = Join-Path $TempDir 'cef_extract'
 if (Test-Path $ExtractDir) { Remove-Item -Recurse -Force $ExtractDir }
 New-Item -ItemType Directory -Force -Path $ExtractDir | Out-Null
+Invoke-CefTarExtract -ArchivePath $ArchivePath -ExtractDir $ExtractDir
 
-if ($ArchiveName -match '\.tar\.xz$') {
-    tar -xJf $ArchivePath -C $ExtractDir
-} else {
-    tar -xjf $ArchivePath -C $ExtractDir
+$Inner = Get-ChildItem -LiteralPath $ExtractDir -Directory | Select-Object -First 1
+if (-not $Inner) {
+    throw "CEF archive extracted but no inner directory found in $ExtractDir"
 }
-
-$Inner = Get-ChildItem $ExtractDir -Directory | Select-Object -First 1
-Move-Item -Force $Inner.FullName $Dest
+if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
+Move-Item -LiteralPath $Inner.FullName -Destination $Dest
 Write-Host "CEF installed to $Dest" -ForegroundColor Green

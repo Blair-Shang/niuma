@@ -7,7 +7,6 @@ source "$SCRIPT_DIR/../lib/common.sh"
 
 REPO_ROOT=""
 CEF_PLATFORM=""
-CHANNEL="stable"
 FORCE="false"
 
 usage() {
@@ -16,8 +15,7 @@ Usage: download-cef-core.sh --cef-platform <index-key> [options]
 
 Options:
   --repo-root <path>       Repository root (auto-detected)
-  --cef-platform <key>     CEF index.json platform key (linux64, macosx64, ...)
-  --channel <name>         CEF channel (default: stable)
+  --cef-platform <key>     CEF index.json platform key (linux64, macosarm64, ...)
   --force                  Re-download even if third_party/cef exists
 EOF
 }
@@ -26,7 +24,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
     --cef-platform) CEF_PLATFORM="$2"; shift 2 ;;
-    --channel) CHANNEL="$2"; shift 2 ;;
+    --channel) shift 2 ;;
     --force) FORCE="true"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) nm_die "unknown argument: $1" ;;
@@ -34,14 +32,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$CEF_PLATFORM" ]] || { usage; nm_die "--cef-platform is required"; }
-# 历史/笔误键：官方 index 只有 linux64，没有 linuxx64
 if [[ "$CEF_PLATFORM" == "linuxx64" ]]; then
   CEF_PLATFORM="linux64"
 fi
 
 REPO_ROOT="${REPO_ROOT:-$(nm_repo_root "$SCRIPT_DIR")}"
 DEST="$(nm_cef_root "$REPO_ROOT")"
-CACHE_DIR="$REPO_ROOT/third_party/.cache"
+CACHE_DIR="$REPO_ROOT/third_party/cef-cache"
+STAGE_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/niuma-cef-dl"
+PIN_FILE="$SCRIPT_DIR/cef-pin.txt"
 
 if [[ -f "$DEST/CMakeLists.txt" && "$FORCE" != "true" ]]; then
   nm_log "CEF already exists at $DEST (use --force to re-download)"
@@ -50,59 +49,44 @@ fi
 
 nm_require_cmd curl
 nm_require_cmd tar
-nm_require_cmd node
 
-mkdir -p "$CACHE_DIR"
-nm_log "fetching CEF build index ($CEF_PLATFORM, channel=$CHANNEL)"
-INDEX_FILE="$CACHE_DIR/cef-index.json"
-# --create-dirs: CACHE_DIR 未建时 curl 写文件会失败（Linux 23 / macOS 56）
-curl -fsSL --retry 5 --retry-delay 2 --create-dirs \
-  'https://cef-builds.spotifycdn.com/index.json' -o "$INDEX_FILE"
+[[ -f "$PIN_FILE" ]] || nm_die "missing CEF pin file: $PIN_FILE"
+CEF_VERSION="$(awk -F= '$1=="cef_version" {print substr($0, index($0,"=")+1); exit}' "$PIN_FILE")"
+[[ -n "$CEF_VERSION" ]] || nm_die "cef_version missing in $PIN_FILE"
 
-RESOLVE_FILE="$CACHE_DIR/cef-resolve.tsv"
-INDEX_FILE="$INDEX_FILE" CEF_PLATFORM="$CEF_PLATFORM" CHANNEL="$CHANNEL" node <<'NODE' >"$RESOLVE_FILE" || nm_die "failed to resolve CEF artifact from index"
-const fs = require('fs');
-const index = JSON.parse(fs.readFileSync(process.env.INDEX_FILE, 'utf8'));
-const platformKey = process.env.CEF_PLATFORM;
-const channel = process.env.CHANNEL || 'stable';
-const platform = index[platformKey];
-if (!platform) {
-  console.error(`platform not found in index: ${platformKey} (available: ${Object.keys(index).join(', ')})`);
-  process.exit(2);
-}
-const versions = (platform.versions || [])
-  .filter((item) => item.channel === channel)
-  .sort((a, b) => {
-    const av = String(a.chromium_version || '').split('.').map(Number);
-    const bv = String(b.chromium_version || '').split('.').map(Number);
-    for (let i = 0; i < Math.max(av.length, bv.length); i += 1) {
-      const diff = (av[i] || 0) - (bv[i] || 0);
-      if (diff !== 0) return diff;
-    }
-    return 0;
-  });
-const version = versions[versions.length - 1];
-if (!version) {
-  console.error(`no CEF version for channel=${channel} platform=${platformKey}`);
-  process.exit(3);
-}
-const file = (version.files || []).find((item) => item.type === 'standard');
-if (!file) {
-  console.error(`no standard distribution for ${version.cef_version}`);
-  process.exit(4);
-}
-process.stdout.write(`${version.cef_version}\t${file.name}\thttps://cef-builds.spotifycdn.com/${file.name}\n`);
-NODE
-IFS=$'\t' read -r CEF_VERSION ARCHIVE_NAME ARCHIVE_URL <"$RESOLVE_FILE" || true
-[[ -n "$CEF_VERSION" && -n "$ARCHIVE_NAME" && -n "$ARCHIVE_URL" ]] || nm_die "invalid CEF resolve output"
+ARCHIVE_NAME="cef_binary_${CEF_VERSION}_${CEF_PLATFORM}.tar.bz2"
+ARCHIVE_URL="https://cef-builds.spotifycdn.com/${ARCHIVE_NAME}"
 
-nm_log "CEF $CEF_VERSION"
+mkdir -p "$CACHE_DIR" "$STAGE_DIR"
+nm_log "CEF $CEF_VERSION ($CEF_PLATFORM)"
 ARCHIVE_PATH="$CACHE_DIR/$ARCHIVE_NAME"
+
+download_archive() {
+  local url="$1"
+  local out="$2"
+  local attempt=1
+  local max=3
+  local delay=10
+  while [[ "$attempt" -le "$max" ]]; do
+    nm_log "download attempt $attempt/$max"
+    if curl -fL --retry 5 --retry-delay 2 -C - --create-dirs --progress-bar "$url" -o "$out"; then
+      return 0
+    fi
+    nm_warn "download failed (attempt $attempt/$max)"
+    if [[ "$attempt" -eq "$max" ]]; then
+      return 1
+    fi
+    sleep "$delay"
+    delay=$((delay * 2))
+    attempt=$((attempt + 1))
+  done
+}
 
 if [[ ! -f "$ARCHIVE_PATH" ]]; then
   nm_log "downloading $ARCHIVE_URL"
-  curl -fL --retry 5 --retry-delay 2 -C - --create-dirs \
-    --progress-bar "$ARCHIVE_URL" -o "$ARCHIVE_PATH"
+  STAGE_ARCHIVE="$STAGE_DIR/$ARCHIVE_NAME"
+  download_archive "$ARCHIVE_URL" "$STAGE_ARCHIVE" || nm_die "CEF archive download failed"
+  mv -f "$STAGE_ARCHIVE" "$ARCHIVE_PATH"
 else
   nm_log "reusing cached archive $ARCHIVE_PATH"
 fi
@@ -111,7 +95,7 @@ EXTRACT_DIR="$CACHE_DIR/cef_extract_${CEF_PLATFORM}_$$"
 rm -rf "$EXTRACT_DIR"
 mkdir -p "$EXTRACT_DIR"
 
-nm_log "extracting archive"
+nm_log "extracting archive (no progress; large bz2 may take several minutes)"
 if [[ "$ARCHIVE_NAME" == *.tar.xz ]]; then
   tar -xJf "$ARCHIVE_PATH" -C "$EXTRACT_DIR"
 elif [[ "$ARCHIVE_NAME" == *.tar.bz2 ]]; then
@@ -120,7 +104,13 @@ else
   nm_die "unsupported archive format: $ARCHIVE_NAME"
 fi
 
-INNER_DIR="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+INNER_DIR=""
+for d in "$EXTRACT_DIR"/*; do
+  if [[ -d "$d" ]]; then
+    INNER_DIR="$d"
+    break
+  fi
+done
 [[ -n "$INNER_DIR" && -f "$INNER_DIR/CMakeLists.txt" ]] || nm_die "invalid CEF archive layout"
 
 if [[ -d "$DEST" ]]; then
