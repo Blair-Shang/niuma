@@ -55,18 +55,15 @@ fs::path ExeDirectory() {
 #endif
 }
 
-bool IsMacAppBundle(const fs::path& exe_dir) {
 #if defined(__APPLE__)
+bool IsMacAppBundle(const fs::path& exe_dir) {
   return exe_dir.filename() == "MacOS" && exe_dir.parent_path().filename() == "Contents";
-#else
-  (void)exe_dir;
-  return false;
-#endif
 }
 
 fs::path MacContentsDir(const fs::path& exe_dir) {
   return exe_dir.parent_path();
 }
+#endif
 
 }  // namespace
 
