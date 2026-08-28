@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
-project(NiuMaShell VERSION 1.0.0 LANGUAGES CXX)
+# CEF 的 cef_variables.cmake 会 CHECK_C_COMPILER_FLAG。CMake 3.31+
+# 要求 C 语言已启用，否则 Linux/macOS configure 失败：
+#   check_compiler_flag: C: needs to be enabled before use.
+project(NiuMaShell VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

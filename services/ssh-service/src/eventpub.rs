@@ -15,9 +15,11 @@ use tokio::net::UnixStream;
 /// Windows 上命名管道忙的错误码。
 #[cfg(windows)]
 const ERROR_PIPE_BUSY: i32 = 231;
-/// 管道忙时的重试间隔。
-#[cfg(windows)]
-const PIPE_RETRY_DELAY_MS: u64 = 50;
+/// 入口尚未就绪时的重试间隔。
+const CONNECT_RETRY_DELAY_MS: u64 = 50;
+/// Unix socket 连不上时的最多重试次数（约 2s，与 Go publishTimeout 对齐）。
+#[cfg(not(windows))]
+const CONNECT_RETRY_ATTEMPTS: u32 = 40;
 /// 终端输出合并窗口。
 const COALESCE_INTERVAL: Duration = Duration::from_millis(12);
 /// 单帧合并上限（字节）。
@@ -232,7 +234,7 @@ impl IngestWriter {
                 match ClientOptions::new().open(WINDOWS_INGEST_ADDR) {
                     Ok(client) => break client,
                     Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
-                        tokio::time::sleep(Duration::from_millis(PIPE_RETRY_DELAY_MS)).await;
+                        tokio::time::sleep(Duration::from_millis(CONNECT_RETRY_DELAY_MS)).await;
                     }
                     Err(err) => return Err(Box::new(err)),
                 }
@@ -242,8 +244,26 @@ impl IngestWriter {
         #[cfg(not(windows))]
         {
             let addr = std::env::temp_dir().join(UNIX_INGEST_NAME);
-            let stream = UnixStream::connect(addr).await?;
-            self.stream = Some(stream);
+            let mut last_err = None;
+            let mut stream = None;
+            for _ in 0..CONNECT_RETRY_ATTEMPTS {
+                match UnixStream::connect(&addr).await {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(err) if is_transient_unix_connect(&err) => {
+                        last_err = Some(err);
+                        tokio::time::sleep(Duration::from_millis(CONNECT_RETRY_DELAY_MS)).await;
+                    }
+                    Err(err) => return Err(Box::new(err)),
+                }
+            }
+            self.stream = Some(stream.ok_or_else(|| {
+                last_err
+                    .map(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+                    .unwrap_or_else(|| "unix eventin connect failed".into())
+            })?);
         }
         Ok(())
     }
@@ -263,4 +283,15 @@ impl IngestWriter {
         }
         Ok(())
     }
+}
+
+#[cfg(not(windows))]
+fn is_transient_unix_connect(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::WouldBlock
+    )
 }

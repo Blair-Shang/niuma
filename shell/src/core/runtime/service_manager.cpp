@@ -28,10 +28,12 @@ namespace niuma {
 
 namespace {
 
+#if defined(_WIN32)
 /// 探测服务地址是否在监听的超时（毫秒）；仅当管道存在但实例繁忙时才会真正阻塞。
 constexpr int kListenProbeTimeoutMs = 200;
 /// 退出时等待子进程结束的超时（毫秒）。
 constexpr int kTerminateWaitMs = 3000;
+#endif
 /// Platform 服务的 manifest id。
 constexpr char kPlatformServiceId[] = "com.niuma.platform";
 

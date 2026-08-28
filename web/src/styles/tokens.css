@@ -395,12 +395,12 @@ body,
   line-height: var(--rs-line-height-normal);
 }
 
-.nm-toolbar-menu :deep(.rs-dropdown) {
+.nm-toolbar-menu .rs-dropdown {
   min-width: 0;
   width: 100%;
 }
 
-.nm-toolbar-menu :deep(.rs-dropdown__trigger) {
+.nm-toolbar-menu .rs-dropdown__trigger {
   min-height: var(--rs-control-height-sm);
   padding: 0 var(--rs-space-sm);
   font-size: var(--nm-font-caption);
