@@ -1,0 +1,4 @@
+# GitHub Actions CEF cache identity.
+# Bump cache_id to invalidate restored binaries and fetch a new Spotify build.
+cache_id=1
+channel=stable

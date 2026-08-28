@@ -134,13 +134,14 @@ jobs:
             NiuMa/services/redis-service
             NiuMa/packages/rust
 
-      - name: Cache CEF
-        uses: actions/cache@v5
+      - name: Restore CEF cache
+        id: cef-cache
+        uses: actions/cache/restore@v5
         with:
           path: |
             NiuMa/third_party/cef
             NiuMa/third_party/.cache
-          key: cef-${{ matrix.artifact }}-${{ hashFiles('NiuMa/scripts/**/download-cef*', 'NiuMa/scripts/shared/setup/download-cef-core.sh') }}
+          key: cef-${{ matrix.artifact }}-${{ hashFiles('NiuMa/scripts/shared/setup/cef-pin.txt') }}
           restore-keys: |
             cef-${{ matrix.artifact }}-
 
@@ -167,6 +168,15 @@ jobs:
 
       - name: Download CEF
         run: ${{ matrix.cef_cmd }}
+
+      - name: Save CEF cache
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            NiuMa/third_party/cef
+            NiuMa/third_party/.cache
+          key: ${{ steps.cef-cache.outputs.cache-primary-key }}
 
       - name: Build and pack
         env:

@@ -21,7 +21,7 @@ $Root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -
 $Dest = Join-Path $Root 'third_party/cef'
 $TempDir = Join-Path $Root 'third_party/.cache'
 
-if (Test-Path $Dest) {
+if (Test-Path (Join-Path $Dest 'CMakeLists.txt')) {
     Write-Host "CEF already exists at $Dest - delete to re-download" -ForegroundColor Yellow
     exit 0
 }
@@ -54,8 +54,21 @@ New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
 $ArchivePath = Join-Path $TempDir $ArchiveName
 
 Write-Host "CEF $($CefVersion)"
-Write-Host "Downloading $Url ..."
-Invoke-WebRequest -Uri $Url -OutFile $ArchivePath -UseBasicParsing
+if (Test-Path $ArchivePath) {
+    Write-Host "Reusing cached archive $ArchivePath"
+} else {
+    Write-Host "Downloading $Url ..."
+    # curl.exe: PowerShell `curl` is Invoke-WebRequest and is much slower on CI.
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        & $curl.Source -fL --retry 5 --retry-delay 2 -C - --progress-bar --output $ArchivePath $Url
+        if ($LASTEXITCODE -ne 0) {
+            throw "curl.exe failed with exit code $LASTEXITCODE"
+        }
+    } else {
+        Invoke-WebRequest -Uri $Url -OutFile $ArchivePath -UseBasicParsing
+    }
+}
 
 Write-Host 'Extracting (tar)...'
 $ExtractDir = Join-Path $TempDir 'cef_extract'

@@ -48,9 +48,12 @@ nm_require_cmd curl
 nm_require_cmd tar
 nm_require_cmd node
 
+mkdir -p "$CACHE_DIR"
 nm_log "fetching CEF build index ($CEF_PLATFORM, channel=$CHANNEL)"
 INDEX_FILE="$CACHE_DIR/cef-index.json"
-curl -fsSL 'https://cef-builds.spotifycdn.com/index.json' -o "$INDEX_FILE"
+# --create-dirs: CACHE_DIR 未建时 curl 写文件会失败（Linux 23 / macOS 56）
+curl -fsSL --retry 5 --retry-delay 2 --create-dirs \
+  'https://cef-builds.spotifycdn.com/index.json' -o "$INDEX_FILE"
 
 read -r CEF_VERSION ARCHIVE_NAME ARCHIVE_URL < <(
   INDEX_FILE="$INDEX_FILE" CEF_PLATFORM="$CEF_PLATFORM" CHANNEL="$CHANNEL" node <<'NODE'
@@ -89,12 +92,12 @@ NODE
 )
 
 nm_log "CEF $CEF_VERSION"
-mkdir -p "$CACHE_DIR"
 ARCHIVE_PATH="$CACHE_DIR/$ARCHIVE_NAME"
 
 if [[ ! -f "$ARCHIVE_PATH" ]]; then
   nm_log "downloading $ARCHIVE_URL"
-  curl -fL "$ARCHIVE_URL" -o "$ARCHIVE_PATH"
+  curl -fL --retry 5 --retry-delay 2 -C - --create-dirs \
+    --progress-bar "$ARCHIVE_URL" -o "$ARCHIVE_PATH"
 else
   nm_log "reusing cached archive $ARCHIVE_PATH"
 fi
