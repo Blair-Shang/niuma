@@ -102,9 +102,16 @@ if(CEF_ROOT AND EXISTS "${CEF_ROOT}/CMakeLists.txt")
 
   add_subdirectory("${CEF_ROOT_NORM}" cef_build EXCLUDE_FROM_ALL)
 
-  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
   add_dependencies(niuma libcef_dll_wrapper)
-  target_link_libraries(niuma PRIVATE libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+  # macOS 发行包没有 libcef.so / libcef.lib，运行时加载
+  # Chromium Embedded Framework.framework。ADD_LOGICAL_TARGET 在空路径上
+  # 会在 Generate 阶段报 IMPORTED_LOCATION not set for libcef_lib。
+  if(APPLE)
+    target_link_libraries(niuma PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+  else()
+    ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+    target_link_libraries(niuma PRIVATE libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+  endif()
   target_include_directories(niuma PRIVATE "${CEF_ROOT_NORM}")
   target_compile_definitions(niuma PRIVATE NIUMMA_WITH_CEF=1)
   set(NIUMMA_WITH_CEF 1)

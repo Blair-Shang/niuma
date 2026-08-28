@@ -13,8 +13,10 @@ use tracing::warn;
 use tokio::net::UnixStream;
 
 /// Windows 上命名管道忙的错误码。
+#[cfg(windows)]
 const ERROR_PIPE_BUSY: i32 = 231;
 /// 管道忙时的重试间隔。
+#[cfg(windows)]
 const PIPE_RETRY_DELAY_MS: u64 = 50;
 /// 终端输出合并窗口。
 const COALESCE_INTERVAL: Duration = Duration::from_millis(12);
@@ -24,6 +26,7 @@ const COALESCE_MAX_BYTES: usize = 48 * 1024;
 #[cfg(not(windows))]
 const UNIX_INGEST_NAME: &str = "niuma.platform.eventin.sock";
 /// Windows 下 platform 事件入口地址。
+#[cfg(windows)]
 const WINDOWS_INGEST_ADDR: &str = r"\\.\pipe\niuma.platform.eventin";
 
 #[cfg(windows)]

@@ -1,5 +1,6 @@
 //! eventpub 向 platform 事件入口异步发布 Redis 监控/流式事件。
 
+#[cfg(windows)]
 use std::time::Duration;
 
 use niuma_serviceipc::write_frame;
@@ -8,13 +9,16 @@ use tokio::sync::mpsc;
 use tracing::warn;
 
 /// Windows 上命名管道忙的错误码。
+#[cfg(windows)]
 const ERROR_PIPE_BUSY: i32 = 231;
 /// 管道忙时的重试间隔。
+#[cfg(windows)]
 const PIPE_RETRY_DELAY_MS: u64 = 50;
 /// Unix 下 platform 事件入口文件名。
 #[cfg(not(windows))]
 const UNIX_INGEST_NAME: &str = "niuma.platform.eventin.sock";
 /// Windows 下 platform 事件入口地址。
+#[cfg(windows)]
 const WINDOWS_INGEST_ADDR: &str = r"\\.\pipe\niuma.platform.eventin";
 
 /// AsyncPublisher 在后台单任务中串行写入 platform 事件入口。
