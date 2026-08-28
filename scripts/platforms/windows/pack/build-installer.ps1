@@ -117,6 +117,12 @@ if (-not (Test-Path $eulaZh) -or -not (Test-Path $eulaEn)) {
 }
 $eulaZhEscaped = Escape-InnoPath $eulaZh
 $eulaEnEscaped = Escape-InnoPath $eulaEn
+# Chocolatey 的 Inno 6.7 精简包不含 Languages\ChineseSimplified.isl，改用仓库内官方译文。
+$zhIsl = Join-Path $PSScriptRoot 'languages\ChineseSimplified.isl'
+if (-not (Test-Path $zhIsl)) {
+    throw "ChineseSimplified.isl missing: $zhIsl"
+}
+$zhIslEscaped = Escape-InnoPath $zhIsl
 $archAllowed = if ($Arch -eq 'arm64') { 'arm64' } else { 'x64compatible' }
 $archInstallMode = if ($Arch -eq 'arm64') { 'arm64' } else { 'x64compatible' }
 
@@ -179,7 +185,7 @@ VersionInfoProductVersion=$AppVersion
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "$eulaEnEscaped"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"; LicenseFile: "$eulaZhEscaped"
+Name: "chinesesimplified"; MessagesFile: "$zhIslEscaped"; LicenseFile: "$eulaZhEscaped"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
