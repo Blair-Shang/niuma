@@ -117,4 +117,54 @@ bool WriteClipboardText(const std::string& text, std::string& error) {
 
 }  // namespace niuma
 
+#elif defined(__linux__)
+
+#include <gtk/gtk.h>
+
+namespace niuma {
+namespace {
+
+GtkClipboard* ClipboardOrError(std::string& error) {
+  int argc = 0;
+  char** argv = nullptr;
+  if (!gtk_init_check(&argc, &argv)) {
+    error = "gtk init failed";
+    return nullptr;
+  }
+  return gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+}
+
+}  // namespace
+
+bool ReadClipboardText(std::string& text, std::string& error) {
+  text.clear();
+  error.clear();
+  GtkClipboard* clipboard = ClipboardOrError(error);
+  if (!clipboard) {
+    return false;
+  }
+  gchar* data = gtk_clipboard_wait_for_text(clipboard);
+  if (!data) {
+    error = "clipboard has no text";
+    return false;
+  }
+  text = data;
+  g_free(data);
+  return true;
+}
+
+bool WriteClipboardText(const std::string& text, std::string& error) {
+  error.clear();
+  GtkClipboard* clipboard = ClipboardOrError(error);
+  if (!clipboard) {
+    return false;
+  }
+  gtk_clipboard_set_text(clipboard, text.c_str(), static_cast<gint>(text.size()));
+  gtk_clipboard_store(clipboard);
+  return true;
+}
+
+}  // namespace niuma
+
 #endif
+

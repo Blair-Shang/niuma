@@ -156,7 +156,10 @@ bool ServiceManager::SpawnService(const ServiceManifest& manifest) {
     return false;
   }
   if (pid == 0) {
-    ::chdir(install_dir_.c_str());
+    // 子进程：工作目录必须切到安装目录；失败则立刻退出，避免带着错误 cwd 拉起服务。
+    if (::chdir(install_dir_.c_str()) != 0) {
+      _exit(127);
+    }
     execl(exe.c_str(), exe.c_str(), static_cast<char*>(nullptr));
     _exit(127);
   }

@@ -83,6 +83,17 @@ if(WIN32)
   target_compile_definitions(niuma PRIVATE OS_WIN=1)
 endif()
 
+if(APPLE)
+  enable_language(OBJCXX)
+  target_sources(niuma PRIVATE src/util/clipboard_mac.mm)
+endif()
+
+if(UNIX AND NOT APPLE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
+  target_link_libraries(niuma PRIVATE PkgConfig::GTK3)
+endif()
+
 target_include_directories(niuma PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src
