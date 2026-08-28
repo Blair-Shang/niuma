@@ -145,11 +145,16 @@ if(CEF_ROOT AND EXISTS "${CEF_ROOT}/CMakeLists.txt")
         "$<TARGET_FILE_DIR:niuma>/Chromium Embedded Framework.framework"
       COMMENT "Copy CEF framework")
   else()
-    # SET_CEF_TARGET_OUT_DIR 在 add_executable 之后设置 CMAKE_RUNTIME_OUTPUT_DIRECTORY，
-    # 对已有 target 无效。Unix Makefiles 下 niuma 在 build 根目录，CEF_TARGET_OUT_DIR
-    # 却是 build/Release，必须拷到 $<TARGET_FILE_DIR:niuma>。
-    COPY_FILES("niuma" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "$<TARGET_FILE_DIR:niuma>")
-    COPY_FILES("niuma" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "$<TARGET_FILE_DIR:niuma>")
+    # 不用 CEF COPY_FILES：其目标目录 CEF_TARGET_OUT_DIR 在 Unix Makefiles 下是
+    # ${BUILD}/Release，而 niuma 在 ${BUILD}/niuma；宏里拼接路径还容易吃掉 genex。
+    add_custom_command(TARGET niuma POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CEF_BINARY_DIR}"
+        "$<TARGET_FILE_DIR:niuma>"
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CEF_RESOURCE_DIR}"
+        "$<TARGET_FILE_DIR:niuma>"
+      COMMENT "Copy CEF binaries and resources next to niuma")
   endif()
 
   message(STATUS "CEF enabled: ${CEF_ROOT}")

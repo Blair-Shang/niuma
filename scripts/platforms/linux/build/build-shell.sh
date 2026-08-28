@@ -66,6 +66,14 @@ OUTPUT_BIN="$(nm_shell_exe_path "$REPO_ROOT" "$PLATFORM" "$ARCH" "$CONFIGURATION
 if [[ "$ALLOW_STUB" != "true" ]]; then
   SHELL_INSTALL="$(dirname "$OUTPUT_BIN")"
   if [[ ! -f "$SHELL_INSTALL/libcef.so" ]]; then
+    nm_log "libcef.so not next to niuma; staging CEF runtime from $CEF_ROOT"
+    bash "$REPO_ROOT/scripts/shared/package/stage-cef-runtime.sh" \
+      --platform "$PLATFORM" \
+      --arch "$ARCH" \
+      --dest "$SHELL_INSTALL" \
+      --configuration "$CONFIGURATION"
+  fi
+  if [[ ! -f "$SHELL_INSTALL/libcef.so" ]]; then
     nm_die "libcef.so missing next to $OUTPUT_BIN. Re-run CEF download and rebuild shell."
   fi
 fi
