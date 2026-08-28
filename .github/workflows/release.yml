@@ -13,7 +13,7 @@ on:
       niuma_ui_ref:
         description: 'niuma-ui git ref (private sibling repo)'
         type: string
-        default: 'v1.1.8'
+        default: 'v1.1.9'
 
 concurrency:
   group: pack-${{ github.workflow }}-${{ github.ref }}
@@ -63,7 +63,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ${{ github.repository_owner }}/niuma-ui
-          ref: ${{ github.event.inputs.niuma_ui_ref || 'v1.1.8' }}
+          ref: ${{ github.event.inputs.niuma_ui_ref || 'v1.1.9' }}
           path: niuma-ui
           token: ${{ secrets.NIUMA_UI_TOKEN || github.token }}
 
@@ -115,8 +115,12 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: NiuMa/platform/go.mod
+          # 必须与仓库根 go.work 一致。setup-go 默认 GOTOOLCHAIN=local，
+          # 若只装 1.25.0，Linux/macOS 的 go generate 都会失败。
+          go-version: '1.25.7'
           cache-dependency-path: |
+            NiuMa/go.work
+            NiuMa/go.work.sum
             NiuMa/platform/go.sum
             NiuMa/services/**/go.sum
             NiuMa/packages/go/**/go.sum

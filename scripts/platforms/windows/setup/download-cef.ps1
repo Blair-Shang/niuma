@@ -82,18 +82,42 @@ function Invoke-CefDefenderRelax {
 
 function Wait-CefExtractProcess {
     param(
-        [Parameter(Mandatory = $true)]$Process,
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
         [Parameter(Mandatory = $true)][string]$Tool
     )
     $started = Get-Date
-    while (-not $Process.WaitForExit(15000)) {
-        $sec = [int]((Get-Date) - $started).TotalSeconds
-        Write-Host "  still extracting... ${sec}s"
+    try {
+        while (-not $Process.WaitForExit(15000)) {
+            $sec = [int]((Get-Date) - $started).TotalSeconds
+            Write-Host "  still extracting... ${sec}s"
+        }
+        # 带超时的 WaitForExit 返回后须再调无参重载，ExitCode 才稳定可读
+        $Process.WaitForExit()
+        $code = $Process.ExitCode
+        if ($null -eq $code -or $code -ne 0) {
+            throw "$Tool extract failed with exit code $code"
+        }
+        Write-Host "Extract finished in $([int]((Get-Date) - $started).TotalSeconds)s ($Tool)"
+    } finally {
+        $Process.Dispose()
     }
-    if ($Process.ExitCode -ne 0) {
-        throw "$Tool extract failed with exit code $($Process.ExitCode)"
+}
+
+function Start-CefCmdProcess {
+    param([Parameter(Mandatory = $true)][string]$CommandLine)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    # /S 去掉包裹引号后执行整行。不要用 Start-Process -ArgumentList：它会把内层引号逃成 \"，
+    # cmd 随即报 The filename, directory name, or volume label syntax is incorrect。
+    $psi.Arguments = '/S /C "' + $CommandLine + '"'
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $false
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo = $psi
+    if (-not $p.Start()) {
+        throw 'failed to start cmd.exe for CEF extract'
     }
-    Write-Host "Extract finished in $([int]((Get-Date) - $started).TotalSeconds)s ($Tool)"
+    return $p
 }
 
 function Invoke-CefTarExtract {
@@ -119,9 +143,8 @@ function Invoke-CefTarExtract {
         $z = $sevenZip.Replace('"', '""')
         $archive = $ArchivePath.Replace('"', '""')
         $out = $ExtractDir.Replace('"', '""')
-        $line = '"{0}" x "{1}" -so | "{0}" x -aoa -si -ttar "-o{2}"' -f $z, $archive, $out
-        $p = Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" `
-            -ArgumentList @('/C', $line) -NoNewWindow -PassThru
+        $line = '"{0}" x -y -- "{1}" -so | "{0}" x -y -aoa -si -ttar -o"{2}"' -f $z, $archive, $out
+        $p = Start-CefCmdProcess -CommandLine $line
         Wait-CefExtractProcess -Process $p -Tool '7-Zip'
         return
     }
