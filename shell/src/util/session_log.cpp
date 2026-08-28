@@ -1,6 +1,7 @@
 #include "util/session_log.h"
 
 #include "util/runtime_paths.h"
+#include "util/utf8_path.h"
 
 #include <niuma/logutil/logutil.hpp>
 
@@ -40,7 +41,7 @@ constexpr int kMaxSessionAgeDays = 15;
 
 bool EnsureDir(const std::string& path) {
   std::error_code ec;
-  fs::create_directories(fs::u8path(path), ec);
+  fs::create_directories(Utf8Path(path), ec);
   return !ec;
 }
 
@@ -107,7 +108,7 @@ std::string BaseLogRoot() {
     return std::string(override_root);
   }
   const std::string install = GetInstallDir();
-  const std::string repo = FindRepositoryRoot(fs::u8path(install));
+  const std::string repo = FindRepositoryRoot(Utf8Path(install));
   if (!repo.empty()) {
     return repo + "/logs";
   }
@@ -189,8 +190,8 @@ void InitSessionLog() {
   }
   EnsureDir(g_session_log_dir);
   // 清理同一天目录内的旧会话（超过数量/天数限制），以及清理过期的日期目录
-  PruneOldSessionLogs(fs::u8path(date_dir), fs::u8path(g_session_log_dir));
-  PruneOldDateDirs(fs::u8path(log_root));
+  PruneOldSessionLogs(Utf8Path(date_dir), Utf8Path(g_session_log_dir));
+  PruneOldDateDirs(Utf8Path(log_root));
 #if defined(_WIN32)
   SetEnvironmentVariableA("NIUMMA_LOG_DIR", g_session_log_dir.c_str());
 #else
@@ -209,7 +210,7 @@ void AppendShellLog(const std::string& line) {
     return;
   }
   std::lock_guard<std::mutex> lock(g_log_mu);
-  const fs::path path = fs::u8path(g_session_log_dir) / "shell.log";
+  const fs::path path = Utf8Path(g_session_log_dir) / "shell.log";
   std::ofstream out(path, std::ios::app);
   if (!out) {
     return;

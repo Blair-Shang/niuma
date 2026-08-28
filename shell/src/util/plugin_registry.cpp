@@ -1,6 +1,7 @@
 #include "util/plugin_registry.h"
 
 #include "util/runtime_paths.h"
+#include "util/utf8_path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -54,7 +55,7 @@ std::set<std::string> LoadDisabledPluginIds() {
 }
 
 bool SaveDisabledPluginIds(const std::set<std::string>& disabled, std::string& error) {
-  const fs::path dir = fs::u8path(GetUserDataDir());
+  const fs::path dir = Utf8Path(GetUserDataDir());
   std::error_code ec;
   fs::create_directories(dir, ec);
   if (ec) {

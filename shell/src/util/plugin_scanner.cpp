@@ -1,6 +1,7 @@
 #include "util/plugin_scanner.h"
 
 #include "util/json_util.h"
+#include "util/utf8_path.h"
 #include "util/plugin_registry.h"
 #include "util/runtime_paths.h"
 
@@ -73,7 +74,7 @@ bool TryReadManifest(const fs::path& manifest_path,
 
 std::vector<LocalPluginRecord> ScanLocalPluginManifests() {
   std::vector<LocalPluginRecord> records;
-  const fs::path base = fs::u8path(GetPluginsPath());
+  const fs::path base = Utf8Path(GetPluginsPath());
   if (!fs::exists(base) || !fs::is_directory(base)) {
     return records;
   }

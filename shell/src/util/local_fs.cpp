@@ -1,4 +1,5 @@
 #include "util/local_fs.h"
+#include "util/utf8_path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -93,7 +94,7 @@ bool LocalFs::IsAccessiblePath(const std::string& path, std::string& error) {
     return false;
   }
   std::error_code ec;
-  const fs::path p = fs::u8path(path);
+  const fs::path p = Utf8Path(path);
   if (!p.is_absolute()) {
     error = "path must be absolute";
     return false;
@@ -113,7 +114,7 @@ bool LocalFs::Exists(const std::string& path) {
     return false;
   }
   std::error_code ec;
-  return fs::exists(fs::u8path(path), ec);
+  return fs::exists(Utf8Path(path), ec);
 }
 
 std::string LocalFs::StatJson(const std::string& path, std::string& error) {
@@ -121,7 +122,7 @@ std::string LocalFs::StatJson(const std::string& path, std::string& error) {
     return {};
   }
   std::error_code ec;
-  const fs::path p = fs::u8path(path);
+  const fs::path p = Utf8Path(path);
   if (!fs::exists(p, ec)) {
     error = "path not found";
     return {};
@@ -148,7 +149,7 @@ std::string LocalFs::ReadText(const std::string& path, std::string& error) {
   if (!IsAccessiblePath(path, error)) {
     return {};
   }
-  std::ifstream in(fs::u8path(path), std::ios::binary);
+  std::ifstream in(Utf8Path(path), std::ios::binary);
   if (!in) {
     error = "failed to open file";
     return {};
@@ -175,7 +176,7 @@ std::string LocalFs::ReadTextPrefix(const std::string& path,
   }
 
   std::error_code ec;
-  const fs::path file_path = fs::u8path(path);
+  const fs::path file_path = Utf8Path(path);
   const std::uintmax_t size = fs::file_size(file_path, ec);
   if (ec) {
     error = ec.message();
@@ -211,7 +212,7 @@ bool LocalFs::WriteText(const std::string& path, const std::string& content,
   if (!IsAccessiblePath(path, error)) {
     return false;
   }
-  std::ofstream out(fs::u8path(path), std::ios::binary | std::ios::trunc);
+  std::ofstream out(Utf8Path(path), std::ios::binary | std::ios::trunc);
   if (!out) {
     error = "failed to open file for write";
     return false;
@@ -244,7 +245,7 @@ std::string LocalFs::ListDirJson(const std::string& path, std::string& error) {
     return {};
   }
   std::error_code ec;
-  const fs::path p = fs::u8path(path);
+  const fs::path p = Utf8Path(path);
   if (!fs::exists(p, ec) || !fs::is_directory(p, ec)) {
     error = "path is not a directory";
     return {};
@@ -289,7 +290,7 @@ bool LocalFs::Mkdir(const std::string& path, std::string& error) {
     return false;
   }
   std::error_code ec;
-  const fs::path p = fs::u8path(path);
+  const fs::path p = Utf8Path(path);
   if (fs::exists(p, ec)) {
     error = "path already exists";
     return false;
@@ -311,12 +312,12 @@ bool LocalFs::Rename(const std::string& from_path, const std::string& to_path,
     return false;
   }
   std::error_code ec;
-  const fs::path from = fs::u8path(from_path);
+  const fs::path from = Utf8Path(from_path);
   if (!fs::exists(from, ec)) {
     error = "source path not found";
     return false;
   }
-  const fs::path to = fs::u8path(to_path);
+  const fs::path to = Utf8Path(to_path);
   if (fs::exists(to, ec)) {
     error = "destination path already exists";
     return false;
@@ -334,7 +335,7 @@ bool LocalFs::Delete(const std::string& path, std::string& error) {
     return false;
   }
   std::error_code ec;
-  const fs::path p = fs::u8path(path);
+  const fs::path p = Utf8Path(path);
   if (!fs::exists(p, ec)) {
     error = "path not found";
     return false;
@@ -354,11 +355,11 @@ bool LocalFs::ShowInFolder(const std::string& path, std::string& error) {
   // 统一成绝对 + 本地分隔符（Windows 下 / 会被 make_preferred 转为 \）。
   // dameng 等服务曾对 outputPath 做 ToSlash，explorer /select 遇正斜杠常落到桌面。
   std::error_code ec;
-  fs::path target = fs::weakly_canonical(fs::u8path(path), ec);
+  fs::path target = fs::weakly_canonical(Utf8Path(path), ec);
   if (ec || target.empty()) {
-    target = fs::absolute(fs::u8path(path), ec);
+    target = fs::absolute(Utf8Path(path), ec);
     if (ec || target.empty()) {
-      target = fs::u8path(path);
+      target = Utf8Path(path);
     }
   }
   target = target.lexically_normal().make_preferred();
