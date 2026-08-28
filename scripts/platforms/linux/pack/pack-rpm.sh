@@ -37,6 +37,13 @@ RPM_ARCH="$(nm_deb_arch "$ARCH")"
 DEB_DIR="$(nm_default_output_dir "$REPO_ROOT" "$PLATFORM" "$ARCH" "deb")"
 DEB_GLOB="${PACKAGE_ID}_${VERSION}_${RPM_ARCH}"
 DEB_ROOT="$DEB_DIR/${DEB_GLOB}"
+DEB_FILE="$DEB_DIR/${DEB_GLOB}.deb"
+if [[ ! -d "$DEB_ROOT" && -f "$DEB_FILE" ]]; then
+  nm_log "extract deb tree from $DEB_FILE"
+  mkdir -p "$DEB_ROOT"
+  dpkg-deb -x "$DEB_FILE" "$DEB_ROOT"
+  dpkg-deb -e "$DEB_FILE" "$DEB_ROOT/DEBIAN"
+fi
 if [[ ! -d "$DEB_ROOT" ]]; then
   nm_log "deb tree missing; running pack-linux.sh first"
   bash "$SCRIPT_DIR/pack-linux.sh" --platform "$PLATFORM" --arch "$ARCH" --configuration "$CONFIGURATION" --skip-web-build --skip-shell-build

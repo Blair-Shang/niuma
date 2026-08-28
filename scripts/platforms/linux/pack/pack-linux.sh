@@ -142,8 +142,7 @@ chmod 0755 "$BIN_DIR/niuma"
 
 bash "$REPO_ROOT/scripts/shared/package/stage-compliance.sh" "$PAYLOAD_ROOT"
 
-mkdir -p "$OUTPUT_DIR/$PACKAGE_BASENAME"
-cp -R "$DEB_ROOT/." "$OUTPUT_DIR/$PACKAGE_BASENAME/"
+mkdir -p "$OUTPUT_DIR"
 
 if command -v dpkg-deb >/dev/null 2>&1; then
   DEB_FILE="$OUTPUT_DIR/${PACKAGE_BASENAME}.deb"
@@ -160,8 +159,12 @@ if command -v dpkg-deb >/dev/null 2>&1; then
       nm_warn "GPG_KEY_ID set but dpkg-sig/debsigs not found; .deb left unsigned"
     fi
   fi
+  # .deb 已包含完整 payload，删掉 staging，避免与 output 各留一份 CEF。
+  rm -rf "$DEB_ROOT"
 else
   nm_warn "dpkg-deb not found; exported unpacked Debian root to $OUTPUT_DIR/$PACKAGE_BASENAME"
+  mkdir -p "$OUTPUT_DIR/$PACKAGE_BASENAME"
+  cp -R "$DEB_ROOT/." "$OUTPUT_DIR/$PACKAGE_BASENAME/"
 fi
 
 nm_log "Linux packaging done -> $OUTPUT_DIR"

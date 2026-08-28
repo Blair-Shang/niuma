@@ -72,6 +72,25 @@ jobs:
         run: git config --global core.longpaths true
         working-directory: .
 
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          set -euo pipefail
+          df -h
+          if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]]; then
+            sudo rm -rf \
+              /usr/share/dotnet \
+              /usr/local/lib/android \
+              /opt/ghc \
+              /usr/local/.ghcup \
+              /opt/hostedtoolcache/CodeQL \
+              || true
+            docker system prune -af || true
+            sudo apt-get clean || true
+          fi
+          df -h
+
       - name: Install Linux CEF / pack dependencies
         if: runner.os == 'Linux'
         working-directory: .

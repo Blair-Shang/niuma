@@ -88,4 +88,9 @@ fi
 
 nm_sync_legacy_shell "$REPO_ROOT" "$PLATFORM" "$ARCH" "$CONFIGURATION"
 
+if [[ "${CI:-}" == "true" ]]; then
+  nm_log "CI: prune cmake object dirs under $BUILD_DIR"
+  rm -rf "$BUILD_DIR/cef_build" "$BUILD_DIR/niuma_logutil" "$BUILD_DIR/CMakeFiles"
+fi
+
 nm_log "built -> $OUTPUT_BIN"

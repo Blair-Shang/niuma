@@ -88,4 +88,10 @@ fi
 
 nm_sync_legacy_shell "$REPO_ROOT" "$PLATFORM" "$ARCH" "$CONFIGURATION"
 
+# 链接完成后对象文件不再需要。CI 磁盘紧，删掉 wrapper / niuma 的 .o，保留二进制与已拷贝的 CEF。
+if [[ "${CI:-}" == "true" ]]; then
+  nm_log "CI: prune cmake object dirs under $BUILD_DIR"
+  rm -rf "$BUILD_DIR/cef_build" "$BUILD_DIR/niuma_logutil" "$BUILD_DIR/CMakeFiles"
+fi
+
 nm_log "built -> $OUTPUT_BIN"

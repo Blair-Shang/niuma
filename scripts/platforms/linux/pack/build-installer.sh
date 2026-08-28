@@ -76,6 +76,8 @@ bash "$REPO_ROOT/scripts/shared/package/make-self-extracting-run.sh" \
   "$VERSION" \
   "uninstall.sh"
 
+rm -rf "$PAYLOAD_DIR" "$UNINSTALL_PAYLOAD"
+
 nm_log "Linux GUI installer ready -> $OUTPUT_RUN"
 nm_log "Linux GUI uninstaller ready -> $UNINSTALL_RUN"
 nm_log "Users can run: chmod +x $SETUP_NAME && ./$SETUP_NAME"

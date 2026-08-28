@@ -54,6 +54,7 @@ Windows 使用 PowerShell（`.ps1`），Unix-like 使用 Bash（`.sh`）。`pack
 | `shared/package/stage-services.ps1` / `.sh` | 服务产物 stage 到壳层目录 |
 | `shared/package/stage-cef-runtime.sh` | Unix 打包时捆绑 CEF 运行时 |
 | `shared/package/stage-compliance.ps1` / `.sh` | 商用合规文件（CEF 许可、NOTICES、`version.json`） |
+| `shared/package/ci-prune-build-cache.sh` | 仅 `CI=true`：打包前删 niuma-ui/node_modules、Rust `target`、已 stage 的 CEF 发行包 |
 | `shared/package/make-self-extracting-run.sh` | Linux/麒麟自解压 `.run` |
 | `shared/sign/sign-windows.ps1` | Authenticode（`CODESIGN_CERT`）；`REQUIRE_CODESIGN` 可强制） |
 | `shared/sign/codesign-macos.sh` | 从内到外 codesign + Hardened Runtime（不用 `--deep`） |
@@ -124,7 +125,7 @@ pnpm version:sync          # 单独同步版本（build:web 已自动执行）
 | macOS x64 | `pnpm release:macos` | `.app` / `.dmg` + `Setup.pkg` |
 | macOS arm64 | `pnpm release:macos:arm64` | 同上 |
 
-`release:*` = `build:*` + `pack:*` + `pack:*:setup`（含 GUI 安装程序）。
+`release:*` = `build:*` + `pack:*` + `pack:*:setup`（含 GUI 安装程序）。Unix 的 `release:*` 在 pack 时带 `--skip-web-build --skip-shell-build`，避免 web/壳层/CEF 编两遍撑爆 CI 磁盘；单独跑 `pack:linux` 仍会按需重编。
 
 ### 分步命令命名
 
