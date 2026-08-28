@@ -45,6 +45,11 @@ rm -rf "$WORK_DIR"
 mkdir -p "$RES_DIR" "$PKG_DIR" "$OUTPUT_DIR"
 
 cp -f "$REPO_ROOT/scripts/shared/package/templates/macos-welcome.html" "$RES_DIR/welcome.html"
+if [[ -f "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" ]]; then
+  cp -f "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" "$RES_DIR/license.txt"
+elif [[ -f "$REPO_ROOT/docs/legal/EULA.en-US.txt" ]]; then
+  cp -f "$REPO_ROOT/docs/legal/EULA.en-US.txt" "$RES_DIR/license.txt"
+fi
 
 HOST_ARCHS="x86_64"
 if [[ "$ARCH" == "arm64" ]]; then
@@ -59,6 +64,7 @@ cat > "$DIST_XML" <<EOF
 <installer-gui-script minSpecVersion="2">
   <title>$APP_NAME</title>
   <welcome file="welcome.html"/>
+  <license file="license.txt"/>
   <options customize="never" require-scripts="false" hostArchitectures="$HOST_ARCHS"/>
   <choices-outline>
     <line choice="default">
@@ -88,17 +94,25 @@ productbuild \
   --package-path "$PKG_DIR" \
   "$SETUP_PKG"
 
-if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
-  nm_log "codesign installer pkg: $CODESIGN_IDENTITY"
-  productsign --sign "$CODESIGN_IDENTITY" "$SETUP_PKG" "${SETUP_PKG%.pkg}-signed.pkg"
+INSTALLER_IDENTITY="${CODESIGN_INSTALLER_IDENTITY:-${CODESIGN_IDENTITY:-}}"
+if [[ -n "$INSTALLER_IDENTITY" ]]; then
+  nm_log "productsign installer pkg: $INSTALLER_IDENTITY"
+  productsign --sign "$INSTALLER_IDENTITY" "$SETUP_PKG" "${SETUP_PKG%.pkg}-signed.pkg"
   mv -f "${SETUP_PKG%.pkg}-signed.pkg" "$SETUP_PKG"
+elif [[ "${REQUIRE_CODESIGN:-}" == "1" || "${REQUIRE_CODESIGN:-}" == "true" ]]; then
+  nm_die "REQUIRE_CODESIGN is set but CODESIGN_IDENTITY / CODESIGN_INSTALLER_IDENTITY are empty"
 fi
 
 if [[ -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_APP_PASSWORD:-}" && -n "${NOTARY_TEAM_ID:-}" ]]; then
   export APPLE_ID="$NOTARY_APPLE_ID"
   export APPLE_APP_PASSWORD="$NOTARY_APP_PASSWORD"
   export APPLE_TEAM_ID="$NOTARY_TEAM_ID"
-  bash "$REPO_ROOT/scripts/shared/sign/notarize-macos.sh" "$SETUP_PKG" || nm_warn "notarization failed"
+  bash "$REPO_ROOT/scripts/shared/sign/notarize-macos.sh" "$SETUP_PKG" || {
+    if [[ "${REQUIRE_CODESIGN:-}" == "1" || "${REQUIRE_CODESIGN:-}" == "true" ]]; then
+      nm_die "notarization failed"
+    fi
+    nm_warn "notarization failed"
+  }
 fi
 
 nm_log "macOS GUI installer ready -> $SETUP_PKG"

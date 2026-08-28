@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{error, info};
@@ -81,7 +82,9 @@ where
 {
     loop {
         let payload = read_frame(&mut stream).await?;
+        let start = Instant::now();
         let resp = dispatch(handler.as_ref(), &payload).await;
+        niuma_logutil::observe_ipc(&payload, &resp, start.elapsed());
         write_frame(&mut stream, &resp).await?;
     }
 }

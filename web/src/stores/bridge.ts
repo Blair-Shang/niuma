@@ -22,7 +22,7 @@ export const useBridgeStore = defineStore('bridge', () => {
 
   const statusLabel = computed(() => {
     if (!connected.value) return 'Offline'
-    return runtimeMode.value === 'cef' ? 'CEF Shell' : 'Shell'
+    return 'Ready'
   })
 
   /** 探测 Bridge 并更新 `connected` / `runtimeMode` */

@@ -37,6 +37,13 @@ if (Test-Path $notices) {
     Copy-Item -Force $notices (Join-Path $licensesDir 'NOTICES.txt')
 }
 
+foreach ($eulaName in @('EULA.zh-CN.txt', 'EULA.en-US.txt')) {
+    $eulaSrc = Join-Path $RepoRoot "docs/legal/$eulaName"
+    if (Test-Path $eulaSrc) {
+        Copy-Item -Force $eulaSrc (Join-Path $licensesDir $eulaName)
+    }
+}
+
 $versionManifest = Join-Path $RepoRoot 'build/version.json'
 if (Test-Path $versionManifest) {
     Copy-Item -Force $versionManifest (Join-Path $DestDir 'version.json')

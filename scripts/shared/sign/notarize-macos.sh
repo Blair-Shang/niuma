@@ -34,7 +34,7 @@ fi
 echo "==> notarytool submit $PKG_PATH"
 xcrun "${SUBMIT_ARGS[@]}"
 
-if [[ "$PKG_PATH" == *.pkg ]]; then
+if [[ "$PKG_PATH" == *.pkg || "$PKG_PATH" == *.dmg ]]; then
   echo "==> stapler staple $PKG_PATH"
   xcrun stapler staple "$PKG_PATH"
 fi

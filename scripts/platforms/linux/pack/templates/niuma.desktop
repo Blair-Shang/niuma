@@ -1,9 +1,13 @@
 [Desktop Entry]
 Type=Application
+Version=1.5
 Name=NiuMa
 Comment=All-in-one AI operations platform
 Exec=/usr/bin/niuma
 Icon=niuma
 Terminal=false
 Categories=Development;Utility;
+Keywords=database;ssh;ftp;ops;ai;
 StartupNotify=true
+StartupWMClass=niuma
+

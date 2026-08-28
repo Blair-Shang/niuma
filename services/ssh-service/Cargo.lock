@@ -792,6 +792,8 @@ name = "niuma-logutil"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
@@ -811,6 +813,7 @@ name = "niuma-serviceipc"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "niuma-logutil",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

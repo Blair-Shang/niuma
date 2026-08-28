@@ -286,33 +286,40 @@ impl SessionManager {
 
     pub async fn sftp_dir_list(&self, session_id: &str, path: &str) -> Result<Value, String> {
         let sftp = self.ensure_sftp(session_id).await?;
-        let sftp = sftp.lock().await;
-        let client = sftp.as_ref().expect("sftp session");
-        let read_dir = client
-            .read_dir(path)
-            .await
-            .map_err(|e| format!("sftp: list {path:?}: {e}"))?;
-        let entries: Vec<Value> = read_dir
-            .map(|ent| {
-                let kind = match ent.file_type() {
-                    FileType::Dir => "dir",
-                    _ => "file",
-                };
-                let meta = ent.metadata();
-                json!({
-                    "name": ent.file_name(),
-                    "kind": kind,
-                    "size": meta.size.unwrap_or(0),
-                    "modifiedAt": meta.mtime.map(|t| t.to_string()).unwrap_or_default(),
-                    "permissions": meta.permissions.unwrap_or_default(),
-                })
-            })
-            .collect();
-        let resolved_path = client
-            .canonicalize(path)
-            .await
-            .unwrap_or_else(|_| path.to_string());
-        Ok(json!({ "path": resolved_path, "entries": entries }))
+        let list_result = {
+            let sftp = sftp.lock().await;
+            let client = sftp.as_ref().expect("sftp session");
+            match client.read_dir(path).await {
+                Ok(read_dir) => {
+                    let entries: Vec<Value> = read_dir
+                        .map(|ent| {
+                            let kind = match ent.file_type() {
+                                FileType::Dir => "dir",
+                                _ => "file",
+                            };
+                            let meta = ent.metadata();
+                            json!({
+                                "name": ent.file_name(),
+                                "kind": kind,
+                                "size": meta.size.unwrap_or(0),
+                                "modifiedAt": meta.mtime.map(|t| t.to_string()).unwrap_or_default(),
+                                "permissions": meta.permissions.unwrap_or_default(),
+                            })
+                        })
+                        .collect();
+                    let resolved_path = client
+                        .canonicalize(path)
+                        .await
+                        .unwrap_or_else(|_| path.to_string());
+                    Ok(json!({ "path": resolved_path, "entries": entries }))
+                }
+                Err(e) => Err(format!("sftp: list {path:?}: {e}")),
+            }
+        };
+        if let Err(ref e) = list_result {
+            self.note_if_lost(session_id, e).await;
+        }
+        list_result
     }
 
     pub async fn sftp_file_read(&self, session_id: &str, path: &str) -> Result<Value, String> {
@@ -657,28 +664,64 @@ impl SessionManager {
             .ok_or_else(|| format!("session not found: {session_id}"))
     }
 
-    async fn ensure_sftp(&self, session_id: &str) -> Result<Arc<Mutex<Option<SftpSession>>>, String> {
-        let handle = self.handle_ref(session_id).await?;
-        let sftp = self.sftp_ref(session_id).await?;
-        let mut sftp_guard = sftp.lock().await;
-        if sftp_guard.is_none() {
-            let handle = handle.lock().await;
-            let channel = handle
-                .channel_open_session()
-                .await
-                .map_err(|e| format!("sftp: open channel: {e}"))?;
-            channel
-                .request_subsystem(true, "sftp")
-                .await
-                .map_err(|e| format!("sftp: subsystem: {e}"))?;
-            let session = SftpSession::new(channel.into_stream())
-                .await
-                .map_err(|e| format!("sftp: handshake: {e}"))?;
-            *sftp_guard = Some(session);
+    async fn note_if_lost(&self, session_id: &str, err: &str) {
+        if !is_transport_lost(err) {
+            return;
         }
-        drop(sftp_guard);
-        Ok(sftp)
+        let _ = self.close(session_id).await;
+        self.events.emit(json!({
+            "type": "ssh.session.state",
+            "sessionId": session_id,
+            "state": "lost",
+            "message": err,
+        }));
     }
+
+    async fn ensure_sftp(&self, session_id: &str) -> Result<Arc<Mutex<Option<SftpSession>>>, String> {
+        let result: Result<Arc<Mutex<Option<SftpSession>>>, String> = async {
+            let handle = self.handle_ref(session_id).await?;
+            let sftp = self.sftp_ref(session_id).await?;
+            let mut sftp_guard = sftp.lock().await;
+            if sftp_guard.is_none() {
+                let handle = handle.lock().await;
+                let channel = handle
+                    .channel_open_session()
+                    .await
+                    .map_err(|e| format!("sftp: open channel: {e}"))?;
+                channel
+                    .request_subsystem(true, "sftp")
+                    .await
+                    .map_err(|e| format!("sftp: subsystem: {e}"))?;
+                let session = SftpSession::new(channel.into_stream())
+                    .await
+                    .map_err(|e| format!("sftp: handshake: {e}"))?;
+                *sftp_guard = Some(session);
+            }
+            drop(sftp_guard);
+            Ok(sftp)
+        }
+        .await;
+        if let Err(ref e) = result {
+            self.note_if_lost(session_id, e).await;
+        }
+        result
+    }
+}
+
+fn is_transport_lost(err: &str) -> bool {
+    let m = err.to_ascii_lowercase();
+    if m.is_empty() || m.contains("session not found") || m.contains("session busy") {
+        return false;
+    }
+    m.contains("broken pipe")
+        || m.contains("connection reset")
+        || m.contains("connection refused")
+        || m.contains("unexpected eof")
+        || m.contains("connection lost")
+        || m.contains("disconnect")
+        || m.contains("channel closed")
+        || m.contains("session closed")
+        || m.contains("connection aborted")
 }
 
 async fn remove_dir_recursive(client: &SftpSession, path: &str) -> Result<(), String> {

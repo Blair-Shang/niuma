@@ -3,8 +3,8 @@ package eventpub
 
 import (
 	"context"
+
 	"niuma/pkg/serviceipc/event"
-	"strings"
 )
 
 type Async struct {
@@ -27,7 +27,7 @@ func (a *Async) Emit(e map[string]any) {
 	}
 	t, _ := e["type"].(string)
 	// 高频进度事件可丢弃，避免阻塞；done 等关键事件走阻塞投递。
-	if strings.HasPrefix(t, "dameng.query.progress") || strings.HasPrefix(t, "dameng.io.progress") {
+	if event.IsProgressType(t) {
 		select {
 		case a.ch <- e:
 		default:

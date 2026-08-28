@@ -5,6 +5,11 @@ import (
 	"path/filepath"
 )
 
+// Dir 返回当前落盘目录（与 slog / observe.jsonl / crashes 同一会话目录）。
+func Dir() string {
+	return resolveLogDir()
+}
+
 // resolveLogDir 返回落盘目录：NIUMMA_LOG_DIR > NIUMMA_LOG_ROOT > 仓库根 logs/。
 func resolveLogDir() string {
 	if dir := os.Getenv("NIUMMA_LOG_DIR"); dir != "" {

@@ -4,6 +4,8 @@
 
 mod resolve;
 mod rotate;
+mod crash;
+mod observe;
 
 use std::io;
 use std::sync::Arc;
@@ -14,6 +16,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 pub use rotate::MAX_FILE_BYTES;
+pub use observe::observe_ipc;
 
 /// InitError 表示日志初始化失败。
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +29,7 @@ pub enum InitError {
 ///
 /// 无法解析 logDir 时回退 stderr（便于纯终端调试）。
 pub fn init(service_name: &str) -> Result<(), InitError> {
+    observe::set_service_name(service_name);
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     if let Some(dir) = resolve::resolve_log_dir() {
@@ -48,6 +52,7 @@ pub fn init(service_name: &str) -> Result<(), InitError> {
             .with(file_layer)
             .init();
         tracing::info!(service = service_name, "logging initialized");
+        crash::install_crash_dump(service_name);
         return Ok(());
     }
 
@@ -56,5 +61,6 @@ pub fn init(service_name: &str) -> Result<(), InitError> {
         .with(tracing_subscriber::fmt::layer())
         .init();
     tracing::warn!(service = service_name, "file logging unavailable, using stderr");
+    crash::install_crash_dump(service_name);
     Ok(())
 }

@@ -1,0 +1,1 @@
+{"v":1,"id":"req-3","ok":false,"error":"mysql: server is MariaDB; use mariadb connection kind instead","errorCode":"engine_mismatch","traceId":"req-3","result":""}

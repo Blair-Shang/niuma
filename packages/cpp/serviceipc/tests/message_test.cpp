@@ -1,6 +1,9 @@
 #include <niuma/serviceipc/message.hpp>
 
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <string>
 
 static int failures = 0;
 
@@ -12,17 +15,44 @@ static int failures = 0;
     }                                                                        \
   } while (0)
 
+#ifndef NIUMA_IPC_GOLDEN_DIR
+#define NIUMA_IPC_GOLDEN_DIR ""
+#endif
+
+static std::string ReadFile(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    std::cerr << "FAIL: open " << path << "\n";
+    ++failures;
+    return {};
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  std::string s = ss.str();
+  while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
+    s.pop_back();
+  }
+  return s;
+}
+
+static std::string Golden(const char* name) {
+  return std::string(NIUMA_IPC_GOLDEN_DIR) + "/" + name;
+}
+
 int main() {
   using namespace niuma::serviceipc;
-  const auto ok = MakeOkResponse("1", R"({"closed":true})");
-  EXPECT(ok.find(R"("ok":true)") != std::string::npos);
-  EXPECT(ok.find(R"("id":"1")") != std::string::npos);
-  // result 字段为转义后的 JSON 字符串
-  EXPECT(ok.find(R"({\"closed\":true})") != std::string::npos);
+  const auto ok = MakeOkResponse("req-1", R"({"closed":true})");
+  EXPECT(ok == ReadFile(Golden("ok-v1.json")));
 
-  const auto fail = MakeFailResponse("2", R"(boom "x")");
-  EXPECT(fail.find(R"("ok":false)") != std::string::npos);
-  EXPECT(fail.find("boom") != std::string::npos);
+  const auto fail_nf = MakeFailResponse("req-2", "method not found: foo");
+  EXPECT(fail_nf == ReadFile(Golden("fail-method_not_found-v1.json")));
+
+  const auto fail_eng = MakeFailResponse(
+      "req-3", "mysql: server is MariaDB; use mariadb connection kind instead");
+  EXPECT(fail_eng == ReadFile(Golden("fail-engine_mismatch-v1.json")));
+  EXPECT(InferErrorCode("use the matching connection kind") == "engine_mismatch");
+  EXPECT(InferErrorCode("i/o timeout") == "timeout");
+  EXPECT(InferErrorCode("read tcp: connection reset by peer") == "lost");
 
   if (failures != 0) {
     return 1;

@@ -4,6 +4,13 @@ project(NiuMaShell VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# CEF 官方 Windows 发行包使用静态 CRT（Release /MT、Debug /MTd）。
+# 必须在 add_executable / add_subdirectory(logutil) 之前设置，否则 logutil 默认 /MD，
+# 会与 libcpmt 多重定义（LNK2005 msvcprt vs libcpmt，LNK1169）。
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 add_compile_definitions(
   NIUMMA_RESOURCES_DIR="resources"
   NIUMMA_APP_SCHEME="app"
@@ -79,6 +86,12 @@ target_include_directories(niuma PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/resources
 )
 
+set(NIUMA_CPP_LOGUTIL "${CMAKE_CURRENT_SOURCE_DIR}/../packages/cpp/logutil")
+if(EXISTS "${NIUMA_CPP_LOGUTIL}/CMakeLists.txt")
+  add_subdirectory("${NIUMA_CPP_LOGUTIL}" "${CMAKE_BINARY_DIR}/niuma_logutil")
+  target_link_libraries(niuma PRIVATE niuma::logutil)
+endif()
+
 set(NIUMMA_WITH_CEF 0)
 
 if(CEF_ROOT AND EXISTS "${CEF_ROOT}/CMakeLists.txt")
@@ -98,6 +111,11 @@ if(CEF_ROOT AND EXISTS "${CEF_ROOT}/CMakeLists.txt")
 
   SET_CEF_TARGET_OUT_DIR()
   SET_EXECUTABLE_TARGET_PROPERTIES(niuma)
+  # logutil 在 CEF 之前已 add_subdirectory；显式对齐 CRT，避免增量缓存仍是 /MD。
+  if(MSVC AND TARGET niuma_logutil)
+    set_property(TARGET niuma_logutil PROPERTY
+      MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
   if(APPLE)
     add_custom_command(TARGET niuma POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_directory

@@ -5,9 +5,17 @@
 
 namespace niuma {
 
-/// 应用 IPC 回调：ok 为成功标志，data 为业务结果 JSON 字符串，err 为失败原因。
-using PlatformCallback =
-    std::function<void(bool ok, const std::string& data, const std::string& err)>;
+/// 一次应用 IPC 往返结果（壳层不解析业务 JSON，只搬运信封字段）。
+struct PlatformInvokeResult {
+  bool ok = false;
+  std::string data;
+  std::string error;
+  std::string error_code;
+  std::string trace_id;
+};
+
+/// 应用 IPC 回调：在 CEF UI 线程上被调用。
+using PlatformCallback = std::function<void(const PlatformInvokeResult&)>;
 
 /** Platform 反向事件回调：参数为完整事件 JSON 字符串。 */
 using PlatformEventCallback = std::function<void(const std::string& event_json)>;
@@ -15,12 +23,14 @@ using PlatformEventCallback = std::function<void(const std::string& event_json)>
 /**
  * @brief ② 应用 IPC：Shell → Platform Core 的透传客户端（不解析业务、不持凭据）。
  *
- * 过渡期传输为 Windows 命名管道 `\\.\pipe\niuma.platform`，分帧为
- * 「4 字节小端长度前缀 + UTF-8 JSON」；未来升级为 gRPC。壳层只做字节搬运：
+ * 传输为 Windows 命名管道 `\\.\pipe\niuma.platform`（其他平台 UDS），分帧为
+ * 「4 字节小端长度前缀 + UTF-8 JSON」。壳层只做字节搬运：
  * 把 Web 的原始请求 JSON 原样发给 Platform，再把响应回传，不落盘、不鉴权。
  *
  * @note 每次 `Invoke` 在独立工作线程上做阻塞管道 IO，绝不阻塞 CEF UI 线程；
  *       结果经 `CefPostTask(TID_UI, ...)` 回到 UI 线程后再触发回调。
+ *       成功往返后连接放回空闲池（最多 8 条、闲置 30s）；一连接同时只跑一个请求。
+ *       仅当从池取出的连接写出失败时换新连接重发；写出成功后读失败不重发。
  */
 class PlatformClient {
  public:
@@ -33,16 +43,14 @@ class PlatformClient {
    * @param params_json Web 发来的**完整原始请求 JSON**（含 method/params/id），
    *                    原样成帧发送给 Platform。
    * @param callback   异步结果回调；成功时 ok=true 且 data 为结果 JSON，失败时
-   *                   ok=false 且 err 含原因。**在 CEF UI 线程上被调用**。
+   *                   ok=false 且 error 为人可读原因（另含 error_code / trace_id）。
+   *                   **在 CEF UI 线程上被调用**。
    */
   void Invoke(const std::string& service_id, const std::string& action,
               const std::string& params_json, PlatformCallback callback);
 
   /**
-   * @brief 关闭所有客户端资源（当前为短连接，无常驻连接需释放）。
-   *
-   * @note 每次 Invoke 使用一次性连接并 RAII 关闭句柄，故此处为空实现；保留接口
-   *       以便未来 gRPC 长连接池的统一释放。
+   * @brief 关闭空闲连接池、事件监听与全部流会话。
    */
   void ShutdownAll();
 

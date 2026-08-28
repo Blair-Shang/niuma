@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * 单一版本源：读取根 package.json，生成 build/version.json，
- * 同步 web / 同级 niuma-ui / ssh-service Cargo.toml 版本字段。
+ * 同步 web 与 ssh-service Cargo.toml 版本字段。
+ * niuma-ui 为独立仓与独立 SemVer，禁止改写其 package.json。
  */
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -31,6 +32,44 @@ function getGitSha() {
   }
 }
 
+function getCommitCount() {
+  try {
+    const raw = execSync('git rev-list --count HEAD', {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    const n = Number.parseInt(raw, 10)
+    if (!Number.isFinite(n) || n < 0) return 0
+    return Math.min(n, 65535)
+  } catch {
+    return 0
+  }
+}
+
+function assertSemver(version) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`package.json version is not semver (x.y.z): ${version}`)
+  }
+}
+
+function assertReleaseTag(version) {
+  const ref = process.env.GITHUB_REF || ''
+  if (!ref.startsWith('refs/tags/')) return
+  const tag = process.env.GITHUB_REF_NAME || ref.slice('refs/tags/'.length)
+  const expected = tag.startsWith('v') ? tag.slice(1) : tag
+  if (expected !== version) {
+    throw new Error(`git tag ${tag} must match package.json version ${version}`)
+  }
+}
+
+function publisherOf(pkg) {
+  const author = pkg.author
+  if (typeof author === 'string' && author.trim()) return author.trim()
+  if (author && typeof author === 'object' && author.name) return String(author.name)
+  return 'NiuMa'
+}
+
 function syncPackageVersion(relPath, version) {
   const abs = join(repoRoot, relPath)
   if (!existsSync(abs)) return
@@ -53,14 +92,22 @@ function syncCargoVersion(version) {
 
 const rootPkg = readJson(join(repoRoot, 'package.json'))
 const version = String(rootPkg.version || '1.0.0')
+assertSemver(version)
+assertReleaseTag(version)
 const buildId = getGitSha()
+const buildNumber = getCommitCount()
 const buildDate = new Date().toISOString()
+const channel = String(process.env.NIUMA_CHANNEL || 'stable').trim() || 'stable'
 
 const info = {
   name: rootPkg.name || 'niuma',
   version,
+  channel,
   buildId,
+  buildNumber,
   buildDate,
+  publisher: publisherOf(rootPkg),
+  homepage: String(rootPkg.homepage || 'https://www.niuma007.com'),
   description: rootPkg.description || '',
 }
 
@@ -68,8 +115,6 @@ mkdirSync(join(repoRoot, 'build'), { recursive: true })
 writeJson(join(repoRoot, 'build/version.json'), info)
 
 syncPackageVersion('web/package.json', version)
-// @niuma/ui 已迁至同级仓库 niuma-ui；存在时同步版本字段便于联调对齐
-syncPackageVersion('../niuma-ui/package.json', version)
 syncCargoVersion(version)
 
 process.stdout.write(`${JSON.stringify(info)}\n`)

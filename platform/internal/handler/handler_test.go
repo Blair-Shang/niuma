@@ -94,6 +94,9 @@ func TestUnknownMethod(t *testing.T) {
 	if resp.OK || resp.Error != "method not found: platform.settings.delete" {
 		t.Fatalf("unknown method: ok=%v err=%q", resp.OK, resp.Error)
 	}
+	if resp.V != 1 || resp.ErrorCode != "method_not_found" || resp.TraceID != "req-1" {
+		t.Fatalf("envelope: v=%d code=%q trace=%q", resp.V, resp.ErrorCode, resp.TraceID)
+	}
 }
 
 // TestResultIsJSONEncodedString 校验线路上 result 被再编码为字符串，

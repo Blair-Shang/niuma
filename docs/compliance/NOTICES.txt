@@ -17,8 +17,8 @@ charge for commercial distribution. See: https://jrsoftware.org/files/is/license
 Open Source Dependencies
 ------------------------
 JavaScript, Go, and Rust dependencies are managed via pnpm, go modules, and
-Cargo respectively. Source code for NiuMa application components is available
-under the project repository license.
+Cargo respectively. NiuMa application code is licensed under the End User
+License Agreement shipped as licenses/EULA.zh-CN.txt and licenses/EULA.en-US.txt.
 
 Oracle Instant Client (optional, not bundled by default)
 --------------------------------------------------------

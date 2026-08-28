@@ -2,6 +2,8 @@
 
 #include "util/runtime_paths.h"
 
+#include <niuma/logutil/logutil.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -194,6 +196,7 @@ void InitSessionLog() {
 #else
   setenv("NIUMMA_LOG_DIR", g_session_log_dir.c_str(), 1);
 #endif
+  niuma::logutil::InstallCrashDump("niuma-shell");
   AppendShellLog("session log initialized");
 }
 

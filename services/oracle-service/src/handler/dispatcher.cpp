@@ -25,6 +25,8 @@
 
 #include "util/connection_error.hpp"
 
+#include <niuma/serviceipc/message.hpp>
+
 namespace niuma::oracle::handler {
 namespace {
 
@@ -32,15 +34,12 @@ constexpr auto kJsonReplace = nlohmann::json::error_handler_t::replace;
 
 std::string Fail(const std::string& id, std::string err) {
   err = util::EnsureUtf8(std::move(err));
-  nlohmann::json j{{"id", id}, {"ok", false}, {"error", err}, {"result", ""}};
-  return j.dump(-1, ' ', false, kJsonReplace);
+  return niuma::serviceipc::MakeFailResponse(id, err);
 }
 
 std::string Ok(const std::string& id, const nlohmann::json& result) {
-  nlohmann::json j{{"id", id},
-                   {"ok", true},
-                   {"result", result.dump(-1, ' ', false, kJsonReplace)}};
-  return j.dump(-1, ' ', false, kJsonReplace);
+  return niuma::serviceipc::MakeOkResponse(
+      id, result.dump(-1, ' ', false, kJsonReplace));
 }
 
 /** 连接断开时关闭 session，并在错误文案中提示重连。 */

@@ -29,6 +29,9 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 			tunnelStop()
 		}
 		logOpError(MethodSessionOpen, perr, "host", params.HostAddress, "port", params.PortNumber)
+		if errors.Is(perr, dialect.ErrMariaDBRejected) {
+			return errorEngineMismatch(req.ID, perr)
+		}
 		return errorResponse(req.ID, perr.Error())
 	}
 	sessionID, err := d.ids.NextString()

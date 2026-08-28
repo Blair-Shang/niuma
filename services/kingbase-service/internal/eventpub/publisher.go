@@ -44,10 +44,8 @@ func (a *Async) Emit(ev map[string]any) {
 }
 
 func isDroppable(typ string) bool {
-	return strings.HasPrefix(typ, "kingbase.debug.paused") ||
-		strings.HasPrefix(typ, "kingbase.query.progress") ||
-		strings.HasPrefix(typ, "kingbase.io.progress") ||
-		strings.HasPrefix(typ, "kingbase.tools.progress")
+	return event.IsProgressType(typ) ||
+		strings.HasPrefix(typ, "kingbase.debug.paused")
 }
 
 func (a *Async) loop() {

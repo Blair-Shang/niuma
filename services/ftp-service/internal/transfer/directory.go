@@ -223,12 +223,14 @@ func isRemoteDirExists(err error) bool {
 		strings.Contains(msg, "521")
 }
 
-func (m *Manager) uploadDir(ctx context.Context, conn *ftp.ServerConn, t *task) error {
+func (m *Manager) uploadDir(ctx context.Context, lease *ConnLease, t *task) error {
 	files, total, err := collectLocalFiles(t.LocalPath)
 	if err != nil {
 		return fmt.Errorf("scan local dir: %w", err)
 	}
-	if err := mkdirRemote(conn, t.RemotePath); err != nil {
+	if err := retryVoid(ctx, lease, func() error {
+		return mkdirRemote(lease.Conn, t.RemotePath)
+	}); err != nil {
 		return err
 	}
 	m.setTotal(t, total)
@@ -241,10 +243,14 @@ func (m *Manager) uploadDir(ctx context.Context, conn *ftp.ServerConn, t *task) 
 		default:
 		}
 		remotePath := remotePathJoin(t.RemotePath, file.rel)
-		if err := ensureRemoteDirUnderBase(conn, t.RemotePath, path.Dir(remotePath)); err != nil {
+		if err := retryVoid(ctx, lease, func() error {
+			return ensureRemoteDirUnderBase(lease.Conn, t.RemotePath, path.Dir(remotePath))
+		}); err != nil {
 			return err
 		}
-		n, err := m.uploadFile(ctx, conn, t, file.local, remotePath, transferred, file.size)
+		n, err := retryOnConnLost(ctx, lease, func() (int64, error) {
+			return m.uploadFile(ctx, lease.Conn, t, file.local, remotePath, transferred, file.size)
+		})
 		if err != nil {
 			return err
 		}
@@ -254,9 +260,14 @@ func (m *Manager) uploadDir(ctx context.Context, conn *ftp.ServerConn, t *task) 
 	return nil
 }
 
-func (m *Manager) downloadDir(ctx context.Context, conn *ftp.ServerConn, t *task) error {
-	files, total, err := collectRemoteFiles(conn, t.RemotePath)
-	if err != nil {
+func (m *Manager) downloadDir(ctx context.Context, lease *ConnLease, t *task) error {
+	var files []remoteFile
+	var total int64
+	if err := retryVoid(ctx, lease, func() error {
+		var listErr error
+		files, total, listErr = collectRemoteFiles(lease.Conn, t.RemotePath)
+		return listErr
+	}); err != nil {
 		return fmt.Errorf("scan remote dir: %w", err)
 	}
 	m.setTotal(t, total)
@@ -272,7 +283,9 @@ func (m *Manager) downloadDir(ctx context.Context, conn *ftp.ServerConn, t *task
 		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 			return fmt.Errorf("mkdir local: %w", err)
 		}
-		n, err := m.downloadFile(ctx, conn, t, file.remote, localPath, transferred, file.size)
+		n, err := retryOnConnLost(ctx, lease, func() (int64, error) {
+			return m.downloadFile(ctx, lease.Conn, t, file.remote, localPath, transferred, file.size)
+		})
 		if err != nil {
 			return err
 		}

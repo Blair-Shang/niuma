@@ -11,10 +11,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"niuma/platform/internal/appupdate"
-	"niuma/platform/internal/idgen"
+	"niuma/pkg/serviceipc/envelope"
 	"niuma/platform/internal/ai"
+	"niuma/platform/internal/appupdate"
 	"niuma/platform/internal/components"
+	"niuma/platform/internal/idgen"
 	"niuma/platform/internal/store"
 )
 
@@ -120,28 +121,22 @@ const (
 	MethodAISkillInstallPack = "platform.ai.skill.installPack"
 	// MethodAISkillExportPack 导出 Skill 包为 zip（本机「下载」）。
 	MethodAISkillExportPack = "platform.ai.skill.exportPack"
+	// MethodDiagTrace 按 traceId 检索本机 observe.jsonl。
+	MethodDiagTrace = "platform.diag.trace"
+	// MethodDiagSummary 汇总本机 RPC 耗时与失败码。
+	MethodDiagSummary = "platform.diag.summary"
+	// MethodDiagCrashes 列出本机崩溃转储聚类。
+	MethodDiagCrashes = "platform.diag.crashes"
 )
 
 // Request 是 Shell 透传过来的原始请求（cefQuery 请求体）。
-type Request struct {
-	// Method 为完整方法名，如 platform.settings.get。
-	Method string `json:"method"`
-	// Params 为原始参数对象，按具体方法二次解析。
-	Params json.RawMessage `json:"params"`
-	// ID 为请求关联 id，原样回填到响应。
-	ID string `json:"id"`
-}
+type Request = envelope.Request
 
 // Response 是回写给 Shell 的响应帧结构。
 //
 // Result 存放业务结果对象“序列化后的 JSON 字符串”（而非对象本身），因此在
-// 线路上会被再编码一层，例如 {"result":"{\"value\":\"dark\"}"}。
-type Response struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-	Result string `json:"result"`
-}
+// 线路上会被再编码一层，例如 {"result":"{\"value\":\"dark\"}"}。另含 v / errorCode / traceId。
+type Response = envelope.Response
 
 // settingGetResult 对应 web SettingGetResult：value 为 JSON 字符串或 null。
 type settingGetResult struct {
@@ -176,10 +171,10 @@ type Deps struct {
 	IDs          idgen.Generator
 	Capabilities *CapabilityRegistry
 	FileEditor   *FileEditorCoordinator
-	Components *components.Registry
-	AppUpdate  *appupdate.Manager
-	AI         *ai.Service
-	Events     EventPublisher
+	Components   *components.Registry
+	AppUpdate    *appupdate.Manager
+	AI           *ai.Service
+	Events       EventPublisher
 }
 
 // Dispatcher 持有各处理逻辑所需的依赖并执行方法分发。
@@ -221,17 +216,19 @@ func New(deps Deps) *Dispatcher {
 func (d *Dispatcher) HandleFrame(ctx context.Context, raw []byte) []byte {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return marshalResponse(Response{
-			ID:    "",
-			OK:    false,
-			Error: fmt.Sprintf("invalid request json: %v", err),
-		})
+		return marshalResponse(envelope.Fail("", fmt.Sprintf("invalid request json: %v", err)))
 	}
-	return marshalResponse(d.dispatch(ctx, req))
+	return marshalResponse(envelope.WithRequest(req, d.dispatch(ctx, req)))
 }
 
-// dispatch 按 method 路由到具体处理逻辑并返回响应。
+// dispatch 按 method 路由并记录失败信封（id / traceId / errorCode）。
 func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
+	resp := d.dispatchMethod(ctx, req)
+	logDispatchError(req, resp)
+	return resp
+}
+
+func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 	switch req.Method {
 	case MethodSettingsGet:
 		return d.settingsGet(ctx, req)
@@ -337,6 +334,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 		return d.aiSkillInstallPack(ctx, req)
 	case MethodAISkillExportPack:
 		return d.aiSkillExportPack(ctx, req)
+	case MethodDiagTrace:
+		return d.diagTrace(ctx, req)
+	case MethodDiagSummary:
+		return d.diagSummary(ctx, req)
+	case MethodDiagCrashes:
+		return d.diagCrashes(ctx, req)
 	default:
 		if d.fileEditor != nil {
 			if resp, handled := d.fileEditor.Dispatch(ctx, req); handled {
@@ -348,11 +351,7 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 				return resp
 			}
 		}
-		return Response{
-			ID:    req.ID,
-			OK:    false,
-			Error: "method not found: " + req.Method,
-		}
+		return envelope.Fail(req.ID, "method not found: "+req.Method)
 	}
 }
 
@@ -397,23 +396,15 @@ func (d *Dispatcher) settingsSet(ctx context.Context, req Request) Response {
 
 // okResponse 把业务结果对象序列化为字符串并封装成成功响应。
 func okResponse(id string, result any) Response {
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return errorResponse(id, fmt.Sprintf("marshal result: %v", err))
-	}
-	return Response{ID: id, OK: true, Result: string(encoded)}
+	return envelope.OK(id, result)
 }
 
-// errorResponse 构造失败响应。
+// errorResponse 构造失败响应（error 仍为人可读字符串，errorCode 由信封推断）。
 func errorResponse(id, message string) Response {
-	return Response{ID: id, OK: false, Error: message}
+	return envelope.Fail(id, message)
 }
 
 // marshalResponse 序列化响应；理论上不会失败，兜底返回一个最小错误帧。
 func marshalResponse(resp Response) []byte {
-	out, err := json.Marshal(resp)
-	if err != nil {
-		return []byte(`{"ok":false,"error":"internal marshal error","result":""}`)
-	}
-	return out
+	return envelope.Marshal(resp)
 }

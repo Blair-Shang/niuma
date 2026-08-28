@@ -6,7 +6,7 @@
  * - 业务：各 `*Api` 模块
  */
 
-export { bridgeInvoke, bridgeOnEvent, isBridgeAvailable } from './client'
+export { bridgeInvoke, bridgeOnEvent, isBridgeAvailable, BridgeError, BRIDGE_PROTOCOL_VERSION } from './client'
 export { isPlatformUnavailable, withPlatformRetry } from './platform'
 export { ensureBridgeEventBus, subscribeBridgeEvent, subscribeBridgeEventByPrefix } from './event-bus'
 
@@ -16,6 +16,7 @@ export { dialogApi } from './dialog'
 export { windowApi } from './window'
 export { pluginApi } from './plugin'
 export { settingsApi } from './settings'
+export { diagApi } from './diag'
 export { componentsApi } from './components'
 export { aiApi } from './ai'
 export { connectionApi, credentialApi, ftpApi } from './ftp'

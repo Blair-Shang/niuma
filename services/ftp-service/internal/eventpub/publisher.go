@@ -31,7 +31,7 @@ func (a *Async) Emit(ev map[string]any) {
 		return
 	}
 	typ, _ := ev["type"].(string)
-	if typ == "ftp.transfer.progress" {
+	if event.IsProgressType(typ) {
 		select {
 		case a.ch <- ev:
 		default:

@@ -24,7 +24,7 @@ Web UI  ──① CEF IPC──>  Shell  ──② 应用 IPC──>  Platform /
 | CEF 多进程、窗口、`app://` 加载 Web | 模块访问裁决、数据权限 |
 | `cefQuery` 收发包、事件推送 | 凭据存储、审计落库 |
 | 按 manifest **启停**后端进程 | 插件策略、签名校验、会话管理 |
-| gRPC/Pipe **原样透传**至 Platform | SSH/DB/AI 等业务实现 |
+| Named Pipe / UDS **原样透传**至 Platform | SSH/DB/AI 等业务实现 |
 
 权限、凭据、插件注册等 **唯一裁决点在 Layer 2 Platform（Go）**。  
 参考其他桌面项目的 `core/security`、`core/plugin` **不进入 shell/**。
@@ -43,7 +43,7 @@ Web UI  ──① CEF IPC──>  Shell  ──② 应用 IPC──>  Platform /
 | 流代理 | `bridge/stream_proxy` | stream → Web 分片 + 背压 | — |
 | 资源协议 | `protocol/` | `app://niuma/*` → `resources/web/` | — |
 | 进程管家 | `core/runtime/` | manifest、启停子进程 | 不裁决权限 |
-| ② 应用 IPC | `ipc/` | gRPC client **透传** | 不读 SQLite、不见凭据 |
+| ② 应用 IPC | `ipc/` | Named Pipe / UDS 客户端 **透传** | 不读 SQLite、不见凭据 |
 
 ---
 
@@ -95,7 +95,7 @@ shell/
 │   │   └── stream_proxy.*
 │   │
 │   ├── ipc/                        # ② Shell → Platform/Services
-│   │   └── platform_client.*       # gRPC 透传（非 CEF IPC）
+│   │   └── platform_client.*       # Named Pipe / UDS 透传（非 CEF IPC）
 │   │
 │   ├── protocol/                   # app:// 静态资源
 │   └── util/
@@ -142,19 +142,19 @@ shell/
 ### 5.5 ServiceManager（`core/runtime/`）
 
 - 扫描 `services/manifests/`
-- `startup: always | on_demand`、健康检查、崩溃重启（规划）
+- `startup: always | on_demand`、健康检查；能力服务崩溃拉起由 platform-core supervisor 负责（退避 1s→30s，并广播 `*.session.state`）
 - **不**解析 YAML 里的业务字段、**不**裁决谁能调谁
 
 ### 5.6 PlatformClient（`ipc/`）
 
-- gRPC over Named Pipe / UDS
+- Named Pipe / UDS + 4 字节长度前缀 JSON（见 [03](./03-ipc-protocol.md)）
 - `Invoke` / `InvokeStream` 原样转发
 - 连接失败重试；**不**缓存凭据、**不**读 `niuma.db`
 
 ### 5.7 StreamProxy（`bridge/`）
 
-- gRPC stream 分片 → `PushEvent`
-- 背压与合并（规划）
+- 反向事件 / 长流分片 → `PushEvent`
+- 进度合并与背压在 **platform-core eventhub**（10 Hz 批量、有界队列）；壳层只搬运帧，不解析业务
 
 ### 5.8 AppSchemeHandler（`protocol/`）
 
@@ -170,7 +170,7 @@ Renderer                Browser (Shell)                    Platform
    │── cefQuery(JSON) ──────>│ message_router_handler         │
    │                         │── bridge_router.Dispatch ─────>│
    │                         │   (EnsureRunning + Invoke)     │
-   │                         │<──────── gRPC response ──────────│
+   │                         │<──────── IPC JSON 响应 ──────────│
    │<── callback Success ────│                                │
 ```
 
@@ -222,4 +222,4 @@ NiuMa/
 
 - [总体架构 — 壳层零业务](./architecture.md#31-业务边界壳层零业务)
 - [03 — IPC 协议设计](./03-ipc-protocol.md)
-- [05 — 后端服务设计](./05-backend-services.md)
+- [11 — Platform Core](./11-platform-core.md)

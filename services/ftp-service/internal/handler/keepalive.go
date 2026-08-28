@@ -42,6 +42,7 @@ func runSessionKeepalive(s *session, interval time.Duration, stop <-chan struct{
 }
 
 // noopSession 发送 NOOP；传输占用锁时跳过本轮，避免阻塞文件传输。
+// NOOP 失败视为控制连接已死，丢弃后由下次操作 ensureConnLocked 原地重拨。
 func noopSession(s *session) error {
 	if !s.mu.TryLock() {
 		return nil
@@ -50,7 +51,12 @@ func noopSession(s *session) error {
 	if s.conn == nil {
 		return nil
 	}
-	return s.conn.NoOp()
+	if err := s.conn.NoOp(); err != nil {
+		_ = s.conn.Quit()
+		s.conn = nil
+		return err
+	}
+	return nil
 }
 
 func stopSessionKeepalive(s *session) {

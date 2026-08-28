@@ -231,4 +231,58 @@ std::string JsonQuoteString(const std::string& value) {
   return out;
 }
 
+std::string InferBridgeErrorCode(const std::string& error) {
+  std::string lower;
+  lower.reserve(error.size());
+  for (unsigned char c : error) {
+    lower.push_back(static_cast<char>(std::tolower(c)));
+  }
+  auto has = [&](const char* needle) {
+    return lower.find(needle) != std::string::npos;
+  };
+  if (lower.rfind("method not found", 0) == 0) {
+    return "method_not_found";
+  }
+  if (lower.rfind("invalid request json", 0) == 0 || lower.rfind("invalid method", 0) == 0) {
+    return "invalid_request";
+  }
+  if (lower.rfind("invalid params", 0) == 0) {
+    return "invalid_params";
+  }
+  if (has("context canceled") || lower == "cancelled") {
+    return "cancelled";
+  }
+  if (has("deadline exceeded") || has("i/o timeout") || has("timeout exceeded") ||
+      has("wait timeout")) {
+    return "timeout";
+  }
+  if (has("broken pipe") || has("connection reset") || has("connection refused") ||
+      has("forcibly closed") || has("use of closed network") || has("invalid connection") ||
+      has("driver: bad connection") || has("unexpected eof") || has("connection lost") ||
+      has("wsasend") || has("wsarecv")) {
+    return "lost";
+  }
+  if (has("unavailable")) {
+    return "unavailable";
+  }
+  if (has("use mariadb connection kind") || has("use the matching connection kind")) {
+    return "engine_mismatch";
+  }
+  return "internal";
+}
+
+std::string FormatBridgeFailureJson(const std::string& error,
+                                    const std::string& error_code,
+                                    const std::string& trace_id) {
+  std::string code = error_code.empty() ? InferBridgeErrorCode(error) : error_code;
+  std::string out = R"({"v":1,"error":)";
+  out += JsonQuoteString(error);
+  out += R"(,"errorCode":)";
+  out += JsonQuoteString(code);
+  out += R"(,"traceId":)";
+  out += JsonQuoteString(trace_id);
+  out += "}";
+  return out;
+}
+
 }  // namespace niuma

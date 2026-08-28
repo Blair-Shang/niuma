@@ -7,5 +7,5 @@ mod message;
 mod server;
 
 pub use frame::{read_frame, write_frame, FrameError, MAX_FRAME_SIZE};
-pub use message::{parse_request, Request, Response};
+pub use message::{infer_error_code, parse_request, Request, Response, PROTOCOL_VERSION};
 pub use server::{serve, FrameHandler};

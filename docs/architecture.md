@@ -50,7 +50,7 @@ flowchart TB
         l3a --- l3b --- l3c
     end
 
-    L3 -->|"② gRPC / Named Pipe"| L2
+    L3 -->|"② Named Pipe / UDS"| L2
 
     subgraph L2["Layer 2 — Platform Core · platform/"]
         direction LR
@@ -60,7 +60,7 @@ flowchart TB
         l2a --- l2b --- l2c
     end
 
-    L2 -->|"② gRPC / Pipe / stdio"| L1
+    L2 -->|"② Pipe / UDS / stdio"| L1
 
     subgraph L1["Layer 1 — Capability Services · services/"]
         direction LR
@@ -107,8 +107,8 @@ flowchart LR
     end
 
     L4p <-->|"① CEF IPC"| L3p
-    L3p -->|"② gRPC / Pipe"| L2p
-    L2p -->|"② gRPC / Pipe"| L1p
+    L3p -->|"② Pipe / UDS"| L2p
+    L2p -->|"② Pipe / UDS"| L1p
 ```
 
 | 进程 | 主/子 | 承载的层 | 仓库目录 | 关键能力 |
@@ -124,7 +124,7 @@ flowchart LR
 |------|------|
 | Renderer 是宿主主进程 | **Browser** 才是主进程 |
 | Layer 3 = Renderer | Layer 3 是 C++ 代码，跑在 **Browser**；Layer 4 跑在 **Renderer** |
-| Web 可以直接 gRPC 连后端 | Web 只能走 ① → Browser 再走 ② |
+| Web 可以直接连后端管道 | Web 只能走 ① → Browser 再走 ② |
 
 ### 2.3 CEF 进程树（Chromium 内置）
 
@@ -164,19 +164,19 @@ flowchart TB
 
     subgraph APP_IPC["② 应用 IPC（自研）"]
         direction LR
-        B2["Browser 主进程"] -->|"gRPC / Named Pipe"| P[Platform Core]
-        P -->|"gRPC / Pipe"| S1[ssh-service]
-        P -->|"gRPC / Pipe"| S2[db-service]
+        B2["Browser 主进程"] -->|"Named Pipe / UDS"| P[Platform Core]
+        P -->|"Pipe / UDS"| S1[ssh-service]
+        P -->|"Pipe / UDS"| S2[db-service]
         P -->|"stdio JSON-RPC"| S3[ai-agent]
     end
 
     CEF_IPC --> APP_IPC
 ```
 
-| 层级 | 范围 | 协议 | 是否需要 proto |
-|------|------|------|----------------|
+| 层级 | 范围 | 协议 | 契约 |
+|------|------|------|------|
 | ① CEF IPC | Renderer ↔ Browser | JSON + cefQuery / PostMessage | 否 |
-| ② 应用 IPC | Browser ↔ Platform ↔ Services | gRPC over Pipe/UDS；轻量 stdio | 是（`proto/`） |
+| ② 应用 IPC | Browser ↔ Platform ↔ Services | Named Pipe / UDS + 长度前缀 JSON | [03](./03-ipc-protocol.md) |
 
 ### 2.5 典型请求链路（SSH 执行命令）
 
@@ -190,12 +190,12 @@ sequenceDiagram
 
     Web->>CEF: cefQuery ssh.exec
     CEF->>Shell: OnQuery JSON
-    Shell->>Plat: gRPC 透传（EnsureRunning 仅起进程）
+    Shell->>Plat: IPC 透传（EnsureRunning 仅起进程）
     Plat->>Plat: 模块访问 · 数据权限 · 凭据 · 审计
     Plat->>SSH: 已授权 Exec
     loop 流式输出
         SSH-->>Plat: output chunk
-        Plat-->>Shell: gRPC stream
+        Plat-->>Shell: IPC 长流
         Shell-->>CEF: PostMessage 分片
         CEF-->>Web: niuma:event
     end
@@ -231,7 +231,7 @@ flowchart TB
 | 级别 | Web UI | 后端 | 示例 |
 |------|--------|------|------|
 | L1 | 有 | 无 | 格式化、计算器 |
-| L2 | 有 | 独立进程 + gRPC | SSH、MySQL |
+| L2 | 有 | 独立进程 + JSON/Pipe | SSH、MySQL |
 | L3 | 有 | Native / 重量级进程 | Oracle、FFmpeg |
 
 ### 2.7 构建与发布包布局
@@ -297,7 +297,7 @@ flowchart LR
     end
 
     subgraph Medium["中流式"]
-        B[gRPC stream] --> C[StreamProxy] --> D[PostMessage 分片]
+        B[IPC 长流] --> C[StreamProxy] --> D[PostMessage 分片]
     end
 
     subgraph Large["超大 GB 级"]
@@ -315,7 +315,7 @@ flowchart LR
 |------|------|
 | **壳薄后端厚** | C++ 壳只负责 CEF、窗口、桥接、服务管理，**不含任何业务逻辑与权限判断** |
 | **权限在 Platform** | 数据权限、模块访问、凭据、审计等**唯一裁决点在 Layer 2** |
-| **协议先行** | 跨语言通信用 Protobuf/gRPC 契约，语言只是实现 |
+| **协议先行** | 跨语言通信用 JSON 信封 契约，语言只是实现 |
 | **两层 IPC** | CEF IPC 管 UI↔宿主；应用 IPC 管宿主↔多语言后端 |
 | **进程隔离** | 重模块独立进程，崩溃不拖垮 UI |
 | **壳层语言固定** | 壳层长期稳定用 C++；后端按模块选语言 |
@@ -362,15 +362,15 @@ flowchart LR
 | **危险操作确认** | ✅ UI 二次确认 | ❌ | ✅ 记录审计、可强制拒绝 | 执行命令 |
 | **审计日志** | 展示 | ❌ | ✅ 写入 `nm_audit_*` | 可选上报细节 |
 | **窗口 / Tab / 托盘** | App Shell 布局 | ✅ | ❌ | ❌ |
-| **cefQuery / gRPC 转发** | 发起 | ✅ **透传，不解析业务** | 处理 | 被调用 |
+| **cefQuery / IPC 转发** | 发起 | ✅ **透传，不解析业务** | 处理 | 被调用 |
 
 #### Shell 允许的「路由」vs 禁止的「鉴权」
 
 | Shell `BridgeRouter` 只做 | Shell **禁止**做 |
 |---------------------------|------------------|
-| 把 `cefQuery` JSON **原样**送到 Platform 的 gRPC 方法 | 判断用户能否访问某模块 |
+| 把 `cefQuery` JSON **原样**送到 Platform 的 IPC 方法 | 判断用户能否访问某模块 |
 | 按 manifest **启停**后端进程（`ServiceManager`） | 读 `niuma.db` 或做 SQL |
-| 把 gRPC stream **分片**推回 Web（`StreamProxy`） | 解析/缓存凭据、连接密码 |
+| 把 IPC 长流 **分片**推回 Web（`StreamProxy`） | 解析/缓存凭据、连接密码 |
 | 维护 Pipe 连接、背压、超时 | 替代 Platform 调用 ssh-service |
 
 **原则**：Web 发来的请求，Shell 默认 **全部先交 Platform**；Platform 鉴权后再决定是否、如何调 Layer 1。  
@@ -386,13 +386,13 @@ sequenceDiagram
     participant Svc as ssh-service
 
     Web->>Shell: cefQuery platform.connection.list
-    Shell->>Plat: gRPC 转发（无业务判断）
+    Shell->>Plat: IPC 转发（无业务判断）
     Plat->>Plat: 模块访问 + 数据权限过滤
     Plat-->>Shell: 已过滤的 profile 列表
     Shell-->>Web: 原样返回
 
     Web->>Shell: cefQuery ssh.exec
-    Shell->>Plat: gRPC 转发
+    Shell->>Plat: IPC 转发
     Plat->>Plat: 鉴权 · 取凭据 · 审计
     Plat->>Svc: 带授权上下文的 Exec
     Svc-->>Plat: stream
@@ -419,7 +419,7 @@ sequenceDiagram
 │  IpcClient · StreamProxy（**仅透传，无业务/权限逻辑**）        │
 └──────────────────────────┬──────────────────────────────────┘
                            │ ② 应用 IPC
-                           │    gRPC over Named Pipe / UDS
+                           │    Named Pipe / UDS + JSON 信封
 ┌──────────────────────────▼──────────────────────────────────┐
 │  Layer 2 — Platform Core（Go）                ← platform/    │
 │  数据权限 · 模块访问 · 凭据 · SQLite · 配置 · 审计 · AI      │
@@ -460,8 +460,8 @@ sequenceDiagram
 | 特性 | 说明 |
 |------|------|
 | 传输 | Named Pipe（Windows）/ Unix Domain Socket（Linux/macOS） |
-| 协议 | gRPC（核心服务）/ JSON-RPC 2.0 over stdio（轻量脚本） |
-| 契约 | `proto/` 目录 Protobuf 定义 |
+| 协议 | 长度前缀 JSON（核心服务）/ JSON-RPC over stdio（轻量脚本） |
+| 契约 | [03 — IPC 信封](./03-ipc-protocol.md) |
 | 发现 | `service.yaml` manifest + `${RUNTIME_DIR}` |
 
 **适用**：SSH 流式输出、DB 结果集、SFTP、AI token 流、服务间调用
@@ -471,7 +471,7 @@ sequenceDiagram
 | 数据量级 | 策略 |
 |----------|------|
 | < 64KB | CEF IPC 一次往返 |
-| 64KB ~ 几十 MB | gRPC stream → Browser 分片 → PostMessage |
+| 64KB ~ 几十 MB | IPC 长流 → Browser 分片 → PostMessage |
 | 几十 MB ~ GB | 共享内存 / mmap 临时文件，CEF IPC 只传句柄 |
 
 ---
@@ -485,7 +485,7 @@ shell/
 ├── core/runtime/   # manifest、子进程启停（不裁决权限）
 ├── browser/        # 主 Browser + handlers（① cefQuery）
 ├── bridge/         # 透传路由、StreamProxy
-├── ipc/            # PlatformClient（② gRPC 透传）
+├── ipc/            # PlatformClient（② IPC 透传）
 └── protocol/       # app:// 资源协议
 ```
 
@@ -497,7 +497,7 @@ shell/
 | `BridgeRouter` | 按 service 选目标，**透传** | 数据权限、模块访问裁决 |
 | `AppSchemeHandler` | `app://` 加载 `resources/web/` | — |
 | `ServiceManager` | manifest、启停进程、健康检查 | 不裁决谁能调谁 |
-| `PlatformClient` | ② gRPC / Pipe 客户端，原样转发 | SQLite、凭据 |
+| `PlatformClient` | ② Pipe / UDS 客户端，原样转发 | SQLite、凭据 |
 | `StreamProxy` | stream → Web 分片 + 背压 | — |
 
 ---
@@ -512,14 +512,14 @@ shell/
 |----|------|
 | **语言** | **Go 1.22+** |
 | **进程** | 独立常驻 `platform-core` |
-| **理由** | 业务中枢（权限、SQLite、gRPC 编排）迭代快；gRPC 生态成熟；与 C++ Shell、多语言 L1 通过 `proto/` 解耦 |
-| **与 Rust 服务** | 仅共享 Protobuf 契约，不共享业务代码；`ssh-service` 等仍可用 Rust |
+| **理由** | 业务中枢（权限、SQLite、IPC 编排）迭代快；与 C++ Shell、多语言 L1 通过 JSON 信封解耦 |
+| **与 Rust 服务** | 仅共享信封契约，不共享业务代码；`ssh-service` 等仍可用 Rust |
 
 推荐技术栈：
 
-| 能力 | 库（规划） |
-|------|------------|
-| gRPC | `google.golang.org/grpc` + `protobuf` |
+| 能力 | 库 |
+|------|----|
+| IPC | `packages/go/serviceipc`（分帧 + envelope） |
 | SQLite | `modernc.org/sqlite`（纯 Go，Windows 打包无 CGO） |
 | 迁移 | 自研或 `golang-migrate`，执行 `scripts/sql/sqlite/` |
 | Vault / 主密钥 | `VaultStore`（密文 SQLite）+ `go-keyring`（仅主密钥） |
@@ -550,8 +550,7 @@ runtime:
 ipc:
   transport: named_pipe          # named_pipe | uds | stdio
   address: "${RUNTIME_DIR}/ssh.pipe"
-  protocol: grpc
-  proto: proto/ssh.proto
+  protocol: length_prefixed_json
 lifecycle:
   startup: on_demand
   idle_timeout: 300s
@@ -654,7 +653,7 @@ NiuMa/
 ├── platform/                  # Platform Core（Go）
 ├── services/manifests/        # service.yaml
 ├── plugins/                   # 可插拔插件包
-├── proto/                     # Protobuf 契约
+├── packages/go/serviceipc/    # IPC 信封（权威）
 └── third_party/cef/           # CEF 预编译包（脚本下载）
 ```
 
@@ -691,7 +690,7 @@ pack/win-x64/
 | 阶段 | 目标 | 产出 |
 |------|------|------|
 | **P0** | C++ 壳 + CEF 窗口 + app:// 加载空 Web 页 | 可运行空壳 |
-| **P1** | Message Router + Bridge 转发 + 第一个 gRPC 后端 | SSH 或 echo 服务打通 |
+| **P1** | Message Router + Bridge 转发 + 第一个能力服务 | SSH 或 echo 服务打通 |
 | **P2** | Platform Core + 插件 manifest 加载 | 插件机制跑通 |
 | **P3** | SSH 终端 + MySQL + AI Tool Registry | MVP 可用 |
 | **P4** | 更多 DB / SFTP / 媒体 / 插件市场 | 完整平台 |

@@ -20,6 +20,8 @@ struct BridgeResponse {
   bool ok = true;
   std::string result;
   std::string error;
+  std::string error_code;
+  std::string trace_id;
 };
 
 struct BridgeEvent {

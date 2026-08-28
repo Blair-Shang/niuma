@@ -44,10 +44,8 @@ func (a *Async) Emit(ev map[string]any) {
 }
 
 func isDroppable(typ string) bool {
-	return strings.HasPrefix(typ, "vastbase.debug.paused") ||
-		strings.HasPrefix(typ, "vastbase.query.progress") ||
-		strings.HasPrefix(typ, "vastbase.io.progress") ||
-		strings.HasPrefix(typ, "vastbase.tools.progress")
+	return event.IsProgressType(typ) ||
+		strings.HasPrefix(typ, "vastbase.debug.paused")
 }
 
 func (a *Async) loop() {

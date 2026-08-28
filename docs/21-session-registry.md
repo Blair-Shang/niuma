@@ -405,13 +405,13 @@ mongodb-service / ssh-service 在 `session.close` 内会级联清理子资源；
 | Redis `scoped` by database + idle | ✅ |
 | 连接树已连接态、右键断开 | ✅ |
 
-### Phase 3 — 体验增强（待做）
+### Phase 3 — 体验增强
 
 | 项 | 内容 |
 |----|------|
-| 空闲超时用户可配置 | `platform.settings` |
-| `session.state` 事件驱动 registry | 服务端断线自动标记 `lost` |
-| Layer-1 `session.open` 幂等 | 多 Web 窗或未来 CLI 共享 |
+| 空闲超时用户可配置 | `platform.settings`（待做） |
+| `session.state` 事件驱动 registry | ✅ 进程崩溃 `sessionId:"*"` → `markKindLost`；单会话 `lost` → `markSessionLost`（不调 `session.close`） |
+| Layer-1 `session.open` 幂等 | 多 Web 窗或未来 CLI 共享（待做） |
 
 ---
 

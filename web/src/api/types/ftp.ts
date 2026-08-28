@@ -112,12 +112,15 @@ export interface FtpSessionTestResult {
 export interface FtpDirListParams {
   sessionId: string
   path: string
+  /** 可选；仅当传入 limit>0 时服务端截断并标 truncated */
+  limit?: number
 }
 
 /** `ftp.dir.list` 返回 */
 export interface FtpDirListResult {
   path: string
   entries: FtpEntry[]
+  truncated?: boolean
 }
 
 /** `ftp.dir.make` 入参 */

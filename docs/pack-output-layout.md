@@ -65,7 +65,8 @@ output/windows-x64/dir/
 └── plugins/
 ```
 
-`/usr/bin/niuma` 为启动器脚本，桌面项位于 `/usr/share/applications/niuma.desktop`。
+`/usr/bin/niuma` 为启动器脚本，桌面项位于 `/usr/share/applications/niuma.desktop`（含 `StartupWMClass`）。  
+`postinst` 将 `chrome-sandbox` 设为 `4755`（CEF 沙箱）。`.deb` 是主分发物；`Setup.run` 只是可选向导。`GPG_KEY_ID` 存在且本机有 `dpkg-sig`/`debsigs` 时给 `.deb` 签名。
 
 ## macOS `.app` 布局
 
@@ -100,6 +101,8 @@ macOS 用户数据目录：`~/Library/Application Support/NiuMa/`（运行时缓
 | 麒麟 | `pnpm release:kylin` |
 | macOS | `pnpm release:macos` |
 
+GitHub 托管流水线：推送 `v*` tag 或手动运行 **Pack and Release**（见 [scripts/README.md](../scripts/README.md) § GitHub Actions）。产物在 Actions Artifact 与 GitHub Release。
+
 ## Linux / 麒麟 GUI 安装程序
 
 `pnpm pack:linux:setup` / `pnpm pack:kylin:setup` 在 `.deb` 基础上生成自解压 **`Setup.run`**：
@@ -125,9 +128,11 @@ macOS 用户数据目录：`~/Library/Application Support/NiuMa/`（运行时缓
 
 `pnpm release:win` 在绿色目录基础上，使用 **Inno Setup 6** 生成可分发 `Setup.exe`：
 
-- 默认安装路径：`C:\Program Files\NiuMa\`
-- 控制面板可卸载
-- 中英双语安装向导
+- 默认安装路径：`C:\Program Files\NiuMa\`（向导可选「仅当前用户」）
+- 控制面板可卸载；固定 `AppId` 覆盖升级
+- 中英双语安装向导（须同意 EULA 才能继续）
+- 企业静默：`NiuMa-<ver>-x64-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
+- 有 `CODESIGN_CERT` 时签名 `niuma.exe` 与 `Setup.exe`；`REQUIRE_CODESIGN=1` 时未签名则失败
 - Inno Setup 可免费用于商业产品（见其官方许可证）
 
 中间产物：

@@ -31,7 +31,7 @@ func (a *Async) Emit(ev map[string]any) {
 		return
 	}
 	typ, _ := ev["type"].(string)
-	if typ == "mongodb.shell.output" || typ == "mongodb.tools.progress" {
+	if typ == "mongodb.shell.output" || event.IsProgressType(typ) {
 		select {
 		case a.ch <- ev:
 		default:

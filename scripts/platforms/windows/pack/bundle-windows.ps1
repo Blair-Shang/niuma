@@ -140,5 +140,11 @@ Remove-Item -Recurse -Force $Staging
 $StageComplianceScript = Join-Path $Root 'scripts\shared\package\stage-compliance.ps1'
 & $StageComplianceScript -DestDir $OutputDir -RepoRoot $Root
 
+$SignScript = Join-Path $Root 'scripts\shared\sign\sign-windows.ps1'
+$packedExe = Join-Path $OutputDir 'niuma.exe'
+if ((Test-Path $SignScript) -and (Test-Path $packedExe)) {
+    & $SignScript -FilePath $packedExe
+}
+
 Write-Step "Done: $OutputDir"
 Get-ChildItem $OutputDir | Select-Object Name, Length | Format-Table -AutoSize

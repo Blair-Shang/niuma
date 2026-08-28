@@ -36,6 +36,10 @@ void Respond(BridgeCallback callback, const BridgeRequest& req, bool ok,
   resp.ok = ok;
   resp.result = result;
   resp.error = error;
+  resp.trace_id = req.id;
+  if (!ok) {
+    resp.error_code = InferBridgeErrorCode(error);
+  }
   callback(resp);
 }
 
@@ -536,13 +540,14 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
     const std::string raw =
         ReplaceJsonMethod(req.params, req.method, platform_update_method);
     platform_client_->Invoke("platform", platform_update_method, raw,
-                             [callback, id = req.id](bool ok, const std::string& data,
-                                                     const std::string& err) {
+                             [callback, id = req.id](const PlatformInvokeResult& r) {
                                BridgeResponse resp;
                                resp.id = id;
-                               resp.ok = ok;
-                               resp.result = data;
-                               resp.error = err;
+                               resp.ok = r.ok;
+                               resp.result = r.data;
+                               resp.error = r.error;
+                               resp.error_code = r.error_code;
+                               resp.trace_id = r.trace_id.empty() ? id : r.trace_id;
                                callback(resp);
                              });
     return;
@@ -555,6 +560,8 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
     resp.id = req.id;
     resp.ok = false;
     resp.error = "invalid method";
+    resp.error_code = "invalid_request";
+    resp.trace_id = req.id;
     callback(resp);
     return;
   }
@@ -632,18 +639,21 @@ void BridgeRouter::Dispatch(const BridgeRequest& req, BridgeCallback callback) {
     resp.id = req.id;
     resp.ok = false;
     resp.error = "service unavailable: " + service_id;
+    resp.error_code = "unavailable";
+    resp.trace_id = req.id;
     callback(resp);
     return;
   }
 
   platform_client_->Invoke(service_id, action, req.params,
-                           [callback, id = req.id](bool ok, const std::string& data,
-                                                   const std::string& err) {
+                           [callback, id = req.id](const PlatformInvokeResult& r) {
                              BridgeResponse resp;
                              resp.id = id;
-                             resp.ok = ok;
-                             resp.result = data;
-                             resp.error = err;
+                             resp.ok = r.ok;
+                             resp.result = r.data;
+                             resp.error = r.error;
+                             resp.error_code = r.error_code;
+                             resp.trace_id = r.trace_id.empty() ? id : r.trace_id;
                              callback(resp);
                            });
 }

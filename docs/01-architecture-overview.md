@@ -24,7 +24,7 @@ NiuMa 是一个**全能型 AI 运维桌面平台**，目标能力包括：
 | 原则 | 说明 |
 |------|------|
 | **壳薄后端厚** | C++ 壳只负责 CEF、窗口、桥接、服务管理；不含业务逻辑 |
-| **协议先行** | 跨语言通信以 Protobuf/gRPC 契约为准，语言只是实现细节 |
+| **协议先行** | 跨语言通信以 JSON 信封为准（[03](./03-ipc-protocol.md)），语言只是实现细节 |
 | **两层 IPC** | CEF IPC 管 UI↔宿主；应用 IPC 管宿主↔多语言后端 |
 | **进程隔离** | 重模块独立进程，单模块崩溃不拖垮 UI |
 | **壳层语言固定** | 壳长期稳定用 C++；后端按模块自由选型 |
@@ -48,7 +48,7 @@ NiuMa 是一个**全能型 AI 运维桌面平台**，目标能力包括：
 │  Service Manager · IPC Client · StreamProxy（流式代理）       │
 └──────────────────────────┬──────────────────────────────────┘
                            │ ② 应用 IPC
-                           │    gRPC over Named Pipe / UDS
+                           │    Named Pipe / UDS + JSON
 ┌──────────────────────────▼──────────────────────────────────┐
 │  Layer 2 — Platform Core（Go，独立进程）                      │
 │  插件注册 · 凭据/权限 · 配置中心 · AI Orchestrator            │
@@ -102,9 +102,9 @@ NiuMa 是一个**全能型 AI 运维桌面平台**，目标能力包括：
 ```
 壳层:       C++17 + CEF Binary Distribution + CMake
 前端:       Vue 3 + TypeScript + Vite + @niuma/ui + Pinia
-Platform:   **Go**（独立进程，权限/SQLite/gRPC 中枢）
+Platform:   **Go**（独立进程，权限/SQLite/IPC 中枢）
 后端服务:   按模块 — Rust / Go / Python / C++ / Java
-契约:       Protobuf 3 + gRPC
+契约:       JSON 信封（Named Pipe / UDS；见 docs/03）
 轻量插件:   JSON-RPC 2.0 over stdio
 构建:       CMake（壳）+ pnpm（前端）+ 各语言原生构建
 打包:       安装包内嵌 CEF runtime + 各 service 二进制
@@ -119,12 +119,12 @@ Platform:   **Go**（独立进程，权限/SQLite/gRPC 中枢）
 | 微信 | NiuMa |
 |------|-------|
 | C++ 跨端逻辑层 | C++ Shell + Platform Core |
-| mmmojo（Mojo IPC + Protobuf） | 应用 IPC（gRPC + Protobuf） |
-| MessagePipe / DataPipe / SharedBuffer | gRPC stream / 共享内存 |
+| mmmojo（Mojo IPC + Protobuf） | 应用 IPC（Named Pipe / UDS + JSON 信封） |
+| MessagePipe / DataPipe / SharedBuffer | IPC 长流 / 事件管道 |
 | XPlugin 子进程 | 多语言 Capability Services |
 | 父进程 broker | Shell / Platform 路由 |
-| MMProto 契约 | `proto/` 目录 |
-| 模块 SDK 边界 | 插件 manifest + proto |
+| MMProto 契约 | JSON 信封（[03](./03-ipc-protocol.md)） |
+| 模块 SDK 边界 | 插件 manifest + IPC 信封 |
 
 核心启示：**不是统一语言，是统一协议 + IPC 总线**。
 
@@ -157,7 +157,7 @@ Platform:   **Go**（独立进程，权限/SQLite/gRPC 中枢）
 - [02 — C++ 壳层设计](./02-shell-cpp-cef.md)
 - [03 — IPC 协议设计](./03-ipc-protocol.md)
 - [04 — 插件系统设计](./04-plugin-system.md)
-- [05 — 后端服务设计](./05-backend-services.md)
+- [11 — Platform Core](./11-platform-core.md)
 - [06 — 目录结构与路线图](./06-directory-structure.md)
 - [本地数据库规范](./database-schema.md)
 - [07 — Web 总览](./07-web-overview.md)

@@ -3,7 +3,6 @@ package eventpub
 
 import (
 	"context"
-	"strings"
 
 	"niuma/pkg/serviceipc/event"
 )
@@ -43,9 +42,7 @@ func (a *Async) Emit(ev map[string]any) {
 }
 
 func isDroppable(typ string) bool {
-	return strings.HasPrefix(typ, "sqlserver.query.progress") ||
-		strings.HasPrefix(typ, "sqlserver.io.progress") ||
-		strings.HasPrefix(typ, "sqlserver.tools.progress")
+	return event.IsProgressType(typ)
 }
 
 func (a *Async) loop() {

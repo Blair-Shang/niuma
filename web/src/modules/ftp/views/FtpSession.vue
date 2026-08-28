@@ -256,12 +256,12 @@ async function enqueueTransferItems(
   }
   try {
     for (const item of items) {
-      await enqueue({
+      await withRemoteReconnect(() => enqueue({
         direction,
         localPath: item.localPath,
         remotePath: item.remotePath,
         overwrite: 'overwrite',
-      })
+      }))
     }
     if (sessionId.value) {
       await transferHub.refreshSession(sessionId.value)

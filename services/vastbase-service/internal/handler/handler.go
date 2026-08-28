@@ -4,9 +4,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 
+	"niuma/pkg/serviceipc/envelope"
+	"niuma/pkg/serviceipc/event"
 	"niuma/services/vastbase-service/internal/dataio"
 	"niuma/services/vastbase-service/internal/debug"
 	"niuma/services/vastbase-service/internal/eventpub"
@@ -26,38 +28,38 @@ const (
 	MethodQueryCancel  = "query.cancel"
 	MethodQueryExplain = "query.explain"
 
-	MethodTreeDatabases = "tree.databases"
-	MethodTreeSchemas   = "tree.schemas"
-	MethodTreeTables    = "tree.tables"
-	MethodTreeRoutines  = "tree.routines"
-	MethodTreeSequences = "tree.sequences"
+	MethodTreeDatabases      = "tree.databases"
+	MethodTreeSchemas        = "tree.schemas"
+	MethodTreeTables         = "tree.tables"
+	MethodTreeRoutines       = "tree.routines"
+	MethodTreeSequences      = "tree.sequences"
 	MethodTreeCategoryCounts = "tree.categoryCounts"
 
 	MethodCatalogSchemas = "catalog.schemas"
 	MethodCatalogTables  = "catalog.tables"
 	MethodCatalogColumns = "catalog.columns"
 
-	MethodMetaColumns       = "meta.columns"
-	MethodMetaIndexes       = "meta.indexes"
-	MethodMetaConstraints   = "meta.constraints"
-	MethodMetaDDL           = "meta.ddl"
-	MethodMetaRoutineSource = "meta.routineSource"
-	MethodMetaDependencies  = "meta.dependencies"
-	MethodMetaPrimaryKey    = "meta.primaryKey"
-	MethodMetaForeignKeys   = "meta.foreignKeys"
+	MethodMetaColumns               = "meta.columns"
+	MethodMetaIndexes               = "meta.indexes"
+	MethodMetaConstraints           = "meta.constraints"
+	MethodMetaDDL                   = "meta.ddl"
+	MethodMetaRoutineSource         = "meta.routineSource"
+	MethodMetaDependencies          = "meta.dependencies"
+	MethodMetaPrimaryKey            = "meta.primaryKey"
+	MethodMetaForeignKeys           = "meta.foreignKeys"
 	MethodMetaDatabaseCreateOptions = "meta.databaseCreateOptions"
-	MethodMetaSchemaOverview = "meta.schemaOverview"
-	MethodMetaDatabaseOverview = "meta.databaseOverview"
-	MethodMetaInstanceOverview = "meta.instanceOverview"
-	MethodMetaActivity = "meta.activity"
-	MethodMetaLocks = "meta.locks"
-	MethodMetaBackendCancel = "meta.backendCancel"
-	MethodMetaBackendTerminate = "meta.backendTerminate"
+	MethodMetaSchemaOverview        = "meta.schemaOverview"
+	MethodMetaDatabaseOverview      = "meta.databaseOverview"
+	MethodMetaInstanceOverview      = "meta.instanceOverview"
+	MethodMetaActivity              = "meta.activity"
+	MethodMetaLocks                 = "meta.locks"
+	MethodMetaBackendCancel         = "meta.backendCancel"
+	MethodMetaBackendTerminate      = "meta.backendTerminate"
 
-	MethodDDLScript  = "ddl.script"
-	MethodDDLExec    = "ddl.exec"
-	MethodDDLDesignPreview = "ddl.designPreview"
-	MethodDDLDesignApply   = "ddl.designApply"
+	MethodDDLScript             = "ddl.script"
+	MethodDDLExec               = "ddl.exec"
+	MethodDDLDesignPreview      = "ddl.designPreview"
+	MethodDDLDesignApply        = "ddl.designApply"
 	MethodDDLCreateTablePreview = "ddl.createTablePreview"
 	MethodDDLCreateTableApply   = "ddl.createTableApply"
 
@@ -93,19 +95,10 @@ const (
 )
 
 // Request 是能力服务请求信封。
-type Request struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	ID     string          `json:"id"`
-}
+type Request = envelope.Request
 
 // Response 是能力服务响应信封。
-type Response struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-	Result string `json:"result"`
-}
+type Response = envelope.Response
 
 type sessionIDParams struct {
 	SessionID string `json:"sessionId"`
@@ -143,20 +136,27 @@ func New(ids idgen.Generator, events *eventpub.Async) *Dispatcher {
 func (d *Dispatcher) HandleFrame(ctx context.Context, raw []byte) []byte {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return marshalResponse(Response{
-			OK:    false,
-			Error: fmt.Sprintf("invalid request json: %v", err),
-		})
+		return marshalResponse(envelope.Fail("", fmt.Sprintf("invalid request json: %v", err)))
 	}
-	return marshalResponse(d.dispatch(ctx, req))
+	return marshalResponse(envelope.WithRequest(req, d.dispatch(ctx, req)))
 }
 
 func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 	resp := d.dispatchMethod(ctx, req)
-	if !resp.OK && strings.TrimSpace(resp.Error) != "" {
-		logOpError(req.Method, fmt.Errorf("%s", resp.Error), "id", req.ID)
-	}
+	d.noteIfLostFrom(req, resp)
+	logDispatchError(req, resp)
 	return resp
+}
+
+func (d *Dispatcher) noteIfLostFrom(req Request, resp Response) {
+	if resp.OK {
+		return
+	}
+	var emit func(map[string]any)
+	if d.events != nil {
+		emit = d.events.Emit
+	}
+	event.NoteLost(emit, "vastbase", event.SessionIDFromParams(req.Params), errors.New(resp.Error), d.sessions.Close)
 }
 
 func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
@@ -293,21 +293,13 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 }
 
 func okResponse(id string, result any) Response {
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return errorResponse(id, fmt.Sprintf("marshal result: %v", err))
-	}
-	return Response{ID: id, OK: true, Result: string(encoded)}
+	return envelope.OK(id, result)
 }
 
 func errorResponse(id, message string) Response {
-	return Response{ID: id, OK: false, Error: message}
+	return envelope.Fail(id, message)
 }
 
 func marshalResponse(resp Response) []byte {
-	out, err := json.Marshal(resp)
-	if err != nil {
-		return []byte(`{"ok":false,"error":"internal marshal error","result":""}`)
-	}
-	return out
+	return envelope.Marshal(resp)
 }

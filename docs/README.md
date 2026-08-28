@@ -11,12 +11,14 @@
 | [architecture.md](./architecture.md) | **总架构文档**（含 §2 整体架构图 Mermaid） |
 | [01-architecture-overview.md](./01-architecture-overview.md) | 架构速览 |
 | [02-shell-cpp-cef.md](./02-shell-cpp-cef.md) | C++ 壳层设计（CEF 封装、模块划分） |
+| [03-ipc-protocol.md](./03-ipc-protocol.md) | **应用 IPC 信封（v / errorCode / traceId；Named Pipe / UDS，非 TCP 端口）** |
 | [04-plugin-system.md](./04-plugin-system.md) | 可插拔插件模型、manifest 规范 |
 | [06-directory-structure.md](./06-directory-structure.md) | 仓库目录与 extensions/、plugins/ 规划 |
 | [07-web-overview.md](./07-web-overview.md) | Web 层总览：Vue 3、Pinia、技术栈 |
 | [08-web-design-system.md](./08-web-design-system.md) | UI 视觉与组件规范（**不含布局**） |
 | [09-web-app-shell.md](./09-web-app-shell.md) | App Shell 布局（**不含视觉细节**） |
 | [10-web-extension-system.md](./10-web-extension-system.md) | **Web 扩展 Registry、Contribution、API** |
+| [11-platform-core.md](./11-platform-core.md) | **Platform Core（Go；Named Pipe / UDS + JSON，非 gRPC）** |
 | [12-ftp-module.md](./12-ftp-module.md) | FTP 管理模块（能力服务 + Web 模块） |
 | [15-file-editor-window.md](./15-file-editor-window.md) | **文件工作台（多 Tab 查看/编辑窗口，全模块复用）** |
 | [16-ssh-sftp-module.md](./16-ssh-sftp-module.md) | SSH / SFTP 管理模块（能力服务 + Web 模块） |
@@ -35,6 +37,7 @@
 | [32-sqlserver-module.md](./32-sqlserver-module.md) | **SQL Server 管理模块（Go + go-mssqldb；后端 P0 session/query + LSP；Web P0 Query/`GO`/LSP；tree 待 P1）** |
 | [33-desktop-app-update.md](./33-desktop-app-update.md) | **桌面端应用内更新（cloud/admin 发布 + 官网/桌面共用 API + 应用内下载 Setup）** |
 | [34-postgresql-module.md](./34-postgresql-module.md) | **PostgreSQL 管理模块（Go + pgx/v5；独立 kind；后端 P0–P4 + LSP；Web 待注册）** |
+| [35-desktop-observability.md](./35-desktop-observability.md) | **桌面本机可观测（observe.jsonl + platform.diag.*，无 APM）** |
 | [20-tool-components.md](./20-tool-components.md) | **工具组件管理（设置页外部 CLI 检测与路径配置）** |
 | [21-session-registry.md](./21-session-registry.md) | **Tab 四层架构 + Session Registry**（时序速查 §0.5、开发者约定 §0.6） |
 | [17-script-platform-layout.md](./17-script-platform-layout.md) | 脚本平台分层与重构方案 |
@@ -49,7 +52,7 @@ Web UI (Vue 3)
     │ ① CEF IPC
     ▼
 C++ Shell (CEF 宿主)
-    │ ② 应用 IPC (gRPC / Named Pipe)
+    │ ② 应用 IPC (Named Pipe / UDS + JSON)
     ▼
 Platform Core ──→ 多语言 Capability Services
 ```
@@ -63,11 +66,11 @@ Platform Core ──→ 多语言 Capability Services
 | 桌面壳 | 自封装 CEF（非 Electron） | UI 一致、无 Node 包袱、企业主流 |
 | 壳层语言 | **C++** | CEF 原生 API、微信/钉钉同款、长期稳定 |
 | UI 层 | Vue 3 + `@niuma/ui`（自封装 Rs* 组件库） | 固定 Chromium 渲染，一套 token 走全平台 |
-| 壳 ↔ 后端 | 应用 IPC（Named Pipe / UDS + gRPC） | 多语言解耦、流式、本机安全 |
-| UI ↔ 壳 | CEF IPC（cefQuery / PostMessage） | Chromium 内置，无需 proto |
-| 跨语言契约 | Protobuf + `proto/` | 协议先行，语言只是实现 |
-| Platform Core | **Go** | 权限/SQLite/gRPC 中枢；迭代快、编排型逻辑为主 |
-| 后端服务（L1） | 按模块选择 | Rust/Go/Python/C++/Java；与 Platform 仅通过 `proto/` 对齐 |
+| 壳 ↔ 后端 | 应用 IPC（Named Pipe / UDS + JSON 信封） | 多语言解耦、流式、本机安全；不定 TCP 端口 |
+| UI ↔ 壳 | CEF IPC（cefQuery / PostMessage） | Chromium 内置 |
+| 跨语言契约 | JSON 信封（[03](./03-ipc-protocol.md)） | Go 权威实现；C++ / Rust 对齐金样例 |
+| Platform Core | **Go** | 权限/SQLite/IPC 中枢；迭代快、编排型逻辑为主 |
+| 后端服务（L1） | 按模块选择 | Rust/Go/Python/C++/Java；与 Platform 仅通过 IPC 信封对齐 |
 | 本地存储 | **SQLite**（离线单文件） | 无软删；凭据 Vault 加密（Keychain 仅主密钥） |
 
 ---

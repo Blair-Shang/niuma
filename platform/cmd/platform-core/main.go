@@ -120,6 +120,9 @@ func run() error {
 	}
 
 	eventHub := eventhub.New()
+	if sup != nil {
+		sup.SetEventSink(eventHub.Publish)
+	}
 	if streamReg == nil {
 		streamReg, _ = streamregistry.Load(nil)
 	}

@@ -3,7 +3,6 @@ package eventpub
 
 import (
 	"context"
-	"strings"
 
 	"niuma/pkg/serviceipc/event"
 )
@@ -44,8 +43,7 @@ func (a *Async) Emit(ev map[string]any) {
 }
 
 func isDroppable(typ string) bool {
-	return strings.HasPrefix(typ, "clickhouse.query.progress") ||
-		strings.HasPrefix(typ, "clickhouse.io.progress")
+	return event.IsProgressType(typ)
 }
 
 func (a *Async) loop() {

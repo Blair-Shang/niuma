@@ -45,6 +45,11 @@ if(NIUMA_SERVICEIPC_BUILD_TESTS)
 
   add_executable(niuma-serviceipc-message-test tests/message_test.cpp)
   target_link_libraries(niuma-serviceipc-message-test PRIVATE niuma_serviceipc)
+  file(TO_CMAKE_PATH
+       "${CMAKE_CURRENT_SOURCE_DIR}/../../go/serviceipc/envelope/golden"
+       _niuma_ipc_golden_dir)
+  target_compile_definitions(niuma-serviceipc-message-test PRIVATE
+                             "NIUMA_IPC_GOLDEN_DIR=\"${_niuma_ipc_golden_dir}\"")
   if(MSVC)
     target_compile_options(niuma-serviceipc-message-test PRIVATE /utf-8)
   endif()

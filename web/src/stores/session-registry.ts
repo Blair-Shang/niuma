@@ -548,6 +548,53 @@ export const useSessionRegistry = defineStore('session-registry', () => {
     return getLeaseByProfile(profileId, kind)?.dialect ?? null
   }
 
+  /**
+   * 能力进程崩溃：清掉该协议全部 lease，不调用 session.close（对端已不在）。
+   * Tab 保留，用户可点重连。
+   *
+   * @param kind - 连接协议（与 manifest `bridge.namespace` 相同）
+   * @returns 被清理的 lease 数量
+   */
+  async function markKindLost(kind: ConnKind): Promise<number> {
+    const targets = [...leases.value.values()].filter((lease) => lease.kind === kind)
+    for (const lease of targets) {
+      for (const binding of lease.tabBindings.values()) {
+        await runTabRelease(binding)
+      }
+      lease.tabBindings.clear()
+      clearIdleTimer(lease)
+      replaceLeases((map) => {
+        map.delete(lease.key)
+      })
+    }
+    return targets.length
+  }
+
+  /**
+   * 单条能力会话意外断开：只清匹配 sessionId 的 lease，不调用 session.close。
+   * sessionId 为 `*` 时与进程崩溃相同，清掉该协议全部 lease。
+   */
+  async function markSessionLost(kind: ConnKind, sessionId: string): Promise<number> {
+    const id = sessionId.trim()
+    if (!id || id === '*') {
+      return markKindLost(kind)
+    }
+    const targets = [...leases.value.values()].filter(
+      (lease) => lease.kind === kind && lease.sessionId === id,
+    )
+    for (const lease of targets) {
+      for (const binding of lease.tabBindings.values()) {
+        await runTabRelease(binding)
+      }
+      lease.tabBindings.clear()
+      clearIdleTimer(lease)
+      replaceLeases((map) => {
+        map.delete(lease.key)
+      })
+    }
+    return targets.length
+  }
+
   return {
     /** 只读租约表（调试 / 连接树响应式） */
     leases,
@@ -563,5 +610,7 @@ export const useSessionRegistry = defineStore('session-registry', () => {
     getLeaseByProfile,
     getSessionIdForProfile,
     getDialectForProfile,
+    markKindLost,
+    markSessionLost,
   }
 })

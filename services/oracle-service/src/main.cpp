@@ -4,6 +4,7 @@
 #include <niuma/logutil/logutil.hpp>
 #include <niuma/serviceipc/server.hpp>
 
+#include <chrono>
 #include <csignal>
 #include <memory>
 
@@ -32,7 +33,16 @@ int main(int argc, char** argv) {
 
   niuma::oracle::handler::Dispatcher dispatcher;
   g_server = std::make_unique<niuma::serviceipc::Server>(
-      addr, [&dispatcher](const std::string& req) { return dispatcher.HandleFrame(req); },
+      addr,
+      [&dispatcher](const std::string& req) {
+        const auto t0 = std::chrono::steady_clock::now();
+        const std::string resp = dispatcher.HandleFrame(req);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+        niuma::logutil::ObserveIPC("oracle-service", req, resp, ms);
+        return resp;
+      },
       "oracle-service");
 
   std::signal(SIGINT, OnSignal);

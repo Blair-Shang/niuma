@@ -2,13 +2,16 @@ package eventhub
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
+
+	"niuma/pkg/serviceipc/event"
 )
 
 const progressCoalesceInterval = 100 * time.Millisecond // 10 Hz，对齐 docs/12 §7.3
 
-// progressCoalescer 对 progress 事件按 taskId 保留最新值、定时扇出；state 立即转发。
+// progressCoalescer 对 type 以 .progress 结尾的事件按键保留最新值、定时扇出；其余立即转发。
 type progressCoalescer struct {
 	hub      *Hub
 	interval time.Duration
@@ -29,18 +32,33 @@ func newProgressCoalescer(hub *Hub, interval time.Duration) *progressCoalescer {
 	}
 }
 
-func (c *progressCoalescer) handle(payload []byte) {
-	var hdr struct {
-		Type   string `json:"type"`
-		TaskID string `json:"taskId"`
+type progressHeader struct {
+	Type     string `json:"type"`
+	TaskID   string `json:"taskId"`
+	BundleID string `json:"bundleId"`
+	ToolID   string `json:"toolId"`
+}
+
+func progressKey(hdr progressHeader) string {
+	if id := strings.TrimSpace(hdr.TaskID); id != "" {
+		return hdr.Type + "\x00" + id
 	}
-	if err := json.Unmarshal(payload, &hdr); err != nil || hdr.Type != "ftp.transfer.progress" || hdr.TaskID == "" {
-		c.hub.fanOut(payload)
+	if b := strings.TrimSpace(hdr.BundleID); b != "" {
+		return hdr.Type + "\x00" + b + "\x00" + strings.TrimSpace(hdr.ToolID)
+	}
+	return hdr.Type
+}
+
+func (c *progressCoalescer) handle(payload []byte) {
+	var hdr progressHeader
+	if err := json.Unmarshal(payload, &hdr); err != nil || !event.IsProgressType(hdr.Type) {
+		c.hub.fanOut(payload, false)
 		return
 	}
 
+	key := progressKey(hdr)
 	c.mu.Lock()
-	c.latest[hdr.TaskID] = append([]byte(nil), payload...)
+	c.latest[key] = append([]byte(nil), payload...)
 	if c.timer == nil {
 		c.timer = time.AfterFunc(c.interval, c.flush)
 	}
@@ -69,5 +87,5 @@ func (c *progressCoalescer) flush() {
 	if err != nil {
 		return
 	}
-	c.hub.fanOut(batch)
+	c.hub.fanOut(batch, true)
 }

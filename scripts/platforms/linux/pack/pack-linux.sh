@@ -36,8 +36,11 @@ nm_require_cmd pnpm
 nm_require_cmd node
 [[ -n "$OUTPUT_DIR" ]] || OUTPUT_DIR="$(nm_default_output_dir "$REPO_ROOT" "linux" "$ARCH" "$FORMAT")"
 
-VERSION="$(nm_package_json_value "$REPO_ROOT" ".version")"
+nm_emit_build_info "$REPO_ROOT"
+VERSION="$(nm_build_info_value "$REPO_ROOT" ".version")"
+HOMEPAGE="$(nm_build_info_value "$REPO_ROOT" ".homepage")"
 DESCRIPTION="$(nm_package_json_value "$REPO_ROOT" ".description")"
+[[ -n "$HOMEPAGE" ]] || HOMEPAGE="https://www.niuma007.com"
 DEB_ARCH="$(nm_deb_arch "$ARCH")"
 SHELL_BIN="$(nm_shell_exe_path "$REPO_ROOT" "$PLATFORM" "$ARCH" "$CONFIGURATION")"
 SERVICES_BIN="$(nm_services_bin_dir "$REPO_ROOT" "$PLATFORM" "$ARCH")"
@@ -71,6 +74,7 @@ Section: utils
 Priority: optional
 Architecture: $DEB_ARCH
 Maintainer: $VENDOR
+Homepage: $HOMEPAGE
 Depends: libgtk-3-0, libnss3, libxss1, libasound2, libgbm1, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libatk1.0-0, libcups2
 Description: $DESCRIPTION
 EOF
@@ -103,6 +107,9 @@ if [[ -f "$SHELL_BIN" ]]; then
     --configuration "$CONFIGURATION"
   cp "$SHELL_BIN" "$PAYLOAD_ROOT/niuma"
   chmod 0755 "$PAYLOAD_ROOT/niuma"
+  if [[ -f "$PAYLOAD_ROOT/chrome-sandbox" ]]; then
+    chmod 4755 "$PAYLOAD_ROOT/chrome-sandbox"
+  fi
   if [[ -d "$SHELL_INSTALL/resources/web" ]]; then
     mkdir -p "$PAYLOAD_ROOT/resources"
     cp -R "$SHELL_INSTALL/resources/web" "$PAYLOAD_ROOT/resources/"
@@ -142,6 +149,17 @@ if command -v dpkg-deb >/dev/null 2>&1; then
   DEB_FILE="$OUTPUT_DIR/${PACKAGE_BASENAME}.deb"
   nm_log "build Debian package -> $DEB_FILE"
   dpkg-deb --build "$DEB_ROOT" "$DEB_FILE"
+  if [[ -n "${GPG_KEY_ID:-}" ]]; then
+    if command -v dpkg-sig >/dev/null 2>&1; then
+      nm_log "dpkg-sig $DEB_FILE ($GPG_KEY_ID)"
+      dpkg-sig --sign builder -k "$GPG_KEY_ID" "$DEB_FILE"
+    elif command -v debsigs >/dev/null 2>&1; then
+      nm_log "debsigs $DEB_FILE ($GPG_KEY_ID)"
+      debsigs --sign=origin -k "$GPG_KEY_ID" "$DEB_FILE"
+    else
+      nm_warn "GPG_KEY_ID set but dpkg-sig/debsigs not found; .deb left unsigned"
+    fi
+  fi
 else
   nm_warn "dpkg-deb not found; exported unpacked Debian root to $OUTPUT_DIR/$PACKAGE_BASENAME"
 fi

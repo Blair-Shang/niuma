@@ -1,3 +1,3 @@
 module niuma/pkg/logutil
 
-go 1.22
+go 1.23

@@ -1,7 +1,7 @@
 # 11 — Platform Core（Layer 2，Go）
 
 > 版本：v0.1 · 日期：2026-07-04
-> 状态：已落地 `platform.settings.*` 持久化 + 应用 IPC（命名管道过渡协议）
+> 状态：已落地 `platform.settings.*` 持久化 + 应用 IPC（Named Pipe / UDS + JSON 信封）
 
 ---
 
@@ -20,11 +20,9 @@ SQLite `nm_app_setting`，壳层不读库、不含任何业务分支。
 
 ---
 
-## 2. 传输与分帧（过渡协议）
+## 2. 传输与分帧（当前契约）
 
-> **过渡说明**：架构目标是 **gRPC over Named Pipe/UDS**，但 gRPC 通道尚未搭建。本期先用
-> 轻量自研协议打通端到端，接口与分帧稳定后再无缝替换为 gRPC。C++ 侧**只用 Win32 API**
-> （`CreateFileW`/`WriteFile`/`ReadFile`/`WaitNamedPipe`），不引入 gRPC/protobuf C++ 依赖。
+> **传输**：Windows 命名管道 / Unix Domain Socket；分帧为 **4 字节小端长度前缀 + UTF-8 JSON**（见 [03](./03-ipc-protocol.md)）。C++ 侧只用 Win32 API（`CreateFileW`/`WriteFile`/`ReadFile`/`WaitNamedPipe`），不引入 gRPC/protobuf。本机 IPC **不定 TCP 端口**。
 
 | 项 | 取值 |
 |----|------|
@@ -48,18 +46,20 @@ SQLite `nm_app_setting`，壳层不读库、不含任何业务分支。
 ### 2.2 响应帧载荷
 
 ```json
-{ "id": "req-uuid", "ok": true, "result": "{\"value\":\"[1,2,3]\"}" }
+{ "v": 1, "id": "req-uuid", "ok": true, "traceId": "req-uuid", "result": "{\"value\":\"[1,2,3]\"}" }
 ```
 
 - `ok`：布尔，成功标志。
-- `error`：失败原因字符串；成功时省略（`omitempty`）。
+- `error`：失败原因**字符串**；成功时省略（`omitempty`）。禁止改成对象。
+- `errorCode`：稳定码（如 `method_not_found`）；成功时省略。
+- `traceId`：跨进程关联；缺省等于 `id`。
 - **`result` 是「被 JSON 再编码一层的字符串」**：其内容为业务结果对象序列化后的文本。
   如上例 `result` 的字符串值即 `{"value":"[1,2,3]"}`。
 
 > **为何 result 是字符串？** 壳层没有完整 JSON 库，只有极简的 `JsonGetString`。把 result
 > 编码成字符串后，C++ 侧 `JsonGetString(resp, "result")` 可一次取出内层 JSON 文本，直接
-> 作为 `callback->Success` 的返回体交回 Web（Web 端再 `JSON.parse`）。字段顺序 id→ok→
-> error→result 亦保证标量字段先被极简解析器命中，避免被 result 内的转义内容干扰。
+> 作为 `callback->Success` 的返回体交回 Web（Web 端再 `JSON.parse`）。失败时壳把
+> `error` / `errorCode` / `traceId` 再包一层 JSON 交给 cefQuery `onFailure`（见 [03](./03-ipc-protocol.md)）。
 
 ---
 
@@ -71,6 +71,7 @@ SQLite `nm_app_setting`，壳层不读库、不含任何业务分支。
 |--------|------|--------------------------|------|
 | `platform.settings.get` | `{ key }` | `{ value: string \| null }` | 读 `nm_app_setting`；键不存在 → `value:null` |
 | `platform.settings.set` | `{ key, value }` | `{ updated: true }` | UPSERT，`updated_at = now(UTC, RFC3339)` |
+| `platform.diag.trace` / `summary` / `crashes` | 见 [35](./35-desktop-observability.md) | 本机 `observe.jsonl` / `crashes/` | 不上 APM |
 | 其他 | — | — | `ok:false, error:"method not found: <m>"` |
 
 `key` 为空一律 `ok:false, error:"key required"`。
@@ -164,34 +165,20 @@ go test ./...     # 含 internal/server 的真实命名管道 set→get 往返�
 
 ---
 
-## 8. gRPC 升级路径（后续）
+## 8. 风险 / 后续
 
-当前协议是**过渡**，升级为 gRPC 时：
-
-1. `proto/` 定义 `PlatformService`（`Invoke`/`InvokeStream`），生成 Go + C++ 桩。
-2. Go 端用 gRPC server 替换 `internal/server` 的分帧循环，`handler` 分发逻辑基本复用。
-3. C++ 端 `platform_client.cpp` 换成 gRPC C++ channel（此时才引入 gRPC 依赖），
-   `bridge_router`/`service_manager` 接口不变。
-4. 流式（SSH/DB/AI token）走 gRPC stream + `StreamProxy` 分片，替代一次性响应帧。
-
-分帧协议（`internal/protocol`）与 `platform.address` 常量届时退役。
-
----
-
-## 9. 风险 / 后续
-
-- **进程生命周期**：本期用 `TerminateProcess` 硬杀子进程（WAL 崩溃安全）；后续可加优雅
-  关闭信号与健康检查/崩溃重启。
+- **进程生命周期**：能力服务崩溃后 **立即** 广播 `{ns}.session.state{sessionId:"*",state:"lost"}` 与 `platform.service.state`，并按 1s→30s 退避自动拉起；`Shutdown` 先置停再杀进程，避免退出时误重启。硬杀仍用于 Windows 子进程（无可靠 SIGTERM）。
+- **崩溃转储**：各进程把 panic / 原生异常写到会话日志目录 `crashes/`（Go `debug.SetCrashOutput`、C++ MiniDump、Rust panic hook）。
 - **重复 spawn**：靠 `WaitNamedPipe` 探测「已在监听」来避免；壳层非正常退出遗留的孤儿
   进程会被下次会话探测复用。
 - ~~迁移副本同步~~：**已解决**——`internal/migrate/sqlite/` 由 `go generate`（`copy_migrations.go`）
   从 `scripts/sql/sqlite/` 生成，`sync_test.go` 做漂移校验，无需人工保持一致。
-- **C++ 未整体编译验证**：仅对新增 Win32 源码做了 `-fsyntax-only` 语法检查（无 CEF）；完整
-  CEF 构建未在本期执行。
+- **IPC 总线**：Go 与 C++ 壳均复用空闲 Named Pipe（取出后该连接上同时只跑一个请求；仅池连接写出失败才换新连接重发，写出成功后读失败不重发）。事件 `*.progress` 10 Hz 合并为可丢的 `platform.event.batch`，`session.state` / `transfer.state` 阻塞入队直至发出或订阅连接已死。查询分页仍走既有 `query.fetch`；`ftp.dir.list` 仅在请求带 `limit>0` 时截断并标 `truncated`。传输断开发具体 `sessionId` 的 `lost` 并带 `errorCode:lost`。不上 gRPC、不改信封 `result` 类型。
+- **C++ 未整体编译验证**：仅对新增 Win32 源码做了 `-fsyntax-only` 语法检查（无 CEF）；完整 CEF 构建未在本期执行。
 
 ---
 
-## 10. 相关文档
+## 9. 相关文档
 
 - [总体架构 — 两层 IPC / 壳层零业务](./architecture.md#24-两层-ipc)
 - [02 — C++ 壳层设计](./02-shell-cpp-cef.md)

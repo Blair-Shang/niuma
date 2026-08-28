@@ -10,6 +10,7 @@ import (
 	"net"
 	"sync"
 
+	"niuma/pkg/serviceipc/event"
 	"niuma/pkg/serviceipc/protocol"
 	"niuma/pkg/serviceipc/streamspec"
 	"niuma/platform/internal/streamregistry"
@@ -61,11 +62,14 @@ type openRequest struct {
 	ID     string          `json:"id"`
 }
 
+const streamOutQueueSize = 32
+
 type session struct {
 	spec      streamspec.Spec
 	bindValue string
 	conn      net.Conn
 	exclusive bool
+	ch        chan []byte
 }
 
 // DeliverExclusive 将事件写入匹配的独占 stream 连接；若已投递则返回 true。
@@ -74,12 +78,13 @@ func (s *Server) DeliverExclusive(payload []byte) bool {
 	sessions := append([]*session(nil), s.sessions...)
 	s.mu.Unlock()
 
+	droppable := streamPayloadDroppable(payload)
 	delivered := false
 	for _, sess := range sessions {
 		if !sess.spec.Match(payload, sess.bindValue) {
 			continue
 		}
-		if err := protocol.WriteFrame(sess.conn, payload); err != nil {
+		if !enqueueStream(sess, payload, droppable) {
 			s.removeSession(sess)
 			continue
 		}
@@ -88,6 +93,49 @@ func (s *Server) DeliverExclusive(payload []byte) bool {
 		}
 	}
 	return delivered
+}
+
+func streamPayloadDroppable(payload []byte) bool {
+	var hdr struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(payload, &hdr); err != nil {
+		return false
+	}
+	return event.IsProgressType(hdr.Type)
+}
+
+func enqueueStream(sess *session, payload []byte, droppable bool) bool {
+	if sess == nil {
+		return false
+	}
+	if sess.ch == nil {
+		return protocol.WriteFrame(sess.conn, payload) == nil
+	}
+	frame := append([]byte(nil), payload...)
+	select {
+	case sess.ch <- frame:
+		return true
+	default:
+		if droppable {
+			return true
+		}
+		return false
+	}
+}
+
+func (sess *session) writeLoop(stop <-chan struct{}) {
+	for {
+		select {
+		case <-stop:
+			return
+		case payload := <-sess.ch:
+			if err := protocol.WriteFrame(sess.conn, payload); err != nil {
+				_ = sess.conn.Close()
+				return
+			}
+		}
+	}
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
@@ -123,6 +171,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		bindValue: bind,
 		conn:      conn,
 		exclusive: spec.Exclusive,
+		ch:        make(chan []byte, streamOutQueueSize),
 	}
 	s.mu.Lock()
 	s.sessions = append(s.sessions, sess)
@@ -134,6 +183,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		"bind", bind,
 		"sessions", sessionCount,
 	)
+
+	go sess.writeLoop(ctx.Done())
 
 	for {
 		if _, err := protocol.ReadFrame(conn); err != nil {

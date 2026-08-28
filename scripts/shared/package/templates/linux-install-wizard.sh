@@ -40,6 +40,31 @@ question_gui() {
   [[ "$ans" == "y" || "$ans" == "Y" ]]
 }
 
+agree_eula() {
+  local dir
+  dir="$(cd "$(dirname "$0")" && pwd)"
+  local eula="$dir/EULA.en-US.txt"
+  case "${LANG:-}" in
+    zh*|ZH*) eula="$dir/EULA.zh-CN.txt" ;;
+  esac
+  [[ -f "$eula" ]] || eula="$dir/EULA.zh-CN.txt"
+  [[ -f "$eula" ]] || return 0
+
+  if have_gui && zenity --help 2>&1 | grep -q -- '--text-info'; then
+    zenity --text-info --title="$APP_NAME License" --filename="$eula" --width=640 --height=480 \
+      --checkbox="I have read and agree to the terms / 我已阅读并同意" || return 1
+    return 0
+  fi
+  if have_gui; then
+    question_gui "You must accept the NiuMa EULA to continue.\nSee licenses after install, or the text in this package.\n\nAgree and continue?" || return 1
+    return 0
+  fi
+  printf '\n===== EULA =====\n'
+  cat "$eula"
+  printf '\n'
+  question_gui "Agree to the EULA?"
+}
+
 [[ -f "$DEB_FILE" ]] || die_gui "Internal error: package.deb not found."
 
 if have_gui; then
@@ -47,6 +72,8 @@ if have_gui; then
 else
   printf '==> %s %s installer\n' "$APP_NAME" "$APP_VERSION"
 fi
+
+agree_eula || exit 0
 
 question_gui "Install $APP_NAME $APP_VERSION now?\n\nAdministrator privileges are required." || exit 0
 

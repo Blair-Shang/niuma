@@ -247,6 +247,113 @@ void WriteLine(Level level, std::string_view msg, const std::vector<Attr>& attrs
   std::cerr << line;
 }
 
+std::string JsonEscape(std::string_view s) {
+  std::string out;
+  out.reserve(s.size() + 8);
+  for (const unsigned char c : s) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        if (c >= 0x20) {
+          out.push_back(static_cast<char>(c));
+        }
+        break;
+    }
+  }
+  return out;
+}
+
+std::string ExtractJsonStringField(std::string_view json, std::string_view key) {
+  const std::string pat = "\"" + std::string(key) + "\":";
+  const auto found = json.find(pat);
+  if (found == std::string_view::npos) {
+    return {};
+  }
+  size_t pos = found + pat.size();
+  while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) {
+    ++pos;
+  }
+  if (pos >= json.size() || json[pos] != '"') {
+    return {};
+  }
+  ++pos;
+  std::string out;
+  for (; pos < json.size(); ++pos) {
+    if (json[pos] == '\\' && pos + 1 < json.size()) {
+      out.push_back(json[pos + 1]);
+      ++pos;
+      continue;
+    }
+    if (json[pos] == '"') {
+      break;
+    }
+    out.push_back(json[pos]);
+  }
+  return out;
+}
+
+bool ExtractJsonBoolField(std::string_view json, std::string_view key, bool def) {
+  const std::string pat = "\"" + std::string(key) + "\":";
+  const auto found = json.find(pat);
+  if (found == std::string_view::npos) {
+    return def;
+  }
+  size_t pos = found + pat.size();
+  while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) {
+    ++pos;
+  }
+  if (json.substr(pos, 4) == "true") {
+    return true;
+  }
+  if (json.substr(pos, 5) == "false") {
+    return false;
+  }
+  return def;
+}
+
+std::string FormatRfc3339Local() {
+  using clock = std::chrono::system_clock;
+  const auto now = clock::now();
+  const auto tt = clock::to_time_t(now);
+  std::tm tm{};
+#ifdef _WIN32
+  localtime_s(&tm, &tt);
+#else
+  localtime_r(&tt, &tm);
+#endif
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) %
+                  1000;
+  std::ostringstream oss;
+  oss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S") << '.' << std::setfill('0') << std::setw(3)
+      << ms.count();
+  return oss.str();
+}
+
+struct ObserveState {
+  std::mutex mu;
+  std::string dir;
+  RotatingWriter writer;
+};
+
+ObserveState& GetObserveState() {
+  static ObserveState state;
+  return state;
+}
+
 }  // namespace
 
 Attr::Attr(std::string_view k, std::string_view v) : key(k), value(v) {}
@@ -254,25 +361,34 @@ Attr::Attr(std::string_view k, const char* v) : key(k), value(v ? v : "") {}
 Attr::Attr(std::string_view k, bool v) : key(k), value(v ? "true" : "false") {}
 
 bool Init(std::string_view service_name) {
-  State& st = GetState();
-  std::lock_guard lock(st.mu);
-  st.service = std::string(service_name);
-  st.ready = true;
-  st.use_file = false;
+  const std::string name(service_name);
+  bool ok = true;
+  {
+    State& st = GetState();
+    std::lock_guard lock(st.mu);
+    st.service = name;
+    st.ready = true;
+    st.use_file = false;
 
-  const fs::path dir = ResolveLogDir();
-  if (dir.empty()) {
-    return true;
+    const fs::path dir = ResolveLogDir();
+    if (dir.empty()) {
+      ok = true;
+    } else {
+      std::error_code ec;
+      fs::create_directories(dir, ec);
+      if (ec) {
+        ok = false;
+      } else {
+        st.writer.path = dir / (st.service + ".log");
+        st.writer.max_size = kMaxFileBytes;
+        st.use_file = true;
+      }
+    }
   }
-  std::error_code ec;
-  fs::create_directories(dir, ec);
-  if (ec) {
-    return false;
+  if (ok) {
+    InstallCrashDump(name);
   }
-  st.writer.path = dir / (st.service + ".log");
-  st.writer.max_size = kMaxFileBytes;
-  st.use_file = true;
-  return true;
+  return ok;
 }
 
 void Info(std::string_view msg, std::initializer_list<Attr> attrs) {
@@ -293,6 +409,75 @@ void Warn(std::string_view msg, const std::vector<Attr>& attrs) {
 }
 void Error(std::string_view msg, const std::vector<Attr>& attrs) {
   WriteLine(Level::kError, msg, attrs);
+}
+
+void ObserveRPC(std::string_view service, std::string_view method, std::string_view id,
+                std::string_view trace_id, bool ok, std::string_view error_code,
+                std::int64_t duration_ms) {
+  const std::string method_s(method);
+  if (method_s.empty() || method_s.rfind("platform.diag.", 0) == 0) {
+    return;
+  }
+  const fs::path dir = ResolveLogDir();
+  if (dir.empty()) {
+    return;
+  }
+  std::string svc(service);
+  if (svc.empty()) {
+    svc = GetState().service;
+  }
+  if (svc.empty()) {
+    svc = "unknown";
+  }
+  std::ostringstream oss;
+  oss << "{\"ts\":\"" << JsonEscape(FormatRfc3339Local()) << "\",\"kind\":\"rpc\",\"service\":\""
+      << JsonEscape(svc) << "\",\"method\":\"" << JsonEscape(method_s) << "\"";
+  if (!id.empty()) {
+    oss << ",\"id\":\"" << JsonEscape(id) << "\"";
+  }
+  if (!trace_id.empty()) {
+    oss << ",\"traceId\":\"" << JsonEscape(trace_id) << "\"";
+  }
+  oss << ",\"ok\":" << (ok ? "true" : "false");
+  if (!error_code.empty() && !ok) {
+    oss << ",\"errorCode\":\"" << JsonEscape(error_code) << "\"";
+  }
+  oss << ",\"durationMs\":" << duration_ms << "}\n";
+  const std::string line = oss.str();
+
+  ObserveState& st = GetObserveState();
+  std::lock_guard lock(st.mu);
+  const std::string dir_s = dir.string();
+  if (st.dir != dir_s) {
+    st.writer.file.close();
+    st.writer.file.clear();
+    st.writer.size = 0;
+    st.writer.path = dir / "observe.jsonl";
+    st.writer.max_size = kMaxFileBytes;
+    st.dir = dir_s;
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+  }
+  st.writer.Write(line);
+}
+
+void ObserveIPC(std::string_view service, std::string_view req_json, std::string_view resp_json,
+                std::int64_t duration_ms) {
+  const std::string method = ExtractJsonStringField(req_json, "method");
+  std::string id = ExtractJsonStringField(resp_json, "id");
+  if (id.empty()) {
+    id = ExtractJsonStringField(req_json, "id");
+  }
+  std::string trace = ExtractJsonStringField(resp_json, "traceId");
+  if (trace.empty()) {
+    trace = ExtractJsonStringField(req_json, "traceId");
+  }
+  if (trace.empty()) {
+    trace = id;
+  }
+  const bool ok = ExtractJsonBoolField(resp_json, "ok", false);
+  const std::string code = ExtractJsonStringField(resp_json, "errorCode");
+  ObserveRPC(service, method, id, trace, ok, code, duration_ms);
 }
 
 }  // namespace niuma::logutil

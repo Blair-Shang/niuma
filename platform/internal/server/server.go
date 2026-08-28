@@ -11,7 +11,9 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"time"
 
+	"niuma/pkg/logutil"
 	"niuma/platform/internal/protocol"
 )
 
@@ -83,7 +85,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 
+		start := time.Now()
 		resp := s.dispatcher.HandleFrame(ctx, payload)
+		logutil.ObserveIPC(payload, resp, time.Since(start))
 		if err := protocol.WriteFrame(conn, resp); err != nil {
 			slog.Error("write frame", "err", err)
 			return

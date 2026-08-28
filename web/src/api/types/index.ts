@@ -1,4 +1,15 @@
 export type { PingResult, ShellInfo, ShellVersion } from './shell'
+export type {
+  DiagCrashGroup,
+  DiagCrashesResult,
+  DiagErrorCodeStat,
+  DiagEvent,
+  DiagMethodStat,
+  DiagSummaryParams,
+  DiagSummaryResult,
+  DiagTraceParams,
+  DiagTraceResult,
+} from './diag'
 export type { DialogOpenFolderParams, DialogOpenFolderResult } from './dialog'
 export type {
   SettingGetParams,

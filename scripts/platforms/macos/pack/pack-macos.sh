@@ -34,8 +34,14 @@ nm_require_cmd pnpm
 nm_require_cmd node
 [[ -n "$OUTPUT_DIR" ]] || OUTPUT_DIR="$(nm_default_output_dir "$REPO_ROOT" "macos" "$ARCH" "$FORMAT")"
 
-VERSION="$(nm_package_json_value "$REPO_ROOT" ".version")"
+nm_emit_build_info "$REPO_ROOT"
+VERSION="$(nm_build_info_value "$REPO_ROOT" ".version")"
+BUILD_NUMBER="$(nm_build_info_value "$REPO_ROOT" ".buildNumber")"
+CHANNEL="$(nm_build_info_value "$REPO_ROOT" ".channel")"
+HOMEPAGE="$(nm_build_info_value "$REPO_ROOT" ".homepage")"
+PUBLISHER="$(nm_build_info_value "$REPO_ROOT" ".publisher")"
 DESCRIPTION="$(nm_package_json_value "$REPO_ROOT" ".description")"
+[[ -n "$BUILD_NUMBER" ]] || BUILD_NUMBER="0"
 SHELL_BIN="$(nm_shell_exe_path "$REPO_ROOT" "$PLATFORM" "$ARCH" "$CONFIGURATION")"
 SERVICES_BIN="$(nm_services_bin_dir "$REPO_ROOT" "$PLATFORM" "$ARCH")"
 APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"
@@ -81,12 +87,35 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key>
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
-  <string>$VERSION</string>
+  <string>$BUILD_NUMBER</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.developer-tools</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright (C) $PUBLISHER</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>$BUNDLE_ID</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>niuma</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 EOF
+bash "$SCRIPT_DIR/generate-icns.sh" "$RESOURCES_DIR/AppIcon.icns" || true
+if [[ ! -f "$RESOURCES_DIR/AppIcon.icns" ]]; then
+  nm_warn "AppIcon.icns missing; Finder will show a generic icon"
+fi
 
 cp -R "$REPO_ROOT/web/dist/." "$RESOURCES_DIR/web/" 2>/dev/null || true
 cp "$REPO_ROOT"/scripts/sql/sqlite/*.sql "$RESOURCES_DIR/platform/migrations/sqlite/" 2>/dev/null || true
@@ -123,17 +152,15 @@ fi
 
 bash "$REPO_ROOT/scripts/shared/package/stage-compliance.sh" "$RESOURCES_DIR"
 
-nm_log "macOS app bundle assembled -> $APP_BUNDLE"
+nm_log "macOS app bundle assembled -> $APP_BUNDLE ($VERSION channel=$CHANNEL build=$BUILD_NUMBER $HOMEPAGE)"
+
+bash "$REPO_ROOT/scripts/shared/sign/codesign-macos.sh" "$APP_BUNDLE" \
+  "$SCRIPT_DIR/niuma.entitlements"
 
 APP_OUT="$(nm_default_output_dir "$REPO_ROOT" "$PLATFORM" "$ARCH" "app")"
 mkdir -p "$APP_OUT"
 rm -rf "$APP_OUT/$APP_NAME.app"
 cp -R "$APP_BUNDLE" "$APP_OUT/"
-
-if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
-  nm_log "codesign app bundle with identity: $CODESIGN_IDENTITY"
-  codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
-fi
 
 DMG_FILE=""
 if [[ "$FORMAT" == "dmg" ]]; then
@@ -142,6 +169,9 @@ if [[ "$FORMAT" == "dmg" ]]; then
     rm -f "$DMG_FILE"
     nm_log "build dmg -> $DMG_FILE"
     hdiutil create -volname "$APP_NAME" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$DMG_FILE"
+    if [[ -n "${CODESIGN_IDENTITY:-}" && -f "$DMG_FILE" ]]; then
+      codesign --force --timestamp --sign "$CODESIGN_IDENTITY" "$DMG_FILE"
+    fi
   else
     nm_warn "hdiutil not found; kept .app bundle only"
   fi
@@ -152,8 +182,15 @@ if [[ -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_APP_PASSWORD:-}" && -n "${NOTARY
   export APPLE_APP_PASSWORD="$NOTARY_APP_PASSWORD"
   export APPLE_TEAM_ID="$NOTARY_TEAM_ID"
   if [[ -n "$DMG_FILE" && -f "$DMG_FILE" ]]; then
-    bash "$REPO_ROOT/scripts/shared/sign/notarize-macos.sh" "$DMG_FILE" || nm_warn "notarization failed"
+    bash "$REPO_ROOT/scripts/shared/sign/notarize-macos.sh" "$DMG_FILE" || {
+      if [[ "${REQUIRE_CODESIGN:-}" == "1" || "${REQUIRE_CODESIGN:-}" == "true" ]]; then
+        nm_die "notarization failed"
+      fi
+      nm_warn "notarization failed"
+    }
   fi
+elif [[ "${REQUIRE_CODESIGN:-}" == "1" || "${REQUIRE_CODESIGN:-}" == "true" ]]; then
+  nm_die "REQUIRE_CODESIGN is set but NOTARY_APPLE_ID / NOTARY_TEAM_ID are empty"
 fi
 
 if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then

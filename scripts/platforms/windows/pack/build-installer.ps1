@@ -16,8 +16,8 @@ param(
 
     [string]$InputDir = '',
     [string]$OutputDir = '',
-    [string]$Publisher = 'NiuMa',
-    [string]$AppUrl = 'https://github.com/niuma/niuma'
+    [string]$Publisher = '',
+    [string]$AppUrl = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,11 +68,23 @@ function Escape-InnoPath {
     return ($Path -replace '\\', '/')
 }
 
+. (Join-Path $Root 'scripts\shared\lib\version.ps1')
 $pkgJson = Get-Content (Join-Path $Root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$buildInfo = Get-BuildInfo -RepoRoot $Root
 $AppVersion = [string]$pkgJson.version
-$AppVersionInno = Format-InnoVersion $AppVersion
+$buildNumber = 0
+if ($buildInfo.PSObject.Properties['buildNumber']) {
+    [void][int]::TryParse([string]$buildInfo.buildNumber, [ref]$buildNumber)
+}
+$AppVersionInno = Format-InnoVersion "$AppVersion.$buildNumber"
 $AppName = 'NiuMa'
 $AppDescription = if ($pkgJson.description) { [string]$pkgJson.description } else { 'NiuMa Desktop' }
+if (-not $Publisher) {
+    $Publisher = if ($buildInfo.publisher) { [string]$buildInfo.publisher } else { 'NiuMa' }
+}
+if (-not $AppUrl) {
+    $AppUrl = if ($buildInfo.homepage) { [string]$buildInfo.homepage } else { 'https://www.niuma007.com' }
+}
 
 $iscc = Find-InnoSetupCompiler
 if (-not $iscc) {
@@ -98,6 +110,13 @@ if (Test-Path $iconPath) {
     $iconLine = "SetupIconFile=`"$((Escape-InnoPath $iconPath))`"`r`n"
 }
 
+$eulaZh = Join-Path $Root 'docs\legal\EULA.zh-CN.txt'
+$eulaEn = Join-Path $Root 'docs\legal\EULA.en-US.txt'
+if (-not (Test-Path $eulaZh) -or -not (Test-Path $eulaEn)) {
+    throw "EULA missing under docs/legal/ (EULA.zh-CN.txt / EULA.en-US.txt)"
+}
+$eulaZhEscaped = Escape-InnoPath $eulaZh
+$eulaEnEscaped = Escape-InnoPath $eulaEn
 $archAllowed = if ($Arch -eq 'arm64') { 'arm64' } else { 'x64compatible' }
 $archInstallMode = if ($Arch -eq 'arm64') { 'arm64' } else { 'x64compatible' }
 
@@ -118,12 +137,13 @@ $issContent = @"
 [Setup]
 AppId=$appId
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
+AppVersion=$AppVersion
 AppVerName={#MyAppName} $AppVersion
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
+AppCopyright=Copyright (C) {#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
@@ -132,23 +152,33 @@ OutputBaseFilename={#OutputBase}
 ${iconLine}Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupLogging=yes
+MinVersion=10.0
+SetupMutex=NiuMa.Desktop.Setup
+UsePreviousAppDir=yes
+UsePreviousLanguage=yes
 PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=$archAllowed
 ArchitecturesInstallIn64BitMode=$archInstallMode
 DisableProgramGroupPage=yes
 ; 覆盖升级时关闭占用安装目录的进程，减少「文件正在使用」失败
 CloseApplications=yes
 RestartApplications=no
+UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
+VersionInfoCopyright=Copyright (C) {#MyAppPublisher}
 VersionInfoDescription=$AppDescription
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductVersion=$AppVersion
+; 静默安装：Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+; 仅当前用户：Setup.exe /CURRENTUSER（需配合 OverridesAllowed=dialog）
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "$eulaEnEscaped"
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"; LicenseFile: "$eulaZhEscaped"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -186,13 +216,18 @@ if (Test-Path $SignScript) {
 $sha256 = (Get-FileHash -Path $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
 $fileSize = (Get-Item -LiteralPath $setupExe).Length
 $metaPath = Join-Path $OutputDir "$setupBaseName.release.json"
+$channel = if ($buildInfo.channel) { [string]$buildInfo.channel } else { 'stable' }
 $metaObj = [ordered]@{
     version      = $AppVersion
+    channel      = $channel
+    buildId      = [string]$buildInfo.buildId
+    buildNumber  = $buildNumber
     platform     = 'windows'
     arch         = $Arch
     fileName     = (Split-Path -Leaf $setupExe)
     fileSize     = $fileSize
     sha256       = $sha256
+    silentArgs   = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'
     downloadHint = "上传 Setup 后把 HTTPS URL 写入 Admin；桌面默认允许 *.niuma007.com"
 }
 $utf8 = New-Object System.Text.UTF8Encoding $false

@@ -157,10 +157,11 @@
 | `ftp.session.open` | `{ profileId }` | `{ sessionId }` |
 | `ftp.session.close` | `{ sessionId }` | `{ closed: true }` |
 | `ftp.session.test` | `{ profileId }` | `{ ok, message }` |
-| `ftp.dir.list` | `{ sessionId, path }` | `{ path, entries: FtpEntry[] }` |
+| `ftp.dir.list` | `{ sessionId, path, limit? }` | `{ path, entries: FtpEntry[], truncated? }` |
 | `ftp.dir.make` | `{ sessionId, path }` | `{ created: true }` |
 
 `FtpEntry`：`{ name, kind: "file"|"dir"|"link", size, modifiedAt, permissions }`。
+未传 `limit`（或 `limit<=0`）时返回完整目录，禁止静默截断；仅当请求显式带 `limit>0` 时截断，并置 `truncated:true`（单页上限 20000）。
 `ftp.session.open` 由 platform-core 取 profile + 从 Vault 解密密码，注入 `ftp-service` 建连；`sessionId` 仅 `ftp-service` 内有效，Web 后续操作携带它。
 
 ### 4.3 文件操作与传输（ftp-service，Phase 3–4）
@@ -213,7 +214,7 @@ const off = bridgeOnEvent((detail) => {
 
 ---
 
-## 7. 进程编排与传输通道（过渡协议）
+## 7. 进程编排与传输通道（当前架构）
 
 沿用 platform-core 现有帧协议（4B 小端长度 + UTF-8 JSON）。
 
@@ -225,7 +226,7 @@ const off = bridgeOnEvent((detail) => {
 
 1. **壳层零业务不变量**：「哪些服务存在、何时拉起、注入什么凭据、插件贡献了什么服务」是业务/策略，壳层应保持字节透传 + 单根进程启停。
 2. **迭代速度与风险**：新增服务或安装带后端的插件**不应重编译/分发原生壳层**；放在 Go 侧仅需加 manifest + 路由分支。
-3. **多语言契约归属**：「如何成为一个服务」的协议（帧 / 未来 gRPC + 瘦 service SDK）定义在 platform↔service（Go）边界最优，任意语言实现、Go 统一监督；若归 C++ 则演进最慢。
+3. **多语言契约归属**：「如何成为一个服务」的协议（长度前缀 JSON 信封 + 瘦 service SDK）定义在 platform↔service（Go）边界最优，任意语言实现、Go 统一监督；若归 C++ 则演进最慢。
 4. **数据/事件通路一致**：事件本就走 `ftp-service → platform-core → 壳层 → Web`，platform-core 已在通路上，应拥有其所监督的进程，避免所有权撕裂。
 5. **凭据与权限**：manifest 的 `permissions`、凭据注入是 platform-core 专属职责，壳层不得触碰凭据。
 6. **动态插件**：运行时安装带 Python/Node 后端的插件，由 platform-core 热读插件 manifest 按需拉起，壳层无需重启或改动。
@@ -248,7 +249,7 @@ const off = bridgeOnEvent((detail) => {
    - **事件与 RPC 分离**：事件帧走独立方向/独立连接，不与请求响应复用同一顺序流，互不阻塞。
    - 该链路建成后，SSH/DB/AI 流式输出可复用。
 
-> 与 gRPC 升级路径一致（[11-platform-core §8](./11-platform-core.md)）：未来 `Invoke`/`InvokeStream` 落地后，`ftp.*` 代理与事件帧无缝替换为 gRPC stream + `StreamProxy`，方法契约与事件契约不变。
+长流与事件已走当前帧协议：`ftp-service` 写反向事件帧，platform-core 推给壳层 `StreamProxy` → Web `niuma:event`。方法名与事件名保持稳定；本机 IPC **不上 gRPC、不定 TCP 端口**。
 
 ### 7.3 高并发与大数据瓶颈评估
 
@@ -262,11 +263,10 @@ const off = bridgeOnEvent((detail) => {
 | 高并发任务/会话 | 无瓶颈 | goroutine 轻量；全局队列 + 每会话并发上限；受限于带宽非架构 |
 | 进度事件风暴 | 需治理 | 每任务节流（≤4/s）+ platform-core 按固定节拍（如 10 Hz）**合并批量**成单帧，帧数与任务数解耦 |
 | 事件可靠性 | 分级 | `progress` **有损可丢**（只保留最新）；`state` **可靠不丢**（小队列）；两类队列分离 |
-| 请求队头阻塞 | 需治理 | 耗时操作全异步——`enqueue` 立即返回 taskId，传输走事件；RPC 短平快；超大 `dir.list` 后续可分页 |
+| 请求队头阻塞 | 已治理 | 耗时操作全异步——`enqueue` 立即返回 taskId；RPC 客户端连接池并发；`dir.list` 仅在调用方传 `limit>0` 时截断并返回 `truncated` |
 | 事件/响应互扰 | 已规避 | 反向事件独立通道（§7.2），不与 RPC 复用顺序流 |
 | SQLite 单连接 | 非瓶颈 | 仅低频站点 CRUD 命中；**传输过程绝不逐块写库**，进度只在 ftp-service 内存 |
 | 背压 | 有界 | 各级队列有界；拥塞时丢 `progress` 保 `state` |
-| gRPC 迁移 | 前向兼容 | stream + `StreamProxy` 提供原生流控，以上约束天然满足 |
 
 ---
 

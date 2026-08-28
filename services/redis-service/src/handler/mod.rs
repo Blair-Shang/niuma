@@ -167,6 +167,35 @@ impl Dispatcher {
     }
 }
 
+fn log_dispatch_error(method: &str, id: &str, req_trace: &str, resp: &Response) {
+    if resp.ok || resp.error_message.trim().is_empty() {
+        return;
+    }
+    if resp.error_message.contains("context canceled") {
+        return;
+    }
+    let trace = if !resp.trace_id.is_empty() {
+        resp.trace_id.as_str()
+    } else if !req_trace.is_empty() {
+        req_trace
+    } else {
+        id
+    };
+    let code = if resp.error_code.is_empty() {
+        "internal"
+    } else {
+        resp.error_code.as_str()
+    };
+    error!(
+        op = method,
+        err = %resp.error_message,
+        id,
+        traceId = trace,
+        errorCode = code,
+        "{method}"
+    );
+}
+
 #[async_trait]
 impl FrameHandler for Dispatcher {
     async fn handle_frame(&self, raw: &[u8]) -> Vec<u8> {
@@ -174,6 +203,8 @@ impl FrameHandler for Dispatcher {
             Ok(r) => r,
             Err(resp) => return resp.to_bytes(),
         };
-        self.dispatch(&req.method, &req.id, req.params).await.to_bytes()
+        let resp = self.dispatch(&req.method, &req.id, req.params).await;
+        log_dispatch_error(&req.method, &req.id, &req.trace_id, &resp);
+        resp.to_bytes()
     }
 }

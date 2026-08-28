@@ -4,7 +4,9 @@ package event
 import (
 	"context"
 	"fmt"
+	"net"
 	"runtime"
+	"sync"
 	"time"
 
 	"niuma/pkg/serviceipc/protocol"
@@ -34,8 +36,13 @@ func ShellAddress() string {
 }
 
 // Publisher 向 Platform 事件入口发送一帧 JSON 事件。
+//
+// 同一 Publisher 复用一条 ingest 连接（写失败则重拨一次）；帧格式不变。
 type Publisher struct {
 	addr string
+
+	mu   sync.Mutex
+	conn net.Conn
 }
 
 // NewPublisher 创建指向 Platform 事件入口的发布器。
@@ -43,22 +50,51 @@ func NewPublisher() *Publisher {
 	return &Publisher{addr: IngestAddress()}
 }
 
-// Publish 写入一帧事件 JSON（短连接）。
+// Publish 写入一帧事件 JSON。连接在成功写入后保留，供后续帧复用。
 func (p *Publisher) Publish(ctx context.Context, payload []byte) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	dialCtx, cancel := context.WithTimeout(ctx, publishTimeout)
-	defer cancel()
-	conn, err := dial(dialCtx, p.addr)
-	if err != nil {
-		return fmt.Errorf("event publish dial: %w", err)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.writeLocked(ctx, payload); err != nil {
+		p.resetLocked()
+		return p.writeLocked(ctx, payload)
 	}
-	defer conn.Close()
-	if err := protocol.WriteFrame(conn, payload); err != nil {
+	return nil
+}
+
+func (p *Publisher) writeLocked(ctx context.Context, payload []byte) error {
+	if p.conn == nil {
+		dialCtx, cancel := context.WithTimeout(ctx, publishTimeout)
+		defer cancel()
+		conn, err := dial(dialCtx, p.addr)
+		if err != nil {
+			return fmt.Errorf("event publish dial: %w", err)
+		}
+		p.conn = conn
+	}
+	if err := protocol.WriteFrame(p.conn, payload); err != nil {
 		return fmt.Errorf("event publish write: %w", err)
 	}
 	return nil
+}
+
+func (p *Publisher) resetLocked() {
+	if p.conn != nil {
+		_ = p.conn.Close()
+		p.conn = nil
+	}
+}
+
+// Close 释放复用的 ingest 连接（测试或进程退出时调用）。
+func (p *Publisher) Close() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.resetLocked()
 }
 
 // PublishMap 序列化并发布事件对象（须含 type 字段）。

@@ -5,7 +5,7 @@ import type { SettingGetResult, SettingSetResult } from '@/api/types/settings'
  * 应用级 KV 配置（Platform 层持久化，SQLite `nm_app_setting`）。
  *
  * 方法名走 `platform.*` 命名空间：壳层 `BridgeRouter` 解析为 `service=platform.settings`
- * 后原样转发给 Platform gRPC，壳层不落盘、不解析业务（见 docs/architecture.md 壳层零业务）。
+ * 后原样转发给 Platform 应用 IPC，壳层不落盘、不解析业务（见 docs/architecture.md 壳层零业务）。
  */
 export const settingsApi = {
   /**

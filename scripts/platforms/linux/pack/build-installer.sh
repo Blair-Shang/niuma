@@ -45,6 +45,12 @@ rm -rf "$PAYLOAD_DIR"
 mkdir -p "$PAYLOAD_DIR"
 cp -f "$DEB_FILE" "$PAYLOAD_DIR/package.deb"
 cp -f "$REPO_ROOT/scripts/shared/package/templates/linux-install-wizard.sh" "$PAYLOAD_DIR/install.sh"
+if [[ -f "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" ]]; then
+  cp -f "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" "$PAYLOAD_DIR/EULA.zh-CN.txt"
+fi
+if [[ -f "$REPO_ROOT/docs/legal/EULA.en-US.txt" ]]; then
+  cp -f "$REPO_ROOT/docs/legal/EULA.en-US.txt" "$PAYLOAD_DIR/EULA.en-US.txt"
+fi
 chmod +x "$PAYLOAD_DIR/install.sh"
 
 mkdir -p "$OUTPUT_DIR"

@@ -65,7 +65,7 @@ plugins/<plugin-id>/
 | 级别 | Web UI | 后端 | 示例 |
 |------|--------|------|------|
 | **L1** | 有 | 无 | 格式化、计算器 |
-| **L2** | 有 | 独立进程 + gRPC | SSH、MySQL |
+| **L2** | 有 | 独立进程 + Named Pipe / UDS JSON | SSH、MySQL |
 | **L3** | 有 | Native / 重量级 | Oracle、FFmpeg |
 
 ---
@@ -104,7 +104,7 @@ sequenceDiagram
 |------|------|
 | 在 `ModuleWorkspace` 挂载 UI | 修改 TopBar / SideNav / StatusBar 源码 |
 | 注册 SideNav **项**（经 Registry） | 覆盖 Shell 路由 `/settings` |
-| `bridge.invoke` 白名单方法 | 直连 gRPC / 读本地 DB |
+| `bridge.invoke` 白名单方法 | 绕过桥接直连管道 / 读本地 DB |
 | 使用 `@niuma/ui` | 引入 Element Plus / 业务层 reka-ui |
 | 订阅 `niuma:event` | 任意执行 eval / 内联 script |
 

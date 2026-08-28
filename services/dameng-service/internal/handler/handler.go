@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,20 +20,13 @@ import (
 	"niuma/services/dameng-service/internal/session"
 	"niuma/services/dameng-service/internal/tree"
 
+	"niuma/pkg/serviceipc/envelope"
+	"niuma/pkg/serviceipc/event"
 	"niuma/pkg/sqllsp"
 )
 
-type Request struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	ID     string          `json:"id"`
-}
-type Response struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-	Result string `json:"result"`
-}
+type Request = envelope.Request
+type Response = envelope.Response
 type Dispatcher struct {
 	ids      idgen.Generator
 	sessions *session.Manager
@@ -59,26 +53,36 @@ func New(i idgen.Generator, e *eventpub.Async) *Dispatcher {
 func (d *Dispatcher) HandleFrame(ctx context.Context, b []byte) []byte {
 	var r Request
 	if e := json.Unmarshal(b, &r); e != nil {
-		return marshal(Response{OK: false, Error: fmt.Sprintf("invalid request json: %v", e)})
+		return marshal(envelope.Fail("", fmt.Sprintf("invalid request json: %v", e)))
 	}
-	return marshal(d.dispatch(ctx, r))
+	resp := d.dispatch(ctx, r)
+	d.noteIfLostFrom(r, resp)
+	logDispatchError(r, resp)
+	return marshal(envelope.WithRequest(r, resp))
+}
+
+func (d *Dispatcher) noteIfLostFrom(req Request, resp Response) {
+	if resp.OK {
+		return
+	}
+	var emit func(map[string]any)
+	if d.events != nil {
+		emit = d.events.Emit
+	}
+	event.NoteLost(emit, "dameng", event.SessionIDFromParams(req.Params), errors.New(resp.Error), d.sessions.Close)
 }
 func marshal(r Response) []byte {
-	b, e := json.Marshal(r)
-	if e != nil {
-		return []byte(`{"ok":false,"error":"internal marshal error","result":""}`)
-	}
-	return b
+	return envelope.Marshal(r)
 }
 func ok(id string, v any) Response {
-	b, e := json.Marshal(v)
-	if e != nil {
-		return fail(id, e)
-	}
-	return Response{ID: id, OK: true, Result: string(b)}
+	return envelope.OK(id, v)
 }
 func fail(id string, e any) Response {
-	return Response{ID: id, OK: false, Error: fmt.Sprint(e), Result: ""}
+	return envelope.Fail(id, fmt.Sprint(e))
+}
+
+func failEngineMismatch(id string, err error) Response {
+	return envelope.FailEngineMismatch(id, err)
 }
 func (d *Dispatcher) dispatch(ctx context.Context, r Request) Response {
 	switch r.Method {
@@ -196,6 +200,9 @@ func (d *Dispatcher) open(ctx context.Context, r Request) Response {
 		_ = db.Close()
 		if stop != nil {
 			stop()
+		}
+		if errors.Is(e, dialect.ErrNotDameng) {
+			return failEngineMismatch(r.ID, e)
 		}
 		return fail(r.ID, e)
 	}

@@ -10,6 +10,7 @@ option(NIUMA_LOGUTIL_BUILD_TESTS "Build niuma_logutil unit tests" OFF)
 
 add_library(niuma_logutil STATIC
   src/logutil.cpp
+  src/crash.cpp
 )
 
 add_library(niuma::logutil ALIAS niuma_logutil)
@@ -22,6 +23,7 @@ target_include_directories(niuma_logutil
 
 if(WIN32)
   target_compile_definitions(niuma_logutil PRIVATE _CRT_SECURE_NO_WARNINGS)
+  target_link_libraries(niuma_logutil PUBLIC dbghelp)
   if(MSVC)
     target_compile_options(niuma_logutil PRIVATE /utf-8)
   endif()

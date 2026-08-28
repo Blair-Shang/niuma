@@ -21,15 +21,22 @@ const listenProbeMs = 200
 // 返回项格式为 KEY=VALUE；可为 nil。
 type EnvProvider func(ctx context.Context, serviceID string) []string
 
-// Supervisor 管理子服务进程的懒启动与管道探活。
+// Supervisor 管理子服务进程的懒启动、崩溃拉起与管道探活。
 type Supervisor struct {
 	servicesDir string
 	manifests   map[string]*Manifest
 	envProvider EnvProvider
-	mu          sync.Mutex
-	spawned     map[string]*exec.Cmd
+	sink        EventSink
+	stop        chan struct{}
+
+	mu           sync.Mutex
+	shuttingDown bool
+	spawned      map[string]*exec.Cmd
 	// spawnEnvFingerprint 记录上次成功 spawn 时 EnvProvider 的指纹；变更则强制重启。
 	spawnEnvFingerprint map[string]string
+	startedAt           map[string]time.Time
+	restartDelay        map[string]time.Duration
+	restartCancel       map[string]context.CancelFunc
 }
 
 // New 创建 Supervisor 并加载 manifests。
@@ -44,8 +51,12 @@ func New(servicesDir string) (*Supervisor, error) {
 	return &Supervisor{
 		servicesDir:         servicesDir,
 		manifests:           manifests,
+		stop:                make(chan struct{}),
 		spawned:             make(map[string]*exec.Cmd),
 		spawnEnvFingerprint: make(map[string]string),
+		startedAt:           make(map[string]time.Time),
+		restartDelay:        make(map[string]time.Duration),
+		restartCancel:       make(map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -57,6 +68,16 @@ func (s *Supervisor) SetEnvProvider(p EnvProvider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.envProvider = p
+}
+
+// SetEventSink 设置进程退出时的 UI 通知回调（可为 nil）。
+func (s *Supervisor) SetEventSink(sink EventSink) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sink = sink
 }
 
 // findServicesRoot 从可执行文件所在目录向上查找含 manifests/ 的 services 根。
@@ -213,6 +234,7 @@ func (s *Supervisor) startLocked(serviceID, exe string, envExtra []string) (*exe
 		}
 	}
 	go s.watchChild(serviceID, cmd)
+	s.startedAt[serviceID] = time.Now()
 	slog.Info("supervisor: spawned", "service", serviceID, "pid", cmd.Process.Pid)
 	return cmd, nil
 }
@@ -220,19 +242,106 @@ func (s *Supervisor) startLocked(serviceID, exe string, envExtra []string) (*exe
 func (s *Supervisor) watchChild(serviceID string, cmd *exec.Cmd) {
 	_ = cmd.Wait()
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	shutting := s.shuttingDown
+	stillTracked := false
 	if cur, ok := s.spawned[serviceID]; ok && cur == cmd {
 		delete(s.spawned, serviceID)
-		slog.Info("supervisor: exited", "service", serviceID)
+		stillTracked = true
 	}
+	lived := time.Duration(0)
+	if t, ok := s.startedAt[serviceID]; ok && !t.IsZero() {
+		lived = time.Since(t)
+	}
+	prevDelay := s.restartDelay[serviceID]
+	sink := s.sink
+	s.mu.Unlock()
+
+	slog.Info("supervisor: exited", "service", serviceID, "tracked", stillTracked, "livedMs", lived.Milliseconds())
+	if shutting {
+		return
+	}
+
+	s.emitLost(sink, serviceID, "capability service exited")
+	if !stillTracked {
+		return
+	}
+	delay := nextRestartDelay(prevDelay, lived)
+	s.mu.Lock()
+	if s.restartDelay == nil {
+		s.restartDelay = make(map[string]time.Duration)
+	}
+	s.restartDelay[serviceID] = delay
+	s.mu.Unlock()
+	s.scheduleRestart(serviceID, delay)
+}
+
+func (s *Supervisor) emitLost(sink EventSink, serviceID, message string) {
+	if sink == nil {
+		return
+	}
+	ns := ""
+	if m, err := s.Manifest(serviceID); err == nil && m != nil {
+		ns = strings.TrimSpace(m.Bridge.Namespace)
+	}
+	for _, ev := range lostEvents(serviceID, ns, message) {
+		sink(ev)
+	}
+}
+
+func (s *Supervisor) scheduleRestart(serviceID string, delay time.Duration) {
+	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return
+	}
+	if s.restartCancel == nil {
+		s.restartCancel = make(map[string]context.CancelFunc)
+	}
+	if cancel, ok := s.restartCancel[serviceID]; ok {
+		cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.restartCancel[serviceID] = cancel
+	if s.stop == nil {
+		s.stop = make(chan struct{})
+	}
+	stop := s.stop
+	s.mu.Unlock()
+
+	slog.Info("supervisor: respawn scheduled", "service", serviceID, "delay", delay.String())
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-timer.C:
+		}
+		s.mu.Lock()
+		delete(s.restartCancel, serviceID)
+		shutting := s.shuttingDown
+		s.mu.Unlock()
+		if shutting {
+			return
+		}
+		ensureCtx, ensureCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer ensureCancel()
+		if err := s.Ensure(ensureCtx, serviceID); err != nil {
+			slog.Error("supervisor: respawn failed", "service", serviceID, "err", err)
+			s.mu.Lock()
+			next := nextRestartDelay(s.restartDelay[serviceID], 0)
+			s.restartDelay[serviceID] = next
+			s.mu.Unlock()
+			s.scheduleRestart(serviceID, next)
+		}
+	}()
 }
 
 func (s *Supervisor) forgetSpawnedLocked(serviceID string, cmd *exec.Cmd) {
 	if cur, ok := s.spawned[serviceID]; ok && cur == cmd {
 		delete(s.spawned, serviceID)
-	}
-	if cmd != nil && cmd.Process != nil {
-		_, _ = cmd.Process.Wait()
 	}
 }
 
@@ -263,16 +372,44 @@ func (s *Supervisor) Shutdown() {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, cmd := range s.spawned {
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return
+	}
+	s.shuttingDown = true
+	close(s.stop)
+	for _, cancel := range s.restartCancel {
+		cancel()
+	}
+	s.restartCancel = make(map[string]context.CancelFunc)
+	cmds := make([]*exec.Cmd, 0, len(s.spawned))
+	for _, cmd := range s.spawned {
+		cmds = append(cmds, cmd)
+	}
+	s.spawned = make(map[string]*exec.Cmd)
+	s.mu.Unlock()
+
+	for _, cmd := range cmds {
 		if cmd == nil || cmd.Process == nil {
 			continue
 		}
 		if err := cmd.Process.Kill(); err != nil {
-			slog.Warn("supervisor: kill failed", "service", id, "err", err)
+			slog.Warn("supervisor: kill failed", "err", err)
 		}
-		_, _ = cmd.Process.Wait()
 	}
-	s.spawned = make(map[string]*exec.Cmd)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		alive := false
+		for _, cmd := range cmds {
+			if cmd != nil && cmd.Process != nil && isProcessAlive(cmd.Process.Pid) {
+				alive = true
+				break
+			}
+		}
+		if !alive {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	closeChildJob()
 }

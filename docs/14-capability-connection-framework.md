@@ -6,7 +6,7 @@
 
 | 层 | 契约 | 扩展方式 |
 |----|------|----------|
-| **A — Bridge 信封** | `{ method, params, id }` / `niuma:event` | 固定，不可改 |
+| **A — Bridge 信封** | `{ v, method, params, id, traceId }` / 响应 `{ v, id, ok, error, errorCode, traceId, result }` / `niuma:event` | 固定；详见 [03](./03-ipc-protocol.md)。`error` 必须是字符串，`result` 必须是 JSON 再编码字符串 |
 | **B — 连接资源** | `platform.connection.*` / `platform.credential.*` | 新模块只注册 `connection_kind` |
 | **C — 能力操作** | `{namespace}.*` | manifest `bridge.namespace` 注册 |
 
@@ -80,11 +80,13 @@ ipc:
 | `{ns}.session.close` | `{ sessionId }` | `{ closed: true }` |
 | `{ns}.session.test` | `{ profileId }` | `{ ok, message }` |
 
-事件（`niuma:event`，待反向通道落地）：
+事件（`niuma:event`）：
 
 ```ts
 { type: `${namespace}.session.state`, sessionId, state, message? }
 // state: connected | closed | lost
+// sessionId 为 "*" 时：该命名空间全部物理会话失效（能力进程退出，由 platform supervisor 发出）
+{ type: 'platform.service.state', serviceId, namespace, state: 'lost', message? }
 ```
 
 ## 6. Web SDK
@@ -94,8 +96,11 @@ ipc:
 ## 7. 性能说明
 
 - 路由为内存 map + 最长前缀扫描（manifest 数量极少，O(n) 可忽略）
-- 不改变现有「每 RPC 独立管道连接」模型，**不引入额外锁或阻塞**
-- 流式/事件通道见 [12-ftp-module §7.2](./12-ftp-module.md)（后续 Phase）
+- **RPC 仍是「一连接同时一个请求」**：Go 客户端与 C++ 壳都把空闲连接放回池里复用，并发请求走多条连接，不在同一连接上流水线，也不改信封。因此 Web 点「停止」发出的 `query.cancel` 不必等 `query.exec` 占用的那条管道结束。
+- 事件：`*.progress` 在 platform 按 10 Hz 合并为可丢的 `platform.event.batch`；Shell 订阅连接用有界队列，进度可丢；`session.state` / `transfer.state` 阻塞直到入队或订阅连接已死，禁止超时关连接冲掉已排队状态
+- `ftp.dir.list` 仅在请求带 `limit>0` 时截断并标 `truncated`（未传 limit 返回完整列表）；查询页继续走既有 `query.fetch` 分页
+- 池连接失效：写出失败才重拨同一请求；写出成功后的读失败把错误返回给调用方，不静默重试
+- 流式通道见 [12-ftp-module §7.2](./12-ftp-module.md)；本机 IPC **不上 gRPC**
 
 ## 8. 相关文档
 

@@ -1,8 +1,8 @@
 // Package protocol 定义 Shell（C++）与 Platform（Go）之间应用 IPC 的报文分帧。
 //
-// 过渡期传输为 Windows 命名管道（非 Windows 用 Unix Domain Socket），
+// 传输为 Windows 命名管道（非 Windows 用 Unix Domain Socket），
 // 分帧格式为：4 字节小端长度前缀 + UTF-8 JSON 载荷。长度前缀描述其后 JSON
-// 字节数（不含前缀自身）。未来升级为 gRPC 后本包可整体退役。
+// 字节数（不含前缀自身）。本机 IPC 契约即此分帧 + envelope JSON，不定 TCP 端口。
 package protocol
 
 import (

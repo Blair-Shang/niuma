@@ -4,74 +4,68 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/mongo"
 
-	"niuma/services/mongodb-service/internal/idgen"
+	"niuma/pkg/serviceipc/envelope"
+	"niuma/pkg/serviceipc/event"
 	"niuma/services/mongodb-service/internal/eventpub"
+	"niuma/services/mongodb-service/internal/idgen"
 	"niuma/services/mongodb-service/internal/session"
 )
 
 const (
-	MethodSessionOpen     = "session.open"
-	MethodSessionClose    = "session.close"
-	MethodSessionTest     = "session.test"
-	MethodTreeDatabases    = "tree.databases"
-	MethodTreeCollections  = "tree.collections"
-	MethodDocumentFind     = "document.find"
-	MethodDocumentGet      = "document.get"
-	MethodDocumentInsert   = "document.insert"
-	MethodDocumentUpdate   = "document.update"
-	MethodDocumentDelete   = "document.delete"
-	MethodAggregateRun     = "aggregate.run"
-	MethodAggregateExplain = "aggregate.explain"
-	MethodPipelineSuggest  = "pipeline.suggest"
-	MethodQuerySuggest     = "query.suggest"
-	MethodQueryExec        = "query.exec"
-	MethodIndexList        = "index.list"
-	MethodIndexCreate      = "index.create"
-	MethodIndexDrop        = "index.drop"
-	MethodMonitorStats     = "monitor.stats"
-	MethodMonitorCurrentOp = "monitor.currentOp"
-	MethodMonitorSlowLog   = "monitor.slowLog"
+	MethodSessionOpen           = "session.open"
+	MethodSessionClose          = "session.close"
+	MethodSessionTest           = "session.test"
+	MethodTreeDatabases         = "tree.databases"
+	MethodTreeCollections       = "tree.collections"
+	MethodDocumentFind          = "document.find"
+	MethodDocumentGet           = "document.get"
+	MethodDocumentInsert        = "document.insert"
+	MethodDocumentUpdate        = "document.update"
+	MethodDocumentDelete        = "document.delete"
+	MethodAggregateRun          = "aggregate.run"
+	MethodAggregateExplain      = "aggregate.explain"
+	MethodPipelineSuggest       = "pipeline.suggest"
+	MethodQuerySuggest          = "query.suggest"
+	MethodQueryExec             = "query.exec"
+	MethodIndexList             = "index.list"
+	MethodIndexCreate           = "index.create"
+	MethodIndexDrop             = "index.drop"
+	MethodMonitorStats          = "monitor.stats"
+	MethodMonitorCurrentOp      = "monitor.currentOp"
+	MethodMonitorSlowLog        = "monitor.slowLog"
 	MethodMonitorProfilerStatus = "monitor.profiler.status"
 	MethodMonitorProfilerSet    = "monitor.profiler.set"
-	MethodSchemaSample         = "schema.sample"
-	MethodSchemaValidatorGet   = "schema.validator.get"
-	MethodSchemaValidatorSet   = "schema.validator.set"
-	MethodCommandExec      = "command.exec"
-	MethodCommandSuggest   = "command.suggest"
-	MethodShellDetect      = "shell.detect"
-	MethodShellOpen        = "shell.open"
-	MethodShellInput       = "shell.input"
-	MethodShellResize      = "shell.resize"
-	MethodShellClose       = "shell.close"
-	MethodToolsDetect      = "tools.detect"
-	MethodToolsDump        = "tools.dump"
-	MethodToolsRestore     = "tools.restore"
-	MethodToolsExport      = "tools.export"
-	MethodToolsImport      = "tools.import"
-	MethodToolsCancel      = "tools.cancel"
-	MethodMonitorStreamStart = "monitor.stream.start"
-	MethodMonitorStreamStop  = "monitor.stream.stop"
+	MethodSchemaSample          = "schema.sample"
+	MethodSchemaValidatorGet    = "schema.validator.get"
+	MethodSchemaValidatorSet    = "schema.validator.set"
+	MethodCommandExec           = "command.exec"
+	MethodCommandSuggest        = "command.suggest"
+	MethodShellDetect           = "shell.detect"
+	MethodShellOpen             = "shell.open"
+	MethodShellInput            = "shell.input"
+	MethodShellResize           = "shell.resize"
+	MethodShellClose            = "shell.close"
+	MethodToolsDetect           = "tools.detect"
+	MethodToolsDump             = "tools.dump"
+	MethodToolsRestore          = "tools.restore"
+	MethodToolsExport           = "tools.export"
+	MethodToolsImport           = "tools.import"
+	MethodToolsCancel           = "tools.cancel"
+	MethodMonitorStreamStart    = "monitor.stream.start"
+	MethodMonitorStreamStop     = "monitor.stream.stop"
 
 	errInvalidParamsFmt  = "invalid params: %v"
 	errSessionIDRequired = "sessionId required"
 )
 
-type Request struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	ID     string          `json:"id"`
-}
+type Request = envelope.Request
 
-type Response struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-	Result string `json:"result"`
-}
+type Response = envelope.Response
 
 type sessionIDParams struct {
 	SessionID string `json:"sessionId"`
@@ -114,12 +108,25 @@ func New(ids idgen.Generator, events *eventpub.Async) *Dispatcher {
 func (d *Dispatcher) HandleFrame(ctx context.Context, raw []byte) []byte {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return marshalResponse(Response{
-			OK:    false,
-			Error: fmt.Sprintf("invalid request json: %v", err),
-		})
+		return marshalResponse(envelope.Fail("", fmt.Sprintf("invalid request json: %v", err)))
 	}
-	return marshalResponse(d.dispatch(ctx, req))
+	resp := d.dispatch(ctx, req)
+	d.noteIfLostFrom(req, resp)
+	logDispatchError(req, resp)
+	return marshalResponse(envelope.WithRequest(req, resp))
+}
+
+func (d *Dispatcher) noteIfLostFrom(req Request, resp Response) {
+	if resp.OK {
+		return
+	}
+	var emit func(map[string]any)
+	if d.events != nil {
+		emit = d.events.Emit
+	}
+	event.NoteLost(emit, "mongodb", event.SessionIDFromParams(req.Params), errors.New(resp.Error), func(id string) error {
+		return d.sessions.Close(context.Background(), id)
+	})
 }
 
 func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
@@ -340,21 +347,13 @@ func (d *Dispatcher) resolveClient(ctx context.Context, raw json.RawMessage) (*m
 }
 
 func okResponse(id string, result any) Response {
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return errorResponse(id, fmt.Sprintf("marshal result: %v", err))
-	}
-	return Response{ID: id, OK: true, Result: string(encoded)}
+	return envelope.OK(id, result)
 }
 
 func errorResponse(id, message string) Response {
-	return Response{ID: id, OK: false, Error: message}
+	return envelope.Fail(id, message)
 }
 
 func marshalResponse(resp Response) []byte {
-	out, err := json.Marshal(resp)
-	if err != nil {
-		return []byte(`{"ok":false,"error":"internal marshal error","result":""}`)
-	}
-	return out
+	return envelope.Marshal(resp)
 }

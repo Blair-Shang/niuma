@@ -51,10 +51,10 @@ shell/src/
 │
 ├── bridge/                  # 请求路由与流代理（透传，不鉴权）
 │   ├── bridge_router.*      # method 解析 → runtime / ipc
-│   └── stream_proxy.*       # gRPC stream → Web 事件分片
+│   └── stream_proxy.*       # 反向事件 / 长流分片 → Web
 │
 ├── ipc/                     # ② 应用 IPC（Shell → Platform/Services）
-│   └── platform_client.*    # gRPC/Pipe 透传，不读 SQLite、不持凭据
+│   └── platform_client.*    # Named Pipe / UDS 透传，不读 SQLite、不持凭据
 │
 ├── protocol/                # app:// 静态资源协议
 └── util/                    # JSON、路径、method 解析
@@ -65,7 +65,7 @@ shell/src/
 | 层级 | 目录 | 协议 | 壳层做什么 | 壳层**不做** |
 |------|------|------|------------|--------------|
 | **① Web ↔ Shell** | `browser/handlers/` | `cefQuery` / `niuma:event` | 收发包、JSON 解析、`shell.window.*` 多窗口 | 权限、业务语义 |
-| **② Shell ↔ 后端** | `ipc/` + `core/runtime/` | gRPC / Named Pipe | 起进程、原样转发 | 鉴权、SQLite、凭据 |
+| **② Shell ↔ 后端** | `ipc/` + `core/runtime/` | Named Pipe / UDS + JSON | 起进程、原样转发 | 鉴权、SQLite、凭据 |
 
 ## 多窗口 API（`shell.window.*`）
 

@@ -22,6 +22,7 @@ pnpm dev              # 构建并启动 niuma.exe（真实 CEF 桌面窗口）
 | Windows 安装程序 | `pnpm pack:win:setup` | 输出 `output/windows-x64/setup/NiuMa-*-Setup.exe` |
 | Windows 一键发布 | `pnpm release:win` | 构建 + 绿色目录 + Setup 安装程序 |
 | 跨平台矩阵 | 见 [scripts/README.md](./scripts/README.md) | `release:<platform>` 含向导式安装程序 |
+| GitHub 自动打包 | Actions：**Pack and Release** | 推送 `v*` tag 或手动运行；详见 scripts/README.md |
 
 > 主应用必须在 CEF 中运行（`cefQuery` 桥接）。`pnpm dev:web` 仅用于调试 Web 层，**不是**桌面应用。
 
@@ -223,6 +224,10 @@ cargo --version
 
 若 `winget install Rustlang.Rustup` 长时间无响应，先结束残留 `winget` / `rustup-init` 进程后再重试。
 
+## 变更记录
+
+功能变更见 [CHANGELOG.md](./CHANGELOG.md)，当前版本 **1.0.0**。只记功能，不记技术栈。
+
 ## 文档
 
 - [设计文档索引](docs/README.md)
@@ -253,17 +258,17 @@ NiuMa/
 ├── web/                       # Vue 3 主 Web 应用（Layer 4）
 ├── packages/rust/             # Rust 公共 crate（日志 / IPC 等）
 ├── packages/ui/               # @niuma/ui 组件库 + playground
-├── platform/                  # Platform Core（Go，规划中）
+├── platform/                  # Platform Core（Go）
 ├── services/ssh-service/      # SSH / SFTP 能力服务（Rust）
 ├── services/manifests/
 ├── plugins/
-└── proto/
+└── proto/                     # 非当前契约（见 proto/README.md）
 ```
 
 ## 架构概要
 
 ```
-Vue 3 Web  ──① CEF IPC──>  C++ Shell  ──② gRPC/Pipe──>  Platform / Services
+Vue 3 Web  ──① CEF IPC──>  C++ Shell  ──② Named Pipe/UDS + JSON──>  Platform / Services
  app://niuma/              niuma.exe
 ```
 

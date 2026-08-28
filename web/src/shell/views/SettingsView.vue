@@ -13,6 +13,8 @@ import ComponentsSettingsPanel from '@/shell/views/ComponentsSettingsPanel.vue'
 import AiProvidersSettingsPanel from '@/shell/views/ai-settings/AiProvidersSettingsPanel.vue'
 import AiMcpSettingsPanel from '@/shell/views/ai-settings/AiMcpSettingsPanel.vue'
 import AiSkillsSettingsPanel from '@/shell/views/ai-settings/AiSkillsSettingsPanel.vue'
+import DiagnosticsPanel from '@/shell/views/DiagnosticsPanel.vue'
+import AppBrandIcon from '@/shell/widgets/AppBrandIcon.vue'
 import { useAccountStore } from '@/stores/account'
 import { CloudApiError } from '@/api/cloud/client'
 
@@ -48,7 +50,7 @@ const sections = computed(
     { id: 'ai-providers', labelKey: 'settings.aiProviders', descKey: 'settings.aiProvidersDesc', icon: 'bot' },
     { id: 'ai-mcp', labelKey: 'settings.aiMcp', descKey: 'settings.aiMcpDesc', icon: 'plug-zap' },
     { id: 'ai-skills', labelKey: 'settings.aiSkills', descKey: 'settings.aiSkillsDesc', icon: 'sparkles' },
-    { id: 'runtime', labelKey: 'settings.runtime', descKey: 'settings.runtimeDesc', icon: 'activity' },
+    { id: 'runtime', labelKey: 'settings.runtime', descKey: 'settings.runtimeDesc', icon: 'info' },
   ],
 )
 
@@ -361,7 +363,7 @@ onMounted(() => {
         <p v-else-if="pluginsError" class="nm-caption" style="color: var(--rs-danger)">
           {{ pluginsError }}
         </p>
-        <p v-else-if="!bridgeStore.connected" class="nm-caption">{{ t('settings.devHint') }}</p>
+        <p v-else-if="!bridgeStore.connected" class="nm-settings__hint">{{ t('settings.devHint') }}</p>
         <div v-else-if="plugins.length" class="nm-settings__list">
           <div
             v-for="record in plugins"
@@ -397,29 +399,48 @@ onMounted(() => {
       <!-- AI Skills -->
       <AiSkillsSettingsPanel v-else-if="activeSection === 'ai-skills'" />
 
-      <!-- 运行时 -->
+      <!-- 关于 -->
       <section v-else class="nm-settings__panel">
         <header class="nm-settings__panel-head">
           <h1 class="nm-section-title">{{ t('settings.runtime') }}</h1>
           <p class="nm-section-desc">{{ t('settings.runtimeDesc') }}</p>
         </header>
 
-        <dl class="nm-settings__facts">
-          <dt class="nm-caption">{{ t('settings.appVersion') }}</dt>
-          <dd class="font-mono">{{ bridgeStore.shellVersion || '—' }}</dd>
-          <dt class="nm-caption">{{ t('settings.buildId') }}</dt>
-          <dd class="font-mono">{{ bridgeStore.shellBuildId || '—' }}</dd>
-          <dt class="nm-caption">{{ t('settings.bridge') }}</dt>
-          <dd>{{ bridgeStore.statusLabel }}</dd>
-          <dt class="nm-caption">{{ t('settings.connected') }}</dt>
-          <dd>{{ bridgeStore.connected ? t('settings.yes') : t('settings.no') }}</dd>
-          <template v-if="bridgeStore.shellInfo">
-            <dt class="nm-caption">{{ t('settings.webPath') }}</dt>
-            <dd class="break-all font-mono nm-caption">{{ bridgeStore.shellInfo.webPath }}</dd>
-          </template>
-        </dl>
-        <p class="nm-caption leading-relaxed">{{ t('settings.versionHint') }}</p>
-        <p class="nm-caption leading-relaxed">{{ t('settings.devHint') }}</p>
+        <div class="nm-about-card">
+          <div class="nm-about-card__top">
+            <div class="nm-about-card__brand">
+              <div class="nm-about-card__mark">
+                <AppBrandIcon :size="28" variant="app" />
+              </div>
+              <div class="min-w-0">
+                <p class="nm-about-card__name">{{ t('app.title') }}</p>
+                <p class="nm-about-card__tag">{{ t('app.subtitle') }}</p>
+              </div>
+            </div>
+            <span
+              class="nm-about-card__status"
+              :class="
+                bridgeStore.connected
+                  ? 'nm-about-card__status--ready'
+                  : 'nm-about-card__status--offline'
+              "
+            >
+              {{ bridgeStore.connected ? t('settings.appReady') : t('settings.appOffline') }}
+            </span>
+          </div>
+          <div class="nm-about-card__meta">
+            <div class="nm-about-card__item">
+              <span class="nm-about-card__k">{{ t('settings.appVersion') }}</span>
+              <span class="nm-about-card__v">{{ bridgeStore.shellVersion || '—' }}</span>
+            </div>
+            <div class="nm-about-card__item">
+              <span class="nm-about-card__k">{{ t('settings.buildId') }}</span>
+              <span class="nm-about-card__v">{{ bridgeStore.shellBuildId || '—' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <DiagnosticsPanel />
       </section>
     </div>
   </div>
@@ -603,11 +624,104 @@ onMounted(() => {
   box-shadow: var(--rs-shadow-sm);
 }
 
-/* 运行时信息 */
-.nm-settings__facts {
+.nm-settings__hint {
+  margin: 0;
+  padding: var(--rs-space-md);
+  border-radius: var(--rs-radius);
+  background: color-mix(in srgb, var(--rs-text) 4%, transparent);
+  color: var(--rs-muted);
+  font-size: var(--nm-font-caption);
+  line-height: 1.5;
+}
+
+.nm-about-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rs-space-md);
+  padding: var(--rs-space-lg);
+  border: 1px solid var(--rs-border-subtle);
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-elevated, var(--rs-surface));
+}
+
+.nm-about-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rs-space-md);
+}
+
+.nm-about-card__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.nm-about-card__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+}
+
+.nm-about-card__name {
+  margin: 0;
+  font-size: var(--nm-font-title);
+  font-weight: 650;
+  color: var(--rs-text);
+}
+
+.nm-about-card__tag {
+  margin: 0.15rem 0 0;
+  font-size: var(--nm-font-caption);
+  color: var(--rs-muted);
+}
+
+.nm-about-card__status {
+  flex-shrink: 0;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--rs-radius-full, 999px);
+  font-size: var(--nm-font-caption);
+  font-weight: 550;
+}
+
+.nm-about-card__status--ready {
+  color: var(--rs-success, #16a34a);
+  background: color-mix(in srgb, var(--rs-success, #16a34a) 12%, transparent);
+}
+
+.nm-about-card__status--offline {
+  color: var(--rs-muted);
+  background: color-mix(in srgb, var(--rs-text) 6%, transparent);
+}
+
+.nm-about-card__meta {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--rs-space-sm) var(--rs-space-lg);
-  margin-bottom: var(--rs-space-md);
+  grid-template-columns: 1fr 1fr;
+  gap: var(--rs-space-sm);
+}
+
+.nm-about-card__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--rs-radius-sm);
+  background: color-mix(in srgb, var(--rs-text) 4%, transparent);
+}
+
+.nm-about-card__k {
+  font-size: var(--nm-font-caption);
+  color: var(--rs-muted);
+}
+
+.nm-about-card__v {
+  font-size: var(--nm-font-body);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  color: var(--rs-text);
 }
 </style>

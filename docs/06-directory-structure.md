@@ -10,16 +10,20 @@
 ```
 NiuMa/
 ├── docs/                        # 设计文档
-├── proto/                       # Protobuf 契约（规划）
+├── proto/                       # 非当前契约占位（勿加 gRPC .proto）
 ├── scripts/                     # 构建、打包、开发脚本
 ├── third_party/cef/             # CEF 预编译包（setup 下载）
 │
 ├── packages/
+│   ├── go/serviceipc/           # IPC 信封（权威）
+│   ├── go/logutil/              # 落盘日志 + observe.jsonl（无 APM）
+│   ├── cpp/serviceipc/
+│   ├── rust/niuma-serviceipc/
 │   └── ui/                      # @niuma/ui 组件库
 │
 ├── web/                         # Layer 4 — CEF 内 Vue 主应用
 ├── shell/                       # Layer 3 — C++ CEF 壳
-├── platform/                    # Layer 2 — Go Platform Core（规划）
+├── platform/                    # Layer 2 — Go Platform Core
 ├── services/                    # Layer 1 — 能力服务 manifest + bin
 ├── plugins/                     # 可插拔插件包（内置 + 第三方）
 │
@@ -108,7 +112,7 @@ shell/src/
 │   └── runtime/                 # ServiceManager、manifest 扫描
 ├── browser/                     # NiuMaClient、handlers
 ├── bridge/                      # BridgeRouter、StreamProxy
-├── ipc/                         # PlatformClient gRPC
+├── ipc/                         # PlatformClient（Named Pipe / UDS）
 ├── protocol/                    # app:// scheme（含 plugins/ 路径规划）
 └── util/
 ```
@@ -117,13 +121,14 @@ shell/src/
 
 ---
 
-## 5. Platform 层 `platform/`（规划）
+## 5. Platform 层 `platform/`
 
 ```
 platform/
 ├── cmd/platform-core/
 └── internal/
-    ├── server/                  # gRPC
+    ├── protocol/                # 4 字节长度前缀 JSON
+    ├── handler/                 # 方法分发
     ├── plugin/                  # manifest 解析、启用/禁用
     ├── auth/                    # 权限裁决
     ├── credential/

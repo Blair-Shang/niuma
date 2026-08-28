@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"niuma/pkg/serviceipc/envelope"
+	"niuma/pkg/serviceipc/event"
 	"niuma/pkg/tunnel"
 	"niuma/services/ftp-service/internal/eventpub"
 	"niuma/services/ftp-service/internal/idgen"
@@ -63,44 +65,38 @@ const (
 // maxFileReadSize 是在线读取文件内容的最大字节数（10 MB）。
 const maxFileReadSize = 10 * 1024 * 1024
 
+// maxDirListEntries 是客户端显式传入 limit 时的单页上限；未传 limit 时返回完整列表。
+const maxDirListEntries = 20000
+
 const defaultDialTimeout = 30 * time.Second
 
 const (
-	errInvalidParamsFmt       = "invalid params: %v"
-	errSessionIDRequired      = "sessionId required"
-	errSessionIDPathRequired  = "sessionId and path required"
-	errTaskIDRequired         = "taskId required"
-	errSessionBusy            = "ftp: session busy: transfer in progress"
+	errInvalidParamsFmt      = "invalid params: %v"
+	errSessionIDRequired     = "sessionId required"
+	errSessionIDPathRequired = "sessionId and path required"
+	errTaskIDRequired        = "taskId required"
+	errSessionBusy           = "ftp: session busy: transfer in progress"
 )
 
-type Request struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	ID     string          `json:"id"`
-}
+type Request = envelope.Request
 
-type Response struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-	Result string `json:"result"`
-}
+type Response = envelope.Response
 
 // ConnectOptions 与 Web connection_options JSON 对齐。
 type ConnectOptions struct {
-	Protocol             string          `json:"protocol"`
-	TLSMode              string          `json:"tls_mode"`
-	Passive              bool            `json:"passive"`
-	Encoding             string          `json:"encoding"`
-	TransferType         string          `json:"transfer_type"`
-	TLSVerify            bool            `json:"tls_verify"`
-	TimeoutSeconds       int             `json:"timeout_seconds"`
-	TimeoutSecondsLegacy int             `json:"timeoutSeconds"`
-	KeepaliveSeconds     int             `json:"keepalive_seconds"`
-	Anonymous            bool            `json:"anonymous"`
-	Proxy                *ProxyOptions   `json:"proxy,omitempty"`
+	Protocol             string        `json:"protocol"`
+	TLSMode              string        `json:"tls_mode"`
+	Passive              bool          `json:"passive"`
+	Encoding             string        `json:"encoding"`
+	TransferType         string        `json:"transfer_type"`
+	TLSVerify            bool          `json:"tls_verify"`
+	TimeoutSeconds       int           `json:"timeout_seconds"`
+	TimeoutSecondsLegacy int           `json:"timeoutSeconds"`
+	KeepaliveSeconds     int           `json:"keepalive_seconds"`
+	Anonymous            bool          `json:"anonymous"`
+	Proxy                *ProxyOptions `json:"proxy,omitempty"`
 	// SSH 跳板机隧道；platform 在转发前已注入 sshProfile 凭据。
-	Tunnel               *tunnel.Options `json:"tunnel,omitempty"`
+	Tunnel *tunnel.Options `json:"tunnel,omitempty"`
 }
 
 // effectiveTimeoutSeconds 返回建连超时秒数；兼容历史 camelCase 字段。
@@ -154,6 +150,7 @@ type sessionIDParams struct {
 type dirListParams struct {
 	SessionID string `json:"sessionId"`
 	Path      string `json:"path"`
+	Limit     int    `json:"limit"`
 }
 
 type dirMakeParams struct {
@@ -193,12 +190,14 @@ type FtpEntry struct {
 	Permissions string `json:"permissions"`
 }
 
+// session 是一条存活的 FTP 控制连接；params 用于断线后原地重拨（sessionId 不变）。
 type session struct {
 	id            string
 	conn          *ftp.ServerConn
 	mu            sync.Mutex
 	tunnelStop    func() // non-nil when a SSH tunnel is active; call to tear down forwarding
 	keepaliveStop chan struct{}
+	params        ConnectParams
 }
 
 // Dispatcher 管理 FTP 会话并处理方法。
@@ -207,15 +206,17 @@ type Dispatcher struct {
 	sessions map[string]*session
 	ids      idgen.Generator
 	xfers    *transfer.Manager
+	events   *eventpub.Async
 }
 
 // New 创建 Dispatcher。
 func New(ids idgen.Generator) *Dispatcher {
+	pub := eventpub.New()
 	d := &Dispatcher{
 		sessions: make(map[string]*session),
 		ids:      ids,
+		events:   pub,
 	}
-	pub := eventpub.New()
 	d.xfers = transfer.New(ids, d.acquireConn, pub.Emit)
 	return d
 }
@@ -224,15 +225,18 @@ func New(ids idgen.Generator) *Dispatcher {
 func (d *Dispatcher) HandleFrame(ctx context.Context, raw []byte) []byte {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return marshalResponse(Response{
-			OK:    false,
-			Error: fmt.Sprintf("invalid request json: %v", err),
-		})
+		return marshalResponse(envelope.Fail("", fmt.Sprintf("invalid request json: %v", err)))
 	}
-	return marshalResponse(d.dispatch(ctx, req))
+	return marshalResponse(envelope.WithRequest(req, d.dispatch(ctx, req)))
 }
 
 func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
+	resp := d.dispatchMethod(ctx, req)
+	logDispatchError(req, resp)
+	return resp
+}
+
+func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 	switch req.Method {
 	case MethodSessionOpen:
 		return d.sessionOpen(ctx, req)
@@ -285,7 +289,7 @@ func (d *Dispatcher) sessionOpen(ctx context.Context, req Request) Response {
 		}
 		return errorResponse(req.ID, err.Error())
 	}
-	sess := &session{id: sessionID, conn: conn, tunnelStop: tunnelStop}
+	sess := &session{id: sessionID, conn: conn, tunnelStop: tunnelStop, params: params.ConnectParams}
 	keepaliveSecs := params.Options.effectiveKeepaliveSeconds()
 	if keepaliveSecs <= 0 {
 		keepaliveSecs = defaultKeepaliveSeconds
@@ -359,8 +363,13 @@ func (d *Dispatcher) dirList(_ context.Context, req Request) Response {
 	for _, ent := range entries {
 		out = append(out, toFtpEntry(ent))
 	}
-	slog.Info(MethodDirList, "session", params.SessionID, "path", path, "entries", len(out))
-	return okResponse(req.ID, map[string]any{"path": path, "entries": out})
+	out, truncated := applyDirListLimit(out, params.Limit)
+	slog.Info(MethodDirList, "session", params.SessionID, "path", path, "entries", len(out), "truncated", truncated)
+	result := map[string]any{"path": path, "entries": out}
+	if truncated {
+		result["truncated"] = true
+	}
+	return okResponse(req.ID, result)
 }
 
 func (d *Dispatcher) dirMake(_ context.Context, req Request) Response {
@@ -471,13 +480,30 @@ func (d *Dispatcher) entryRename(_ context.Context, req Request) Response {
 	return okResponse(req.ID, map[string]any{"renamed": true})
 }
 
-func (d *Dispatcher) acquireConn(sessionID string) (*ftp.ServerConn, func(), error) {
+// acquireConn 为传输任务占用会话锁；连接已断开时先原地重拨，避免换 sessionId。
+func (d *Dispatcher) acquireConn(sessionID string) (*transfer.ConnLease, error) {
 	s, err := d.getSession(sessionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	s.mu.Lock()
-	return s.conn, func() { s.mu.Unlock() }, nil
+	if err := d.ensureConnLocked(s); err != nil {
+		s.mu.Unlock()
+		d.forgetLost(sessionID, err)
+		return nil, err
+	}
+	lease := &transfer.ConnLease{
+		Conn:    s.conn,
+		Release: func() { s.mu.Unlock() },
+	}
+	lease.Reconnect = func() (*ftp.ServerConn, error) {
+		if err := d.redialLocked(s); err != nil {
+			return nil, err
+		}
+		lease.Conn = s.conn
+		return s.conn, nil
+	}
+	return lease, nil
 }
 
 func (d *Dispatcher) withSessionTryLock(sessionID string, fn func(*ftp.ServerConn) error) error {
@@ -488,8 +514,61 @@ func (d *Dispatcher) withSessionTryLock(sessionID string, fn func(*ftp.ServerCon
 	if !s.mu.TryLock() {
 		return fmt.Errorf("%s", errSessionBusy)
 	}
-	defer s.mu.Unlock()
-	return fn(s.conn)
+	locked := true
+	defer func() {
+		if locked {
+			s.mu.Unlock()
+		}
+	}()
+	if err := d.ensureConnLocked(s); err != nil {
+		s.mu.Unlock()
+		locked = false
+		d.forgetLost(sessionID, err)
+		return err
+	}
+	fnErr := fn(s.conn)
+	if fnErr == nil || !isFTPConnLost(fnErr) {
+		return fnErr
+	}
+	if redialErr := d.redialLocked(s); redialErr != nil {
+		s.mu.Unlock()
+		locked = false
+		d.forgetLost(sessionID, redialErr)
+		return fnErr
+	}
+	fnErr = fn(s.conn)
+	if fnErr != nil && isFTPConnLost(fnErr) {
+		s.mu.Unlock()
+		locked = false
+		d.forgetLost(sessionID, fnErr)
+	}
+	return fnErr
+}
+
+// applyDirListLimit 仅在客户端显式传入 limit>0 时截断；未传则返回完整列表，禁止静默丢条目。
+func applyDirListLimit(entries []FtpEntry, limit int) (out []FtpEntry, truncated bool) {
+	if limit <= 0 {
+		return entries, false
+	}
+	if limit > maxDirListEntries {
+		limit = maxDirListEntries
+	}
+	if len(entries) > limit {
+		return entries[:limit], true
+	}
+	return entries, false
+}
+
+func (d *Dispatcher) forgetLost(sessionID string, err error) {
+	_ = d.closeSession(sessionID)
+	if d.events == nil {
+		return
+	}
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	d.events.Emit(event.SessionLost("ftp", sessionID, msg))
 }
 
 type transferEnqueueParams struct {
@@ -512,6 +591,9 @@ func (d *Dispatcher) transferEnqueue(_ context.Context, req Request) Response {
 	var params transferEnqueueParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	if _, err := d.getSession(params.SessionID); err != nil {
+		return errorResponse(req.ID, err.Error())
 	}
 	taskID, err := d.xfers.Enqueue(transfer.EnqueueParams{
 		SessionID:  params.SessionID,
@@ -706,7 +788,7 @@ func dialFTPWithTunnel(ctx context.Context, params ConnectParams) (*ftp.ServerCo
 		params.PortNumber = port
 		stop = s
 	}
-	conn, err := dialFTP(ctx, params)
+	conn, err := dialFTP(params)
 	if err != nil {
 		if stop != nil {
 			stop()
@@ -725,7 +807,7 @@ func dialFTPWithTunnel(ctx context.Context, params ConnectParams) (*ftp.ServerCo
 //
 // 当 Options.Protocol 为 "ftps" 且 TLSMode 为空或 "none" 时，自动回退到 explicit 模式。
 // Options.TLSVerify 为 false 时跳过服务端证书校验（适用于自签名证书场景）。
-func dialFTP(ctx context.Context, params ConnectParams) (*ftp.ServerConn, error) {
+func dialFTP(params ConnectParams) (*ftp.ServerConn, error) {
 	if params.HostAddress == "" {
 		return nil, fmt.Errorf("ftp: host required")
 	}
@@ -753,6 +835,8 @@ func dialFTP(ctx context.Context, params ConnectParams) (*ftp.ServerConn, error)
 
 	var opts []ftp.DialOption
 	opts = append(opts, ftp.DialWithTimeout(timeout))
+	// 长传结束后控制连接可能已接近空闲超时；延长读 226 的截止时间。
+	opts = append(opts, ftp.DialWithShutTimeout(timeout))
 
 	if params.Options.Passive {
 		opts = append(opts, ftp.DialWithDisabledEPSV(true))
@@ -761,8 +845,13 @@ func dialFTP(ctx context.Context, params ConnectParams) (*ftp.ServerConn, error)
 		opts = append(opts, ftp.DialWithDisabledUTF8(true))
 	}
 
+	// DialFunc 同时用于控制连接和后续 PASV/EPSV 数据连接。
+	// 不能捕获 session.open / redial 的短生命周期 ctx：该 ctx 在调用返回后即被 cancel，
+	// 闲置后 LIST/RETR 拨数据口会报 "operation was canceled"。
 	dialFn := func(network, address string) (net.Conn, error) {
-		return dialTCP(ctx, params.Options.Proxy, network, address, timeout)
+		dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return dialTCP(dialCtx, params.Options.Proxy, network, address, timeout)
 	}
 	opts = append(opts, ftp.DialWithDialFunc(dialFn))
 
@@ -905,21 +994,13 @@ func removeRemoteDirRecursiveSafe(conn *ftp.ServerConn, dir string) error {
 }
 
 func okResponse(id string, result any) Response {
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return errorResponse(id, fmt.Sprintf("marshal result: %v", err))
-	}
-	return Response{ID: id, OK: true, Result: string(encoded)}
+	return envelope.OK(id, result)
 }
 
 func errorResponse(id, message string) Response {
-	return Response{ID: id, OK: false, Error: message}
+	return envelope.Fail(id, message)
 }
 
 func marshalResponse(resp Response) []byte {
-	out, err := json.Marshal(resp)
-	if err != nil {
-		return []byte(`{"ok":false,"error":"internal marshal error","result":""}`)
-	}
-	return out
+	return envelope.Marshal(resp)
 }

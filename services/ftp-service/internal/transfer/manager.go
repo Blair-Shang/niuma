@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"niuma/services/ftp-service/internal/idgen"
-
-	"github.com/jlaffaye/ftp"
 )
 
 const (
@@ -45,12 +43,12 @@ const (
 type State string
 
 const (
-	StateQueued    State = "queued"
-	StateRunning   State = "running"
-	StatePaused    State = "paused"
-	StateDone      State = "done"
-	StateFailed    State = "failed"
-	StateCanceled  State = "canceled"
+	StateQueued   State = "queued"
+	StateRunning  State = "running"
+	StatePaused   State = "paused"
+	StateDone     State = "done"
+	StateFailed   State = "failed"
+	StateCanceled State = "canceled"
 )
 
 // Task 是对外可见的传输任务快照。
@@ -78,15 +76,15 @@ type EnqueueParams struct {
 
 type task struct {
 	Task
-	overwrite       string
-	cancel          context.CancelFunc
-	pauseCh         chan struct{}
-	resumeCh        chan struct{}
+	overwrite        string
+	cancel           context.CancelFunc
+	pauseCh          chan struct{}
+	resumeCh         chan struct{}
 	lastProgressEmit time.Time
 }
 
-// SessionConn 按 sessionId 获取 FTP 连接；release 在传输结束后调用。
-type SessionConn func(sessionID string) (conn *ftp.ServerConn, release func(), err error)
+// SessionConn 按 sessionId 获取连接租约；Release 在传输结束后调用。
+type SessionConn func(sessionID string) (*ConnLease, error)
 
 type sessionRunner struct {
 	tasks chan *task
@@ -279,20 +277,20 @@ func (m *Manager) runTask(t *task) {
 
 	m.setState(t, StateRunning, "")
 
-	conn, release, err := m.getConn(t.SessionID)
+	lease, err := m.getConn(t.SessionID)
 	if err != nil {
 		m.setState(t, StateFailed, err.Error())
 		logTransferFailed(t, err)
 		return
 	}
-	defer release()
+	defer lease.Release()
 
 	var runErr error
 	switch t.Direction {
 	case DirectionDownload:
-		runErr = m.download(ctx, conn, t)
+		runErr = m.download(ctx, lease, t)
 	case DirectionUpload:
-		runErr = m.upload(ctx, conn, t)
+		runErr = m.upload(ctx, lease, t)
 	}
 
 	if ctx.Err() != nil {
@@ -311,11 +309,13 @@ func (m *Manager) runTask(t *task) {
 	logTransferDone(t)
 }
 
-func (m *Manager) download(ctx context.Context, conn *ftp.ServerConn, t *task) error {
+func (m *Manager) download(ctx context.Context, lease *ConnLease, t *task) error {
 	local := t.LocalPath
 	remote := t.RemotePath
 
-	isDir, err := remoteIsDir(conn, remote)
+	isDir, err := retryOnConnLost(ctx, lease, func() (bool, error) {
+		return remoteIsDir(lease.Conn, remote)
+	})
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func (m *Manager) download(ctx context.Context, conn *ftp.ServerConn, t *task) e
 		if err := os.MkdirAll(local, 0o755); err != nil {
 			return fmt.Errorf("mkdir local: %w", err)
 		}
-		return m.downloadDir(ctx, conn, t)
+		return m.downloadDir(ctx, lease, t)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
@@ -331,16 +331,18 @@ func (m *Manager) download(ctx context.Context, conn *ftp.ServerConn, t *task) e
 	}
 
 	fileTotal := int64(0)
-	if size, sizeErr := conn.FileSize(remote); sizeErr == nil {
+	if size, sizeErr := lease.Conn.FileSize(remote); sizeErr == nil {
 		fileTotal = size
 	}
 	m.setTotal(t, fileTotal)
 
-	_, err = m.downloadFile(ctx, conn, t, remote, local, 0, fileTotal)
+	_, err = retryOnConnLost(ctx, lease, func() (int64, error) {
+		return m.downloadFile(ctx, lease.Conn, t, remote, local, 0, fileTotal)
+	})
 	return err
 }
 
-func (m *Manager) upload(ctx context.Context, conn *ftp.ServerConn, t *task) error {
+func (m *Manager) upload(ctx context.Context, lease *ConnLease, t *task) error {
 	local := t.LocalPath
 	remote := t.RemotePath
 
@@ -349,12 +351,14 @@ func (m *Manager) upload(ctx context.Context, conn *ftp.ServerConn, t *task) err
 		return fmt.Errorf("stat local: %w", err)
 	}
 	if info.IsDir() {
-		return m.uploadDir(ctx, conn, t)
+		return m.uploadDir(ctx, lease, t)
 	}
 
 	fileTotal := info.Size()
 	m.setTotal(t, fileTotal)
-	_, err = m.uploadFile(ctx, conn, t, local, remote, 0, fileTotal)
+	_, err = retryOnConnLost(ctx, lease, func() (int64, error) {
+		return m.uploadFile(ctx, lease.Conn, t, local, remote, 0, fileTotal)
+	})
 	return err
 }
 

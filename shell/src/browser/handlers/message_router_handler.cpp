@@ -34,7 +34,10 @@ bool NiuMaMessageRouterHandler::OnQuery(CefRefPtr<CefBrowser> browser,
     if (resp.ok) {
       callback->Success(resp.result.empty() ? "{}" : resp.result);
     } else {
-      callback->Failure(0, resp.error);
+      const std::string trace =
+          resp.trace_id.empty() ? resp.id : resp.trace_id;
+      callback->Failure(0, niuma::FormatBridgeFailureJson(
+                               resp.error, resp.error_code, trace));
     }
   });
   return true;

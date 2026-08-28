@@ -4,6 +4,8 @@
 #include "util/runtime_paths.h"
 #include "util/session_log.h"
 
+#include <niuma/logutil/logutil.hpp>
+
 #include <functional>
 #include <cstdint>
 #include <atomic>
@@ -16,6 +18,7 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -99,6 +102,34 @@ constexpr DWORD kRetrySleepMs = 150;
 constexpr uint32_t kMaxFrameBytes = 1u << 30;
 /// 长度前缀字节数（uint32 小端）。
 constexpr DWORD kHeaderBytes = 4;
+constexpr size_t kMaxIdleConns = 8;
+constexpr auto kMaxIdleAge = std::chrono::seconds(30);
+
+struct IdlePipe {
+  HANDLE handle = INVALID_HANDLE_VALUE;
+  std::chrono::steady_clock::time_point at{};
+};
+
+std::mutex g_rpc_pool_mu;
+std::vector<IdlePipe> g_rpc_idle;
+
+void DrainRpcPool() {
+  std::vector<HANDLE> closing;
+  {
+    std::lock_guard<std::mutex> lock(g_rpc_pool_mu);
+    closing.reserve(g_rpc_idle.size());
+    for (IdlePipe& item : g_rpc_idle) {
+      closing.push_back(item.handle);
+      item.handle = INVALID_HANDLE_VALUE;
+    }
+    g_rpc_idle.clear();
+  }
+  for (HANDLE h : closing) {
+    if (h != INVALID_HANDLE_VALUE && h != nullptr) {
+      CloseHandle(h);
+    }
+  }
+}
 
 /// @brief HANDLE 的 RAII 封装：Move-only，析构时 CloseHandle。
 class ScopedHandle {
@@ -107,6 +138,14 @@ class ScopedHandle {
   explicit ScopedHandle(HANDLE handle) : handle_(handle) {}
   ScopedHandle(const ScopedHandle&) = delete;
   ScopedHandle& operator=(const ScopedHandle&) = delete;
+  ScopedHandle(ScopedHandle&& other) noexcept : handle_(other.Release()) {}
+  ScopedHandle& operator=(ScopedHandle&& other) noexcept {
+    if (this != &other) {
+      Reset();
+      handle_ = other.Release();
+    }
+    return *this;
+  }
   ~ScopedHandle() { Reset(); }
 
   bool Valid() const {
@@ -188,6 +227,66 @@ ScopedHandle ConnectPipe(const wchar_t* pipe_name, std::string& error) {
   return ScopedHandle();
 }
 
+bool WriteFrame(HANDLE pipe, const std::string& request, std::string& error) {
+  const uint32_t n = static_cast<uint32_t>(request.size());
+  unsigned char header[kHeaderBytes] = {
+      static_cast<unsigned char>(n & 0xFF),
+      static_cast<unsigned char>((n >> 8) & 0xFF),
+      static_cast<unsigned char>((n >> 16) & 0xFF),
+      static_cast<unsigned char>((n >> 24) & 0xFF)};
+  if (!WriteAll(pipe, header, kHeaderBytes) ||
+      (n > 0 && !WriteAll(pipe, request.data(), n))) {
+    error = "write failed";
+    return false;
+  }
+  return true;
+}
+
+ScopedHandle TakeRpcPipe(bool& reused, std::string& error) {
+  std::vector<HANDLE> stale;
+  reused = false;
+  {
+    std::lock_guard<std::mutex> lock(g_rpc_pool_mu);
+    const auto now = std::chrono::steady_clock::now();
+    while (!g_rpc_idle.empty()) {
+      IdlePipe last = g_rpc_idle.back();
+      g_rpc_idle.pop_back();
+      if (now - last.at > kMaxIdleAge) {
+        stale.push_back(last.handle);
+        continue;
+      }
+      reused = true;
+      for (HANDLE h : stale) {
+        if (h != INVALID_HANDLE_VALUE) {
+          CloseHandle(h);
+        }
+      }
+      return ScopedHandle(last.handle);
+    }
+  }
+  for (HANDLE h : stale) {
+    if (h != INVALID_HANDLE_VALUE) {
+      CloseHandle(h);
+    }
+  }
+  return ConnectPipe(kPipeName, error);
+}
+
+void PutRpcPipe(ScopedHandle& pipe) {
+  if (!pipe.Valid()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(g_rpc_pool_mu);
+  if (g_rpc_idle.size() >= kMaxIdleConns) {
+    pipe.Reset();
+    return;
+  }
+  IdlePipe item;
+  item.handle = pipe.Release();
+  item.at = std::chrono::steady_clock::now();
+  g_rpc_idle.push_back(item);
+}
+
 /// @brief 读取一帧响应/事件载荷。
 bool ReadFrame(HANDLE pipe, std::string& response, std::string& error) {
   unsigned char resp_header[kHeaderBytes];
@@ -212,27 +311,32 @@ bool ReadFrame(HANDLE pipe, std::string& response, std::string& error) {
   return true;
 }
 
-/// @brief 单次请求-响应：连接 → 发送成帧请求 → 读取成帧响应。
+/// @brief 单次请求-响应：池连接复用；仅写出失败且来自池时换新连接重发。
 bool SendRecv(const std::string& request, std::string& response,
               std::string& error) {
-  ScopedHandle pipe = ConnectPipe(kPipeName, error);
+  bool reused = false;
+  ScopedHandle pipe = TakeRpcPipe(reused, error);
   if (!pipe.Valid()) {
     return false;
   }
-
-  const uint32_t n = static_cast<uint32_t>(request.size());
-  unsigned char header[kHeaderBytes] = {
-      static_cast<unsigned char>(n & 0xFF),
-      static_cast<unsigned char>((n >> 8) & 0xFF),
-      static_cast<unsigned char>((n >> 16) & 0xFF),
-      static_cast<unsigned char>((n >> 24) & 0xFF)};
-  if (!WriteAll(pipe.Get(), header, kHeaderBytes) ||
-      (n > 0 && !WriteAll(pipe.Get(), request.data(), n))) {
-    error = "write failed";
+  if (!WriteFrame(pipe.Get(), request, error)) {
+    pipe.Reset();
+    if (!reused) {
+      return false;
+    }
+    pipe = ConnectPipe(kPipeName, error);
+    if (!pipe.Valid()) {
+      return false;
+    }
+    if (!WriteFrame(pipe.Get(), request, error)) {
+      return false;
+    }
+  }
+  if (!ReadFrame(pipe.Get(), response, error)) {
     return false;
   }
-
-  return ReadFrame(pipe.Get(), response, error);
+  PutRpcPipe(pipe);
+  return true;
 }
 
 std::atomic<bool> g_event_listener_stop{false};
@@ -309,6 +413,33 @@ constexpr uint32_t kMaxFrameBytes = 1u << 30;  // 1 GiB，与 Go MaxFrameSize �
 constexpr size_t kHeaderBytes = 4;
 constexpr int kConnectAttempts = 10;
 constexpr auto kRetrySleep = std::chrono::milliseconds(150);
+constexpr size_t kMaxIdleConns = 8;
+constexpr auto kMaxIdleAge = std::chrono::seconds(30);
+
+struct IdleFd {
+  int fd = -1;
+  std::chrono::steady_clock::time_point at{};
+};
+
+std::mutex g_rpc_pool_mu;
+std::vector<IdleFd> g_rpc_idle;
+
+void DrainRpcPool() {
+  std::vector<int> closing;
+  {
+    std::lock_guard<std::mutex> lock(g_rpc_pool_mu);
+    for (IdleFd& item : g_rpc_idle) {
+      closing.push_back(item.fd);
+      item.fd = -1;
+    }
+    g_rpc_idle.clear();
+  }
+  for (int fd : closing) {
+    if (fd >= 0) {
+      close(fd);
+    }
+  }
+}
 
 bool WriteAll(int fd, const void* data, size_t len) {
   const char* cursor = static_cast<const char*>(data);
@@ -363,6 +494,63 @@ int ConnectUnixSocket(const std::string& path, std::string& error) {
   return -1;
 }
 
+bool WriteFrame(int fd, const std::string& request, std::string& error) {
+  const uint32_t n = static_cast<uint32_t>(request.size());
+  unsigned char header[kHeaderBytes] = {
+      static_cast<unsigned char>(n & 0xFF),
+      static_cast<unsigned char>((n >> 8) & 0xFF),
+      static_cast<unsigned char>((n >> 16) & 0xFF),
+      static_cast<unsigned char>((n >> 24) & 0xFF)};
+  if (!WriteAll(fd, header, kHeaderBytes) ||
+      (n > 0 && !WriteAll(fd, request.data(), n))) {
+    error = "write failed";
+    return false;
+  }
+  return true;
+}
+
+int TakeRpcFd(bool& reused, std::string& error) {
+  std::vector<int> stale;
+  reused = false;
+  {
+    std::lock_guard<std::mutex> lock(g_rpc_pool_mu);
+    const auto now = std::chrono::steady_clock::now();
+    while (!g_rpc_idle.empty()) {
+      IdleFd last = g_rpc_idle.back();
+      g_rpc_idle.pop_back();
+      if (now - last.at > kMaxIdleAge) {
+        stale.push_back(last.fd);
+        continue;
+      }
+      reused = true;
+      for (int fd : stale) {
+        if (fd >= 0) {
+          close(fd);
+        }
+      }
+      return last.fd;
+    }
+  }
+  for (int fd : stale) {
+    if (fd >= 0) {
+      close(fd);
+    }
+  }
+  return ConnectUnixSocket(GetPlatformIpcAddress(), error);
+}
+
+void PutRpcFd(int fd) {
+  if (fd < 0) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(g_rpc_pool_mu);
+  if (g_rpc_idle.size() >= kMaxIdleConns) {
+    close(fd);
+    return;
+  }
+  g_rpc_idle.push_back(IdleFd{fd, std::chrono::steady_clock::now()});
+}
+
 bool ReadFrame(int fd, std::string& response, std::string& error) {
   unsigned char resp_header[kHeaderBytes];
   if (!ReadAll(fd, resp_header, kHeaderBytes)) {
@@ -386,25 +574,40 @@ bool ReadFrame(int fd, std::string& response, std::string& error) {
 }
 
 bool SendRecv(const std::string& request, std::string& response, std::string& error) {
-  const int fd = ConnectUnixSocket(GetPlatformIpcAddress(), error);
+  bool reused = false;
+  int fd = TakeRpcFd(reused, error);
   if (fd < 0) {
     return false;
   }
-
-  const uint32_t n = static_cast<uint32_t>(request.size());
-  unsigned char header[kHeaderBytes] = {
-      static_cast<unsigned char>(n & 0xFF),
-      static_cast<unsigned char>((n >> 8) & 0xFF),
-      static_cast<unsigned char>((n >> 16) & 0xFF),
-      static_cast<unsigned char>((n >> 24) & 0xFF)};
-  const bool ok = WriteAll(fd, header, kHeaderBytes) &&
-                  (n == 0 || WriteAll(fd, request.data(), n)) &&
-                  ReadFrame(fd, response, error);
-  close(fd);
-  if (!ok && error.empty()) {
-    error = "socket io failed";
+  if (!WriteFrame(fd, request, error)) {
+    close(fd);
+    if (!reused) {
+      if (error.empty()) {
+        error = "socket io failed";
+      }
+      return false;
+    }
+    fd = ConnectUnixSocket(GetPlatformIpcAddress(), error);
+    if (fd < 0) {
+      return false;
+    }
+    if (!WriteFrame(fd, request, error)) {
+      close(fd);
+      if (error.empty()) {
+        error = "socket io failed";
+      }
+      return false;
+    }
   }
-  return ok;
+  if (!ReadFrame(fd, response, error)) {
+    close(fd);
+    if (error.empty()) {
+      error = "socket io failed";
+    }
+    return false;
+  }
+  PutRpcFd(fd);
+  return true;
 }
 
 std::atomic<bool> g_event_listener_stop{false};
@@ -503,29 +706,42 @@ void PlatformClient::Invoke(const std::string& service_id,
                       callback = std::move(callback)]() mutable {
     std::string response;
     std::string io_error;
+    const auto t0 = std::chrono::steady_clock::now();
     const bool io_ok = SendRecv(request, response, io_error);
-
-    bool ok = false;
-    std::string data;
-    std::string err;
-    if (!io_ok) {
-      err = "platform unavailable: " + io_error;
+    const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - t0)
+                                 .count();
+    if (io_ok) {
+      niuma::logutil::ObserveIPC("niuma-shell", request, response, duration_ms);
     } else {
-      ok = JsonGetBool(response, "ok", false);
-      data = JsonGetString(response, "result");
-      err = JsonGetString(response, "error");
-      if (!ok && err.empty()) {
-        err = "platform error";
+      niuma::logutil::ObserveRPC("niuma-shell", JsonGetString(request, "method"),
+                                 JsonGetString(request, "id"), JsonGetString(request, "traceId"),
+                                 false, "unavailable", duration_ms);
+    }
+
+    PlatformInvokeResult result;
+    if (!io_ok) {
+      result.ok = false;
+      result.error = "platform unavailable: " + io_error;
+      result.error_code = "unavailable";
+    } else {
+      result.ok = JsonGetBool(response, "ok", false);
+      result.data = JsonGetString(response, "result");
+      result.error = JsonGetString(response, "error");
+      result.error_code = JsonGetString(response, "errorCode");
+      result.trace_id = JsonGetString(response, "traceId");
+      if (!result.ok && result.error.empty()) {
+        result.error = "platform error";
       }
     }
 
-    PostToUi([cb = std::move(callback), ok, data = std::move(data),
-              err = std::move(err)]() { cb(ok, data, err); });
+    PostToUi([cb = std::move(callback), result = std::move(result)]() { cb(result); });
   });
   worker.detach();
 }
 
 void PlatformClient::ShutdownAll() {
+  DrainRpcPool();
   CloseAllStreams();
   StopEventListener();
 }

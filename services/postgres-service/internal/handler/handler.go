@@ -4,9 +4,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 
+	"niuma/pkg/serviceipc/envelope"
+	"niuma/pkg/serviceipc/event"
 	"niuma/pkg/sqllsp"
 	"niuma/services/postgres-service/internal/dataio"
 	"niuma/services/postgres-service/internal/eventpub"
@@ -84,11 +86,11 @@ const (
 	MethodMetaDatabaseCreateOptions = "meta.databaseCreateOptions"
 	// MethodMetaDatabaseOverview 已有库的建库属性（复制 CREATE DATABASE）。
 	MethodMetaDatabaseOverview = "meta.databaseOverview"
-	MethodMetaInstanceOverview      = "meta.instanceOverview"
-	MethodMetaActivity              = "meta.activity"
-	MethodMetaLocks                 = "meta.locks"
-	MethodMetaBackendCancel         = "meta.backendCancel"
-	MethodMetaBackendTerminate      = "meta.backendTerminate"
+	MethodMetaInstanceOverview = "meta.instanceOverview"
+	MethodMetaActivity         = "meta.activity"
+	MethodMetaLocks            = "meta.locks"
+	MethodMetaBackendCancel    = "meta.backendCancel"
+	MethodMetaBackendTerminate = "meta.backendTerminate"
 	// MethodMetaServerVariables 读取 pg_settings（Variables）。
 	MethodMetaServerVariables = "meta.serverVariables"
 	// MethodMetaServerStatus 扁平化 pg_stat_*（Status）。
@@ -114,19 +116,10 @@ const (
 )
 
 // Request 是能力服务请求信封。
-type Request struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	ID     string          `json:"id"`
-}
+type Request = envelope.Request
 
 // Response 是能力服务响应信封。
-type Response struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-	Result string `json:"result"`
-}
+type Response = envelope.Response
 
 type sessionIDParams struct {
 	SessionID string `json:"sessionId"`
@@ -162,20 +155,27 @@ func New(ids idgen.Generator, events *eventpub.Async) *Dispatcher {
 func (d *Dispatcher) HandleFrame(ctx context.Context, raw []byte) []byte {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return marshalResponse(Response{
-			OK:    false,
-			Error: fmt.Sprintf("invalid request json: %v", err),
-		})
+		return marshalResponse(envelope.Fail("", fmt.Sprintf("invalid request json: %v", err)))
 	}
-	return marshalResponse(d.dispatch(ctx, req))
+	return marshalResponse(envelope.WithRequest(req, d.dispatch(ctx, req)))
 }
 
 func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 	resp := d.dispatchMethod(ctx, req)
-	if !resp.OK && strings.TrimSpace(resp.Error) != "" {
-		logOpError(req.Method, fmt.Errorf("%s", resp.Error), "id", req.ID)
-	}
+	d.noteIfLostFrom(req, resp)
+	logDispatchError(req, resp)
 	return resp
+}
+
+func (d *Dispatcher) noteIfLostFrom(req Request, resp Response) {
+	if resp.OK {
+		return
+	}
+	var emit func(map[string]any)
+	if d.events != nil {
+		emit = d.events.Emit
+	}
+	event.NoteLost(emit, "postgres", event.SessionIDFromParams(req.Params), errors.New(resp.Error), d.sessions.Close)
 }
 
 func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
@@ -304,21 +304,17 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 }
 
 func okResponse(id string, result any) Response {
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return errorResponse(id, fmt.Sprintf("marshal result: %v", err))
-	}
-	return Response{ID: id, OK: true, Result: string(encoded)}
+	return envelope.OK(id, result)
 }
 
 func errorResponse(id, message string) Response {
-	return Response{ID: id, OK: false, Error: message}
+	return envelope.Fail(id, message)
+}
+
+func errorEngineMismatch(id string, err error) Response {
+	return envelope.FailEngineMismatch(id, err)
 }
 
 func marshalResponse(resp Response) []byte {
-	out, err := json.Marshal(resp)
-	if err != nil {
-		return []byte(`{"ok":false,"error":"internal marshal error","result":""}`)
-	}
-	return out
+	return envelope.Marshal(resp)
 }

@@ -1,0 +1,55 @@
+NiuMa End-User License Agreement and Disclaimer (EULA)
+Version: 1.0.0    Applies to: desktop client installation and use
+
+IMPORTANT: Read this agreement before installing, copying, or using NiuMa (the "Software").
+Installing or using the Software means you have read, understood, and agree to be bound by this agreement. If you do not agree, cancel installation and delete all copies.
+
+The Software is provided by an individual developer (the "Developer"), not by a registered company as a contracting party. This agreement is not a paid services contract, outsourcing engagement, or service-level agreement (SLA).
+
+1. License
+Subject to this agreement, the Developer grants you a personal, non-exclusive, non-transferable, revocable license to install and run the Software object code on devices you own or control, for your own use.
+Intellectual property in the Software, UI, docs, trademarks, and icons remains with the Developer or the respective owners. This agreement does not grant source-code rights and does not open-source the Software.
+
+2. Restrictions
+You may not, without written permission: reverse engineer (except where mandatory law allows), crack, remove notices; redistribute modified builds as "official"; or use the Software for illegal, infringing, or harmful network activity.
+You may share unmodified official installers together with this agreement. You may not charge a license fee for the Software itself (reasonable media cost excepted).
+
+3. Operations, connections, and data risk
+The Software is an operations and data tool and may connect to databases, SSH, FTP, cloud, and other systems that you configure. You agree that:
+(a) Targets, accounts, keys, certificates, commands, and SQL are chosen and executed by you. The Developer does not control your servers and is not responsible for your actions.
+(b) Destructive or incorrect operations can cause irreversible data loss or downtime. Back up production systems and confirm you are authorized to access them.
+(c) Credentials are stored by default in your local user profile. Protect the device. Loss from theft, shared accounts, malware, or misconfiguration is your responsibility.
+(d) Third-party databases, clouds, and OS licenses still apply. Optional components such as Oracle Instant Client are not bundled; if you install them, you must comply with their terms.
+
+4. Artificial intelligence
+AI features (for example generated SQL or suggestions) may be wrong, stale, or unsafe. Review all output before execution. You bear losses from relying on AI output.
+
+5. As-is; no warranty
+The Software is provided "AS IS" and "AS AVAILABLE". To the maximum extent permitted by law, the Developer disclaims all warranties, express or implied, including merchantability, fitness for a particular purpose, non-infringement, uninterrupted or error-free operation, security, and compatibility.
+The current Windows installer may be unsigned. OS features such as Microsoft SmartScreen may warn you. That is not a defect and not a security guarantee. Continuing to install is at your own risk.
+
+6. Limitation of liability
+To the maximum extent permitted by law:
+(a) The Developer is not liable for indirect, incidental, special, punitive, or consequential damages, including data loss, lost profits, business interruption, or third-party claims, even if advised of the possibility.
+(b) The Developer's total liability relating to the Software will not exceed the amount you actually paid the Developer for the Software (zero if you obtained it free of charge).
+(c) Some jurisdictions do not allow certain limitations. Those terms apply only to the extent allowed. Mandatory consumer rights are not waived.
+
+7. Privacy and network
+The Software mainly runs on your device. Update checks, installer downloads, or feedback/diagnostics you submit may contact servers operated by the Developer or a designate (for example the website or update API). Do not include passwords, keys, or other people's personal data in feedback.
+The Developer is not the processor of databases or hosts you connect to; you are responsible for that compliance.
+
+8. Third-party components
+The Software includes Chromium Embedded Framework and other components. See licenses/NOTICES.txt and licenses/CEF-LICENSE.txt in the install directory. Those licenses govern the corresponding components if they conflict with this agreement.
+
+9. Updates and termination
+The Developer may provide, delay, or stop updates without notice and has no duty to support you. This license ends when you stop using and uninstall the Software; sections 3–8 and 10 survive.
+Breach of this agreement terminates the license immediately.
+
+10. Governing law
+This agreement is governed by the laws of the People's Republic of China (excluding conflict-of-law rules). Disputes shall be submitted to the people's court with jurisdiction at the Developer's domicile. Mandatory consumer rules in your jurisdiction, if any, still apply.
+
+11. Entire agreement
+This is the entire agreement regarding use of the Software. Failure to enforce a term is not a waiver.
+A current copy may be published at https://www.niuma007.com . If the website text differs from the copy you accepted at install time, the accepted copy controls.
+
+By continuing installation you confirm you are of legal age (or have guardian consent) and accept this agreement.

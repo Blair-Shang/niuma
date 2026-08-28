@@ -1,8 +1,8 @@
 // Package protocol 定义 Layer-1 能力服务与 Platform 之间的应用 IPC 报文分帧。
 //
-// 过渡期传输为 Windows 命名管道（非 Windows 用 Unix Domain Socket），
+// 传输为 Windows 命名管道（非 Windows 用 Unix Domain Socket），
 // 分帧格式为：4 字节小端长度前缀 + UTF-8 JSON 载荷。各语言实现须与此契约对齐
-// （见 docs/13-service-layout.md）。
+// （见 docs/13-service-layout.md）。本机 IPC 不定 TCP 端口。
 package protocol
 
 import (

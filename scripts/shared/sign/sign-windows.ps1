@@ -4,9 +4,10 @@
   可选 Authenticode 签名（Setup.exe / niuma.exe）。
 
   环境变量：
-    SIGNTOOL_PATH   - signtool.exe 路径（默认从 Windows SDK 查找）
-    CODESIGN_CERT   - 证书指纹或主题名（/sha1 或 /n）
-    CODESIGN_TS_URL - 时间戳 URL（默认 http://timestamp.digicert.com）
+    SIGNTOOL_PATH     - signtool.exe 路径（默认从 Windows SDK 查找）
+    CODESIGN_CERT     - 证书指纹或主题名（/sha1 或 /n）
+    CODESIGN_TS_URL   - 时间戳 URL（默认 http://timestamp.digicert.com）
+    REQUIRE_CODESIGN  - 1/true 时未配置证书则失败（正式发版）
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -17,7 +18,16 @@ $ErrorActionPreference = 'Stop'
 if (-not (Test-Path $FilePath)) {
     throw "file not found: $FilePath"
 }
+
+function Test-RequireCodeSign {
+    $flag = [string]$env:REQUIRE_CODESIGN
+    return ($flag -eq '1' -or $flag -eq 'true')
+}
+
 if (-not $env:CODESIGN_CERT) {
+    if (Test-RequireCodeSign) {
+        throw "REQUIRE_CODESIGN is set but CODESIGN_CERT is empty: $FilePath"
+    }
     Write-Host "==> skip Authenticode (CODESIGN_CERT not set): $FilePath" -ForegroundColor DarkGray
     return
 }

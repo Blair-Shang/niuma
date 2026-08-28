@@ -11,11 +11,10 @@ Layer 2：**Go** 实现的业务中枢 — 插件注册、数据权限、模块�
 | 项 | 选择 |
 |----|------|
 | 语言 | **Go 1.22**（受 `modernc.org/sqlite` 版本约束，见下） |
-| IPC（当前） | **命名管道 + 4 字节小端长度前缀 + UTF-8 JSON**（Windows）/ UDS（其他平台） |
-| IPC（规划） | gRPC over Named Pipe / UDS，替换上面的过渡协议 |
+| IPC | **命名管道 + 4 字节小端长度前缀 + UTF-8 JSON**（Windows）/ UDS（其他平台）；见 [docs/03](../docs/03-ipc-protocol.md) |
 | 本地库 | SQLite（`modernc.org/sqlite` v1.29.10，纯 Go，无 cgo） |
 | 凭据 | **VaultStore**（AES-256-GCM 密文 + Keychain 主密钥） |
-| 契约 | `proto/` Protobuf（gRPC 上线后） |
+| 契约 | JSON 信封（`packages/go/serviceipc/envelope`）；非 Protobuf/gRPC |
 
 > **依赖版本说明**：`modernc.org/sqlite` 最新版（v1.53+）已要求 Go ≥ 1.25，与本仓
 > `go 1.22` 基线冲突；故固定在支持 Go 1.22 的 `v1.29.10`（对应 `libc v1.49.3`、

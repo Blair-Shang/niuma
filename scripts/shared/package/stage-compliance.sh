@@ -29,6 +29,12 @@ fi
 if [[ -f "$REPO_ROOT/docs/compliance/NOTICES.txt" ]]; then
   cp "$REPO_ROOT/docs/compliance/NOTICES.txt" "$DEST_DIR/licenses/NOTICES.txt"
 fi
+if [[ -f "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" ]]; then
+  cp "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" "$DEST_DIR/licenses/EULA.zh-CN.txt"
+fi
+if [[ -f "$REPO_ROOT/docs/legal/EULA.en-US.txt" ]]; then
+  cp "$REPO_ROOT/docs/legal/EULA.en-US.txt" "$DEST_DIR/licenses/EULA.en-US.txt"
+fi
 if [[ -f "$REPO_ROOT/build/version.json" ]]; then
   cp "$REPO_ROOT/build/version.json" "$DEST_DIR/version.json"
 fi
