@@ -67,5 +67,11 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: true,
+    // @vueuse/core 的 /* #__PURE__ */ 位置 Rolldown 不认；依赖产物，关掉以免污染 CI。
+    rolldownOptions: {
+      checks: {
+        invalidAnnotation: false,
+      },
+    },
   },
 })

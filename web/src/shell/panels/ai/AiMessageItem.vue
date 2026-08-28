@@ -3,16 +3,17 @@
  * 单条对话消息：用户/助手布局；MD 渲染；底部工具条（复制/重试/编辑/分支）。
  */
 import { copyTextToClipboard, RsIcon } from '@niuma/ui'
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiLiveToolInvocation } from '@/api/types/ai'
 import { useAiStore } from '@/stores/ai'
 import AiMarkdown from './AiMarkdown.vue'
 import AiMediaLightbox from './AiMediaLightbox.vue'
-import AiToolCallCard from './AiToolCallCard.vue'
 import type { AiContextAttachment } from './context-pack'
 import type { ExtractedTextFile } from './attachment-utils'
 import type { ParsedAssistantContent } from './parse-assistant-content'
+
+const AiToolCallCard = defineAsyncComponent(() => import('./AiToolCallCard.vue'))
 
 const props = withDefaults(
   defineProps<{

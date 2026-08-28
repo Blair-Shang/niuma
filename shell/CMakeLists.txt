@@ -138,26 +138,18 @@ if(CEF_ROOT AND EXISTS "${CEF_ROOT}/CMakeLists.txt")
       MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   endif()
   if(APPLE)
+    # macOS 发行包没有顶层 Resources/；pak / icudtl 在 framework 内。
     add_custom_command(TARGET niuma POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CEF_ROOT_NORM}/Release/Chromium Embedded Framework.framework"
         "$<TARGET_FILE_DIR:niuma>/Chromium Embedded Framework.framework"
       COMMENT "Copy CEF framework")
-    foreach(_cef_res chrome_100_percent.pak chrome_200_percent.pak resources.pak icudtl.dat)
-      add_custom_command(TARGET niuma POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${CEF_ROOT_NORM}/Resources/${_cef_res}"
-          "$<TARGET_FILE_DIR:niuma>/${_cef_res}"
-        COMMENT "Copy CEF resource ${_cef_res}")
-    endforeach()
-    add_custom_command(TARGET niuma POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CEF_ROOT_NORM}/Resources/locales"
-        "$<TARGET_FILE_DIR:niuma>/locales"
-      COMMENT "Copy CEF locales")
   else()
-    COPY_FILES("niuma" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
-    COPY_FILES("niuma" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+    # SET_CEF_TARGET_OUT_DIR 在 add_executable 之后设置 CMAKE_RUNTIME_OUTPUT_DIRECTORY，
+    # 对已有 target 无效。Unix Makefiles 下 niuma 在 build 根目录，CEF_TARGET_OUT_DIR
+    # 却是 build/Release，必须拷到 $<TARGET_FILE_DIR:niuma>。
+    COPY_FILES("niuma" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "$<TARGET_FILE_DIR:niuma>")
+    COPY_FILES("niuma" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "$<TARGET_FILE_DIR:niuma>")
   endif()
 
   message(STATUS "CEF enabled: ${CEF_ROOT}")
