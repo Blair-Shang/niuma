@@ -68,6 +68,19 @@ function Escape-InnoPath {
     return ($Path -replace '\\', '/')
 }
 
+function Get-FileSha256Hex {
+    param([string]$Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $hash = $sha.ComputeHash($stream)
+        return [System.BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
 . (Join-Path $Root 'scripts\shared\lib\version.ps1')
 $pkgJson = Get-Content (Join-Path $Root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $buildInfo = Get-BuildInfo -RepoRoot $Root
@@ -220,7 +233,8 @@ if (Test-Path $SignScript) {
 }
 
 # 发版元数据：供 Admin 填写 download_url / sha256 / file_size
-$sha256 = (Get-FileHash -Path $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
+# GHA 精简 PowerShell 可能没有 Get-FileHash，改用 .NET SHA256。
+$sha256 = Get-FileSha256Hex -Path $setupExe
 $fileSize = (Get-Item -LiteralPath $setupExe).Length
 $metaPath = Join-Path $OutputDir "$setupBaseName.release.json"
 $channel = if ($buildInfo.channel) { [string]$buildInfo.channel } else { 'stable' }
