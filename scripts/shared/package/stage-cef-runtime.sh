@@ -137,9 +137,11 @@ stage_macos() {
   [[ -d "$framework_src" ]] || framework_src="$CEF_ROOT/$CONFIGURATION/$framework_name"
   [[ -d "$framework_src" ]] || nm_die "macOS CEF framework not found (expected under build output or $CEF_ROOT/$CONFIGURATION)"
 
+  # dest=.../Contents/MacOS 时 Frameworks 与 MacOS 同级，只上一级到 Contents。
+  # 原先 dirname 两次会落到 NiuMa.app/Frameworks，pack 检查 Contents/Frameworks 就会失败。
   local frameworks_dir="$DEST_DIR"
   if [[ "$(basename "$DEST_DIR")" == "MacOS" ]]; then
-    frameworks_dir="$(dirname "$(dirname "$DEST_DIR")")/Frameworks"
+    frameworks_dir="$(dirname "$DEST_DIR")/Frameworks"
   elif [[ "$(basename "$DEST_DIR")" == "Contents" ]]; then
     frameworks_dir="$DEST_DIR/Frameworks"
   elif [[ "$DEST_DIR" == *.app/Contents/MacOS ]]; then
@@ -158,7 +160,7 @@ stage_macos() {
   )
   local resources_dir="$DEST_DIR"
   if [[ "$(basename "$DEST_DIR")" == "MacOS" ]]; then
-    resources_dir="$(dirname "$(dirname "$DEST_DIR")")/Resources"
+    resources_dir="$(dirname "$DEST_DIR")/Resources"
   elif [[ "$(basename "$DEST_DIR")" == "Contents" ]]; then
     resources_dir="$DEST_DIR/Resources"
   fi
