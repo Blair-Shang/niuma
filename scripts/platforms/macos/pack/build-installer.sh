@@ -87,7 +87,7 @@ pkgbuild \
   --version "$VERSION" \
   "$COMPONENT_PKG"
 
-SETUP_PKG="$OUTPUT_DIR/${APP_NAME}-${VERSION}-${ARCH}-Setup.pkg"
+SETUP_PKG="$OUTPUT_DIR/${APP_NAME}-${VERSION}-macos-${ARCH}-Setup.pkg"
 productbuild \
   --distribution "$DIST_XML" \
   --resources "$RES_DIR" \

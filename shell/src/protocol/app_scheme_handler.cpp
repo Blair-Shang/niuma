@@ -7,6 +7,7 @@
 
 #if NIUMMA_WITH_CEF
 #include "include/wrapper/cef_stream_resource_handler.h"
+#include "include/cef_response.h"
 #include "include/cef_stream.h"
 #endif
 
@@ -106,7 +107,14 @@ CefRefPtr<CefResourceHandler> NiuMaAppSchemeHandlerFactory::Create(
     return nullptr;
   }
 
-  return new CefStreamResourceHandler(niuma::MimeTypeForPath(file_path), stream);
+  // 本地文件没有网络收益。index.html 若被 HTTP 缓存，升级后仍会引用旧的
+  // index-xxxx.js，用户看到的还是上一版界面。
+  CefResponse::HeaderMap headers;
+  headers.insert(std::make_pair("Cache-Control", "no-store"));
+  headers.insert(std::make_pair("Pragma", "no-cache"));
+
+  return new CefStreamResourceHandler(
+      200, "OK", niuma::MimeTypeForPath(file_path), headers, stream);
 }
 
 #endif

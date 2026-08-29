@@ -2,13 +2,18 @@
 
 > 安装包 / 绿色版解压后的**运行时结构**（Windows x64）  
 > 绿色目录：`output/windows-x64/dir/`  
-> 安装程序：`output/windows-x64/setup/NiuMa-<version>-x64-Setup.exe`（`pnpm pack:win:setup` / `pnpm release:win`）
+> 安装程序：`output/windows-x64/setup/NiuMa-<version>-windows-x64-Setup.exe`（`pnpm pack:win:setup` / `pnpm release:win`）
 
 ```
 output/windows-x64/dir/
 ├── niuma.exe
 ├── chrome_elf.dll
 ├── libcef.dll
+├── libEGL.dll
+├── libGLESv2.dll
+├── chrome_100_percent.pak
+├── chrome_200_percent.pak
+├── resources.pak
 ├── icudtl.dat
 ├── ...
 ├── resources/web/              # ← web/dist
@@ -55,6 +60,7 @@ output/windows-x64/dir/
 ├── libcef.so
 ├── libEGL.so
 ├── libGLESv2.so
+├── v8_context_snapshot.bin
 ├── chrome-sandbox
 ├── *.pak
 ├── icudtl.dat
@@ -76,7 +82,13 @@ output/windows-x64/dir/
 NiuMa.app/Contents/
 ├── Info.plist
 ├── MacOS/niuma
-├── Frameworks/Chromium Embedded Framework.framework/
+├── Frameworks/
+│   ├── Chromium Embedded Framework.framework/
+│   ├── NiuMa Helper.app/
+│   ├── NiuMa Helper (GPU).app/
+│   ├── NiuMa Helper (Plugin).app/
+│   ├── NiuMa Helper (Renderer).app/
+│   └── NiuMa Helper (Alerts).app/
 └── Resources/
     ├── web/
     ├── locales/
@@ -107,9 +119,9 @@ GitHub 托管流水线：推送 `v*` tag 或手动运行 **Pack and Release**（
 
 `pnpm pack:linux:setup` / `pnpm pack:kylin:setup` 在 `.deb` 基础上生成自解压 **`Setup.run`**：
 
-- 双击或 `./NiuMa-*-Setup.run` 启动图形向导（**zenity**，无 GUI 时回退文本模式）
+- 双击或 `./NiuMa-*-linux-*-Setup.run` 启动图形向导（**zenity**，无 GUI 时回退文本模式）
 - 欢迎 → 确认 → 输入管理员密码（**pkexec** / **sudo**）→ `dpkg -i` 安装
-- 输出：`output/linux-x64/setup/NiuMa-<version>-<arch>-Setup.run`
+- 输出：`output/linux-x64/setup/NiuMa-<version>-linux-<arch>-Setup.run`
 
 依赖（目标机器）：`dpkg`、`zenity`（GNOME/麒麟桌面通常已带）
 
@@ -119,7 +131,7 @@ GitHub 托管流水线：推送 `v*` tag 或手动运行 **Pack and Release**（
 
 - 双击 `.pkg` 启动 macOS 标准安装向导（欢迎页 → 继续 → 安装）
 - 使用 `pkgbuild` + `productbuild`（系统自带）
-- 输出：`output/macos-x64/setup/NiuMa-<version>-<arch>-Setup.pkg`
+- 输出：`output/macos-x64/setup/NiuMa-<version>-macos-<arch>-Setup.pkg`
 - 可选：`CODESIGN_IDENTITY` 对 pkg 签名
 
 `pack:macos` 会同步复制 `NiuMa.app` 到 `output/macos-x64/app/` 供安装包构建使用。
@@ -131,7 +143,7 @@ GitHub 托管流水线：推送 `v*` tag 或手动运行 **Pack and Release**（
 - 默认安装路径：`C:\Program Files\NiuMa\`（向导可选「仅当前用户」）
 - 控制面板可卸载；固定 `AppId` 覆盖升级
 - 中英双语安装向导（须同意 EULA 才能继续）
-- 企业静默：`NiuMa-<ver>-x64-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
+- 企业静默：`NiuMa-<ver>-windows-x64-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
 - 有 `CODESIGN_CERT` 时签名 `niuma.exe` 与 `Setup.exe`；`REQUIRE_CODESIGN=1` 时未签名则失败
 - Inno Setup 可免费用于商业产品（见其官方许可证）
 

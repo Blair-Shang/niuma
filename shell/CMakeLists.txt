@@ -56,6 +56,7 @@ set(SHELL_SOURCES
   src/browser/handlers/message_router_handler.cpp
   src/browser/handlers/drag_handler.cpp
   src/browser/handlers/permission_handler.cpp
+  src/browser/handlers/download_handler.cpp
   src/bridge/bridge_router.cpp
   src/bridge/stream_proxy.cpp
   src/ipc/platform_client.cpp
@@ -92,6 +93,11 @@ if(UNIX AND NOT APPLE)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
   target_link_libraries(niuma PRIVATE PkgConfig::GTK3)
+  # CEF 官方链接用 -Wl,-rpath,.（依赖 cwd）。安装后从任意目录启动也要能找到旁边的 libcef.so。
+  set_target_properties(niuma PROPERTIES
+    BUILD_RPATH "\$ORIGIN"
+    INSTALL_RPATH "\$ORIGIN"
+  )
 endif()
 
 target_include_directories(niuma PRIVATE

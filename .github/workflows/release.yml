@@ -213,6 +213,9 @@ jobs:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: ${{ matrix.pack_cmd }}
 
+      - name: Verify CEF runtime in pack output
+        run: node .github/scripts/verify-pack-runtime.mjs "output/${{ matrix.artifact }}"
+
       - name: Write SHA-256 checksums
         run: node .github/scripts/write-sha256.mjs "output/${{ matrix.artifact }}"
 
@@ -244,10 +247,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-files
+          # 只收用户安装包。output/*/dir 里的 niuma.exe、服务 exe、bootstrap
+          # 以及 Uninstall.run 已打进安装包，不单独挂 GitHub Release。
           mapfile -t files < <(find dist -type f \( \
-            -iname '*.exe' -o -iname '*.deb' -o -iname '*.rpm' -o \
-            -iname '*.run' -o -iname '*.pkg' -o -iname '*.dmg' -o \
-            -iname 'SHA256SUMS.txt' \
+            -name 'NiuMa-*-Setup.exe' -o \
+            -name 'NiuMa-*-Setup.run' -o \
+            -name 'NiuMa-*-Setup.pkg' -o \
+            -name 'NiuMa-*.dmg' -o \
+            -name '*.deb' -o \
+            -name '*.rpm' -o \
+            -name 'SHA256SUMS.txt' \
           \) | sort)
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No installer artifacts were produced." >&2

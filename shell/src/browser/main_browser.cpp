@@ -1,4 +1,5 @@
 #include "browser/main_browser.h"
+#include "core/cef/cef_settings.h"
 #include "ipc/platform_client.h"
 #include "browser/handlers/drag_handler.h"
 #include "core/window/main_window.h"
@@ -59,13 +60,19 @@ bool IsDevToolsShortcut(const CefKeyEvent& event) {
   if (event.type != KEYEVENT_RAWKEYDOWN && event.type != KEYEVENT_KEYDOWN) {
     return false;
   }
-#if defined(OS_WIN)
-  if (event.windows_key_code == VK_F12) {
+  // CEF 各平台都填 windows_key_code（VK_F12 = 0x7B）。
+  if (event.windows_key_code == 0x7B) {
     return true;
   }
   const bool ctrl = (event.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
   const bool shift = (event.modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
   if (ctrl && shift && event.windows_key_code == 'I') {
+    return true;
+  }
+#if defined(__APPLE__)
+  const bool cmd = (event.modifiers & EVENTFLAG_COMMAND_DOWN) != 0;
+  const bool alt = (event.modifiers & EVENTFLAG_ALT_DOWN) != 0;
+  if (cmd && alt && event.windows_key_code == 'I') {
     return true;
   }
 #endif
@@ -100,6 +107,7 @@ namespace niuma {
 NiuMaClient::NiuMaClient() {
   drag_handler_ = new NiuMaDragHandler();
   permission_handler_ = new NiuMaPermissionHandler();
+  download_handler_ = new NiuMaDownloadHandler();
   message_router_handler_ = std::make_unique<NiuMaMessageRouterHandler>();
   CefMessageRouterConfig config;
   config.js_query_function = "cefQuery";
@@ -288,7 +296,10 @@ bool NiuMaClient::OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
   (void)os_event;
   (void)is_keyboard_shortcut;
   if (IsDevToolsShortcut(event)) {
-    ToggleDevTools(browser);
+    // 生产安装包吞掉 F12，避免 Chrome runtime 自行打开开发者工具。
+    if (DevToolsAllowed()) {
+      ToggleDevTools(browser);
+    }
     return true;
   }
   return false;

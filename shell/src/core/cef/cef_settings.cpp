@@ -12,25 +12,26 @@
 
 namespace fs = std::filesystem;
 
-namespace {
+namespace niuma {
 
-bool IsDevRuntime() {
+#if NIUMMA_WITH_CEF
+
+bool DevToolsAllowed() {
   if (const char* env = std::getenv("NIUMMA_DEV_URL")) {
-    return env[0] != '\0';
+    if (env[0] != '\0') {
+      return true;
+    }
   }
   CefRefPtr<CefCommandLine> command_line = CefCommandLine::GetGlobalCommandLine();
   if (!command_line) {
     return false;
   }
+  if (command_line->HasSwitch("devtools")) {
+    return true;
+  }
   const std::string url = command_line->GetSwitchValue("url");
   return url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0;
 }
-
-}  // namespace
-
-namespace niuma {
-
-#if NIUMMA_WITH_CEF
 
 void ConfigureCefSettings(CefSettings& settings) {
   settings.windowless_rendering_enabled = false;
@@ -59,7 +60,7 @@ void ConfigureCefSettings(CefSettings& settings) {
     CefString(&settings.locales_dir_path).FromString(GetCefLocalesDir());
   }
 
-  if (IsDevRuntime() || (command_line && command_line->HasSwitch("devtools"))) {
+  if (DevToolsAllowed()) {
     settings.remote_debugging_port = 9222;
   }
 }

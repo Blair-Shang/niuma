@@ -75,7 +75,7 @@ Priority: optional
 Architecture: $DEB_ARCH
 Maintainer: $VENDOR
 Homepage: $HOMEPAGE
-Depends: libgtk-3-0, libnss3, libxss1, libasound2, libgbm1, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libatk1.0-0, libcups2
+Depends: libgtk-3-0 | libgtk-3-0t64, libnss3, libxss1, libasound2 | libasound2t64, libgbm1, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libatk1.0-0 | libatk1.0-0t64, libatk-bridge2.0-0 | libatk-bridge2.0-0t64, libcups2, libpango-1.0-0 | libpango-1.0-0t64, libcairo2, libxkbcommon0, libdbus-1-3
 Description: $DESCRIPTION
 EOF
 
@@ -84,6 +84,7 @@ cp "$SCRIPT_DIR/templates/prerm" "$CONTROL_DIR/prerm"
 chmod 0755 "$CONTROL_DIR/postinst" "$CONTROL_DIR/prerm"
 
 cp -R "$REPO_ROOT/web/dist/." "$PAYLOAD_ROOT/resources/web/" 2>/dev/null || true
+find "$PAYLOAD_ROOT/resources/web" -type f -name '*.map' -delete 2>/dev/null || true
 cp "$REPO_ROOT"/scripts/sql/sqlite/*.sql "$PAYLOAD_ROOT/platform/migrations/sqlite/" 2>/dev/null || true
 cp -R "$REPO_ROOT/services/manifests/." "$PAYLOAD_ROOT/services/manifests/" 2>/dev/null || true
 if [[ -d "$REPO_ROOT/plugins" ]]; then
@@ -110,9 +111,11 @@ if [[ -f "$SHELL_BIN" ]]; then
   if [[ -f "$PAYLOAD_ROOT/chrome-sandbox" ]]; then
     chmod 4755 "$PAYLOAD_ROOT/chrome-sandbox"
   fi
-  if [[ -d "$SHELL_INSTALL/resources/web" ]]; then
+  # 以 web/dist 为准。壳层 POST_BUILD 拷贝可能偏旧，且会带上 .map。
+  if [[ ! -f "$PAYLOAD_ROOT/resources/web/index.html" && -d "$SHELL_INSTALL/resources/web" ]]; then
     mkdir -p "$PAYLOAD_ROOT/resources"
     cp -R "$SHELL_INSTALL/resources/web" "$PAYLOAD_ROOT/resources/"
+    find "$PAYLOAD_ROOT/resources/web" -type f -name '*.map' -delete 2>/dev/null || true
   fi
 else
   nm_die "shell binary missing at $SHELL_BIN"
@@ -135,6 +138,7 @@ if [[ ! -x "\$APP_BIN" ]]; then
 fi
 
 cd "\$APP_ROOT"
+export LD_LIBRARY_PATH="\$APP_ROOT\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 exec "\$APP_BIN" "\$@"
 EOF
 

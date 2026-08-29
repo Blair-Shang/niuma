@@ -39,7 +39,8 @@ fi
 [[ -f "$DEB_FILE" ]] || nm_die "deb package not found under $INPUT_DIR (run: pnpm pack:$PLATFORM first)"
 
 ARCH_LABEL="$ARCH"
-SETUP_NAME="NiuMa-${VERSION}-${ARCH_LABEL}-Setup.run"
+OS_LABEL="$PLATFORM"
+SETUP_NAME="NiuMa-${VERSION}-${OS_LABEL}-${ARCH_LABEL}-Setup.run"
 PAYLOAD_DIR="$REPO_ROOT/build/pack-linux-setup-payload"
 rm -rf "$PAYLOAD_DIR"
 mkdir -p "$PAYLOAD_DIR"
@@ -68,7 +69,7 @@ cp -f "$REPO_ROOT/scripts/shared/package/templates/linux-uninstall-wizard.sh" "$
 sed -i "s/__PACKAGE_ID__/$PACKAGE_ID/g" "$UNINSTALL_PAYLOAD/uninstall.sh" 2>/dev/null || \
   sed -i '' "s/__PACKAGE_ID__/$PACKAGE_ID/g" "$UNINSTALL_PAYLOAD/uninstall.sh"
 chmod +x "$UNINSTALL_PAYLOAD/uninstall.sh"
-UNINSTALL_RUN="$OUTPUT_DIR/NiuMa-${VERSION}-${ARCH_LABEL}-Uninstall.run"
+UNINSTALL_RUN="$OUTPUT_DIR/NiuMa-${VERSION}-${OS_LABEL}-${ARCH_LABEL}-Uninstall.run"
 bash "$REPO_ROOT/scripts/shared/package/make-self-extracting-run.sh" \
   "$UNINSTALL_PAYLOAD" \
   "$UNINSTALL_RUN" \

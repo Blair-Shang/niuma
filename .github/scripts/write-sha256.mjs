@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { basename, join, relative } from 'node:path'
 
 const root = process.argv[2]
 if (!root) {
@@ -13,7 +13,14 @@ if (!root) {
   process.exit(1)
 }
 
-const keep = /\.(exe|deb|rpm|run|pkg|dmg|zip|app)$/i
+// 只校验用户安装包。绿色目录里的 niuma.exe / 服务 exe 不进清单。
+function isReleaseInstaller(file) {
+  const name = basename(file)
+  if (/^NiuMa-.+-Setup\.(exe|run|pkg)$/i.test(name)) return true
+  if (/^NiuMa-.+\.dmg$/i.test(name)) return true
+  if (/\.(deb|rpm)$/i.test(name)) return true
+  return false
+}
 
 function walk(dir, acc = []) {
   for (const name of readdirSync(dir)) {
@@ -29,7 +36,7 @@ function walk(dir, acc = []) {
 }
 
 const files = walk(root)
-  .filter((file) => keep.test(file) && !file.endsWith('SHA256SUMS.txt'))
+  .filter((file) => isReleaseInstaller(file))
   .sort((a, b) => a.localeCompare(b))
 
 const lines = files.map((file) => {

@@ -109,7 +109,7 @@ Then reopen the terminal and rerun: pnpm pack:win:setup
 }
 
 $archLabel = if ($Arch -eq 'arm64') { 'arm64' } else { 'x64' }
-$setupBaseName = "NiuMa-$AppVersion-$archLabel-Setup"
+$setupBaseName = "NiuMa-$AppVersion-windows-$archLabel-Setup"
 $issWorkDir = Join-Path $Root 'build/pack-inno'
 $issFile = Join-Path $issWorkDir 'niuma-setup.iss'
 New-Item -ItemType Directory -Force -Path $issWorkDir | Out-Null

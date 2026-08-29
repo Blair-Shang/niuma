@@ -26,7 +26,7 @@ pnpm dev:platform:delve    # delve
 pnpm dev:hot:ext-platform  # 或 pnpm dev:debug:ext
 
 # 日志：仓库根 logs/<session>/
-# Web：CEF 内 F12 或 Chrome http://localhost:9222
+# Web：开发态 CEF 内 F12，或 Chrome http://localhost:9222（安装包默认关闭）
 # VS Code：Run and Debug → Platform Core / FTP Service
 ```
 

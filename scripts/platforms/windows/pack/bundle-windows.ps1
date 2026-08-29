@@ -79,6 +79,8 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $ResWeb = Join-Path $Staging 'resources/web'
 New-Item -ItemType Directory -Force -Path $ResWeb | Out-Null
 Copy-Item -Recurse -Force "$WebDist\*" $ResWeb
+Get-ChildItem -Path $ResWeb -Recurse -Filter '*.map' -File -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
 $MigDst = Join-Path $Staging 'platform/migrations/sqlite'
 New-Item -ItemType Directory -Force -Path $MigDst | Out-Null
@@ -122,20 +124,79 @@ if (Test-Path $NiumaExe) {
     Write-Warning "niuma.exe not found at $NiumaExe - pack web-only skeleton"
 }
 
+# CEF 运行时：优先用壳层 POST_BUILD 已拷到 exe 旁的文件（CI prune 后 third_party/cef 可能已删）。
+# 官方 Windows 发行包把 .pak 放在 Resources/，不在 Release/；只拷 Release 会漏 resources.pak。
+$cefRuntimeNames = @(
+    'chrome_100_percent.pak'
+    'chrome_200_percent.pak'
+    'resources.pak'
+    'icudtl.dat'
+    'v8_context_snapshot.bin'
+    'snapshot_blob.bin'
+    'libcef.dll'
+    'chrome_elf.dll'
+    'libEGL.dll'
+    'libGLESv2.dll'
+    'd3dcompiler_47.dll'
+    'dxcompiler.dll'
+    'dxil.dll'
+    'vk_swiftshader.dll'
+    'vk_swiftshader_icd.json'
+    'vulkan-1.dll'
+)
+foreach ($name in $cefRuntimeNames) {
+    $src = Join-Path $ShellBuild $name
+    if (Test-Path -LiteralPath $src) {
+        Copy-Item -LiteralPath $src -Destination $Staging -Force
+    }
+}
+$shellLocales = Join-Path $ShellBuild 'locales'
+if (Test-Path -LiteralPath $shellLocales) {
+    $localesDst = Join-Path $Staging 'locales'
+    New-Item -ItemType Directory -Force -Path $localesDst | Out-Null
+    Copy-Item -Recurse -Force "$shellLocales\*" $localesDst
+}
+
 $CefRelease = Join-Path $CefRoot 'Release'
 if (Test-Path $CefRelease) {
-    Copy-Item -Force "$CefRelease\*" $Staging
+    Get-ChildItem -LiteralPath $CefRelease -File | Where-Object {
+        $_.Extension -notin @('.lib', '.pdb', '.exp')
+    } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $Staging -Force
+    }
 }
 $CefResources = Join-Path $CefRoot 'Resources'
 if (Test-Path $CefResources) {
-    $LocalesDst = Join-Path $Staging 'locales'
-    New-Item -ItemType Directory -Force -Path $LocalesDst | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $CefResources 'locales/*') $LocalesDst -ErrorAction SilentlyContinue
-    Copy-Item -Force (Join-Path $CefResources 'icudtl.dat') $Staging -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $CefResources | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $Staging -Recurse -Force
+    }
 }
 
 Copy-Item -Recurse -Force "$Staging\*" $OutputDir
 Remove-Item -Recurse -Force $Staging
+
+$requiredRuntime = @(
+    'niuma.exe'
+    'libcef.dll'
+    'chrome_elf.dll'
+    'chrome_100_percent.pak'
+    'resources.pak'
+    'icudtl.dat'
+)
+$missingRuntime = @()
+foreach ($name in $requiredRuntime) {
+    if (-not (Test-Path -LiteralPath (Join-Path $OutputDir $name))) {
+        $missingRuntime += $name
+    }
+}
+$localeZh = Join-Path $OutputDir 'locales\zh-CN.pak'
+$localeEn = Join-Path $OutputDir 'locales\en-US.pak'
+if (-not (Test-Path -LiteralPath $localeZh) -and -not (Test-Path -LiteralPath $localeEn)) {
+    $missingRuntime += 'locales/zh-CN.pak or locales/en-US.pak'
+}
+if ($missingRuntime.Count -gt 0) {
+    throw "Packed CEF runtime missing: $($missingRuntime -join ', '). Run: pnpm cef:download"
+}
 
 $StageComplianceScript = Join-Path $Root 'scripts\shared\package\stage-compliance.ps1'
 & $StageComplianceScript -DestDir $OutputDir -RepoRoot $Root

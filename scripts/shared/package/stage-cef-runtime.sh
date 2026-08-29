@@ -62,15 +62,31 @@ copy_if_exists() {
       mkdir -p "$(dirname "$dst")"
       cp -f "$src" "$dst"
     fi
+    return 0
   fi
+  return 1
+}
+
+copy_first_existing() {
+  local dst="$1"
+  shift
+  local src
+  for src in "$@"; do
+    if copy_if_exists "$src" "$dst"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 stage_linux_like() {
-  local binary_dir="$CEF_ROOT/$CONFIGURATION"
-  local resource_dir="$CEF_ROOT/Resources"
+  local dist_binary="$CEF_ROOT/$CONFIGURATION"
+  local dist_resource="$CEF_ROOT/Resources"
+  local source_binary="$dist_binary"
+  local source_resource="$dist_resource"
   if [[ -n "$SOURCE_DIR" ]]; then
-    binary_dir="$SOURCE_DIR"
-    resource_dir="$SOURCE_DIR"
+    source_binary="$SOURCE_DIR"
+    source_resource="$SOURCE_DIR"
   fi
 
   local binaries=(
@@ -92,14 +108,22 @@ stage_linux_like() {
 
   local item
   for item in "${binaries[@]}"; do
-    copy_if_exists "$binary_dir/$item" "$DEST_DIR/$item"
+    copy_first_existing "$DEST_DIR/$item" "$source_binary/$item" "$dist_binary/$item" || true
   done
   for item in "${resources[@]}"; do
-    copy_if_exists "$resource_dir/$item" "$DEST_DIR/$item"
+    copy_first_existing "$DEST_DIR/$item" "$source_resource/$item" "$dist_resource/$item" || true
   done
-  copy_if_exists "$resource_dir/locales" "$DEST_DIR/locales"
+  copy_first_existing "$DEST_DIR/locales" "$source_resource/locales" "$dist_resource/locales" || true
 
   [[ -f "$DEST_DIR/libcef.so" ]] || nm_die "libcef.so missing in $DEST_DIR (build shell first or set --cef-root)"
+  [[ -f "$DEST_DIR/resources.pak" ]] || nm_die "resources.pak missing in $DEST_DIR"
+  [[ -f "$DEST_DIR/chrome_100_percent.pak" ]] || nm_die "chrome_100_percent.pak missing in $DEST_DIR"
+  [[ -f "$DEST_DIR/icudtl.dat" ]] || nm_die "icudtl.dat missing in $DEST_DIR"
+  [[ -f "$DEST_DIR/v8_context_snapshot.bin" ]] || nm_die "v8_context_snapshot.bin missing in $DEST_DIR"
+  [[ -f "$DEST_DIR/libEGL.so" && -f "$DEST_DIR/libGLESv2.so" ]] || nm_die "libEGL.so / libGLESv2.so missing in $DEST_DIR"
+  if [[ ! -f "$DEST_DIR/locales/zh-CN.pak" && ! -f "$DEST_DIR/locales/en-US.pak" ]]; then
+    nm_die "locales pak missing in $DEST_DIR/locales"
+  fi
 }
 
 stage_macos() {
@@ -154,6 +178,9 @@ stage_macos() {
   done
 
   [[ -d "$frameworks_dir/$framework_name" ]] || nm_die "failed to stage macOS CEF framework"
+  [[ -f "$resources_dir/resources.pak" ]] || nm_die "resources.pak missing in $resources_dir"
+  [[ -f "$resources_dir/chrome_100_percent.pak" ]] || nm_die "chrome_100_percent.pak missing in $resources_dir"
+  [[ -f "$resources_dir/icudtl.dat" ]] || nm_die "icudtl.dat missing in $resources_dir"
 }
 
 stage_windows() {

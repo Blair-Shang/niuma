@@ -3,11 +3,13 @@
 #if NIUMMA_WITH_CEF
 #include "browser/handlers/message_router_handler.h"
 #include "browser/handlers/drag_handler.h"
+#include "browser/handlers/download_handler.h"
 #include "browser/handlers/permission_handler.h"
 #include "ipc/platform_client.h"
 #include "include/cef_client.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_dialog_handler.h"
+#include "include/cef_download_handler.h"
 #include "include/cef_drag_handler.h"
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_keyboard_handler.h"
@@ -40,6 +42,9 @@ class NiuMaClient : public CefClient,
   CefRefPtr<CefDragHandler> GetDragHandler() override { return drag_handler_; }
   CefRefPtr<CefPermissionHandler> GetPermissionHandler() override {
     return permission_handler_;
+  }
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
+    return download_handler_;
   }
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
   CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
@@ -86,6 +91,7 @@ class NiuMaClient : public CefClient,
   std::unique_ptr<NiuMaMessageRouterHandler> message_router_handler_;
   CefRefPtr<NiuMaDragHandler> drag_handler_;
   CefRefPtr<NiuMaPermissionHandler> permission_handler_;
+  CefRefPtr<NiuMaDownloadHandler> download_handler_;
   std::set<int> revealed_browsers_;
   bool event_listener_started_ = false;
 

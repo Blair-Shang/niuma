@@ -16,6 +16,9 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
+#if defined(__APPLE__)
+#include "include/wrapper/cef_library_loader.h"
+#endif
 #endif
 
 namespace {
@@ -52,6 +55,23 @@ int RunBrowserProcess(int argc, char* argv[]) {
 
 }  // namespace
 
+#if defined(__APPLE__) && NIUMMA_WITH_CEF
+static bool LoadMacCefFramework(int argc, char* argv[]) {
+  static CefScopedLibraryLoader library_loader;
+  bool helper = false;
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] && std::string(argv[i]).rfind("--type=", 0) == 0) {
+      helper = true;
+      break;
+    }
+  }
+  if (helper) {
+    return library_loader.LoadInHelper();
+  }
+  return library_loader.LoadInMain();
+}
+#endif
+
 #if defined(OS_WIN)
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 #if NIUMMA_WITH_CEF
@@ -71,6 +91,12 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 #else
 int main(int argc, char* argv[]) {
 #if NIUMMA_WITH_CEF
+#if defined(__APPLE__)
+  if (!LoadMacCefFramework(argc, argv)) {
+    std::cerr << "NiuMa: failed to load Chromium Embedded Framework\n";
+    return 1;
+  }
+#endif
   CefMainArgs main_args(argc, argv);
   CefRefPtr<niuma::NiuMaApp> app(new niuma::NiuMaApp());
   const int exit_code = CefExecuteProcess(main_args, app.get(), nullptr);

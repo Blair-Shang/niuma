@@ -17,7 +17,7 @@
 | 云端版本清单 | **无**；`niuma-cloud` 仅在反馈里存 `clientVersion` |
 | Admin | 账户 / 员工 / 反馈 / 审计；**无**发布管理 |
 | 官网下载 | `niuma-site`：hit 计次写本地 JSON 后 302；版本/notes 读 cloud `updates/latest` |
-| 安装包 | Windows：Inno Setup 6 → `NiuMa-<ver>-x64-Setup.exe`（固定 `AppId`，支持覆盖升级） |
+| 安装包 | Windows：Inno Setup 6 → `NiuMa-<ver>-windows-x64-Setup.exe`（固定 `AppId`，支持覆盖升级） |
 
 市场主流（非 Electron / 非商店）路径：公开更新清单 → 应用比对 → 展示说明 → 下载完整安装包 → 校验 → 拉起安装程序 → 退出当前进程。本方案对齐该路径。
 
@@ -162,7 +162,7 @@ Query：
   "version": "1.0.1",
   "title": "1.0.1 稳定性修复",
   "notesMd": "## 修复\n- …\n",
-  "downloadUrl": "https://cdn.example.com/niuma/NiuMa-1.0.1-x64-Setup.exe",
+  "downloadUrl": "https://cdn.example.com/niuma/NiuMa-1.0.1-windows-x64-Setup.exe",
   "sha256": "a1b2…",
   "fileSize": 123456789,
   "minSupportedVersion": "1.0.0",
@@ -192,7 +192,7 @@ Query：在 latest 参数基础上增加：
     "version": "1.0.1",
     "title": "1.0.1 稳定性修复",
     "notesMd": "## 修复\n- …\n",
-    "downloadUrl": "https://cdn.example.com/niuma/NiuMa-1.0.1-x64-Setup.exe",
+    "downloadUrl": "https://cdn.example.com/niuma/NiuMa-1.0.1-windows-x64-Setup.exe",
     "sha256": "a1b2…",
     "fileSize": 123456789,
     "minSupportedVersion": "1.0.0",
@@ -293,7 +293,7 @@ Cloud 客户端：复用 `web/src/api/cloud/client.ts`（`VITE_CLOUD_API_BASE`�
 
 ```json
 {
-  "url": "https://cdn.example.com/.../NiuMa-1.0.1-x64-Setup.exe",
+  "url": "https://cdn.example.com/.../NiuMa-1.0.1-windows-x64-Setup.exe",
   "sha256": "a1b2…",
   "expectedSize": 123456789
 }
@@ -358,12 +358,12 @@ Windows P0：
 ### 10.1 发布
 
 1. 在 NiuMa 仓执行 `pnpm release:win`（或等价），产出  
-   `output/windows-x64/setup/NiuMa-<ver>-x64-Setup.exe`。
-2. 同目录会生成 `NiuMa-<ver>-x64-Setup.release.json`（含 `sha256` / `fileSize`）；亦可手动：
+   `output/windows-x64/setup/NiuMa-<ver>-windows-x64-Setup.exe`。
+2. 同目录会生成 `NiuMa-<ver>-windows-x64-Setup.release.json`（含 `sha256` / `fileSize`）；亦可手动：
 
    ```powershell
-   Get-FileHash .\NiuMa-1.0.1-x64-Setup.exe -Algorithm SHA256
-   (Get-Item .\NiuMa-1.0.1-x64-Setup.exe).Length
+   Get-FileHash .\NiuMa-1.0.1-windows-x64-Setup.exe -Algorithm SHA256
+   (Get-Item .\NiuMa-1.0.1-windows-x64-Setup.exe).Length
    ```
 
 3. 上传至 CDN / 对象存储，得到 HTTPS `download_url`（host 须在 cloud 与桌面白名单内）。

@@ -118,6 +118,7 @@ if [[ ! -f "$RESOURCES_DIR/AppIcon.icns" ]]; then
 fi
 
 cp -R "$REPO_ROOT/web/dist/." "$RESOURCES_DIR/web/" 2>/dev/null || true
+find "$RESOURCES_DIR/web" -type f -name '*.map' -delete 2>/dev/null || true
 cp "$REPO_ROOT"/scripts/sql/sqlite/*.sql "$RESOURCES_DIR/platform/migrations/sqlite/" 2>/dev/null || true
 cp -R "$REPO_ROOT/services/manifests/." "$RESOURCES_DIR/services/manifests/" 2>/dev/null || true
 cp "$REPO_ROOT/assets/brand/app-icon.svg" "$RESOURCES_DIR/niuma.svg"
@@ -143,12 +144,69 @@ if [[ -f "$SHELL_BIN" ]]; then
     --configuration "$CONFIGURATION"
   cp "$SHELL_BIN" "$MACOS_DIR/niuma"
   chmod 0755 "$MACOS_DIR/niuma"
-  if [[ -d "$SHELL_INSTALL/resources/web" ]]; then
+  if [[ ! -f "$RESOURCES_DIR/web/index.html" && -d "$SHELL_INSTALL/resources/web" ]]; then
     cp -R "$SHELL_INSTALL/resources/web/." "$RESOURCES_DIR/web/" 2>/dev/null || true
+    find "$RESOURCES_DIR/web" -type f -name '*.map' -delete 2>/dev/null || true
   fi
 else
   nm_die "shell binary missing at $SHELL_BIN"
 fi
+
+# CEF 从 M76 起必须在 Contents/Frameworks 下放 Helper 子进程包，否则渲染/GPU 起不来。
+FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
+mkdir -p "$FRAMEWORKS_DIR"
+write_helper_plist() {
+  local helper_name="$1"
+  local helper_id="$2"
+  local plist="$3"
+  cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>$helper_name</string>
+  <key>CFBundleExecutable</key>
+  <string>$helper_name</string>
+  <key>CFBundleIdentifier</key>
+  <string>$helper_id</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$helper_name</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$BUILD_NUMBER</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+}
+
+HELPER_SPECS=(
+  "NiuMa Helper|$BUNDLE_ID.helper"
+  "NiuMa Helper (GPU)|$BUNDLE_ID.helper.gpu"
+  "NiuMa Helper (Plugin)|$BUNDLE_ID.helper.plugin"
+  "NiuMa Helper (Renderer)|$BUNDLE_ID.helper.renderer"
+  "NiuMa Helper (Alerts)|$BUNDLE_ID.helper.alerts"
+)
+for spec in "${HELPER_SPECS[@]}"; do
+  helper_name="${spec%%|*}"
+  helper_id="${spec#*|}"
+  helper_app="$FRAMEWORKS_DIR/${helper_name}.app"
+  mkdir -p "$helper_app/Contents/MacOS"
+  cp "$MACOS_DIR/niuma" "$helper_app/Contents/MacOS/${helper_name}"
+  chmod 0755 "$helper_app/Contents/MacOS/${helper_name}"
+  write_helper_plist "$helper_name" "$helper_id" "$helper_app/Contents/Info.plist"
+done
+[[ -d "$FRAMEWORKS_DIR/NiuMa Helper.app" ]] || nm_die "macOS CEF helper apps were not staged"
+[[ -d "$FRAMEWORKS_DIR/Chromium Embedded Framework.framework" ]] || nm_die "macOS CEF framework missing under Frameworks"
 
 bash "$REPO_ROOT/scripts/shared/package/stage-compliance.sh" "$RESOURCES_DIR"
 
@@ -165,7 +223,7 @@ cp -R "$APP_BUNDLE" "$APP_OUT/"
 DMG_FILE=""
 if [[ "$FORMAT" == "dmg" ]]; then
   if command -v hdiutil >/dev/null 2>&1; then
-    DMG_FILE="$OUTPUT_DIR/${APP_NAME}-${VERSION}-${ARCH}.dmg"
+    DMG_FILE="$OUTPUT_DIR/${APP_NAME}-${VERSION}-macos-${ARCH}.dmg"
     rm -f "$DMG_FILE"
     nm_log "build dmg -> $DMG_FILE"
     hdiutil create -volname "$APP_NAME" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$DMG_FILE"

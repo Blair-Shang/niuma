@@ -116,7 +116,7 @@ pnpm version:sync          # 单独同步版本（build:web 已自动执行）
 
 | 平台 | 命令 | 主要产物 |
 |------|------|----------|
-| Windows x64 | `pnpm release:win` | `output/windows-x64/dir/` + `setup/NiuMa-*-x64-Setup.exe` |
+| Windows x64 | `pnpm release:win` | `output/windows-x64/dir/` + `setup/NiuMa-*-windows-x64-Setup.exe` |
 | Windows arm64 | `pnpm release:win:arm64` | 同上（arm64）；CEF 用 `windowsarm64` |
 | Linux x64 | `pnpm release:linux` | `.deb` + `Setup.run` + `Uninstall.run` |
 | Linux arm64 | `pnpm release:linux:arm64` | 同上 |
@@ -157,8 +157,8 @@ $env:REQUIRE_CODESIGN = "1"
 pnpm pack:win
 pnpm pack:win:setup
 # 企业静默 / 仅当前用户：
-#   NiuMa-1.0.0-x64-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
-#   NiuMa-1.0.0-x64-Setup.exe /CURRENTUSER
+#   NiuMa-1.0.0-windows-x64-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+#   NiuMa-1.0.0-windows-x64-Setup.exe /CURRENTUSER
 ```
 
 ```bash
@@ -190,13 +190,13 @@ sudo apt-get install -f   # 补依赖
 
 ## GitHub Actions 自动打包
 
-工作流：[.github/workflows/release.yml](../.github/workflows/release.yml)。在对应 OS 的 GitHub 托管 runner 上跑 `release:*`，产物上传 Artifact；打 `v*` tag（或手动勾选 Create Release）时挂到 GitHub Release。
+工作流：[.github/workflows/release.yml](../.github/workflows/release.yml)。在对应 OS 的 GitHub 托管 runner 上跑 `release:*`，打包后校验 CEF 运行时（`resources.pak` 等），产物上传 Artifact；打 `v*` tag 时只把用户安装包挂到 GitHub Release（`Setup.exe` / `.deb` / `Setup.run` / `.dmg` / `Setup.pkg`）。绿色目录里的 `niuma.exe`、服务进程、`Uninstall.run` 已打进安装包，不单独上架。
 
 | Runner | 命令 | 产物 |
 |--------|------|------|
-| `windows-2022` | `pnpm release:win` | `output/windows-x64/`（`Setup.exe`） |
-| `ubuntu-22.04` | `pnpm release:linux` | `output/linux-x64/`（`.deb` + `Setup.run`） |
-| `macos-14`（arm64） | `pnpm release:macos:arm64` | `output/macos-arm64/`（`.dmg` + `Setup.pkg`） |
+| `windows-2022` | `pnpm release:win` | `NiuMa-*-windows-x64-Setup.exe` |
+| `ubuntu-22.04` | `pnpm release:linux` | `niuma_*_amd64.deb` + `NiuMa-*-linux-x64-Setup.run` |
+| `macos-14`（arm64） | `pnpm release:macos:arm64` | `NiuMa-*-macos-arm64.dmg` + `NiuMa-*-macos-arm64-Setup.pkg` |
 
 Windows arm64 / Linux arm64 / 麒麟没有官方托管 runner，需自建后再扩矩阵。Linux / macOS 桌面运行链路仍未闭环，对应 job 可能失败；`fail-fast: false`，成功的平台仍会出包。
 

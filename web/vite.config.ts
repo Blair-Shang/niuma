@@ -66,7 +66,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: true,
+    // 安装包内不带 .map，避免 F12 / 解包看到 Vue/TS 源码。
+    sourcemap: false,
     // @vueuse/core 的 /* #__PURE__ */ 位置 Rolldown 不认；依赖产物，关掉以免污染 CI。
     rolldownOptions: {
       checks: {

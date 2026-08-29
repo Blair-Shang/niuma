@@ -18,12 +18,12 @@
 ```powershell
 # Windows
 pnpm release:win
-# -> output/windows-x64/setup/NiuMa-*-Setup.exe
+# -> output/windows-x64/setup/NiuMa-*-windows-x64-Setup.exe
 
 # Linux（在 Linux 构建机上）
 pnpm release:linux
 # -> output/linux-x64/deb/*.deb
-# -> output/linux-x64/setup/NiuMa-*-Setup.run
+# -> output/linux-x64/setup/NiuMa-*-linux-x64-Setup.run
 
 # 麒麟
 pnpm release:kylin
@@ -31,7 +31,7 @@ pnpm release:kylin
 # macOS
 export CODESIGN_IDENTITY="Developer ID Application: ..."
 pnpm release:macos
-# -> output/macos-x64/setup/NiuMa-*-Setup.pkg
+# -> output/macos-x64/setup/NiuMa-*-macos-x64-Setup.pkg
 ```
 
 仅重打安装包（已有 deb / app）：

@@ -19,8 +19,8 @@ func TestValidateDownloadURL(t *testing.T) {
 }
 
 func TestSafeFileName(t *testing.T) {
-	n, err := safeFileName("https://cdn.niuma007.com/path/NiuMa-1.0.1-x64-Setup.exe")
-	if err != nil || n != "NiuMa-1.0.1-x64-Setup.exe" {
+	n, err := safeFileName("https://cdn.niuma007.com/path/NiuMa-1.0.1-windows-x64-Setup.exe")
+	if err != nil || n != "NiuMa-1.0.1-windows-x64-Setup.exe" {
 		t.Fatalf("got %q %v", n, err)
 	}
 	if _, err := safeFileName("https://cdn.niuma007.com/evil.sh"); err == nil {
