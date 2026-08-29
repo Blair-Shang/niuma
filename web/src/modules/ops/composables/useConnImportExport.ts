@@ -1,7 +1,7 @@
 /**
  * 连接 / 文件夹导入导出。
  * 连接配置由 platform.connection.export|import 读写本机文件；
- * 文件夹组织层（localStorage）由前端随 organization 透传并还原。
+ * 文件夹组织层由 SQLite（platform.connection.organization.*）持久化，导出包内 organization 用于跨机还原。
  */
 import { connectionApi, dialogApi } from '@/api'
 import type { ConnectionExportOrganization } from '@/api/types/connection'
@@ -143,6 +143,7 @@ function restoreOrganization(
       f.name || fallbackName,
       parentId,
       f.accentColor as ConnAccentColor | undefined,
+      f.expanded ?? true,
     )
     folderIdMap.set(f.id, created.id)
     for (const oldPid of f.profileIds) {

@@ -79,11 +79,12 @@ func newTestDispatcher(t *testing.T) (*handler.Dispatcher, *memSecretStore) {
 	}
 	secrets := newMemSecretStore()
 	d := handler.New(handler.Deps{
-		Settings:    store.NewSettingStore(db),
-		Connections: store.NewConnectionStore(db),
-		Credentials: store.NewCredentialStore(db),
-		Secrets:     secrets,
-		IDs:         idGen,
+		Settings:     store.NewSettingStore(db),
+		Connections:  store.NewConnectionStore(db),
+		Organization: store.NewOrganizationStore(db),
+		Credentials:  store.NewCredentialStore(db),
+		Secrets:      secrets,
+		IDs:          idGen,
 	})
 	return d, secrets
 }
@@ -324,7 +325,7 @@ func TestConnectionExportImport(t *testing.T) {
 	listResp := invokeMap(t, d, handler.MethodConnectionList, map[string]any{})
 	var list struct {
 		Profiles []struct {
-			ProfileName string `json:"profileName"`
+			ProfileName   string   `json:"profileName"`
 			CredentialIDs []string `json:"credentialIds"`
 		} `json:"profiles"`
 	}
@@ -489,6 +490,113 @@ func TestConnectionImportRenamesOnConflict(t *testing.T) {
 	}
 	if !names["同名站点"] || !names["同名站点 (2)"] {
 		t.Fatalf("expected original + renamed, got %+v", names)
+	}
+}
+
+func TestConnectionOrganizationRoundTrip(t *testing.T) {
+	d, _ := newTestDispatcher(t)
+
+	parentID := "folder-root"
+	childID := "folder-child"
+	setResp := invokeMap(t, d, handler.MethodConnectionOrganizationSet, map[string]any{
+		"organization": map[string]any{
+			"folders": []map[string]any{
+				{
+					"id": parentID, "name": "生产", "parentId": nil,
+					"profileIds": []string{"p1"}, "accentColor": "blue", "expanded": true,
+				},
+				{
+					"id": childID, "name": "从库", "parentId": parentID,
+					"profileIds": []string{}, "expanded": false,
+				},
+			},
+			"rootOrder": []string{"folder:" + parentID, "conn:p2"},
+		},
+	})
+	if setResp.Error != "" {
+		t.Fatalf("set organization: %s", setResp.Error)
+	}
+
+	getResp := invokeMap(t, d, handler.MethodConnectionOrganizationGet, map[string]any{})
+	if getResp.Error != "" {
+		t.Fatalf("get organization: %s", getResp.Error)
+	}
+	var got struct {
+		Organization struct {
+			Folders []struct {
+				ID         string   `json:"id"`
+				Name       string   `json:"name"`
+				ParentID   *string  `json:"parentId"`
+				ProfileIDs []string `json:"profileIds"`
+				Expanded   bool     `json:"expanded"`
+			} `json:"folders"`
+			RootOrder []string `json:"rootOrder"`
+		} `json:"organization"`
+	}
+	mustUnmarshalResult(t, getResp.Result, &got)
+	if len(got.Organization.Folders) != 2 {
+		t.Fatalf("folders: %+v", got.Organization.Folders)
+	}
+	if got.Organization.Folders[0].Name != "生产" || got.Organization.Folders[1].ParentID == nil || *got.Organization.Folders[1].ParentID != parentID {
+		t.Fatalf("unexpected folders: %+v", got.Organization.Folders)
+	}
+	if len(got.Organization.RootOrder) != 2 || got.Organization.RootOrder[1] != "conn:p2" {
+		t.Fatalf("rootOrder: %+v", got.Organization.RootOrder)
+	}
+}
+
+func TestConnectionDeletePrunesOrganization(t *testing.T) {
+	d, _ := newTestDispatcher(t)
+
+	createResp := invokeMap(t, d, handler.MethodConnectionCreate, map[string]any{
+		"profile": map[string]any{
+			"profileName": "待删站点", "connectionKind": "ftp",
+			"hostAddress": "127.0.0.1", "portNumber": 21, "loginAccount": "u",
+			"connectionOptions": map[string]any{},
+		},
+	})
+	if createResp.Error != "" {
+		t.Fatalf("create: %s", createResp.Error)
+	}
+	var created struct {
+		ProfileID string `json:"profileId"`
+	}
+	mustUnmarshalResult(t, createResp.Result, &created)
+
+	setResp := invokeMap(t, d, handler.MethodConnectionOrganizationSet, map[string]any{
+		"organization": map[string]any{
+			"folders": []map[string]any{
+				{"id": "f1", "name": "组", "parentId": nil, "profileIds": []string{created.ProfileID}, "expanded": true},
+			},
+			"rootOrder": []string{"folder:f1", "conn:" + created.ProfileID},
+		},
+	})
+	if setResp.Error != "" {
+		t.Fatalf("set organization: %s", setResp.Error)
+	}
+
+	delResp := invokeMap(t, d, handler.MethodConnectionDelete, map[string]any{"profileId": created.ProfileID})
+	if delResp.Error != "" {
+		t.Fatalf("delete: %s", delResp.Error)
+	}
+
+	getResp := invokeMap(t, d, handler.MethodConnectionOrganizationGet, map[string]any{})
+	var got struct {
+		Organization struct {
+			Folders []struct {
+				ProfileIDs []string `json:"profileIds"`
+			} `json:"folders"`
+			RootOrder []string `json:"rootOrder"`
+		} `json:"organization"`
+	}
+	mustUnmarshalResult(t, getResp.Result, &got)
+	if len(got.Organization.Folders) != 1 || len(got.Organization.Folders[0].ProfileIDs) != 0 {
+		t.Fatalf("expected profile unlinked, folders=%+v", got.Organization.Folders)
+	}
+	for _, key := range got.Organization.RootOrder {
+		if key == "conn:"+created.ProfileID {
+			t.Fatalf("rootOrder still has deleted conn: %+v", got.Organization.RootOrder)
+		}
 	}
 }
 

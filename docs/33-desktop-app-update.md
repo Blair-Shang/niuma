@@ -226,7 +226,7 @@ Query：`product`、`platform`、`arch`、`channel`、`limit`（默认 20，最�
 
 - Cloud **不**代理 Setup 字节流。
 - 官网下载按钮：继续 `GET|POST /api/v1/downloads/windows/hit`（niuma-site）；服务端 302 目标建议与当前 `published` 的 `download_url` 对齐（运维配置或后续 site 读 cloud）。
-- 桌面端下载 hit：`POST /cloud/api/v1/updates/hit` 标为 **P2**。
+- 桌面端下载 hit：`POST /niuma/cloud/api/v1/updates/hit` 已落地；失败不阻断更新。
 
 ---
 

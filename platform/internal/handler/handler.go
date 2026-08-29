@@ -39,6 +39,10 @@ const (
 	MethodConnectionExport = "platform.connection.export"
 	// MethodConnectionImport 从本机 JSON 文件导入连接配置（不含凭据明文）。
 	MethodConnectionImport = "platform.connection.import"
+	// MethodConnectionOrganizationGet 读取连接树文件夹组织层。
+	MethodConnectionOrganizationGet = "platform.connection.organization.get"
+	// MethodConnectionOrganizationSet 写入连接树文件夹组织层。
+	MethodConnectionOrganizationSet = "platform.connection.organization.set"
 	// MethodCredentialSet 写入或更新凭据（明文经 VaultStore 加密写入 cipher_text）。
 	MethodCredentialSet = "platform.credential.set"
 	// MethodCredentialDelete 删除凭据（密文行与关联一并清理）。
@@ -166,6 +170,7 @@ type settingSetParams struct {
 type Deps struct {
 	Settings     *store.SettingStore
 	Connections  *store.ConnectionStore
+	Organization *store.OrganizationStore
 	Credentials  *store.CredentialStore
 	Secrets      store.SecretStore
 	IDs          idgen.Generator
@@ -181,6 +186,7 @@ type Deps struct {
 type Dispatcher struct {
 	settings     *store.SettingStore
 	connections  *store.ConnectionStore
+	organization *store.OrganizationStore
 	credentials  *store.CredentialStore
 	secrets      store.SecretStore
 	ids          idgen.Generator
@@ -197,6 +203,7 @@ func New(deps Deps) *Dispatcher {
 	return &Dispatcher{
 		settings:     deps.Settings,
 		connections:  deps.Connections,
+		organization: deps.Organization,
 		credentials:  deps.Credentials,
 		secrets:      deps.Secrets,
 		ids:          deps.IDs,
@@ -248,6 +255,10 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.connectionExport(ctx, req)
 	case MethodConnectionImport:
 		return d.connectionImport(ctx, req)
+	case MethodConnectionOrganizationGet:
+		return d.connectionOrganizationGet(ctx, req)
+	case MethodConnectionOrganizationSet:
+		return d.connectionOrganizationSet(ctx, req)
 	case MethodCredentialSet:
 		return d.credentialSet(ctx, req)
 	case MethodCredentialDelete:

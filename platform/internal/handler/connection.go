@@ -287,6 +287,11 @@ func (d *Dispatcher) connectionDelete(ctx context.Context, req Request) Response
 			return errorResponse(req.ID, err.Error())
 		}
 	}
+	if d.organization != nil {
+		if err := d.organization.UnlinkProfile(ctx, defaultWorkspaceID, params.ProfileID); err != nil {
+			return errorResponse(req.ID, err.Error())
+		}
+	}
 	return okResponse(req.ID, map[string]any{"deleted": true})
 }
 
@@ -826,4 +831,42 @@ func (d *Dispatcher) deleteCredential(ctx context.Context, credentialID string) 
 	// DeleteSecret 在 VaultStore 下为幂等空操作；在测试替身（memSecretStore）下会清除内存条目。
 	_ = d.secrets.DeleteSecret(credentialServicePrefix+credentialID, credentialSecretAccount)
 	return d.credentials.Delete(ctx, credentialID)
+}
+
+// connectionOrganizationGet 处理 platform.connection.organization.get。
+func (d *Dispatcher) connectionOrganizationGet(ctx context.Context, req Request) Response {
+	if d.organization == nil {
+		return errorResponse(req.ID, "organization store not configured")
+	}
+	var params struct {
+		WorkspaceID string `json:"workspaceId"`
+	}
+	if len(req.Params) > 0 {
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+		}
+	}
+	org, err := d.organization.Get(ctx, params.WorkspaceID)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	return okResponse(req.ID, map[string]any{"organization": org})
+}
+
+// connectionOrganizationSet 处理 platform.connection.organization.set。
+func (d *Dispatcher) connectionOrganizationSet(ctx context.Context, req Request) Response {
+	if d.organization == nil {
+		return errorResponse(req.ID, "organization store not configured")
+	}
+	var params struct {
+		WorkspaceID  string                       `json:"workspaceId"`
+		Organization store.ConnectionOrganization `json:"organization"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+	}
+	if err := d.organization.Put(ctx, params.WorkspaceID, params.Organization); err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	return okResponse(req.ID, map[string]any{"updated": true})
 }

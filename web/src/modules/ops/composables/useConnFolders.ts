@@ -1,3 +1,7 @@
+import { connectionApi } from '@/api'
+import { isBridgeAvailable } from '@/api/client'
+import { isPlatformUnavailable, withPlatformRetry } from '@/api/platform'
+import type { ConnectionExportOrganization } from '@/api/types/connection'
 import {
   connTreeKey,
   folderTreeKey,
@@ -52,7 +56,7 @@ function loadRootOrder(folders: ConnFolder[]): string[] {
   return folders.filter((f) => !f.parentId).map((f) => folderTreeKey(f.id))
 }
 
-function saveFolders(folders: ConnFolder[]): void {
+function saveFoldersLocal(folders: ConnFolder[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(folders))
   } catch {
@@ -60,7 +64,7 @@ function saveFolders(folders: ConnFolder[]): void {
   }
 }
 
-function saveRootOrder(order: string[]): void {
+function saveRootOrderLocal(order: string[]): void {
   try {
     localStorage.setItem(ROOT_ORDER_KEY, JSON.stringify(order))
   } catch {
@@ -68,8 +72,89 @@ function saveRootOrder(order: string[]): void {
   }
 }
 
+function clearLocalOrganization(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(ROOT_ORDER_KEY)
+  } catch {
+    // storage not available
+  }
+}
+
+function toOrganization(folders: ConnFolder[], rootOrder: string[]): ConnectionExportOrganization {
+  return {
+    folders: folders.map((f) => ({
+      id: f.id,
+      name: f.name,
+      parentId: f.parentId,
+      profileIds: [...f.profileIds],
+      accentColor: f.accentColor,
+      expanded: f.expanded,
+    })),
+    rootOrder: [...rootOrder],
+  }
+}
+
+function fromOrganization(org: ConnectionExportOrganization | null | undefined): {
+  folders: ConnFolder[]
+  rootOrder: string[]
+} {
+  const folders = (org?.folders ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    expanded: f.expanded ?? true,
+    profileIds: [...(f.profileIds ?? [])],
+    parentId: f.parentId ?? null,
+    accentColor: folderAccentColor({ accentColor: f.accentColor }),
+  }))
+  return { folders, rootOrder: [...(org?.rootOrder ?? [])] }
+}
+
+function flushOrganizationToPlatform(folders: ConnFolder[], rootOrder: string[]): Promise<void> {
+  if (!isBridgeAvailable()) {
+    saveFoldersLocal(folders)
+    saveRootOrderLocal(rootOrder)
+    return Promise.resolve()
+  }
+  const payload = toOrganization(folders, rootOrder)
+  const run = connectionApi
+    .setOrganization({ organization: payload })
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      if (isPlatformUnavailable(error)) {
+        saveFoldersLocal(folders)
+        saveRootOrderLocal(rootOrder)
+        return
+      }
+      console.warn('[conn-folders] platform save failed', error)
+    })
+  return run
+}
+
 function cloneFolder(f: ConnFolder): ConnFolder {
   return { ...f, profileIds: [...f.profileIds] }
+}
+
+/**
+ * 同级文件夹重名时在名称后追加递增数字：新建文件夹 → 新建文件夹1 → 新建文件夹2。
+ * 仅与传入的已占用名称比较，跨层级允许同名。
+ */
+export function uniqueSiblingFolderName(name: string, takenNames: Iterable<string>): string {
+  const taken = new Set(takenNames)
+  if (!taken.has(name)) return name
+  let n = 1
+  while (taken.has(`${name}${n}`)) n += 1
+  return `${name}${n}`
+}
+
+/** createFolder 用 [...prev, created] 追加，引用前缀不变时可走增量插树。 */
+export function isFolderListAppend(
+  prev: readonly ConnFolder[] | undefined,
+  next: readonly ConnFolder[],
+): boolean {
+  if (!prev) return false
+  if (next.length !== prev.length + 1) return false
+  return prev.every((folder, index) => next[index] === folder)
 }
 
 const foldersRef = ref<ConnFolder[]>(loadFolders())
@@ -103,8 +188,36 @@ export function useConnFolders() {
   const rootOrder = rootOrderRef
 
   function persist(): void {
-    saveFolders(folders.value)
-    saveRootOrder(rootOrder.value)
+    if (!isBridgeAvailable()) {
+      saveFoldersLocal(folders.value)
+      saveRootOrderLocal(rootOrder.value)
+      return
+    }
+    void flushOrganizationToPlatform(folders.value, rootOrder.value)
+  }
+
+  /** 从 SQLite 拉取组织层；库空时把旧 localStorage 迁进去。 */
+  async function hydrate(): Promise<void> {
+    if (!isBridgeAvailable()) {
+      return
+    }
+    try {
+      const res = await withPlatformRetry(() => connectionApi.getOrganization({}))
+      const remote = fromOrganization(res.organization)
+      const remoteEmpty = remote.folders.length === 0 && remote.rootOrder.length === 0
+      if (remoteEmpty && (folders.value.length > 0 || rootOrder.value.length > 0)) {
+        await flushOrganizationToPlatform(folders.value, rootOrder.value)
+        clearLocalOrganization()
+        return
+      }
+      folders.value = remote.folders
+      rootOrder.value = remote.rootOrder
+      clearLocalOrganization()
+    } catch (error) {
+      if (!isPlatformUnavailable(error)) {
+        console.warn('[conn-folders] platform load failed', error)
+      }
+    }
   }
 
   /** 补齐 rootOrder：根文件夹 + 未分组连接 */
@@ -124,7 +237,7 @@ export function useConnFolders() {
     }
     if (next.join('\0') !== rootOrder.value.join('\0')) {
       rootOrder.value = next
-      saveRootOrder(next)
+      persist()
     }
   }
 
@@ -140,15 +253,27 @@ export function useConnFolders() {
     persist()
   }
 
+  function siblingFolderNames(parentId: string | null, excludeId?: string): string[] {
+    return folders.value
+      .filter((f) => (f.parentId ?? null) === parentId && f.id !== excludeId)
+      .map((f) => f.name)
+  }
+
+  /** 按同级已有名称生成不重复的文件夹名。 */
+  function nextFolderName(name: string, parentId: string | null = null, excludeId?: string): string {
+    return uniqueSiblingFolderName(name, siblingFolderNames(parentId, excludeId))
+  }
+
   function createFolder(
     name: string,
     parentId: string | null = null,
     accentColor: ConnAccentColor = DEFAULT_FOLDER_ACCENT,
+    expanded = true,
   ): ConnFolder {
     const folder: ConnFolder = {
       id: crypto.randomUUID(),
-      name,
-      expanded: true,
+      name: nextFolderName(name, parentId),
+      expanded,
       profileIds: [],
       parentId,
       accentColor,
@@ -193,11 +318,33 @@ export function useConnFolders() {
     persist()
   }
 
-  function toggleFolder(id: string): void {
-    folders.value = folders.value.map((f) =>
-      f.id === id ? { ...f, expanded: !f.expanded } : f,
-    )
+  /**
+   * 就地更新展开态并落盘，不替换 folders 数组，避免连接树整树重建。
+   */
+  function setFolderExpanded(id: string, expanded: boolean): void {
+    const folder = folders.value.find((f) => f.id === id)
+    if (!folder || folder.expanded === expanded) return
+    folder.expanded = expanded
     persist()
+  }
+
+  /** 按当前树展开键回写文件夹 expanded；未出现在 keys 里的文件夹视为折叠。 */
+  function syncFolderExpandedFromKeys(keys: readonly string[]): void {
+    const expanded = new Set(keys)
+    let changed = false
+    for (const folder of folders.value) {
+      const next = expanded.has(folderTreeKey(folder.id))
+      if (folder.expanded === next) continue
+      folder.expanded = next
+      changed = true
+    }
+    if (changed) persist()
+  }
+
+  function toggleFolder(id: string): void {
+    const folder = folders.value.find((f) => f.id === id)
+    if (!folder) return
+    setFolderExpanded(id, !folder.expanded)
   }
 
   function moveToFolder(profileId: string, folderId: string | null): void {
@@ -307,11 +454,15 @@ export function useConnFolders() {
   return {
     folders,
     rootOrder,
+    hydrate,
     syncRootOrder,
     createFolder,
+    nextFolderName,
     renameFolder,
     updateFolder,
     deleteFolder,
+    setFolderExpanded,
+    syncFolderExpandedFromKeys,
     toggleFolder,
     moveToFolder,
     insertRootOrder,

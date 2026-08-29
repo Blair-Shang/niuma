@@ -221,7 +221,7 @@ git push origin v1.0.0
 | `NOTARY_APPLE_ID` / `NOTARY_APP_PASSWORD` / `NOTARY_TEAM_ID` | 可选，公证 |
 | `GPG_KEY_ID` | 可选，Linux `.deb` 签名 |
 
-手动跑时可填 `niuma_ui_ref`（默认 `v1.1.8`，须与已发布的 niuma-ui tag 对齐）。
+手动跑时可填 `niuma_ui_ref`（默认 `v1.1.11`，须与已发布的 niuma-ui tag 对齐）。
 
 CEF 体积大：工作流在下载后立刻 `cache/save`（不等打包结束），缓存键只跟 `scripts/shared/setup/cef-pin.txt` 走。版本钉在该文件的 `cef_version`（不拉 Spotify 整份 index.json）；换官方构建时改 `cef_version` 并加 `cache_id`。入口脚本对整次下载做 3 次指数退避重试。
 

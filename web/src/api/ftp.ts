@@ -12,6 +12,10 @@ import type {
   ConnectionImportResult,
   ConnectionListParams,
   ConnectionListResult,
+  ConnectionOrganizationGetParams,
+  ConnectionOrganizationGetResult,
+  ConnectionOrganizationSetParams,
+  ConnectionOrganizationSetResult,
   ConnectionUpdateParams,
   ConnectionUpdateResult,
   CredentialDeleteParams,
@@ -78,6 +82,24 @@ export const connectionApi = {
   /** 从本机 JSON 导入连接配置（platform 创建站点，不含凭据） */
   import(params: ConnectionImportParams): Promise<ConnectionImportResult> {
     return bridgeInvoke<ConnectionImportResult>('platform.connection.import', params)
+  },
+
+  getOrganization(
+    params: ConnectionOrganizationGetParams = {},
+  ): Promise<ConnectionOrganizationGetResult> {
+    return bridgeInvoke<ConnectionOrganizationGetResult>(
+      'platform.connection.organization.get',
+      params,
+    )
+  },
+
+  setOrganization(
+    params: ConnectionOrganizationSetParams,
+  ): Promise<ConnectionOrganizationSetResult> {
+    return bridgeInvoke<ConnectionOrganizationSetResult>(
+      'platform.connection.organization.set',
+      params,
+    )
   },
 } as const
 

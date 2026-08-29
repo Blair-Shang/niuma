@@ -1,6 +1,7 @@
 #include "browser/main_browser.h"
 #include "core/cef/cef_settings.h"
 #include "ipc/platform_client.h"
+#include "browser/handlers/context_menu_handler.h"
 #include "browser/handlers/drag_handler.h"
 #include "core/window/main_window.h"
 #include "core/window/splash_window.h"
@@ -56,6 +57,32 @@ void ToggleDevTools(CefRefPtr<CefBrowser> browser) {
   host->ShowDevTools(window_info, nullptr, settings, CefPoint());
 }
 
+bool IsBrowserChromeShortcut(const CefKeyEvent& event) {
+  if (event.type != KEYEVENT_RAWKEYDOWN && event.type != KEYEVENT_KEYDOWN) {
+    return false;
+  }
+  const bool ctrl = (event.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
+  const bool alt = (event.modifiers & EVENTFLAG_ALT_DOWN) != 0;
+#if defined(__APPLE__)
+  const bool cmd = (event.modifiers & EVENTFLAG_COMMAND_DOWN) != 0;
+#else
+  const bool cmd = false;
+#endif
+  // Ctrl/Cmd+P 打印；Ctrl/Cmd+U 查看源代码
+  if ((ctrl || cmd) && !alt &&
+      (event.windows_key_code == 'P' || event.windows_key_code == 'U')) {
+    return true;
+  }
+  // Alt+Left / Alt+Right，以及浏览器前进后退键
+  if (alt && (event.windows_key_code == 0x25 || event.windows_key_code == 0x27)) {
+    return true;
+  }
+  if (event.windows_key_code == 0xA6 || event.windows_key_code == 0xA7) {
+    return true;
+  }
+  return false;
+}
+
 bool IsDevToolsShortcut(const CefKeyEvent& event) {
   if (event.type != KEYEVENT_RAWKEYDOWN && event.type != KEYEVENT_KEYDOWN) {
     return false;
@@ -105,6 +132,7 @@ namespace niuma {
 #if NIUMMA_WITH_CEF
 
 NiuMaClient::NiuMaClient() {
+  context_menu_handler_ = new NiuMaContextMenuHandler();
   drag_handler_ = new NiuMaDragHandler();
   permission_handler_ = new NiuMaPermissionHandler();
   download_handler_ = new NiuMaDownloadHandler();
@@ -300,6 +328,9 @@ bool NiuMaClient::OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
     if (DevToolsAllowed()) {
       ToggleDevTools(browser);
     }
+    return true;
+  }
+  if (!DevToolsAllowed() && IsBrowserChromeShortcut(event)) {
     return true;
   }
   return false;

@@ -54,6 +54,7 @@ set(SHELL_SOURCES
   src/core/runtime/service_manifest.cpp
   src/browser/main_browser.cpp
   src/browser/handlers/message_router_handler.cpp
+  src/browser/handlers/context_menu_handler.cpp
   src/browser/handlers/drag_handler.cpp
   src/browser/handlers/permission_handler.cpp
   src/browser/handlers/download_handler.cpp

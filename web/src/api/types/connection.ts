@@ -135,7 +135,7 @@ export interface ConnectionDeleteResult {
   deleted: boolean
 }
 
-/** 导出包中的前端组织层（文件夹），由 Web 管理、platform 透传。 */
+/** 导出包 / SQLite 中的连接树组织层（文件夹）。 */
 export interface ConnectionExportOrganization {
   folders: Array<{
     id: string
@@ -143,8 +143,30 @@ export interface ConnectionExportOrganization {
     parentId: string | null
     profileIds: string[]
     accentColor?: string
+    expanded?: boolean
   }>
   rootOrder: string[]
+}
+
+/** `platform.connection.organization.get` 入参 */
+export interface ConnectionOrganizationGetParams {
+  workspaceId?: string
+}
+
+/** `platform.connection.organization.get` 返回 */
+export interface ConnectionOrganizationGetResult {
+  organization: ConnectionExportOrganization
+}
+
+/** `platform.connection.organization.set` 入参 */
+export interface ConnectionOrganizationSetParams {
+  workspaceId?: string
+  organization: ConnectionExportOrganization
+}
+
+/** `platform.connection.organization.set` 返回 */
+export interface ConnectionOrganizationSetResult {
+  updated: boolean
 }
 
 /** `platform.connection.export` 入参 */

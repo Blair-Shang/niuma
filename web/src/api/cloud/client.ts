@@ -1,13 +1,13 @@
 /**
  * niuma-cloud HTTP 客户端（账户 / 反馈）。
  * Base URL：`VITE_CLOUD_API_BASE`
- * - 开发默认：`http://127.0.0.1:8090/cloud`
- * - 生产：`https://www.niuma007.com/cloud`
+ * - 开发默认：`http://127.0.0.1:8090/niuma/cloud`
+ * - 生产：`https://www.niuma007.com/niuma/cloud`
  */
 
 const DEFAULT_BASE = import.meta.env.DEV
-  ? 'http://127.0.0.1:8090/cloud'
-  : 'https://www.niuma007.com/cloud'
+  ? 'http://127.0.0.1:8090/niuma/cloud'
+  : 'https://www.niuma007.com/niuma/cloud'
 
 export function cloudApiBase(): string {
   const raw = (import.meta.env.VITE_CLOUD_API_BASE as string | undefined) || DEFAULT_BASE

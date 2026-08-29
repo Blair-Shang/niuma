@@ -1,4 +1,4 @@
-import { computed, watchEffect } from 'vue'
+import { shallowRef, watch, watchEffect } from 'vue'
 import type { Ref } from 'vue'
 import type { RsTreeDropPosition, RsTreeNode } from '@niuma/ui'
 import { connectionKindsForCategory } from '@/extensions/shell/activity-bar-config'
@@ -115,6 +115,82 @@ function buildRootNodes(
   return result
 }
 
+function makeEmptyFolderNode(folder: ConnFolder): ConnFolderNode {
+  return {
+    key: folderTreeKey(folder.id),
+    label: folder.name,
+    _type: 'folder',
+    _folder: { ...folder },
+    children: [],
+  }
+}
+
+function insertFolderUnderParent(
+  nodes: readonly ConnTreeNode[],
+  parentId: string,
+  child: ConnFolderNode,
+): ConnTreeNode[] | null {
+  const parentKey = folderTreeKey(parentId)
+  let found = false
+  const next = nodes.map((node) => {
+    if (found) return node
+    if (node._type === 'folder' && node.key === parentKey) {
+      found = true
+      const kids = (node.children ?? []) as ConnTreeNode[]
+      let idx = 0
+      while (idx < kids.length && kids[idx]._type === 'folder') idx += 1
+      return { ...node, children: [...kids.slice(0, idx), child, ...kids.slice(idx)] }
+    }
+    const kids = node.children as ConnTreeNode[] | undefined
+    if (!kids?.length) return node
+    const patched = insertFolderUnderParent(kids, parentId, child)
+    if (!patched) return node
+    found = true
+    return { ...node, children: patched }
+  })
+  return found ? next : null
+}
+
+function sameRefPrefix<T>(prev: readonly T[], next: readonly T[]): boolean {
+  return prev.every((item, index) => next[index] === item)
+}
+
+/**
+ * 仅当 folders 在末尾追加了一个新文件夹、连接列表未变时，把节点插进现有树。
+ * 其余变更仍走全量 buildRootNodes。
+ */
+export function tryInsertCreatedFolder(
+  prevNodes: readonly ConnTreeNode[],
+  prevFolders: readonly ConnFolder[],
+  nextFolders: readonly ConnFolder[],
+  prevConns: readonly ConnItem[],
+  nextConns: readonly ConnItem[],
+  prevRootOrder: readonly string[],
+  nextRootOrder: readonly string[],
+): ConnTreeNode[] | null {
+  if (prevConns !== nextConns) return null
+  if (nextFolders.length !== prevFolders.length + 1) return null
+  if (!sameRefPrefix(prevFolders, nextFolders)) return null
+  const created = nextFolders[nextFolders.length - 1]
+  if (!created) return null
+
+  const node = makeEmptyFolderNode(created)
+  if (!created.parentId) {
+    const key = folderTreeKey(created.id)
+    const appended =
+      nextRootOrder.length === prevRootOrder.length + 1
+      && sameRefPrefix(prevRootOrder, nextRootOrder)
+      && nextRootOrder[nextRootOrder.length - 1] === key
+    if (!appended) return null
+    return [...prevNodes, node]
+  }
+
+  if (nextRootOrder !== prevRootOrder && !sameRefPrefix(prevRootOrder, nextRootOrder)) {
+    return null
+  }
+  return insertFolderUnderParent(prevNodes, created.parentId, node)
+}
+
 /**
  * 级联过滤连接树（与 RsTree `filterTreeNodes` 同算法：子节点匹配则保留父级）。
  */
@@ -183,6 +259,20 @@ export function collectExpandableConnKeys(nodes: readonly ConnTreeNode[]): strin
       keys.push(node.key, ...collectExpandableConnKeys(node.children as ConnTreeNode[]))
     }
   }
+  return keys
+}
+
+/** 收集树上已有节点 key，用于修剪展开集（不新增任何 key）。 */
+export function collectExistingConnKeys(nodes: readonly ConnTreeNode[]): Set<string> {
+  const keys = new Set<string>()
+  const walk = (list: readonly ConnTreeNode[]): void => {
+    for (const node of list) {
+      if (node.key) keys.add(node.key)
+      const children = node.children as ConnTreeNode[] | undefined
+      if (children?.length) walk(children)
+    }
+  }
+  walk(nodes)
   return keys
 }
 
@@ -341,8 +431,29 @@ export function useConnTree(
   // flush:'pre' 保证在组件渲染读取 rootOrder 前先完成同步
   watchEffect(() => syncRootOrder(conns.value), { flush: 'pre' })
 
-  const nodes = computed<ConnTreeNode[]>(() =>
-    buildRootNodes(folders.value, conns.value, rootOrder.value),
+  const nodes = shallowRef<ConnTreeNode[]>([])
+  watch(
+    [folders, conns, rootOrder],
+    ([nextFolders, nextConns, nextOrder], prev) => {
+      const prevFolders = prev?.[0]
+      const prevConns = prev?.[1]
+      const prevOrder = prev?.[2]
+      // Vue 把多源 watch 的 oldValue 标成 T | undefined；首次 immediate 也没有 prev
+      if (prevFolders === undefined || prevConns === undefined || prevOrder === undefined) {
+        nodes.value = buildRootNodes(nextFolders, nextConns, nextOrder)
+        return
+      }
+      nodes.value = tryInsertCreatedFolder(
+        nodes.value,
+        prevFolders,
+        nextFolders,
+        prevConns,
+        nextConns,
+        prevOrder,
+        nextOrder,
+      ) ?? buildRootNodes(nextFolders, nextConns, nextOrder)
+    },
+    { immediate: true, flush: 'pre' },
   )
 
   return { nodes, allowDrop, handleConnTreeDrop }

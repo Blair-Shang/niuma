@@ -10,10 +10,10 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      niuma_ui_ref:
-        description: 'niuma-ui git ref (private sibling repo)'
+      niuma_ui_version:
+        description: 'npm niuma-ui 版本（latest 或 1.1.11）'
         type: string
-        default: 'v1.1.9'
+        default: 'latest'
 
 concurrency:
   group: pack-${{ github.workflow }}-${{ github.ref }}
@@ -58,14 +58,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: NiuMa
-
-      - name: Checkout niuma-ui
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository_owner }}/niuma-ui
-          ref: ${{ github.event.inputs.niuma_ui_ref || 'v1.1.9' }}
-          path: niuma-ui
-          token: ${{ secrets.NIUMA_UI_TOKEN || github.token }}
 
       - name: Enable Windows long paths
         if: runner.os == 'Windows'
@@ -127,9 +119,8 @@ jobs:
         with:
           node-version: '24'
           cache: pnpm
-          cache-dependency-path: |
-            NiuMa/pnpm-lock.yaml
-            niuma-ui/pnpm-lock.yaml
+          cache-dependency-path: NiuMa/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -186,8 +177,9 @@ jobs:
 
       - name: Install JS dependencies
         run: |
-          pnpm --dir ../niuma-ui install --frozen-lockfile
-          pnpm install --frozen-lockfile
+          UI="${{ github.event.inputs.niuma_ui_version || vars.NIUMA_UI_VERSION || 'latest' }}"
+          pnpm --filter @niuma/web pkg set "dependencies.@niuma/ui=npm:niuma-ui@${UI}"
+          pnpm install --no-frozen-lockfile
 
       - name: Download CEF
         run: ${{ matrix.cef_cmd }}
@@ -233,7 +225,9 @@ jobs:
     needs: pack
     if: ${{ always() && !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 90
+    env:
+      NIUMA_CLOUD_PIPELINE_TOKEN: ${{ secrets.NIUMA_CLOUD_PIPELINE_TOKEN }}
     steps:
       - name: Download pack artifacts
         uses: actions/download-artifact@v5
@@ -295,3 +289,23 @@ jobs:
           files: release-files/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout scripts for cloud push
+        if: env.NIUMA_CLOUD_PIPELINE_TOKEN != ''
+        uses: actions/checkout@v5
+        with:
+          path: cloud-push-src
+          sparse-checkout: |
+            .github/scripts/push-cloud-release.mjs
+            CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      - name: Upload installers to niuma-cloud
+        if: env.NIUMA_CLOUD_PIPELINE_TOKEN != ''
+        env:
+          NIUMA_CLOUD_API_BASE: ${{ vars.NIUMA_CLOUD_API_BASE || 'https://www.niuma007.com/niuma/cloud' }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          NIUMA_CHANNEL: stable
+          NIUMA_PREVIEW_CHANNEL: beta
+          CHANGELOG_PATH: cloud-push-src/CHANGELOG.md
+        run: node cloud-push-src/.github/scripts/push-cloud-release.mjs release-files

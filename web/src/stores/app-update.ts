@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { isBridgeAvailable } from '@/api/client'
 import { CloudApiError } from '@/api/cloud/client'
-import { checkAppUpdate, fetchLatestRelease, type UpdateRelease } from '@/api/cloud/updates'
+import { checkAppUpdate, fetchLatestRelease, recordUpdateHit, type UpdateRelease } from '@/api/cloud/updates'
 import { shellApi } from '@/api/shell'
 import {
   onShellUpdateProgress,
@@ -52,6 +52,11 @@ function mapPlatform(raw?: string | null): string {
   if (p === 'kylin' || p === 'linux') return 'linux'
   if (p === 'macos' || p === 'darwin') return 'macos'
   return 'windows'
+}
+
+/** Linux / macOS 尚未稳定，检查与官网同一条 beta 渠道。 */
+function updateChannel(platform: string): string {
+  return platform === 'windows' ? 'stable' : 'beta'
 }
 
 function readSnooze(): { version: string; until: number } | null {
@@ -132,11 +137,12 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     changelogRelease.value = null
     changelogHasUpdate.value = false
     const { platform, arch, current } = platformArch()
+    const channel = updateChannel(platform)
     try {
       const [rel, checkRes] = await Promise.all([
-        fetchLatestRelease({ platform, arch }),
+        fetchLatestRelease({ platform, arch, channel }),
         current
-          ? checkAppUpdate({ current, platform, arch }).catch(() => null)
+          ? checkAppUpdate({ current, platform, arch, channel }).catch(() => null)
           : Promise.resolve(null),
       ])
       changelogRelease.value = rel
@@ -202,7 +208,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     try {
       const platform = mapPlatform(bridge.shellInfo?.platform)
       const arch = (bridge.shellInfo?.arch || 'x64').toLowerCase()
-      const res = await checkAppUpdate({ current, platform, arch })
+      const res = await checkAppUpdate({ current, platform, arch, channel: updateChannel(platform) })
       if (!res.updateAvailable || !res.latest) {
         phase.value = 'idle'
         latest.value = null
@@ -241,6 +247,13 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
       return
     }
     error.value = ''
+    void recordUpdateHit({
+      product: latest.value.product,
+      channel: latest.value.channel,
+      platform: latest.value.platform,
+      arch: latest.value.arch,
+      version: latest.value.version,
+    }).catch(() => undefined)
     // 非 Windows：不走半成品 apply，直接打开发布包 HTTPS 链接
     if (!inAppInstallSupported.value) {
       try {

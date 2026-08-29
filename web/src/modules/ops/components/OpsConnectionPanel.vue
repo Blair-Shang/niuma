@@ -33,7 +33,7 @@ import { useConnTreeFocus, type RsTreeExpose } from '@/modules/ops/composables/u
 import { useConnTreeChildren } from '@/modules/ops/composables/useConnTreeChildren'
 import {
   allowDrop,
-  collectExpandableConnKeys,
+  collectExistingConnKeys,
   connTreeSearchMatch,
   filterConnTreeByCategory,
   handleConnTreeDrop,
@@ -43,7 +43,7 @@ import {
   type ConnResourceNode,
   type ConnTreeNode,
 } from '@/modules/ops/composables/useConnTree'
-import { useConnFolders, type ConnFolder } from '@/modules/ops/composables/useConnFolders'
+import { folderTreeKey, isFolderListAppend, useConnFolders, type ConnFolder } from '@/modules/ops/composables/useConnFolders'
 import { useConnImportExport, type ConnExportScope } from '@/modules/ops/composables/useConnImportExport'
 import { useConnTreeSyncStore } from '@/stores/conn-tree-sync'
 import { useSessionRegistry } from '@/stores/session-registry'
@@ -264,17 +264,61 @@ watch(
   },
 )
 
-// 仅在分类切换或文件夹结构变化时重算展开键，避免每次连接数据变更都 deep-walk 整棵树
-watch(
-  [categoryRef, cf.folders],
-  () => {
-    const expandable = collectExpandableConnKeys(categoryTreeNodes.value)
-    const valid = new Set(expandable)
-    const kept = treeExpandedKeys.value.filter((k) => valid.has(k))
-    treeExpandedKeys.value = kept.length > 0 ? kept : expandable
-  },
-  { immediate: true },
-)
+function sameKeyList(prev: readonly string[], next: readonly string[]): boolean {
+  return prev.length === next.length && prev.every((key, index) => key === next[index])
+}
+
+function persistedFolderExpandKeys(): string[] {
+  const existing = collectExistingConnKeys(categoryTreeNodes.value)
+  return cf.folders.value
+    .filter((folder) => folder.expanded)
+    .map((folder) => folderTreeKey(folder.id))
+    .filter((key) => existing.has(key))
+}
+
+/** 分类切换：文件夹开合跟已保存的 expanded；连接/资源展开键仍按当前树保留。 */
+function syncExpandedKeysOnCategory(): void {
+  const existing = collectExistingConnKeys(categoryTreeNodes.value)
+  const folderKeySet = new Set(cf.folders.value.map((folder) => folderTreeKey(folder.id)))
+  const persistedFolders = persistedFolderExpandKeys()
+  const nonFolderKept = treeExpandedKeys.value.filter((key) => !folderKeySet.has(key) && existing.has(key))
+  const next = [...persistedFolders, ...nonFolderKept]
+  if (sameKeyList(treeExpandedKeys.value, next)) return
+  treeExpandedKeys.value = next
+}
+
+/** 文件夹增删改后只丢掉已经不在树上的 key，绝不补开其它文件夹。 */
+function pruneExpandedKeys(): void {
+  const existing = collectExistingConnKeys(categoryTreeNodes.value)
+  const next = treeExpandedKeys.value.filter((key) => existing.has(key))
+  if (sameKeyList(treeExpandedKeys.value, next)) return
+  treeExpandedKeys.value = next
+}
+
+function isFolderTreeOpen(node: RsTreeNode): boolean {
+  return Boolean(node.key && treeExpandedKeys.value.includes(node.key))
+}
+
+watch(categoryRef, syncExpandedKeysOnCategory, { immediate: true })
+watch(cf.folders, (next, prev) => {
+  if (isFolderListAppend(prev, next)) {
+    const created = next[next.length - 1]
+    if (created?.expanded) {
+      const key = folderTreeKey(created.id)
+      if (!treeExpandedKeys.value.includes(key)) {
+        treeExpandedKeys.value = [...treeExpandedKeys.value, key]
+      }
+    }
+    return
+  }
+  pruneExpandedKeys()
+})
+
+// 搜索时 RsTree 会临时展开匹配祖先，不能写回；清空搜索后树会还原展开键再落盘
+watch(treeExpandedKeys, (keys) => {
+  if (treeFilter.value) return
+  cf.syncFolderExpandedFromKeys(keys)
+})
 
 function treeSearchMatch(node: RsTreeNode, keyword: string): boolean {
   return connTreeSearchMatch(node as ConnTreeNode, keyword)
@@ -515,7 +559,9 @@ function openFolderDialog(
   folderDlgMode.value = mode
   folderDlgId.value = folder?.id ?? null
   folderDlgParentId.value = parentId
-  folderDlgName.value = mode === 'create' ? t('opsNav.newFolder') : (folder?.name ?? '')
+  folderDlgName.value = mode === 'create'
+    ? cf.nextFolderName(t('opsNav.newFolder'), parentId)
+    : (folder?.name ?? '')
   folderDlgColor.value = folder ? folderAccentColor(folder) : DEFAULT_FOLDER_ACCENT
   folderDlgError.value = null
   folderDlgOpen.value = true
@@ -528,7 +574,14 @@ function onFolderSave(): void {
     return
   }
   if (folderDlgMode.value === 'create') {
-    cf.createFolder(name, folderDlgParentId.value, folderDlgColor.value)
+    const parentId = folderDlgParentId.value
+    cf.createFolder(name, parentId, folderDlgColor.value)
+    if (parentId) {
+      const parentKey = folderTreeKey(parentId)
+      if (!treeExpandedKeys.value.includes(parentKey)) {
+        treeExpandedKeys.value = [...treeExpandedKeys.value, parentKey]
+      }
+    }
     toast.success(t('opsNav.folderAdded'))
   } else if (folderDlgId.value) {
     cf.updateFolder(folderDlgId.value, { name, accentColor: folderDlgColor.value })
@@ -678,7 +731,10 @@ async function onDelete(): Promise<void> {
 }
 
 onMounted(() => {
-  void cx.loadAll()
+  void cf.hydrate().finally(() => {
+    syncExpandedKeysOnCategory()
+    void cx.loadAll()
+  })
 })
 
 /* ── 类型守卫（模板用） ── */
@@ -738,7 +794,7 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
               @contextmenu="ctxTarget = node as ConnTreeNode"
             >
               <RsIcon
-                :name="asFolderNode(node as ConnTreeNode)._folder.expanded ? 'folder-open' : 'folder'"
+                :name="isFolderTreeOpen(node) ? 'folder-open' : 'folder'"
                 :size="14"
                 class="nm-conn-row__icon"
                 :color="folderAccentColor(asFolderNode(node as ConnTreeNode)._folder)"

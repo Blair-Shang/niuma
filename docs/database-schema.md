@@ -158,6 +158,7 @@ PRIMARY KEY (parent_id, child_id)
 | 表名 | 说明 | 主键 |
 |------|------|------|
 | `nm_connection_profile` | SSH / DB / FTP 连接配置（无密码明文） | `profile_id` |
+| `nm_connection_organization` | 连接树文件夹组织层（每工作区一份 JSON） | `workspace_id` |
 | `nm_credential_ref` | 凭据（标签/类型 + Vault 密文） | `credential_id` |
 | `nm_profile_credential` | Profile 与凭据多对多 | `(profile_id, credential_id)` |
 | `nm_recent_access` | 最近打开的连接/文件 | `recent_id` |

@@ -31,6 +31,71 @@ function descriptorToNode(conn: ConnItem, descriptor: ConnResourceDescriptor): C
 const EMPTY_CHILD_CACHE: ReadonlyMap<string, ConnResourceNode[]> = new Map()
 const EMPTY_LOADING_SET: ReadonlySet<string> = new Set()
 
+function nodeLoadingUnchanged(node: ConnTreeNode, loading: boolean): boolean {
+  return node.loading === loading || (node.loading == null && !loading)
+}
+
+function applyChildCacheNode(
+  node: ConnTreeNode,
+  cacheMap: ReadonlyMap<string, ConnResourceNode[]>,
+  loadingKeysSet: ReadonlySet<string>,
+  visiting: Set<string>,
+): ConnTreeNode {
+  const key = node.key
+  const loading = Boolean(key && loadingKeysSet.has(key))
+  if (!key) {
+    return node
+  }
+
+  // 缓存图成环（或父子误指向同一 children 数组）时防止栈溢出
+  if (visiting.has(key)) {
+    return {
+      ...node,
+      isLeaf: true,
+      children: undefined,
+      loading,
+    }
+  }
+
+  const cached = cacheMap.get(key)
+  if (cached) {
+    // 叶子节点不应拥有子列表（误刷新表/视图时曾把兄弟挂到叶子下）
+    if (node.isLeaf) {
+      if (node.children == null && nodeLoadingUnchanged(node, loading)) return node
+      return { ...node, children: undefined, isLeaf: true, loading }
+    }
+    visiting.add(key)
+    try {
+      // 必须每次按最新 cacheMap 往下挂：只比本节点 cache 数组引用会漏掉子孙懒加载
+      return {
+        ...node,
+        isLeaf: false,
+        children: applyChildCache(cached, cacheMap, loadingKeysSet, visiting),
+        loading,
+      }
+    } finally {
+      visiting.delete(key)
+    }
+  }
+
+  const children = node.children as ConnTreeNode[] | undefined
+  if (children?.length) {
+    visiting.add(key)
+    try {
+      const nextChildren = applyChildCache(children, cacheMap, loadingKeysSet, visiting)
+      if (nextChildren === children && nodeLoadingUnchanged(node, loading)) {
+        return node
+      }
+      return { ...node, children: nextChildren, loading }
+    } finally {
+      visiting.delete(key)
+    }
+  }
+
+  if (nodeLoadingUnchanged(node, loading)) return node
+  return { ...node, loading }
+}
+
 function applyChildCache(
   nodes: readonly ConnTreeNode[],
   cache?: ReadonlyMap<string, ConnResourceNode[]>,
@@ -39,59 +104,13 @@ function applyChildCache(
 ): ConnTreeNode[] {
   const cacheMap = cache ?? EMPTY_CHILD_CACHE
   const loadingKeysSet = loadingSet ?? EMPTY_LOADING_SET
-  return nodes.map((node) => {
-    const key = node.key
-    const loading = Boolean(key && loadingKeysSet.has(key))
-    if (!key) {
-      return node
-    }
-
-    // 缓存图成环（或父子误指向同一 children 数组）时防止栈溢出
-    if (visiting.has(key)) {
-      return {
-        ...node,
-        isLeaf: true,
-        children: undefined,
-        loading,
-      }
-    }
-
-    const cached = cacheMap.get(key)
-    if (cached) {
-      // 叶子节点不应拥有子列表（误刷新表/视图时曾把兄弟挂到叶子下）
-      if (node.isLeaf) {
-        return { ...node, children: undefined, isLeaf: true, loading }
-      }
-      visiting.add(key)
-      try {
-        return {
-          ...node,
-          isLeaf: false,
-          children: applyChildCache(cached, cacheMap, loadingKeysSet, visiting),
-          loading,
-        }
-      } finally {
-        visiting.delete(key)
-      }
-    }
-
-    const children = node.children as ConnTreeNode[] | undefined
-    if (children?.length) {
-      visiting.add(key)
-      try {
-        return {
-          ...node,
-          children: applyChildCache(children, cacheMap, loadingKeysSet, visiting),
-          loading,
-        }
-      } finally {
-        visiting.delete(key)
-      }
-    }
-
-    // 勿把 cache 内对象直接交给树：避免 RsTree / 业务侧就地改 children 污染单例缓存
-    return { ...node, loading }
+  let mutated = false
+  const next = nodes.map((node) => {
+    const result = applyChildCacheNode(node, cacheMap, loadingKeysSet, visiting)
+    if (result !== node) mutated = true
+    return result
   })
+  return mutated ? next : (nodes as ConnTreeNode[])
 }
 
 function cacheKey(conn: ConnItem, parentPath?: ConnResourceDescriptor['path']): string {

@@ -57,3 +57,25 @@ export function checkAppUpdate(params: UpdateCheckParams): Promise<UpdateCheckRe
 export function fetchLatestRelease(params: UpdateLatestParams): Promise<UpdateRelease> {
   return cloudFetch<UpdateRelease>(`/api/v1/updates/latest?${updateQuery(params)}`)
 }
+
+export type UpdateHitParams = {
+  platform: string
+  arch: string
+  product?: string
+  channel?: string
+  version?: string
+}
+
+/** 记录一次拉起/下载安装包；失败由调用方吞掉。 */
+export function recordUpdateHit(params: UpdateHitParams): Promise<{ ok: boolean; hits: number }> {
+  return cloudFetch<{ ok: boolean; hits: number }>('/api/v1/updates/hit', {
+    method: 'POST',
+    body: JSON.stringify({
+      platform: params.platform,
+      arch: params.arch,
+      product: params.product,
+      channel: params.channel,
+      version: params.version,
+    }),
+  })
+}

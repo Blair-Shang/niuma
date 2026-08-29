@@ -47,9 +47,9 @@ type Manager struct {
 func New(allowedHosts []string) *Manager {
 	hosts := normalizeHosts(allowedHosts)
 	if len(hosts) == 0 {
-		// 默认允许官方站与其子域（cdn.niuma007.com 等经后缀匹配放行）
-		// 生产若 CDN 为其它根域：设置 NIUMA_UPDATE_DOWNLOAD_HOSTS=cdn.example.com,niuma007.com
-		hosts = []string{"niuma007.com", "www.niuma007.com"}
+		// 默认允许官方站、GitHub Release（含跳转后的 objects.githubusercontent.com）
+		// 其它 CDN：设置 NIUMA_UPDATE_DOWNLOAD_HOSTS=cdn.example.com,niuma007.com
+		hosts = []string{"niuma007.com", "www.niuma007.com", "github.com", "githubusercontent.com"}
 	}
 	return &Manager{hosts: hosts, tempRoot: filepath.Join(os.TempDir(), dirName)}
 }

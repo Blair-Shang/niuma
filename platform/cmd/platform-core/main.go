@@ -163,6 +163,7 @@ func run() error {
 	dispatcher := handler.New(handler.Deps{
 		Settings:     settingStore,
 		Connections:  store.NewConnectionStore(db),
+		Organization: store.NewOrganizationStore(db),
 		Credentials:  store.NewCredentialStore(db),
 		Secrets:      secrets,
 		IDs:          idGen,

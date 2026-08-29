@@ -36,6 +36,9 @@ void NiuMaApp::OnBeforeCommandLineProcessing(
   command_line->AppendSwitch("allow-file-access-from-files");
   command_line->AppendSwitch("use-alloy-style");
   command_line->AppendSwitchWithValue("lang", "zh-CN");
+  // Chrome 137+ 默认禁用 SwiftShader。本机 GPU 崩溃后没有软件回退，
+  // backdrop-filter / 合成会直接失败。允许 SwiftShader 以免界面透底。
+  command_line->AppendSwitch("enable-unsafe-swiftshader");
 }
 
 CefRefPtr<CefClient> NiuMaApp::GetDefaultClient() {

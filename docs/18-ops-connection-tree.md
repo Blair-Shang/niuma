@@ -47,8 +47,8 @@ NiuMa 是**运维连接壳**（SSH / FTP / Redis …），不是完整 DBA IDE�
 
 ```
 ┌─ 组织层（持久化）────────────────────────────────────┐
-│  folder:{uuid}     用户文件夹，localStorage + 拖放排序   │
-│  conn:{profileId}  连接站点，SQLite nm_connection_profile │
+│  folder:{uuid}     用户文件夹，SQLite nm_connection_organization │
+│  conn:{profileId}  连接站点，SQLite nm_connection_profile        │
 └───────────────────────────┬──────────────────────────┘
                             │ expand + lazy load
 ┌─ 资源层（虚拟）───────────▼──────────────────────────┐
@@ -63,7 +63,7 @@ NiuMa 是**运维连接壳**（SSH / FTP / Redis …），不是完整 DBA IDE�
 
 | 层级 | Key 前缀 | 持久化 | 可拖放 | 数据来源 |
 |------|----------|--------|--------|----------|
-| 文件夹 | `folder:` | localStorage | 是 | 用户 |
+| 文件夹 | `folder:` | SQLite `nm_connection_organization` | 是 | `platform.connection.organization.*` |
 | 连接 | `conn:` | SQLite | 是 | `platform.connection.*` |
 | 资源 | `res:` | **否** | **否** | 各能力服务元数据 API + 内存缓存 |
 
@@ -215,7 +215,7 @@ registerConnKindLoader('redis', {
 7. 能力服务实现 `xxx.tree.*`（若有树；**禁止**复用长会话 `session.open` 做树展开）
 8. 模块文案放 `modules/<kind>/locale/{zh-CN,en-US}.ts`，由 `web/src/locale/index.ts` merge
 
-**无需修改**：`OpsConnectionPanel.vue` 主体、`useConnFolders` 持久化格式。
+**无需修改**：`OpsConnectionPanel.vue` 主体、`useConnFolders` 组织 JSON 形状（现写入 `nm_connection_organization`）。
 
 ---
 

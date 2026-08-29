@@ -2,11 +2,13 @@
 
 #if NIUMMA_WITH_CEF
 #include "browser/handlers/message_router_handler.h"
+#include "browser/handlers/context_menu_handler.h"
 #include "browser/handlers/drag_handler.h"
 #include "browser/handlers/download_handler.h"
 #include "browser/handlers/permission_handler.h"
 #include "ipc/platform_client.h"
 #include "include/cef_client.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_dialog_handler.h"
 #include "include/cef_download_handler.h"
@@ -39,6 +41,9 @@ class NiuMaClient : public CefClient,
 
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefDialogHandler> GetDialogHandler() override { return this; }
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
+    return context_menu_handler_;
+  }
   CefRefPtr<CefDragHandler> GetDragHandler() override { return drag_handler_; }
   CefRefPtr<CefPermissionHandler> GetPermissionHandler() override {
     return permission_handler_;
@@ -89,6 +94,7 @@ class NiuMaClient : public CefClient,
   bool is_closing_ = false;
   CefRefPtr<CefMessageRouterBrowserSide> browser_router_;
   std::unique_ptr<NiuMaMessageRouterHandler> message_router_handler_;
+  CefRefPtr<NiuMaContextMenuHandler> context_menu_handler_;
   CefRefPtr<NiuMaDragHandler> drag_handler_;
   CefRefPtr<NiuMaPermissionHandler> permission_handler_;
   CefRefPtr<NiuMaDownloadHandler> download_handler_;
