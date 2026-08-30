@@ -39,18 +39,17 @@ function resolveUiWarmup(relFromSrc: string): string | undefined {
   return existsSync(dist) ? dist : undefined
 }
 
+const prebundleEntries = [
+  resolveUiPrebundle('codemirror'),
+  resolveUiPrebundle('xterm'),
+  resolveUiWarmup('components/RsCodeEditor.vue'),
+].filter((p): p is string => Boolean(p))
+
 /**
- * niumaUiHost：dev 联调用到的组件源码；build / 安装包走 npm dist。
+ * niumaUiHost：只服务 pnpm dev（源码 HMR）。vite build 走包主入口。
  * 不要把 @niuma/ui 别名到 src/index.ts。
  */
-export default defineConfig(() => {
-  const prebundleEntries = [
-    resolveUiPrebundle('codemirror'),
-    resolveUiPrebundle('xterm'),
-    resolveUiWarmup('components/RsCodeEditor.vue'),
-  ].filter((p): p is string => Boolean(p))
-
-  return {
+export default defineConfig({
   plugins: [
     vue(),
     tailwindcss(),
@@ -99,5 +98,4 @@ export default defineConfig(() => {
       },
     },
   },
-  }
 })
