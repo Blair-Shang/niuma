@@ -176,10 +176,31 @@ jobs:
         run: bash .github/scripts/import-macos-p12.sh
 
       - name: Install JS dependencies
+        # Windows 默认 pwsh，不能写 UI="..."。
+        # pnpm --filter pkg set 会当成脚本名，改不到 web/package.json。
+        # 必须用 add，才能把 link:../../niuma-ui 换成 npm 上的 niuma-ui。
+        shell: bash
+        env:
+          NIUMA_UI_PKG: ${{ github.event.inputs.niuma_ui_version || vars.NIUMA_UI_VERSION || 'latest' }}
         run: |
-          UI="${{ github.event.inputs.niuma_ui_version || vars.NIUMA_UI_VERSION || 'latest' }}"
-          pnpm --filter @niuma/web pkg set "dependencies.@niuma/ui=npm:niuma-ui@${UI}"
-          pnpm install --no-frozen-lockfile
+          set -euo pipefail
+          echo "Installing @niuma/ui from npm:niuma-ui@${NIUMA_UI_PKG}"
+          pnpm --filter @niuma/web add "@niuma/ui@npm:niuma-ui@${NIUMA_UI_PKG}"
+          UI_INDEX=""
+          for cand in web/node_modules/@niuma/ui/src/index.ts node_modules/@niuma/ui/src/index.ts; do
+            if [[ -f "$cand" ]]; then
+              UI_INDEX="$cand"
+              break
+            fi
+          done
+          if [[ -z "${UI_INDEX}" ]]; then
+            echo "niuma-ui source not found after install" >&2
+            ls -la web/node_modules/@niuma 2>/dev/null || true
+            ls -la node_modules/@niuma 2>/dev/null || true
+            exit 1
+          fi
+          echo "niuma-ui source: ${UI_INDEX}"
+          node -e "const {createRequire}=require('module');const {resolve}=require('path');const r=createRequire(resolve('web/package.json'));console.log('resolved', r.resolve('@niuma/ui/package.json'))"
 
       - name: Download CEF
         run: ${{ matrix.cef_cmd }}

@@ -11,8 +11,17 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "noEmit": true,
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@niuma/ui": [
+        "./node_modules/@niuma/ui/src/index.ts",
+        "../node_modules/@niuma/ui/src/index.ts"
+      ],
+      "@niuma/ui/*": [
+        "./node_modules/@niuma/ui/*",
+        "../node_modules/@niuma/ui/*"
+      ]
     },
     "types": ["vite/client"]
   },
