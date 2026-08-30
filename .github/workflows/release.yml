@@ -186,21 +186,28 @@ jobs:
           set -euo pipefail
           echo "Installing @niuma/ui from npm:niuma-ui@${NIUMA_UI_PKG}"
           pnpm --filter @niuma/web add "@niuma/ui@npm:niuma-ui@${NIUMA_UI_PKG}"
-          UI_INDEX=""
-          for cand in web/node_modules/@niuma/ui/src/index.ts node_modules/@niuma/ui/src/index.ts; do
-            if [[ -f "$cand" ]]; then
-              UI_INDEX="$cand"
-              break
-            fi
-          done
-          if [[ -z "${UI_INDEX}" ]]; then
-            echo "niuma-ui source not found after install" >&2
-            ls -la web/node_modules/@niuma 2>/dev/null || true
-            ls -la node_modules/@niuma 2>/dev/null || true
-            exit 1
-          fi
-          echo "niuma-ui source: ${UI_INDEX}"
-          node -e "const {createRequire}=require('module');const {resolve}=require('path');const r=createRequire(resolve('web/package.json'));console.log('resolved', r.resolve('@niuma/ui/package.json'))"
+          # niuma-ui >= 1.2.0 只发 dist/；本机 link 才有 src/。用 Node resolve 跟 Vite 同一条路径。
+          node -e '
+            const { createRequire } = require("module");
+            const { existsSync } = require("fs");
+            const { dirname, join, resolve } = require("path");
+            const r = createRequire(resolve("web/package.json"));
+            const pkg = r.resolve("@niuma/ui/package.json");
+            const root = dirname(pkg);
+            const dist = join(root, "dist/index.js");
+            const src = join(root, "src/index.ts");
+            console.log("resolved", pkg);
+            if (existsSync(dist)) {
+              console.log("niuma-ui entry", dist);
+              process.exit(0);
+            }
+            if (existsSync(src)) {
+              console.log("niuma-ui source", src);
+              process.exit(0);
+            }
+            console.error("niuma-ui has neither dist/index.js nor src/index.ts");
+            process.exit(1);
+          '
 
       - name: Download CEF
         run: ${{ matrix.cef_cmd }}
