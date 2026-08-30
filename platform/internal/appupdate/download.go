@@ -175,6 +175,9 @@ func (m *Manager) Download(ctx context.Context, rawURL, expectSHA string, expect
 		_ = os.Remove(tmpPath)
 		return "", 0, err
 	}
+	if strings.HasSuffix(strings.ToLower(destPath), ".run") {
+		_ = os.Chmod(destPath, 0o755)
+	}
 	st, err := os.Stat(destPath)
 	if err != nil {
 		return "", 0, err

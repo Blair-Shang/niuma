@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsButton, RsDialog } from '@niuma/ui'
+import { RsButton, RsDialog, RsMarkdown } from '@niuma/ui'
 import AppBrandIcon from '@/shell/widgets/AppBrandIcon.vue'
 import { useAppUpdateStore } from '@/stores/app-update'
 import { useBridgeStore } from '@/stores/bridge'
@@ -102,17 +102,26 @@ function onChangelogOpen(open: boolean) {
           <p v-if="store.changelogLoading" class="nm-changelog__meta">
             {{ t('shell.help.changelogLoading') }}
           </p>
-          <template v-else-if="store.changelogRelease">
-            <p class="nm-changelog__meta">
-              <span class="font-mono">{{ store.changelogRelease.version }}</span>
-              <span v-if="store.changelogRelease.title"> · {{ store.changelogRelease.title }}</span>
-            </p>
+          <template v-else-if="store.changelogItems.length">
             <p v-if="store.changelogHasUpdate" class="nm-changelog__update">
               {{ t('shell.help.changelogUpdateAvailable') }}
             </p>
-            <pre class="nm-changelog__notes">{{
-              store.changelogRelease.notesMd || t('appUpdate.noNotes')
-            }}</pre>
+            <article
+              v-for="rel in store.changelogItems"
+              :key="`${rel.version}-${rel.channel}-${rel.platform}`"
+              class="nm-changelog__ver"
+            >
+              <p class="nm-changelog__meta">
+                <span class="font-mono">{{ rel.version }}</span>
+                <span v-if="rel.title"> · {{ rel.title }}</span>
+              </p>
+              <RsMarkdown
+                class="nm-changelog__notes"
+                :model-value="rel.notesMd || t('appUpdate.noNotes')"
+                readonly
+                height="12rem"
+              />
+            </article>
           </template>
           <p v-else-if="changelogErrorText" class="nm-changelog__err">{{ changelogErrorText }}</p>
           <p v-else class="nm-changelog__meta">{{ t('shell.help.changelogEmpty') }}</p>
@@ -174,6 +183,8 @@ function onChangelogOpen(open: boolean) {
 .nm-changelog {
   display: grid;
   gap: 0.75rem;
+  max-height: 28rem;
+  overflow: auto;
 }
 .nm-changelog__meta {
   margin: 0;
@@ -185,17 +196,13 @@ function onChangelogOpen(open: boolean) {
   font-size: 0.85rem;
   color: var(--rs-primary);
 }
+.nm-changelog__ver {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
 .nm-changelog__notes {
-  margin: 0;
-  max-height: 16rem;
-  overflow: auto;
-  padding: 0.75rem;
-  border-radius: 0.5rem;
-  background: var(--rs-bg-subtle, rgba(0, 0, 0, 0.04));
-  white-space: pre-wrap;
-  font-family: inherit;
-  font-size: 0.8125rem;
-  line-height: 1.5;
+  min-width: 0;
 }
 .nm-changelog__err {
   margin: 0;

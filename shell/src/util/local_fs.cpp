@@ -20,6 +20,8 @@
 #include <shlobj.h>
 #else
 #include <spawn.h>
+#include <sys/stat.h>
+#include <unistd.h>
 extern char** environ;
 #endif
 
@@ -485,6 +487,27 @@ bool PathUnderUpdateDir(const std::string& path, std::string& error) {
   return true;
 }
 
+bool EndsWithIgnoreCase(const std::string& value, const std::string& suffix) {
+  if (value.size() < suffix.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < suffix.size(); ++i) {
+    const unsigned char a = static_cast<unsigned char>(value[value.size() - suffix.size() + i]);
+    const unsigned char b = static_cast<unsigned char>(suffix[i]);
+    if (std::tolower(a) != std::tolower(b)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsAllowedInstallerName(const std::string& path) {
+  return EndsWithIgnoreCase(path, ".exe") || EndsWithIgnoreCase(path, ".msi") ||
+         EndsWithIgnoreCase(path, ".pkg") || EndsWithIgnoreCase(path, ".dmg") ||
+         EndsWithIgnoreCase(path, ".deb") || EndsWithIgnoreCase(path, ".rpm") ||
+         EndsWithIgnoreCase(path, ".run");
+}
+
 }  // namespace
 
 bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
@@ -497,6 +520,10 @@ bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
   }
   if (!Exists(path)) {
     error = "installer missing";
+    return false;
+  }
+  if (!IsAllowedInstallerName(path)) {
+    error = "unsupported installer";
     return false;
   }
 #if defined(OS_WIN)
@@ -512,10 +539,40 @@ bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
     return false;
   }
   return true;
+#elif defined(__APPLE__)
+  std::vector<char> path_arg(path.begin(), path.end());
+  path_arg.push_back('\0');
+  const char* opener = "open";
+  char* argv[] = {const_cast<char*>(opener), path_arg.data(), nullptr};
+  pid_t pid = 0;
+  if (posix_spawnp(&pid, opener, nullptr, nullptr, argv, environ) != 0) {
+    error = "launch installer failed";
+    return false;
+  }
+  return true;
 #else
-  // P0 仅 Windows Setup；非 Windows 由 Web 打开下载链，避免半成品 apply
-  error = "apply_unsupported_platform";
-  return false;
+  std::vector<char> path_arg(path.begin(), path.end());
+  path_arg.push_back('\0');
+  pid_t pid = 0;
+  if (EndsWithIgnoreCase(path, ".run")) {
+    if (chmod(path.c_str(), 0755) != 0) {
+      error = "chmod installer failed";
+      return false;
+    }
+    char* argv[] = {path_arg.data(), nullptr};
+    if (posix_spawn(&pid, path.c_str(), nullptr, nullptr, argv, environ) != 0) {
+      error = "launch installer failed";
+      return false;
+    }
+    return true;
+  }
+  const char* opener = "xdg-open";
+  char* argv[] = {const_cast<char*>(opener), path_arg.data(), nullptr};
+  if (posix_spawnp(&pid, opener, nullptr, nullptr, argv, environ) != 0) {
+    error = "launch installer failed";
+    return false;
+  }
+  return true;
 #endif
 }
 

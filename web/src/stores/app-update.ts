@@ -2,7 +2,13 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { isBridgeAvailable } from '@/api/client'
 import { CloudApiError } from '@/api/cloud/client'
-import { checkAppUpdate, fetchLatestRelease, recordUpdateHit, type UpdateRelease } from '@/api/cloud/updates'
+import {
+  checkAppUpdate,
+  fetchLatestRelease,
+  fetchReleaseHistory,
+  recordUpdateHit,
+  type UpdateRelease,
+} from '@/api/cloud/updates'
 import { shellApi } from '@/api/shell'
 import {
   onShellUpdateProgress,
@@ -85,6 +91,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
   const aboutOpen = ref(false)
   const changelogOpen = ref(false)
   const changelogRelease = ref<UpdateRelease | null>(null)
+  const changelogItems = ref<UpdateRelease[]>([])
   const changelogLoading = ref(false)
   const changelogError = ref('')
   const changelogHasUpdate = ref(false)
@@ -98,11 +105,8 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     return Math.min(100, Math.round((received.value / total.value) * 100))
   })
 
-  /** P0 仅 Windows 走应用内下载 Setup；其它平台打开下载链。 */
-  const inAppInstallSupported = computed(() => {
-    const bridge = useBridgeStore()
-    return mapPlatform(bridge.shellInfo?.platform) === 'windows'
-  })
+  /** Windows / Linux / macOS 均走应用内下载 + 拉起安装包。 */
+  const inAppInstallSupported = computed(() => isBridgeAvailable())
 
   function platformArch() {
     const bridge = useBridgeStore()
@@ -135,17 +139,25 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     changelogLoading.value = true
     changelogError.value = ''
     changelogRelease.value = null
+    changelogItems.value = []
     changelogHasUpdate.value = false
     const { platform, arch, current } = platformArch()
     const channel = updateChannel(platform)
     try {
-      const [rel, checkRes] = await Promise.all([
-        fetchLatestRelease({ platform, arch, channel }),
+      const [items, checkRes] = await Promise.all([
+        fetchReleaseHistory({ platform, arch, channel, limit: 20 }).catch(async (e) => {
+          if (e instanceof CloudApiError && (e.status === 404 || e.code === 'not_found')) {
+            return [] as UpdateRelease[]
+          }
+          const one = await fetchLatestRelease({ platform, arch, channel }).catch(() => null)
+          return one ? [one] : Promise.reject(e)
+        }),
         current
           ? checkAppUpdate({ current, platform, arch, channel }).catch(() => null)
           : Promise.resolve(null),
       ])
-      changelogRelease.value = rel
+      changelogItems.value = items
+      changelogRelease.value = items[0] ?? null
       if (checkRes?.updateAvailable && checkRes.latest) {
         changelogHasUpdate.value = true
         latest.value = checkRes.latest
@@ -155,6 +167,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     } catch (e) {
       if (e instanceof CloudApiError && (e.status === 404 || e.code === 'not_found')) {
         changelogRelease.value = null
+        changelogItems.value = []
       } else {
         changelogError.value = mapUpdateError(e, 'checkFailed')
       }
@@ -254,15 +267,6 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
       arch: latest.value.arch,
       version: latest.value.version,
     }).catch(() => undefined)
-    // 非 Windows：不走半成品 apply，直接打开发布包 HTTPS 链接
-    if (!inAppInstallSupported.value) {
-      try {
-        await shellApi.openExternal({ url: latest.value.downloadUrl })
-      } catch (e) {
-        error.value = mapUpdateError(e, 'openDownloadFailed')
-      }
-      return
-    }
     phase.value = 'downloading'
     received.value = 0
     total.value = latest.value.fileSize || 0
@@ -282,8 +286,21 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
       phase.value = 'applying'
       await shellUpdateApply({ path: dl.path })
     } catch (e) {
+      const code = mapUpdateError(e, 'updateFailed')
+      // 旧 Shell 尚未支持 Linux/macOS apply 时回退到外链
+      if (code === 'apply_unsupported_platform' && latest.value.downloadUrl) {
+        try {
+          await shellApi.openExternal({ url: latest.value.downloadUrl })
+          error.value = ''
+          phase.value = forceUpdate.value ? 'forced' : 'available'
+          return
+        } catch (openErr) {
+          error.value = mapUpdateError(openErr, 'openDownloadFailed')
+        }
+      } else {
+        error.value = code
+      }
       phase.value = forceUpdate.value ? 'forced' : 'available'
-      error.value = mapUpdateError(e, 'updateFailed')
     } finally {
       off()
     }
@@ -324,6 +341,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     aboutChecking,
     changelogOpen,
     changelogRelease,
+    changelogItems,
     changelogLoading,
     changelogError,
     changelogHasUpdate,

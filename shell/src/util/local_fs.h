@@ -28,8 +28,9 @@ class LocalFs {
   /** 使用系统默认浏览器打开 http(s) URL。 */
   static bool OpenExternalUrl(const std::string& url, std::string& error);
   /**
-   * 拉起本机安装包（仅允许 %TEMP%/niuma-update/ 下的安装程序）。
-   * Windows：ShellExecuteW open；不传静默参数，由用户确认 UAC/向导。
+   * 拉起本机安装包（仅允许临时目录 niuma-update/ 下的安装程序）。
+   * Windows：ShellExecuteW；Linux：.run 直接执行，其它包 xdg-open；macOS：open。
+   * 不传静默参数，由用户确认系统向导。
    */
   static bool LaunchInstaller(const std::string& path, std::string& error);
 

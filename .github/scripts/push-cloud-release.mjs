@@ -111,21 +111,37 @@ async function registerReleases(channel, group, notesMd) {
     })),
   }
   const url = `${apiBase}/api/v1/pipeline/releases`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  })
-  const text = await res.text()
-  if (!res.ok) {
+  const payload = JSON.stringify(body)
+  // 旧 cloud 对登记接口按 IP 冷却 2s；beta 后立刻登 stable 会 429。重试覆盖未升级的服务端。
+  const maxAttempts = 4
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: payload,
+    })
+    const text = await res.text()
+    if (res.ok) {
+      process.stdout.write(`pushed ${group.length} release(s) ${version} channel=${channel} -> ${url}\n${text}\n`)
+      return
+    }
+    if (res.status === 429 && attempt < maxAttempts) {
+      const waitMs = 2500
+      process.stderr.write(`cloud push 429 channel=${channel}, retry in ${waitMs}ms (${attempt}/${maxAttempts})\n`)
+      await sleep(waitMs)
+      continue
+    }
     process.stderr.write(`cloud push failed ${res.status} channel=${channel}: ${text}\n`)
     process.exit(1)
   }
-  process.stdout.write(`pushed ${group.length} release(s) ${version} channel=${channel} -> ${url}\n${text}\n`)
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function uploadAsset(file, dim, sha, channel) {

@@ -47,6 +47,10 @@ const authSubtitle = computed(() => {
   return t('account.authSubtitleLogin')
 })
 
+const legalText = computed(() =>
+  account.authMode === 'otp' ? t('account.authLegalOtp') : t('account.authLegal'),
+)
+
 /** 主分段：登录 / 注册；OTP 与重置走次级链路 */
 const showMainSegment = computed(
   () => account.authMode === 'login' || account.authMode === 'register',
@@ -466,7 +470,7 @@ const primaryLabel = computed(() => {
             {{ primaryLabel }}
           </RsButton>
 
-          <p class="nm-auth__legal">{{ t('account.authLegal') }}</p>
+          <p class="nm-auth__legal">{{ legalText }}</p>
         </form>
       </template>
     </RsDialog>

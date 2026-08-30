@@ -120,11 +120,7 @@ function onOpenChange(open: boolean) {
           variant="primary"
           @click="store.startUpdate()"
         >
-          {{
-            store.inAppInstallSupported
-              ? t('appUpdate.updateNow')
-              : t('appUpdate.openDownload')
-          }}
+          {{ t('appUpdate.updateNow') }}
         </RsButton>
         <RsButton v-else-if="!store.latest" variant="primary" @click="store.closeDialog()">
           {{ t('appUpdate.close') }}

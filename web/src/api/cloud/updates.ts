@@ -58,6 +58,18 @@ export function fetchLatestRelease(params: UpdateLatestParams): Promise<UpdateRe
   return cloudFetch<UpdateRelease>(`/api/v1/updates/latest?${updateQuery(params)}`)
 }
 
+/** 已发布版本列表（semver 降序），供帮助菜单更新日志。 */
+export async function fetchReleaseHistory(
+  params: UpdateLatestParams & { limit?: number },
+): Promise<UpdateRelease[]> {
+  const q = new URLSearchParams(updateQuery(params))
+  if (params.limit && params.limit > 0) {
+    q.set('limit', String(params.limit))
+  }
+  const data = await cloudFetch<{ items?: UpdateRelease[] }>(`/api/v1/updates/releases?${q}`)
+  return Array.isArray(data.items) ? data.items : []
+}
+
 export type UpdateHitParams = {
   platform: string
   arch: string
