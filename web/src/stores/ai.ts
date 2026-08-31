@@ -13,11 +13,17 @@ import type {
   AiSkill,
   AiToolInvocationRecord,
 } from '@/api/types/ai'
+import { useAccountStore } from '@/stores/account'
 import {
   buildContextPack,
   extractAttachmentMarkers,
   type AiContextAttachment,
 } from '@/shell/panels/ai/context-pack'
+import {
+  ensureSystemAiProvider,
+  isSystemAiProvider,
+  SYSTEM_AI_PROVIDER_ID,
+} from '@/shell/panels/ai/system-provider'
 
 /**
  * AI 对话状态 — 会话列表、消息、流式缓冲与 run 生命周期。
@@ -287,8 +293,10 @@ export const useAiStore = defineStore('ai', () => {
     const res = await aiApi.listProviders({ includeModels: true, status: 'active' })
     providers.value = res.providers ?? []
     if (!selectedProviderId.value && providers.value.length) {
-      selectedProviderId.value = providers.value[0].providerId
-      selectedModelCode.value = providers.value[0].defaultModelCode || providers.value[0].models?.[0]?.modelCode || ''
+      const system = providers.value.find((p) => p.providerId === SYSTEM_AI_PROVIDER_ID && p.recordStatus !== 'disabled')
+      const first = system ?? providers.value[0]
+      selectedProviderId.value = first.providerId
+      selectedModelCode.value = first.defaultModelCode || first.models?.[0]?.modelCode || ''
     }
   }
 
@@ -311,6 +319,15 @@ export const useAiStore = defineStore('ai', () => {
     loading.value = true
     error.value = null
     try {
+      const account = useAccountStore()
+      if (account.isLoggedIn) {
+        try {
+          const token = await account.ensureAccess()
+          await ensureSystemAiProvider(token)
+        } catch {
+          // 云端未开通或离线时继续用已有 Provider
+        }
+      }
       await Promise.all([refreshProviders(), refreshConversations(), refreshSkills()])
       if (!activeConversationId.value && conversations.value.length) {
         await openConversation(conversations.value[0].conversationId)
@@ -349,6 +366,21 @@ export const useAiStore = defineStore('ai', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  async function resolveCloudAccessToken(): Promise<string | undefined> {
+    const current =
+      providers.value.find((p) => p.providerId === selectedProviderId.value) ??
+      { providerId: selectedProviderId.value }
+    if (!isSystemAiProvider(current)) {
+      return undefined
+    }
+    const account = useAccountStore()
+    if (!account.isLoggedIn) {
+      account.openAuth('login')
+      throw new Error('login_required')
+    }
+    return account.ensureAccess()
   }
 
   async function newConversation(): Promise<void> {
@@ -438,6 +470,7 @@ export const useAiStore = defineStore('ai', () => {
     })
 
     try {
+      const cloudAccessToken = await resolveCloudAccessToken()
       const res = await aiApi.streamChat({
         conversationId: activeConversationId.value,
         content: displayContent,
@@ -446,6 +479,7 @@ export const useAiStore = defineStore('ai', () => {
         skillCode: selectedSkillCode.value || undefined,
         editFromMessageId: editId || undefined,
         context: options?.context,
+        cloudAccessToken,
       })
       runId.value = res.runId
       editingMessageId.value = null
@@ -459,7 +493,14 @@ export const useAiStore = defineStore('ai', () => {
     } catch (e) {
       sending.value = false
       runStatus.value = 'error'
-      runError.value = e instanceof Error ? e.message : String(e)
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg === 'login_required') {
+        sending.value = false
+        runStatus.value = 'idle'
+        messages.value = messages.value.filter((m) => m.messageId !== optimisticId)
+        return
+      }
+      runError.value = msg
       error.value = runError.value
       messages.value = messages.value.filter((m) => m.messageId !== optimisticId)
       if (editId && activeConversationId.value) {
@@ -501,6 +542,7 @@ export const useAiStore = defineStore('ai', () => {
     }
 
     try {
+      const cloudAccessToken = await resolveCloudAccessToken()
       const res = await aiApi.streamChat({
         conversationId: activeConversationId.value,
         regenerateFromMessageId: assistantMessageId,
@@ -508,6 +550,7 @@ export const useAiStore = defineStore('ai', () => {
         modelCode: selectedModelCode.value || undefined,
         skillCode: selectedSkillCode.value || undefined,
         context,
+        cloudAccessToken,
       })
       runId.value = res.runId
     } catch (e) {

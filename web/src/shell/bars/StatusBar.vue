@@ -3,6 +3,7 @@ import { useBridgeStore } from '@/stores/bridge'
 import { useShellStore } from '@/stores/shell'
 import { useTransferHubStore } from '@/stores/transfer-hub'
 import { useDataTaskHubStore } from '@/stores/data-task-hub'
+import { useAppUpdateStore } from '@/stores/app-update'
 import { useI18n } from 'vue-i18n'
 import { computed } from 'vue'
 
@@ -10,7 +11,18 @@ const bridgeStore = useBridgeStore()
 const shellStore = useShellStore()
 const transferHub = useTransferHubStore()
 const dataTaskHub = useDataTaskHubStore()
+const appUpdate = useAppUpdateStore()
 const { t } = useI18n()
+
+const updateChip = computed(() => {
+  if (appUpdate.phase === 'downloading' || appUpdate.phase === 'verifying') {
+    return t('appUpdate.statusDownloading', { percent: appUpdate.progressPercent })
+  }
+  if (appUpdate.phase === 'ready') {
+    return t('appUpdate.statusReady')
+  }
+  return ''
+})
 
 const leftText = computed(() =>
   bridgeStore.connected ? t('shell.statusReady') : t('shell.statusOffline'),
@@ -63,6 +75,15 @@ function onDataTasksClick(): void {
     </span>
 
     <span class="nm-statusbar__right flex items-center gap-3">
+      <button
+        v-if="updateChip"
+        type="button"
+        class="nm-statusbar__chip"
+        :class="{ 'nm-statusbar__chip--active': appUpdate.phase === 'ready' }"
+        @click="appUpdate.openDialog()"
+      >
+        {{ updateChip }}
+      </button>
       <button
         type="button"
         class="nm-statusbar__chip"

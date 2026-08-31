@@ -38,6 +38,8 @@ type StreamParams struct {
 	RegenerateFromMessageID string
 	// EditFromMessageID 若设置：删除该 user 及之后记录，以 Content 作为新用户消息重跑。
 	EditFromMessageID string
+	// CloudAccessToken 系统 Provider 使用的当前云端 Access Token，不落库。
+	CloudAccessToken string
 }
 
 // StreamStartResult 是 stream 立即返回给 Bridge 的结果。
@@ -120,7 +122,7 @@ func (s *Service) StartStream(ctx context.Context, params StreamParams) (*Stream
 	if modelCode == "" {
 		modelCode = conv.ModelCode
 	}
-	provider, apiKey, resolvedModel, err := s.resolveChatProvider(ctx, providerID, modelCode)
+	provider, apiKey, resolvedModel, err := s.resolveChatProvider(ctx, providerID, modelCode, params.CloudAccessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +208,7 @@ func (s *Service) startRegenerate(ctx context.Context, params StreamParams) (*St
 	if modelCode == "" {
 		modelCode = conv.ModelCode
 	}
-	provider, apiKey, resolvedModel, err := s.resolveChatProvider(ctx, providerID, modelCode)
+	provider, apiKey, resolvedModel, err := s.resolveChatProvider(ctx, providerID, modelCode, params.CloudAccessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +297,7 @@ func (s *Service) startEdit(ctx context.Context, params StreamParams) (*StreamSt
 	if modelCode == "" {
 		modelCode = conv.ModelCode
 	}
-	provider, apiKey, resolvedModel, err := s.resolveChatProvider(ctx, providerID, modelCode)
+	provider, apiKey, resolvedModel, err := s.resolveChatProvider(ctx, providerID, modelCode, params.CloudAccessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +420,7 @@ func (s *Service) Cancel(runID string) (cancelled bool) {
 	return true
 }
 
-func (s *Service) resolveChatProvider(ctx context.Context, providerID, modelCode string) (*store.AIProvider, string, string, error) {
+func (s *Service) resolveChatProvider(ctx context.Context, providerID, modelCode, cloudAccessToken string) (*store.AIProvider, string, string, error) {
 	var provider *store.AIProvider
 	var err error
 	if providerID != "" {
@@ -452,6 +454,13 @@ func (s *Service) resolveChatProvider(ctx context.Context, providerID, modelCode
 	}
 	if resolvedModel == "" {
 		return nil, "", "", fmt.Errorf("ai: modelCode required")
+	}
+	if IsSystemProvider(provider) {
+		token := strings.TrimSpace(cloudAccessToken)
+		if token == "" {
+			return nil, "", "", fmt.Errorf("ai: login required for system provider")
+		}
+		return provider, token, resolvedModel, nil
 	}
 	if provider.CredentialID == "" {
 		if strings.EqualFold(provider.ProviderKind, "ollama") {

@@ -267,6 +267,7 @@ func (d *Dispatcher) aiChatStream(ctx context.Context, req Request) Response {
 		RegenerateFromMessageID string           `json:"regenerateFromMessageId"`
 		EditFromMessageID       string           `json:"editFromMessageId"`
 		Context                 *ai.ContextDraft `json:"context"`
+		CloudAccessToken        string           `json:"cloudAccessToken"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
@@ -280,6 +281,7 @@ func (d *Dispatcher) aiChatStream(ctx context.Context, req Request) Response {
 		RegenerateFromMessageID: params.RegenerateFromMessageID,
 		EditFromMessageID:       params.EditFromMessageID,
 		Context:                 params.Context,
+		CloudAccessToken:        params.CloudAccessToken,
 	})
 	if err != nil {
 		return errorResponse(req.ID, err.Error())

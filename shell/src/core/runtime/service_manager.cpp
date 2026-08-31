@@ -20,6 +20,9 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #endif
 
 namespace fs = std::filesystem;
@@ -30,10 +33,11 @@ namespace {
 
 #if defined(_WIN32)
 /// 探测服务地址是否在监听的超时（毫秒）；仅当管道存在但实例繁忙时才会真正阻塞。
+/// EnsureRunning 热路径不得调用 IsServiceListening，避免在 CEF UI 线程上踩到此时限。
 constexpr int kListenProbeTimeoutMs = 200;
-/// 退出时等待子进程结束的超时（毫秒）。
-constexpr int kTerminateWaitMs = 3000;
 #endif
+/// 退出时等待子进程结束的超时（毫秒）；超时后再强杀，避免 ShutdownAll 卡死。
+constexpr int kTerminateWaitMs = 3000;
 /// Platform 服务的 manifest id。
 constexpr char kPlatformServiceId[] = "com.niuma.platform";
 
@@ -156,6 +160,13 @@ bool ServiceManager::SpawnService(const ServiceManifest& manifest) {
     return false;
   }
   if (pid == 0) {
+#if defined(__linux__)
+    // 壳被杀时内核给 platform-core 发 SIGKILL，避免主进程没了后台还在。
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    if (getppid() == 1) {
+      _exit(0);
+    }
+#endif
     // 子进程：工作目录必须切到安装目录；失败则立刻退出，避免带着错误 cwd 拉起服务。
     if (::chdir(install_dir_.c_str()) != 0) {
       _exit(127);
@@ -187,19 +198,29 @@ bool ServiceManager::IsSpawnedProcessAlive(const SpawnedProcess& proc) const {
   if (pid <= 0) {
     return false;
   }
+  // 先收尸：platform-core 已退出而壳未 waitpid 时是僵尸，kill(0) 仍成功，
+  // 会被误判为还活着，从而既不重拉也不释放管道。
+  int status = 0;
+  const pid_t waited = waitpid(pid, &status, WNOHANG);
+  if (waited == pid || (waited < 0 && errno == ECHILD)) {
+    return false;
+  }
   return kill(pid, 0) == 0 || errno == EPERM;
 #endif
 }
 
 void ServiceManager::ReleaseSpawned(SpawnedProcess& proc, bool terminate_if_alive) {
 #if defined(_WIN32)
-  if (terminate_if_alive && proc.process_handle && IsSpawnedProcessAlive(proc)) {
-    TerminateProcess(static_cast<HANDLE>(proc.process_handle), 0);
-    WaitForSingleObject(static_cast<HANDLE>(proc.process_handle), kTerminateWaitMs);
-  }
+  // 先关 Job：KILL_ON_JOB_CLOSE 会杀掉 platform-core 以及继承进该 Job 的
+  // 能力服务。若先 TerminateProcess(platform)，其 defer Shutdown 不会跑，
+  // 孙进程只能靠 Job 继承或 platform 自己的 Job 关闭来收，缺口更大。
   if (proc.job_handle) {
     CloseHandle(static_cast<HANDLE>(proc.job_handle));
     proc.job_handle = nullptr;
+  }
+  if (terminate_if_alive && proc.process_handle && IsSpawnedProcessAlive(proc)) {
+    TerminateProcess(static_cast<HANDLE>(proc.process_handle), 0);
+    WaitForSingleObject(static_cast<HANDLE>(proc.process_handle), kTerminateWaitMs);
   }
   if (proc.process_handle) {
     CloseHandle(static_cast<HANDLE>(proc.process_handle));
@@ -213,7 +234,19 @@ void ServiceManager::ReleaseSpawned(SpawnedProcess& proc, bool terminate_if_aliv
   const pid_t pid = static_cast<pid_t>(reinterpret_cast<intptr_t>(proc.process_handle));
   if (terminate_if_alive && pid > 0 && IsSpawnedProcessAlive(proc)) {
     kill(pid, SIGTERM);
-    waitpid(pid, nullptr, 0);
+    const int steps = kTerminateWaitMs / 50;
+    bool reaped = false;
+    for (int i = 0; i < steps; ++i) {
+      if (waitpid(pid, nullptr, WNOHANG) == pid) {
+        reaped = true;
+        break;
+      }
+      usleep(50 * 1000);
+    }
+    if (!reaped) {
+      kill(pid, SIGKILL);
+      waitpid(pid, nullptr, 0);
+    }
   } else if (pid > 0) {
     waitpid(pid, nullptr, WNOHANG);
   }
@@ -239,18 +272,23 @@ bool ServiceManager::EnsureRunning(const std::string& service_id) {
   }
   const std::string& id = manifest->id;
 
-  if (IsServiceListening(*manifest)) {
-    running_ids_.insert(id);
-    return true;
-  }
-
+  // 热路径：本会话已登记则不再 WaitNamedPipe。管道繁忙时探测会在 CEF UI
+  // 线程卡住 kListenProbeTimeoutMs，后续 cefQuery（关连接、调终端大小等）全部排队。
   if (running_ids_.count(id)) {
     auto it = spawned_.find(id);
-    if (it != spawned_.end() && IsSpawnedProcessAlive(it->second)) {
-      // 进程仍在但管道未就绪：保留登记，由 PlatformClient 重试连接。
+    if (it == spawned_.end()) {
+      // 外部已拉起的 platform-core（如 pnpm dev:platform），无本进程 spawn 记录。
+      return true;
+    }
+    if (IsSpawnedProcessAlive(it->second)) {
       return true;
     }
     ClearSpawnedState(id);
+  }
+
+  if (IsServiceListening(*manifest)) {
+    running_ids_.insert(id);
+    return true;
   }
 
   if (SpawnService(*manifest)) {
@@ -261,15 +299,11 @@ bool ServiceManager::EnsureRunning(const std::string& service_id) {
 }
 
 void ServiceManager::ShutdownAll() {
-#if defined(_WIN32)
-  for (auto& entry : spawned_) {
-    ReleaseSpawned(entry.second, false);
-  }
-#else
+  // 只回收本进程 SpawnService 记下的子进程。探测到、但不是自己拉起的
+  // platform（dev:platform 或上次崩溃残留）不杀，避免误杀外部调试进程。
   for (auto& entry : spawned_) {
     ReleaseSpawned(entry.second, true);
   }
-#endif
   spawned_.clear();
   running_ids_.clear();
 }

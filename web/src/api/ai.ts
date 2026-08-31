@@ -61,6 +61,8 @@ import type {
   AiProviderListRemoteModelsResult,
   AiProviderProbeParams,
   AiProviderTestResult,
+  AiProviderEnsureSystemParams,
+  AiProviderEnsureSystemResult,
   AiProviderUpsertParams,
   AiProviderUpsertResult,
 } from '@/api/types/ai'
@@ -90,6 +92,10 @@ export const aiApi = {
 
   deleteProvider(params: AiProviderDeleteParams): Promise<AiProviderDeleteResult> {
     return bridgeInvoke<AiProviderDeleteResult>('platform.ai.provider.delete', params)
+  },
+
+  ensureSystemProvider(params: AiProviderEnsureSystemParams): Promise<AiProviderEnsureSystemResult> {
+    return bridgeInvoke<AiProviderEnsureSystemResult>('platform.ai.provider.ensureSystem', params)
   },
 
   testProvider(params: AiProviderProbeParams): Promise<AiProviderTestResult> {

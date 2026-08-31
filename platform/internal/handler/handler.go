@@ -75,6 +75,8 @@ const (
 	MethodAIProviderListRemoteModels = "platform.ai.provider.listRemoteModels"
 	// MethodAIProviderGetApiKey 解密读取 Provider API Key（仅本地 IPC，供编辑回填）。
 	MethodAIProviderGetApiKey = "platform.ai.provider.getApiKey"
+	// MethodAIProviderEnsureSystem 按云端目录同步本机系统 Provider。
+	MethodAIProviderEnsureSystem = "platform.ai.provider.ensureSystem"
 	// MethodAIModelList 列出模型。
 	MethodAIModelList = "platform.ai.model.list"
 	// MethodAIModelUpsert 新建或更新模型。
@@ -295,6 +297,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.aiProviderListRemoteModels(ctx, req)
 	case MethodAIProviderGetApiKey:
 		return d.aiProviderGetApiKey(ctx, req)
+	case MethodAIProviderEnsureSystem:
+		return d.aiProviderEnsureSystem(ctx, req)
 	case MethodAIModelList:
 		return d.aiModelList(ctx, req)
 	case MethodAIModelUpsert:

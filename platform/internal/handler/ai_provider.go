@@ -86,7 +86,7 @@ func toAIProviderView(p store.AIProvider, models []aiModelView) aiProviderView {
 		ProviderName:     p.ProviderName,
 		ProviderKind:     p.ProviderKind,
 		BaseURL:          p.BaseURL,
-		HasAPIKey:        strings.TrimSpace(p.CredentialID) != "",
+		HasAPIKey:        strings.TrimSpace(p.CredentialID) != "" || ai.IsSystemProvider(&p),
 		DefaultModelCode: p.DefaultModelCode,
 		ProviderOptions:  json.RawMessage(options),
 		RecordStatus:     p.RecordStatus,
@@ -213,6 +213,9 @@ func (d *Dispatcher) aiProviderUpsert(ctx context.Context, req Request) Response
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
 	}
+	if ai.IsSystemProviderID(params.ProviderID) {
+		return errorResponse(req.ID, "system provider is read-only")
+	}
 	if strings.TrimSpace(params.Provider.ProviderName) == "" {
 		return errorResponse(req.ID, "providerName required")
 	}
@@ -315,6 +318,9 @@ func (d *Dispatcher) aiProviderDelete(ctx context.Context, req Request) Response
 	if params.ProviderID == "" {
 		return errorResponse(req.ID, "providerId required")
 	}
+	if ai.IsSystemProviderID(params.ProviderID) {
+		return errorResponse(req.ID, "system provider cannot be deleted")
+	}
 
 	existing, err := d.ai.Providers.GetProvider(ctx, params.ProviderID)
 	if err != nil {
@@ -336,6 +342,47 @@ func (d *Dispatcher) aiProviderDelete(ctx context.Context, req Request) Response
 		}
 	}
 	return okResponse(req.ID, map[string]any{"deleted": true})
+}
+
+// aiProviderEnsureSystem 处理 platform.ai.provider.ensureSystem：按云端目录同步本机系统 Provider。
+func (d *Dispatcher) aiProviderEnsureSystem(ctx context.Context, req Request) Response {
+	svc := d.requireAI()
+	if svc == nil {
+		return errorResponse(req.ID, "ai service unavailable")
+	}
+	var params struct {
+		Enabled          bool   `json:"enabled"`
+		BaseURL          string `json:"baseUrl"`
+		ProviderName     string `json:"providerName"`
+		DefaultModelCode string `json:"defaultModelCode"`
+		Models           []struct {
+			Code  string `json:"code"`
+			Label string `json:"label"`
+		} `json:"models"`
+	}
+	if len(req.Params) > 0 {
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+		}
+	}
+	specs := make([]ai.SystemModelSpec, 0, len(params.Models))
+	for _, m := range params.Models {
+		specs = append(specs, ai.SystemModelSpec{Code: m.Code, Label: m.Label})
+	}
+	result, err := svc.EnsureSystemProvider(ctx, ai.EnsureSystemParams{
+		Enabled:          params.Enabled,
+		BaseURL:          params.BaseURL,
+		ProviderName:     params.ProviderName,
+		DefaultModelCode: params.DefaultModelCode,
+		Models:           specs,
+	})
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	return okResponse(req.ID, map[string]any{
+		"providerId": result.ProviderID,
+		"enabled":    result.Enabled,
+	})
 }
 
 // parseAIProbeParams 解析 test / listRemoteModels 共用入参。
@@ -486,6 +533,9 @@ func (d *Dispatcher) aiModelUpsert(ctx context.Context, req Request) Response {
 	}
 	if parent == nil {
 		return errorResponse(req.ID, "provider not found")
+	}
+	if ai.IsSystemProvider(parent) {
+		return errorResponse(req.ID, "system provider is read-only")
 	}
 
 	entity := store.AIModel{

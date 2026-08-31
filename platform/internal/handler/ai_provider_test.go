@@ -161,6 +161,56 @@ func TestAIProviderUpsertListDelete(t *testing.T) {
 	}
 }
 
+func TestAIProviderEnsureSystemAndProtect(t *testing.T) {
+	t.Parallel()
+	d := newTestAIDispatcher(t, nil)
+	ctx := context.Background()
+
+	ensureRaw, _ := json.Marshal(map[string]any{
+		"method": handler.MethodAIProviderEnsureSystem,
+		"id":     "s1",
+		"params": map[string]any{
+			"enabled":          true,
+			"baseUrl":          "https://www.niuma007.com/niuma/cloud/api/v1/ai/v1",
+			"providerName":     "NiuMa",
+			"defaultModelCode": "niuma-fast",
+			"models": []map[string]any{
+				{"code": "niuma-fast", "label": "Fast"},
+			},
+		},
+	})
+	ensureResp := decodeAITestResponse(t, d.HandleFrame(ctx, ensureRaw))
+	if !ensureResp.OK {
+		t.Fatalf("ensure: %s", ensureResp.Error)
+	}
+
+	delRaw, _ := json.Marshal(map[string]any{
+		"method": handler.MethodAIProviderDelete,
+		"id":     "s2",
+		"params": map[string]any{"providerId": "niuma-system"},
+	})
+	delResp := decodeAITestResponse(t, d.HandleFrame(ctx, delRaw))
+	if delResp.OK {
+		t.Fatal("system provider must not be deleted")
+	}
+
+	upsertRaw, _ := json.Marshal(map[string]any{
+		"method": handler.MethodAIProviderUpsert,
+		"id":     "s3",
+		"params": map[string]any{
+			"providerId": "niuma-system",
+			"provider": map[string]any{
+				"providerName": "hack",
+				"providerKind": "openai",
+			},
+		},
+	})
+	upsertResp := decodeAITestResponse(t, d.HandleFrame(ctx, upsertRaw))
+	if upsertResp.OK {
+		t.Fatal("system provider must be read-only via upsert")
+	}
+}
+
 type aiTestResponse struct {
 	OK     bool   `json:"ok"`
 	Error  string `json:"error"`

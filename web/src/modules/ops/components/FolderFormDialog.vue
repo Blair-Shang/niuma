@@ -12,6 +12,7 @@ const accentColor = defineModel<ConnAccentColor>('accentColor', { required: true
 const props = defineProps<{
   mode: 'create' | 'edit'
   formError?: string | null
+  saving?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +26,7 @@ const dlgTitle = computed(() =>
 )
 
 function close(): void {
+  if (props.saving) return
   open.value = false
 }
 </script>
@@ -60,10 +62,10 @@ function close(): void {
 
       <div class="nm-folder-form__actions">
         <span class="nm-folder-form__actions-spacer" />
-        <RsButton type="button" variant="ghost" @click="close">
+        <RsButton type="button" variant="ghost" :disabled="saving" @click="close">
           {{ t('modules.ftp.form.cancel') }}
         </RsButton>
-        <RsButton type="submit" variant="primary">
+        <RsButton type="submit" variant="primary" :disabled="saving" :loading="saving">
           {{ t('modules.ftp.form.save') }}
         </RsButton>
       </div>

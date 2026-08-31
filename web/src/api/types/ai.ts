@@ -99,6 +99,25 @@ export interface AiProviderDeleteResult {
   deleted: boolean
 }
 
+/** 云端系统模型目录条目。 */
+export interface AiSystemModelSpec {
+  code: string
+  label?: string
+}
+
+export interface AiProviderEnsureSystemParams {
+  enabled: boolean
+  baseUrl?: string
+  providerName?: string
+  defaultModelCode?: string
+  models?: AiSystemModelSpec[]
+}
+
+export interface AiProviderEnsureSystemResult {
+  providerId: string
+  enabled: boolean
+}
+
 /** 连通探测 / 拉取远程模型：可传未保存的表单字段；已保存时可用 providerId 取 Vault 密钥。 */
 export interface AiProviderProbeParams {
   providerId?: string
@@ -287,6 +306,8 @@ export interface AiChatStreamParams {
   editFromMessageId?: string
   /** 工作区上下文草稿；后端须校验/截断/脱敏，不得仅信任前端附录。 */
   context?: AiContextDraft
+  /** 系统 Provider 使用的当前云端 Access Token，不落库。 */
+  cloudAccessToken?: string
 }
 
 export interface AiChatStreamResult {

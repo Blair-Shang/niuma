@@ -57,6 +57,9 @@ func terminateProcess(pid uint32) {
 	_ = windows.TerminateProcess(handle, 1)
 }
 
+// terminateStaleProcessesAtExe 终止仍占用同一可执行路径的孤儿进程，避免管道名冲突。
+// 会枚举本机进程，杀毒挂钩时可能耗时数秒到数十秒，只允许在管道已被占用时调用，
+// 且不得持有 Supervisor.mu。
 func terminateStaleProcessesAtExe(exePath string) {
 	want := strings.ToLower(filepath.Clean(exePath))
 	self := uint32(os.Getpid())

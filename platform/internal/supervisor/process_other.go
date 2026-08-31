@@ -18,6 +18,7 @@ func isProcessAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
+// terminateStaleProcessesAtExe 在非 Windows 上为空操作：UDS 文件冲突由监听方覆盖或删除。
 func terminateStaleProcessesAtExe(exePath string) {
 	_ = exePath
 }

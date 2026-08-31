@@ -11,7 +11,7 @@ import {
   type ConnFolder,
   type ConnFolderMutations,
 } from '@/modules/ops/composables/useConnFolders'
-import type { ConnAccentColor, ConnItem } from '@/modules/ops/types'
+import type { ConnItem } from '@/modules/ops/types'
 
 const FILE_ACCEPT = ['.json']
 const DEFAULT_EXPORT_NAME = 'niuma-connections.json'
@@ -115,70 +115,14 @@ function buildOrganizationForScope(
   }
 }
 
-function restoreOrganization(
+async function restoreOrganization(
   organization: ConnectionExportOrganization | null | undefined,
   idMap: Record<string, string>,
   cf: ConnFolderMutations,
   fallbackName: string,
   nestUnderFolderId: string | null,
-): void {
-  if (!organization?.folders?.length) {
-    if (nestUnderFolderId) {
-      for (const newPid of Object.values(idMap)) {
-        cf.moveToFolder(newPid, nestUnderFolderId)
-      }
-    }
-    return
-  }
-
-  const folderIdMap = new Map<string, string>()
-  for (const f of topologicalFolders(organization.folders)) {
-    let parentId: string | null = null
-    if (f.parentId && folderIdMap.has(f.parentId)) {
-      parentId = folderIdMap.get(f.parentId)!
-    } else if (!f.parentId && nestUnderFolderId) {
-      parentId = nestUnderFolderId
-    }
-    const created = cf.createFolder(
-      f.name || fallbackName,
-      parentId,
-      f.accentColor as ConnAccentColor | undefined,
-      f.expanded ?? true,
-    )
-    folderIdMap.set(f.id, created.id)
-    for (const oldPid of f.profileIds) {
-      const newPid = idMap[oldPid]
-      if (newPid) cf.moveToFolder(newPid, created.id)
-    }
-  }
-
-  const assigned = new Set(cf.folders.value.flatMap((f) => f.profileIds))
-  for (const newPid of Object.values(idMap)) {
-    if (assigned.has(newPid)) continue
-    if (nestUnderFolderId) cf.moveToFolder(newPid, nestUnderFolderId)
-  }
-}
-
-function topologicalFolders(
-  folders: ConnectionExportOrganization['folders'],
-): ConnectionExportOrganization['folders'] {
-  const byId = new Map(folders.map((f) => [f.id, f]))
-  const result: ConnectionExportOrganization['folders'] = []
-  const visiting = new Set<string>()
-  const done = new Set<string>()
-
-  function visit(id: string): void {
-    if (done.has(id) || !byId.has(id) || visiting.has(id)) return
-    visiting.add(id)
-    const f = byId.get(id)!
-    if (f.parentId) visit(f.parentId)
-    visiting.delete(id)
-    done.add(id)
-    result.push(f)
-  }
-
-  for (const f of folders) visit(f.id)
-  return result
+): Promise<void> {
+  await cf.applyImportedOrganization(organization, idMap, fallbackName, nestUnderFolderId)
 }
 
 function mapPlatformError(e: unknown, fallback: string, t: (key: string) => string): string {
@@ -263,7 +207,7 @@ export function useConnImportExport(deps: {
         path: picked.filePaths[0],
         passphrase: credentials.passphrase.trim() || undefined,
       })
-      restoreOrganization(
+      await restoreOrganization(
         res.organization,
         res.idMap ?? {},
         deps.folders,

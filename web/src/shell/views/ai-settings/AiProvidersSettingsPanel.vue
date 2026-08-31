@@ -11,6 +11,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { aiApi } from '@/api/ai'
 import type { AiProvider, AiProviderKind } from '@/api/types/ai'
 import { useBridgeStore } from '@/stores/bridge'
+import { isSystemAiProvider } from '@/shell/panels/ai/system-provider'
 import {
   AI_PROVIDER_PRESET_CUSTOM,
   AI_PROVIDER_PRESETS,
@@ -97,6 +98,8 @@ const modelSelectOptions = computed((): RsSelectOption[] => {
 const selected = computed(() =>
   providers.value.find((p) => p.providerId === selectedId.value) ?? null,
 )
+
+const systemSelected = computed(() => Boolean(selected.value && isSystemAiProvider(selected.value)))
 
 const showDetail = computed(() => creating.value || selected.value != null)
 
@@ -474,7 +477,7 @@ onMounted(() => {
               <span class="nm-ai-providers__nav-text min-w-0">
                 <span class="nm-ai-providers__nav-name truncate">{{ p.providerName }}</span>
                 <span class="nm-ai-providers__nav-meta truncate">
-                  {{ p.providerKind }}
+                  {{ isSystemAiProvider(p) ? t('settings.aiProvidersSystem') : p.providerKind }}
                   <template v-if="p.defaultModelCode"> · {{ p.defaultModelCode }}</template>
                 </span>
               </span>
@@ -516,7 +519,11 @@ onMounted(() => {
                 <p class="nm-caption">{{ kindLabel }}</p>
               </div>
               <div v-if="!creating" class="nm-ai-providers__badges">
+                <span v-if="systemSelected" class="nm-ai-providers__badge nm-ai-providers__badge--ok">
+                  {{ t('settings.aiProvidersSystem') }}
+                </span>
                 <span
+                  v-else
                   class="nm-ai-providers__badge"
                   :class="selected?.hasApiKey ? 'nm-ai-providers__badge--ok' : 'nm-ai-providers__badge--warn'"
                 >
@@ -533,7 +540,9 @@ onMounted(() => {
               {{ statusMessage }}
             </p>
 
-            <div class="nm-ai-providers__form">
+            <p v-if="systemSelected" class="nm-caption">{{ t('settings.aiProvidersSystemHint') }}</p>
+
+            <div v-if="!systemSelected" class="nm-ai-providers__form">
               <div class="nm-ai-providers__field nm-ai-providers__field--full">
                 <div class="nm-ai-providers__label-row">
                   <span class="nm-ai-providers__label">{{ t('settings.aiProvidersPreset') }}</span>
@@ -670,7 +679,7 @@ onMounted(() => {
               </div>
             </div>
 
-            <footer class="nm-ai-providers__footer">
+            <footer v-if="!systemSelected" class="nm-ai-providers__footer">
               <RsButton
                 v-if="!creating"
                 variant="ghost"

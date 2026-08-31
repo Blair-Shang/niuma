@@ -31,8 +31,8 @@ class ServiceManager {
    *
    * 解析规则：除已在 BridgeRouter 本地处理的 `shell.*` 外，一律映射到
    * manifest `com.niuma.platform`（由 platform-core 再代理到各能力服务）。
-   * 若已启动过、或探测到管道已在监听，则直接视为运行中；否则 spawn 其可执行文件。
-   * 本方法**不等待**管道就绪（PlatformClient 会在工作线程上带重试连接）。
+   * 若本会话已登记运行中，则立即返回、不探管道（避免 UI 线程 WaitNamedPipe）。
+   * 尚未登记时探测监听或 spawn。本方法**不等待**管道就绪（PlatformClient 会在工作线程上带重试连接）。
    *
    * @param service_id 由 method 解析出的服务段（如 `platform.settings`）；当前均映射 platform-core。
    * @return 服务已在运行或已成功拉起返回 true；manifest 缺失或启动失败返回 false。
@@ -42,7 +42,9 @@ class ServiceManager {
   /**
    * @brief 终止所有由本管理器 spawn 的子进程并关闭句柄。
    *
-   * @note 关闭顺序应先于 CefShutdown（见 .cursor/rules/cpp-shell.mdc §8）。
+   * 只杀本进程 spawn 过的子进程。Windows：先关 Job 再 TerminateProcess 兜底。
+   * Unix：SIGTERM，超时 SIGKILL 并 waitpid。不杀外部已在听的 platform。
+   * 不在此重拉进程。关闭顺序应先于 CefShutdown。
    */
   void ShutdownAll();
 
@@ -63,13 +65,23 @@ class ServiceManager {
   /// @brief 把 Bridge 请求映射为 platform-core manifest（壳层不直接拉起能力服务）。
   const ServiceManifest* ResolveManifest(const std::string& service_id) const;
 
-  /// @brief 探测服务地址是否已可连接（命名管道），用于避免重复 spawn。
+  /**
+   * @brief 探测服务地址是否已可连接（命名管道 / UDS）。
+   *
+   * Windows 上 WaitNamedPipe 在实例全忙时最多阻塞 kListenProbeTimeoutMs。
+   * 仅供 EnsureRunning 在尚未登记时调用，禁止放进每个 Bridge 请求的热路径。
+   */
   bool IsServiceListening(const ServiceManifest& manifest) const;
 
   /// @brief 按 manifest 拉起子进程；成功时登记到 spawned_。
   bool SpawnService(const ServiceManifest& manifest);
 
-  /// @brief 本管理器 spawn 的进程是否仍在运行。
+  /**
+   * @brief 本管理器 spawn 的进程是否仍在运行。
+   *
+   * Unix 会先 waitpid(WNOHANG) 收掉僵尸再判断；不能只靠 kill(pid,0)，
+   * 否则已退出的 platform-core 会被当成还活着，既不重拉也不释放。
+   */
   bool IsSpawnedProcessAlive(const SpawnedProcess& proc) const;
 
   /// @brief 释放进程/线程/作业句柄；可选终止仍存活的进程。

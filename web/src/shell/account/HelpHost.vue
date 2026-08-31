@@ -134,9 +134,15 @@ function onChangelogOpen(open: boolean) {
         <RsButton
           v-if="store.changelogHasUpdate"
           variant="primary"
-          @click="store.updateFromChangelog()"
+          @click="
+            store.phase === 'ready'
+              ? (store.closeChangelog(), store.restartToUpdate())
+              : store.updateFromChangelog()
+          "
         >
-          {{ t('appUpdate.updateNow') }}
+          {{
+            store.phase === 'ready' ? t('appUpdate.restartToUpdate') : t('appUpdate.updateNow')
+          }}
         </RsButton>
       </template>
     </RsDialog>

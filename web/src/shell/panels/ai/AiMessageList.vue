@@ -6,8 +6,10 @@ import { RsButton, RsIcon } from '@niuma/ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiLiveToolInvocation } from '@/api/types/ai'
+import { useAccountStore } from '@/stores/account'
 import { useAiStore } from '@/stores/ai'
 import { useTabStore } from '@/stores/tab'
+import { isSystemAiProvider } from './system-provider'
 import AiMessageItem from './AiMessageItem.vue'
 import { extractAttachmentMarkers } from './context-pack'
 import { extractImageMarkers, extractTextMarkers } from './attachment-utils'
@@ -16,6 +18,23 @@ import { parseAssistantContent } from './parse-assistant-content'
 const { t } = useI18n()
 const aiStore = useAiStore()
 const tabStore = useTabStore()
+const accountStore = useAccountStore()
+
+const usableProviders = computed(() =>
+  aiStore.providers.filter((p) => p.recordStatus !== 'disabled'),
+)
+const onlySystemProvider = computed(() => {
+  const list = usableProviders.value
+  return list.length > 0 && list.every((p) => isSystemAiProvider(p))
+})
+const showLoginPrompt = computed(
+  () =>
+    !aiStore.loading &&
+    !accountStore.isLoggedIn &&
+    (usableProviders.value.length === 0 || onlySystemProvider.value) &&
+    !aiStore.messages.length &&
+    !aiStore.streamingText,
+)
 
 const listEl = ref<HTMLElement | null>(null)
 const bottomEl = ref<HTMLElement | null>(null)
@@ -27,7 +46,8 @@ const NEAR_BOTTOM_PX = 96
 const showEmpty = computed(
   () =>
     !aiStore.loading &&
-    aiStore.providers.length > 0 &&
+    usableProviders.value.length > 0 &&
+    !showLoginPrompt.value &&
     !aiStore.messages.length &&
     !aiStore.streamingText,
 )
@@ -249,6 +269,10 @@ function openProviderSettings(): void {
   tabStore.openSettings({ section: 'ai-providers' })
 }
 
+function openLogin(): void {
+  accountStore.openAuth('login')
+}
+
 function focusAttachment(id: string): void {
   const tabId = id.startsWith('tab:') ? id.slice(4) : ''
   if (!tabId) {
@@ -267,7 +291,23 @@ function focusAttachment(id: string): void {
       <p class="nm-ai-messages__welcome-desc">{{ t('ai.loading') }}</p>
     </div>
 
-    <div v-else-if="!aiStore.providers.length" class="nm-ai-messages__welcome">
+    <div v-else-if="showLoginPrompt" class="nm-ai-messages__welcome">
+      <div class="nm-ai-messages__welcome-mark" aria-hidden="true">
+        <RsIcon name="sparkles" :size="22" />
+      </div>
+      <h2 class="nm-ai-messages__welcome-title">{{ t('ai.loginToUse') }}</h2>
+      <p class="nm-ai-messages__welcome-desc">{{ t('ai.loginToUseDesc') }}</p>
+      <div class="nm-ai-messages__welcome-actions">
+        <RsButton variant="primary" size="sm" @click="openLogin">
+          {{ t('ai.openLogin') }}
+        </RsButton>
+        <RsButton variant="secondary" size="sm" @click="openProviderSettings">
+          {{ t('ai.openSettings') }}
+        </RsButton>
+      </div>
+    </div>
+
+    <div v-else-if="!usableProviders.length" class="nm-ai-messages__welcome">
       <div class="nm-ai-messages__welcome-mark" aria-hidden="true">
         <RsIcon name="sparkles" :size="22" />
       </div>
@@ -391,6 +431,15 @@ function focusAttachment(id: string): void {
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--rs-text);
+}
+
+.nm-ai-messages__welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .nm-ai-messages__welcome-desc {

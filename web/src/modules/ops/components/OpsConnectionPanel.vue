@@ -539,7 +539,11 @@ function onFolderCtx(key: string, folder: ConnFolder): void {
     return
   }
   if (key === 'edit') openFolderDialog('edit', null, folder)
-  else if (key === 'delete') cf.deleteFolder(folder.id)
+  else if (key === 'delete') {
+    void cf.deleteFolder(folder.id).catch(() => {
+      toast.error(t('opsNav.folderDeleteFailed'))
+    })
+  }
 }
 
 /* ── 文件夹对话框（新建 / 编辑，与连接表单统一风格） ── */
@@ -550,6 +554,7 @@ const folderDlgParentId = ref<string | null>(null)
 const folderDlgName = ref('')
 const folderDlgColor = ref<ConnAccentColor>(DEFAULT_FOLDER_ACCENT)
 const folderDlgError = ref<string | null>(null)
+const folderDlgSaving = ref(false)
 
 function openFolderDialog(
   mode: 'create' | 'edit',
@@ -564,30 +569,40 @@ function openFolderDialog(
     : (folder?.name ?? '')
   folderDlgColor.value = folder ? folderAccentColor(folder) : DEFAULT_FOLDER_ACCENT
   folderDlgError.value = null
+  folderDlgSaving.value = false
   folderDlgOpen.value = true
 }
 
-function onFolderSave(): void {
+async function onFolderSave(): Promise<void> {
   const name = folderDlgName.value.trim()
   if (!name) {
     folderDlgError.value = t('opsNav.form.folderNameRequired')
     return
   }
-  if (folderDlgMode.value === 'create') {
-    const parentId = folderDlgParentId.value
-    cf.createFolder(name, parentId, folderDlgColor.value)
-    if (parentId) {
-      const parentKey = folderTreeKey(parentId)
-      if (!treeExpandedKeys.value.includes(parentKey)) {
-        treeExpandedKeys.value = [...treeExpandedKeys.value, parentKey]
+  if (folderDlgSaving.value) return
+  folderDlgSaving.value = true
+  folderDlgError.value = null
+  try {
+    if (folderDlgMode.value === 'create') {
+      const parentId = folderDlgParentId.value
+      await cf.createFolder(name, parentId, folderDlgColor.value)
+      if (parentId) {
+        const parentKey = folderTreeKey(parentId)
+        if (!treeExpandedKeys.value.includes(parentKey)) {
+          treeExpandedKeys.value = [...treeExpandedKeys.value, parentKey]
+        }
       }
+      toast.success(t('opsNav.folderAdded'))
+    } else if (folderDlgId.value) {
+      cf.updateFolder(folderDlgId.value, { name, accentColor: folderDlgColor.value })
+      toast.success(t('opsNav.folderEdited'))
     }
-    toast.success(t('opsNav.folderAdded'))
-  } else if (folderDlgId.value) {
-    cf.updateFolder(folderDlgId.value, { name, accentColor: folderDlgColor.value })
-    toast.success(t('opsNav.folderEdited'))
+    folderDlgOpen.value = false
+  } catch {
+    folderDlgError.value = t('opsNav.folderSaveFailed')
+  } finally {
+    folderDlgSaving.value = false
   }
-  folderDlgOpen.value = false
 }
 
 /* ── 树拖放 → 同步到 useConnFolders ── */
@@ -902,6 +917,7 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
         v-model:accent-color="folderDlgColor"
         :mode="folderDlgMode"
         :form-error="folderDlgError"
+        :saving="folderDlgSaving"
         @save="onFolderSave"
       />
 

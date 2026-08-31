@@ -13,6 +13,9 @@ const title = computed(() => {
   if (store.phase === 'idle' && store.dialogOpen && !store.latest) {
     return t('appUpdate.titleLatest')
   }
+  if (store.phase === 'ready' && store.latest) {
+    return t('appUpdate.titleReady', { version: store.latest.version })
+  }
   if (store.latest) {
     return t('appUpdate.titleAvailable', { version: store.latest.version })
   }
@@ -79,6 +82,12 @@ function onOpenChange(open: boolean) {
               readonly
               height="14rem"
             />
+            <p v-if="store.phase === 'ready'" class="nm-update__meta">
+              {{ t('appUpdate.readyHint') }}
+            </p>
+            <p v-else-if="store.phase === 'applying'" class="nm-update__meta">
+              {{ t('appUpdate.applying') }}
+            </p>
             <div
               v-if="store.phase === 'downloading' || store.phase === 'verifying'"
               class="nm-update__prog"
@@ -90,7 +99,7 @@ function onOpenChange(open: boolean) {
                 {{
                   store.phase === 'verifying'
                     ? t('appUpdate.verifying')
-                    : t('appUpdate.downloading', { percent: store.progressPercent })
+                    : t('appUpdate.downloadingBg', { percent: store.progressPercent })
                 }}
               </p>
             </div>
@@ -107,16 +116,21 @@ function onOpenChange(open: boolean) {
           {{ t('appUpdate.cancelDownload') }}
         </RsButton>
         <RsButton
-          v-else-if="
-            canDismiss && store.latest && (store.phase === 'available' || store.phase === 'forced')
-          "
+          v-else-if="canDismiss && store.latest && store.phase !== 'applying'"
           variant="secondary"
-          @click="store.snooze()"
+          @click="store.phase === 'ready' ? store.closeDialog() : store.snooze()"
         >
-          {{ t('appUpdate.snooze') }}
+          {{ store.phase === 'ready' ? t('appUpdate.close') : t('appUpdate.snooze') }}
         </RsButton>
         <RsButton
-          v-if="store.latest && (store.phase === 'available' || store.phase === 'forced')"
+          v-if="store.phase === 'ready'"
+          variant="primary"
+          @click="store.restartToUpdate()"
+        >
+          {{ t('appUpdate.restartToUpdate') }}
+        </RsButton>
+        <RsButton
+          v-else-if="store.latest && (store.phase === 'available' || store.phase === 'forced')"
           variant="primary"
           @click="store.startUpdate()"
         >

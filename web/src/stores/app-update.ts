@@ -42,6 +42,7 @@ function mapUpdateError(e: unknown, fallbackKey: string): string {
 }
 
 const SNOOZE_KEY = 'niuma.appUpdate.snooze'
+const READY_KEY = 'niuma.appUpdate.readyPack'
 
 type Phase =
   | 'idle'
@@ -50,8 +51,11 @@ type Phase =
   | 'forced'
   | 'downloading'
   | 'verifying'
+  | 'ready'
   | 'applying'
   | 'error'
+
+type ReadyPack = { version: string; path: string }
 
 function mapPlatform(raw?: string | null): string {
   const p = (raw || '').toLowerCase()
@@ -82,6 +86,26 @@ function writeSnooze(version: string, hours = 24) {
   )
 }
 
+function readReadyPack(): ReadyPack | null {
+  try {
+    const raw = localStorage.getItem(READY_KEY)
+    if (!raw) return null
+    const pack = JSON.parse(raw) as ReadyPack
+    if (!pack.version || !pack.path) return null
+    return pack
+  } catch {
+    return null
+  }
+}
+
+function writeReadyPack(pack: ReadyPack) {
+  localStorage.setItem(READY_KEY, JSON.stringify(pack))
+}
+
+function clearReadyPack() {
+  localStorage.removeItem(READY_KEY)
+}
+
 export const useAppUpdateStore = defineStore('appUpdate', () => {
   const phase = ref<Phase>('idle')
   const latest = ref<UpdateRelease | null>(null)
@@ -99,6 +123,8 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
   const received = ref(0)
   const total = ref(0)
   const localPath = ref('')
+  let downloadTask: Promise<void> | null = null
+  let progressOff: (() => void) | null = null
 
   const progressPercent = computed(() => {
     if (total.value <= 0) return 0
@@ -122,7 +148,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
   }
 
   function closeDialog() {
-    if (forceUpdate.value && (phase.value === 'available' || phase.value === 'forced')) return
+    if (forceUpdate.value) return
     dialogOpen.value = false
   }
 
@@ -162,7 +188,15 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
         changelogHasUpdate.value = true
         latest.value = checkRes.latest
         forceUpdate.value = !!checkRes.forceUpdate
-        phase.value = forceUpdate.value ? 'forced' : 'available'
+        if (
+          phase.value !== 'downloading' &&
+          phase.value !== 'verifying' &&
+          phase.value !== 'ready' &&
+          phase.value !== 'applying'
+        ) {
+          phase.value = forceUpdate.value ? 'forced' : 'available'
+        }
+        startSilentDownload()
       }
     } catch (e) {
       if (e instanceof CloudApiError && (e.status === 404 || e.code === 'not_found')) {
@@ -200,13 +234,104 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     if (!latest.value) return
     changelogOpen.value = false
     dialogOpen.value = true
+    startSilentDownload()
   }
 
   function snooze() {
     if (forceUpdate.value || !latest.value) return
     writeSnooze(latest.value.version)
     dialogOpen.value = false
-    phase.value = 'idle'
+    // 稍后提醒只关窗，后台下载继续。
+    if (phase.value === 'idle') {
+      void ensureDownloaded()
+    }
+  }
+
+  function stopProgressListen() {
+    if (progressOff) {
+      progressOff()
+      progressOff = null
+    }
+  }
+
+  /** 下载并校验安装包，不拉起安装、不退出应用。关窗后仍继续。 */
+  async function ensureDownloaded(): Promise<string> {
+    if (!latest.value) {
+      throw new Error('updateFailed')
+    }
+    if (!isBridgeAvailable()) {
+      throw new Error('desktopOnly')
+    }
+    const version = latest.value.version
+    const sha256 = latest.value.sha256
+    if (phase.value === 'ready' && localPath.value) {
+      return localPath.value
+    }
+    if (downloadTask) {
+      await downloadTask
+      if (phase.value === 'ready' && localPath.value) {
+        return localPath.value
+      }
+      throw new Error(error.value || 'updateFailed')
+    }
+
+    downloadTask = (async () => {
+      error.value = ''
+      const cached = readReadyPack()
+      if (cached && cached.version === version) {
+        try {
+          await shellUpdateVerify({ path: cached.path, sha256 })
+          localPath.value = cached.path
+          phase.value = 'ready'
+          return
+        } catch {
+          clearReadyPack()
+        }
+      }
+
+      phase.value = 'downloading'
+      received.value = 0
+      total.value = latest.value?.fileSize || 0
+      stopProgressListen()
+      progressOff = onShellUpdateProgress((p) => {
+        received.value = p.received
+        total.value = p.total || total.value
+      })
+      try {
+        const dl = await shellUpdateDownload({
+          url: latest.value!.downloadUrl,
+          sha256,
+          expectedSize: latest.value!.fileSize || undefined,
+        })
+        localPath.value = dl.path
+        phase.value = 'verifying'
+        await shellUpdateVerify({ path: dl.path, sha256 })
+        writeReadyPack({ version, path: dl.path })
+        phase.value = 'ready'
+      } finally {
+        stopProgressListen()
+      }
+    })()
+
+    try {
+      await downloadTask
+    } finally {
+      downloadTask = null
+    }
+    if (phase.value !== 'ready' || !localPath.value) {
+      throw new Error(error.value || 'updateFailed')
+    }
+    return localPath.value
+  }
+
+  function startSilentDownload() {
+    if (!latest.value || !isBridgeAvailable()) return
+    if (phase.value === 'ready' || phase.value === 'applying') return
+    if (downloadTask) return
+    void ensureDownloaded().catch((e) => {
+      error.value = mapUpdateError(e, 'updateFailed')
+      phase.value = forceUpdate.value ? 'forced' : 'available'
+    })
   }
 
   async function check(opts?: { manual?: boolean }) {
@@ -214,6 +339,15 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     const current = bridge.shellVersion?.trim()
     if (!current) {
       if (opts?.manual) error.value = 'noLocalVersion'
+      return
+    }
+    const busy =
+      phase.value === 'downloading' ||
+      phase.value === 'verifying' ||
+      phase.value === 'ready' ||
+      phase.value === 'applying'
+    if (busy) {
+      if (opts?.manual || forceUpdate.value) dialogOpen.value = true
       return
     }
     phase.value = 'checking'
@@ -237,14 +371,26 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
       latest.value = res.latest
       forceUpdate.value = !!res.forceUpdate
       phase.value = forceUpdate.value ? 'forced' : 'available'
-      if (!opts?.manual && !forceUpdate.value) {
-        const sn = readSnooze()
-        if (sn && sn.version === res.latest.version && sn.until > Date.now()) {
-          phase.value = 'idle'
-          return
-        }
+      const snoozed =
+        !opts?.manual &&
+        !forceUpdate.value &&
+        (() => {
+          const sn = readSnooze()
+          return !!(sn && sn.version === res.latest.version && sn.until > Date.now())
+        })()
+      if (opts?.manual || forceUpdate.value) {
+        dialogOpen.value = true
       }
-      dialogOpen.value = true
+      if (!snoozed || forceUpdate.value) {
+        void recordUpdateHit({
+          product: res.latest.product,
+          channel: res.latest.channel,
+          platform: res.latest.platform,
+          arch: res.latest.arch,
+          version: res.latest.version,
+        }).catch(() => undefined)
+      }
+      startSilentDownload()
     } catch (e) {
       phase.value = 'error'
       error.value = mapUpdateError(e, 'checkFailed')
@@ -253,6 +399,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     }
   }
 
+  /** 用户点「立即更新」：开始或继续后台下载，不立刻退出。已就绪则重启安装。 */
   async function startUpdate() {
     if (!latest.value) return
     if (!isBridgeAvailable()) {
@@ -267,27 +414,14 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
       arch: latest.value.arch,
       version: latest.value.version,
     }).catch(() => undefined)
-    phase.value = 'downloading'
-    received.value = 0
-    total.value = latest.value.fileSize || 0
-    const off = onShellUpdateProgress((p) => {
-      received.value = p.received
-      total.value = p.total || total.value
-    })
+    if (phase.value === 'ready' && localPath.value) {
+      await restartToUpdate()
+      return
+    }
     try {
-      const dl = await shellUpdateDownload({
-        url: latest.value.downloadUrl,
-        sha256: latest.value.sha256,
-        expectedSize: latest.value.fileSize || undefined,
-      })
-      localPath.value = dl.path
-      phase.value = 'verifying'
-      await shellUpdateVerify({ path: dl.path, sha256: latest.value.sha256 })
-      phase.value = 'applying'
-      await shellUpdateApply({ path: dl.path })
+      await ensureDownloaded()
     } catch (e) {
       const code = mapUpdateError(e, 'updateFailed')
-      // 旧 Shell 尚未支持 Linux/macOS apply 时回退到外链
       if (code === 'apply_unsupported_platform' && latest.value.downloadUrl) {
         try {
           await shellApi.openExternal({ url: latest.value.downloadUrl })
@@ -301,8 +435,33 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
         error.value = code
       }
       phase.value = forceUpdate.value ? 'forced' : 'available'
-    } finally {
-      off()
+    }
+  }
+
+  /** 拉起安装包并退出本进程；下载未完成时先等后台下完。 */
+  async function restartToUpdate() {
+    if (!latest.value) return
+    error.value = ''
+    try {
+      const path = await ensureDownloaded()
+      phase.value = 'applying'
+      await shellUpdateApply({ path })
+      clearReadyPack()
+    } catch (e) {
+      const code = mapUpdateError(e, 'updateFailed')
+      if (code === 'apply_unsupported_platform' && latest.value.downloadUrl) {
+        try {
+          await shellApi.openExternal({ url: latest.value.downloadUrl })
+          error.value = ''
+          phase.value = 'ready'
+          return
+        } catch (openErr) {
+          error.value = mapUpdateError(openErr, 'openDownloadFailed')
+        }
+      } else {
+        error.value = code
+      }
+      phase.value = localPath.value ? 'ready' : forceUpdate.value ? 'forced' : 'available'
     }
   }
 
@@ -312,6 +471,8 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     } catch {
       /* ignore */
     }
+    downloadTask = null
+    stopProgressListen()
     phase.value = forceUpdate.value ? 'forced' : 'available'
   }
 
@@ -360,6 +521,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     snooze,
     check,
     startUpdate,
+    restartToUpdate,
     cancelDownload,
     scheduleStartupCheck,
   }

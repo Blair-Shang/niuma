@@ -102,6 +102,7 @@ export const useAccountStore = defineStore('account', () => {
         expiresAt: expiresAt.value!,
         user: user.value,
       })
+      void syncSystemAi()
     } catch {
       clearSession()
     }
@@ -181,6 +182,19 @@ export const useAccountStore = defineStore('account', () => {
     if (pendingFeedback.value) {
       pendingFeedback.value = false
       feedbackOpen.value = true
+    }
+    void syncSystemAi()
+  }
+
+  async function syncSystemAi(): Promise<void> {
+    try {
+      const token = await ensureAccess()
+      const { ensureSystemAiProvider } = await import('@/shell/panels/ai/system-provider')
+      await ensureSystemAiProvider(token)
+      const { useAiStore } = await import('@/stores/ai')
+      await useAiStore().refreshProviders()
+    } catch {
+      // 未登录、离线或云端未开通系统 AI 时忽略
     }
   }
 
