@@ -73,7 +73,7 @@ func resolveNS(ctx context.Context, rt Runtime, s scopeArgs) (string, error) {
 
 func invokeJSON(ctx context.Context, rt Runtime, method string, params map[string]any, out any) error {
 	if rt == nil {
-		return fmt.Errorf("sql host: capability runtime not bound")
+		return fmt.Errorf("host: capability runtime not bound")
 	}
 	raw, err := rt.Call(ctx, method, params)
 	if err != nil {

@@ -149,11 +149,10 @@ async function onBranch(): Promise<void> {
       <RsIcon :name="isUser ? 'user' : 'bot'" :size="13" />
     </div>
     <div class="nm-ai-msg__main">
-      <div class="nm-ai-msg__role-row">
-        <div class="nm-ai-msg__role">
-          {{ isUser ? t('ai.roleUser') : t('ai.roleAssistant') }}
+      <div v-if="streaming || timeLabel" class="nm-ai-msg__role-row">
+        <div class="nm-ai-msg__meta">
           <span v-if="streaming" class="nm-ai-msg__live">{{ t('ai.streaming') }}</span>
-          <span v-else-if="timeLabel" class="nm-ai-msg__time">{{ timeLabel }}</span>
+          <span v-else class="nm-ai-msg__time">{{ timeLabel }}</span>
         </div>
       </div>
 
@@ -370,14 +369,10 @@ async function onBranch(): Promise<void> {
   justify-content: flex-end;
 }
 
-.nm-ai-msg__role {
+.nm-ai-msg__meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--rs-text);
 }
 
 .nm-ai-msg__time {

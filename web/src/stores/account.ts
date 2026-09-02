@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { isBridgeAvailable, settingsApi } from '@/api'
+import { CloudApiError } from '@/api/cloud/client'
 import {
   fetchMe,
   loginOtpComplete,
@@ -31,6 +33,8 @@ export const PASSWORD_MAX_LEN = 128
 export const OTP_RESEND_COOLDOWN_SEC = 60
 
 const STORAGE_KEY = 'nm.cloud.session'
+/** 与 CEF localStorage 双写；升级覆盖安装目录时 SQLite 仍在 %LOCALAPPDATA%\NiuMa\data。 */
+const SETTING_KEY = 'account.cloudSession'
 
 type PersistedSession = {
   accessToken: string
@@ -39,22 +43,64 @@ type PersistedSession = {
   user: CloudUser
 }
 
-function loadPersisted(): PersistedSession | null {
+function parseSession(raw: string | null | undefined): PersistedSession | null {
+  if (!raw) return null
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as PersistedSession
+    const parsed = JSON.parse(raw) as PersistedSession
+    if (!parsed?.accessToken || !parsed.refreshToken || !parsed.user) return null
+    return parsed
   } catch {
     return null
   }
 }
 
+function loadPersistedLocal(): PersistedSession | null {
+  try {
+    return parseSession(localStorage.getItem(STORAGE_KEY))
+  } catch {
+    return null
+  }
+}
+
+async function loadPersistedPlatform(): Promise<PersistedSession | null> {
+  if (!isBridgeAvailable()) return null
+  try {
+    const res = await settingsApi.get(SETTING_KEY)
+    return parseSession(res.value)
+  } catch {
+    return null
+  }
+}
+
+function preferSession(a: PersistedSession | null, b: PersistedSession | null): PersistedSession | null {
+  if (!a) return b
+  if (!b) return a
+  const ta = Date.parse(a.expiresAt) || 0
+  const tb = Date.parse(b.expiresAt) || 0
+  return tb > ta ? b : a
+}
+
+let persistTail: Promise<void> = Promise.resolve()
+
+async function writePlatformSession(session: PersistedSession | null): Promise<void> {
+  if (!isBridgeAvailable()) return
+  await settingsApi.set(SETTING_KEY, session ? JSON.stringify(session) : '')
+}
+
 function persist(session: PersistedSession | null): void {
   if (!session) {
     localStorage.removeItem(STORAGE_KEY)
-    return
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+  persistTail = persistTail.then(() => writePlatformSession(session)).catch(() => undefined)
+}
+
+/** 仅当云端明确拒绝令牌时清本地；网络/5xx 保留，避免升级后离线被踢出。 */
+export function shouldClearSessionOnAuthError(e: unknown): boolean {
+  if (!(e instanceof CloudApiError)) return false
+  if (e.status === 401 || e.status === 403) return true
+  return e.code === 'invalid_refresh' || e.code === 'unauthorized' || e.code === 'invalid_token'
 }
 
 export const useAccountStore = defineStore('account', () => {
@@ -84,15 +130,20 @@ export const useAccountStore = defineStore('account', () => {
     })
   }
 
+  async function flushPersist(): Promise<void> {
+    await persistTail
+  }
+
   async function bootstrap(): Promise<void> {
     if (bootstrapped.value) return
     bootstrapped.value = true
-    const saved = loadPersisted()
+    const saved = preferSession(loadPersistedLocal(), await loadPersistedPlatform())
     if (!saved) return
     accessToken.value = saved.accessToken
     refreshToken.value = saved.refreshToken
     expiresAt.value = saved.expiresAt
     user.value = saved.user
+    persist(saved)
     try {
       await ensureAccess()
       user.value = await fetchMe(accessToken.value!)
@@ -103,8 +154,10 @@ export const useAccountStore = defineStore('account', () => {
         user: user.value,
       })
       void syncSystemAi()
-    } catch {
-      clearSession()
+    } catch (e) {
+      if (shouldClearSessionOnAuthError(e)) {
+        clearSession()
+      }
     }
   }
 
@@ -128,9 +181,12 @@ export const useAccountStore = defineStore('account', () => {
     accessToken.value = next.accessToken
     expiresAt.value = next.expiresAt
     user.value = next.user
+    if (next.refreshToken) {
+      refreshToken.value = next.refreshToken
+    }
     persist({
       accessToken: next.accessToken,
-      refreshToken: refreshToken.value,
+      refreshToken: refreshToken.value!,
       expiresAt: next.expiresAt,
       user: next.user,
     })
@@ -289,6 +345,7 @@ export const useAccountStore = defineStore('account', () => {
     feedbackOpen,
     passwordChangeOpen,
     bootstrap,
+    flushPersist,
     openAuth,
     closeAuth,
     openFeedback,

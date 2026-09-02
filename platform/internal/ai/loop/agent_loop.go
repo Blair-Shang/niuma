@@ -31,7 +31,8 @@ type boundTool struct {
 }
 
 // buildEnabledToolDefs 读取官方 host + 已启用 MCP 工具并生成 OpenAI tools + 名称映射。
-func (s *Service) buildEnabledToolDefs(ctx context.Context) ([]ToolDef, map[string]boundTool, error) {
+// moduleID 用于按当前页签挑选 sql_* / ssh_*，避免 SSH 会话误暴露查库工具。
+func (s *Service) buildEnabledToolDefs(ctx context.Context, moduleID string) ([]ToolDef, map[string]boundTool, error) {
 	if s == nil {
 		return nil, nil, nil
 	}
@@ -39,7 +40,8 @@ func (s *Service) buildEnabledToolDefs(ctx context.Context) ([]ToolDef, map[stri
 	bound := make(map[string]boundTool)
 
 	if s.host != nil {
-		for _, spec := range host.SQLToolSpecs() {
+		for _, spec := range host.HostToolSpecs(moduleID) {
+			serverID := host.SpecServerID(spec)
 			defs = append(defs, ToolDef{
 				Type: "function",
 				Function: ToolFunctionDef{
@@ -52,13 +54,13 @@ func (s *Service) buildEnabledToolDefs(ctx context.Context) ([]ToolDef, map[stri
 				ExposeName: spec.Name,
 				HostName:   spec.Name,
 				Tool: store.AIMCPTool{
-					ServerID:        host.ServerID,
+					ServerID:        serverID,
 					ToolName:        spec.Name,
 					ToolDescription: spec.Description,
 					InputSchema:     string(spec.Parameters),
 					RiskLevel:       spec.Risk,
 				},
-				Server: store.AIMCPServer{ServerID: host.ServerID, ServerName: "host-sql"},
+				Server: store.AIMCPServer{ServerID: serverID, ServerName: serverID},
 			}
 		}
 	}
@@ -155,7 +157,11 @@ func (s *Service) runChatStream(
 	defer s.runs.remove(runID)
 
 	messages := AssembleMessages(history, normalized, skillPrompt)
-	toolDefs, bound, err := s.buildEnabledToolDefs(ctx)
+	moduleID := ""
+	if normalized.Workspace != nil {
+		moduleID = normalized.Workspace.ModuleID
+	}
+	toolDefs, bound, err := s.buildEnabledToolDefs(ctx, moduleID)
 	if err != nil {
 		s.publishRunError(runID, conversationID, err)
 		return
@@ -339,7 +345,7 @@ func (s *Service) invokeBoundTool(
 		if err := json.Unmarshal(args, &argMap); err != nil {
 			argMap = map[string]any{}
 		}
-		result, callErr = host.CallSQL(ctx, s.host, b.HostName, argMap)
+		result, callErr = host.Call(ctx, s.host, b.HostName, argMap)
 	} else {
 		bearer := s.mcpBearerToken(b.Server.CredentialID)
 		switch b.Server.TransportKind {
@@ -403,6 +409,14 @@ func mergeWorkspaceArgs(rawArgs string, normalized NormalizedContext) json.RawMe
 		}
 		if _, ok := obj["schema"]; !ok && normalized.Workspace.Schema != "" {
 			obj["schema"] = normalized.Workspace.Schema
+		}
+		if cwd := strings.TrimSpace(normalized.Workspace.Cwd); cwd != "" {
+			if _, ok := obj["cwd"]; !ok {
+				obj["cwd"] = cwd
+			}
+			if _, ok := obj["path"]; !ok {
+				obj["path"] = cwd
+			}
 		}
 	}
 	b, err := json.Marshal(obj)

@@ -14,6 +14,7 @@ import { useTabStore } from '@/stores/tab'
 
 const props = defineProps<{
   profileId?: string
+  tabId?: string
   terminalSyncGroupId?: string
   terminalSyncSlot?: 'A' | 'B' | 'C' | 'D'
 }>()
@@ -86,6 +87,7 @@ onMounted(() => {
   <SshSession
     v-if="props.profileId"
     :profile-id="props.profileId"
+    :tab-id="props.tabId"
     :terminal-sync-group-id="props.terminalSyncGroupId"
     :terminal-sync-slot="props.terminalSyncSlot"
     class="nm-ssh-tab"

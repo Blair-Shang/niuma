@@ -4,7 +4,13 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabStore, type WorkspaceTab } from '@/stores/tab'
 import { useSessionActionStore } from '@/stores/session-actions'
-import { beginTabDrag, draggingGroupId, draggingTabId, endTabDrag } from '../workspace/tab-dnd'
+import {
+  beginTabDrag,
+  draggingGroupId,
+  draggingTabId,
+  endTabDrag,
+  NIUMA_TAB_MIME,
+} from '../workspace/tab-dnd'
 
 /** 本 TabBar 归属的编辑组 id（分屏后每组各一条 Tab 栏） */
 const props = defineProps<{ groupId: string }>()
@@ -297,7 +303,8 @@ function closeGroupHere(): void {
 function onDragStart(tab: WorkspaceTab, event: DragEvent): void {
   beginTabDrag(tab.tabId, props.groupId)
   if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.effectAllowed = 'copyMove'
+    event.dataTransfer.setData(NIUMA_TAB_MIME, tab.tabId)
     // Firefox 需要写入数据才会真正启动拖拽
     event.dataTransfer.setData('text/plain', tab.tabId)
   }

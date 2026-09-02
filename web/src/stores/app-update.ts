@@ -18,6 +18,7 @@ import {
   shellUpdateDownload,
   shellUpdateVerify,
 } from '@/api/shell-update'
+import { useAccountStore } from '@/stores/account'
 import { useBridgeStore } from '@/stores/bridge'
 
 /** Bridge / 网络错误映射为 appUpdate.errors.* 键；未知则回落原文。 */
@@ -461,6 +462,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     error.value = ''
     try {
       const path = await ensureDownloaded()
+      await useAccountStore().flushPersist()
       phase.value = 'applying'
       await shellUpdateApply({ path })
       clearReadyPack()

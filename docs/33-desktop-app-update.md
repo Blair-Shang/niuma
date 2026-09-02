@@ -319,8 +319,8 @@ Cloud 客户端：复用 `web/src/api/cloud/client.ts`（`VITE_CLOUD_API_BASE`�
 Windows P0：
 
 1. `path` 必须位于更新临时目录内（防任意路径执行）。
-2. `ShellExecute` 启动 Setup（交互向导；**不**默认 `/SILENT`）。
-3. 启动成功后退出当前 NiuMa 进程（先停 Platform 子进程）。
+2. `ShellExecute` 启动 Setup，带 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`（覆盖升级不弹向导）。
+3. 启动成功后退出当前 NiuMa 进程（先停 Platform 子进程）；Inno `[Run]` 装完拉起新版本。
 4. 非 Windows：Shell 返回 `apply_unsupported_platform`；Web 改为 `openExternal(downloadUrl)`。
 
 当前 iss：固定 `AppId`、`PrivilegesRequired=lowest`（默认当前用户、不弹 UAC）、`CloseApplications=yes`、`RestartApplications=no`。

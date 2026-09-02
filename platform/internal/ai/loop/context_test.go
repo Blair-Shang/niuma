@@ -60,6 +60,31 @@ func TestNormalizeContext_selectionAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestNormalizeContext_sshWorkspace(t *testing.T) {
+	draft := &ContextDraft{
+		Workspace: &ContextWorkspace{
+			ModuleID:  "ssh",
+			ProfileID: "p-ssh",
+			SessionID: "s-ssh",
+			Title:     "prod-box",
+			Cwd:       "/var/log",
+		},
+	}
+	n := NormalizeContext(draft)
+	if n.Workspace == nil || n.Workspace.Cwd != "/var/log" {
+		t.Fatalf("cwd: %+v", n.Workspace)
+	}
+	if !strings.Contains(n.PromptBlock, "cwd=/var/log") {
+		t.Fatalf("missing cwd: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "[Workspace · SSH]") {
+		t.Fatalf("missing ssh workspace rules: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "ssh_*") {
+		t.Fatalf("missing ssh tool hint: %q", n.PromptBlock)
+	}
+}
+
 func TestNormalizeContext_stripsSecrets(t *testing.T) {
 	draft := &ContextDraft{
 		Attachments: []ContextAttachment{{
@@ -192,5 +217,46 @@ func TestAssembleMessages_injectsContextAndStripsMarkers(t *testing.T) {
 	}
 	if userText != "解释这段" {
 		t.Fatalf("unexpected user: %q", userText)
+	}
+}
+
+func TestAssembleMessages_marksCurrentTurnOnOrphanedUsers(t *testing.T) {
+	history := []store.AIMessage{
+		{MessageRole: MessageRoleUser, MessageContent: "mongo资源占用搞为什么"},
+		{MessageRole: MessageRoleUser, MessageContent: "当前磁盘占比图"},
+	}
+	msgs := AssembleMessages(history, NormalizedContext{}, "")
+	if len(msgs) < 4 {
+		t.Fatalf("want system+orphan+hint+current, got %d", len(msgs))
+	}
+	last := msgs[len(msgs)-1]
+	text, ok := last.Content.(string)
+	if !ok || last.Role != MessageRoleUser || text != "当前磁盘占比图" {
+		t.Fatalf("last user: role=%s content=%v", last.Role, last.Content)
+	}
+	hint := msgs[len(msgs)-2]
+	hintText, ok := hint.Content.(string)
+	if !ok || hint.Role != MessageRoleSystem || !strings.Contains(hintText, "[Current turn]") {
+		t.Fatalf("current-turn hint: role=%s content=%v", hint.Role, hint.Content)
+	}
+}
+
+func TestAssembleMessages_noCurrentTurnHintWhenPaired(t *testing.T) {
+	history := []store.AIMessage{
+		{MessageRole: MessageRoleUser, MessageContent: "mongo为什么占资源"},
+		{MessageRole: MessageRoleAssistant, MessageContent: "mongod 单核偏高"},
+		{MessageRole: MessageRoleUser, MessageContent: "当前磁盘占比图"},
+	}
+	msgs := AssembleMessages(history, NormalizedContext{}, "")
+	for _, m := range msgs {
+		text, _ := m.Content.(string)
+		if strings.Contains(text, "[Current turn]") {
+			t.Fatalf("paired history should not inject current-turn hint")
+		}
+	}
+	last := msgs[len(msgs)-1]
+	text, ok := last.Content.(string)
+	if !ok || text != "当前磁盘占比图" {
+		t.Fatalf("last user: %v", last.Content)
 	}
 }

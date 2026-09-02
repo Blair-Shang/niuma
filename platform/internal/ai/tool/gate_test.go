@@ -21,6 +21,7 @@ func TestInferToolRisk(t *testing.T) {
 		{"run_shell", RiskDangerous},
 		{"execute_command", RiskDangerous},
 		{"run_skill_script", RiskDangerous},
+		{"ssh_exec", RiskDangerous},
 		{"", RiskRead},
 	}
 	for _, tc := range cases {

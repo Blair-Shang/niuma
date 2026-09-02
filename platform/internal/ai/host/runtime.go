@@ -7,10 +7,19 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
 
 // ServerID 写入 nm_ai_tool_invocation.server_id，表示官方 host 而非 MCP。
-const ServerID = "host_sql"
+// 兼容旧调用；新代码按族使用 ServerIDSQL / ServerIDSSH。
+const ServerID = ServerIDSQL
+
+const (
+	// ServerIDSQL 是官方 sql_* 工具的 invocation server_id。
+	ServerIDSQL = "host_sql"
+	// ServerIDSSH 是官方 ssh_* 工具的 invocation server_id。
+	ServerIDSSH = "host_ssh"
+)
 
 // 官方 SQL 只读工具名（须符合 ^[a-zA-Z0-9_-]+$）。
 const (
@@ -18,6 +27,15 @@ const (
 	ToolListTables    = "sql_list_tables"
 	ToolDescribeTable = "sql_describe_table"
 	ToolRunReadonly   = "sql_run_readonly"
+)
+
+// 官方 SSH 工具名（须符合 ^[a-zA-Z0-9_-]+$）。
+const (
+	ToolSSHListDir        = "ssh_list_dir"
+	ToolSSHReadFile       = "ssh_read_file"
+	ToolSSHHostMetrics    = "ssh_host_metrics"
+	ToolSSHInspectProcess = "ssh_inspect_process"
+	ToolSSHExec           = "ssh_exec"
 )
 
 // Runtime 由 handler 注入：走与 Web 相同的 Capability Dispatch。
@@ -34,6 +52,8 @@ type ToolSpec struct {
 	Description string
 	Parameters  json.RawMessage
 	Risk        string
+	// ServerID 写入 invocation；空则视为 ServerIDSQL。
+	ServerID string
 }
 
 // IsSQLTool 判断名称是否为官方 sql_*。
@@ -43,6 +63,33 @@ func IsSQLTool(name string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// IsSSHTool 判断名称是否为官方 ssh_*。
+func IsSSHTool(name string) bool {
+	switch name {
+	case ToolSSHListDir, ToolSSHReadFile, ToolSSHHostMetrics, ToolSSHInspectProcess, ToolSSHExec:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsHostTool 判断名称是否为任一官方 host 工具。
+func IsHostTool(name string) bool {
+	return IsSQLTool(name) || IsSSHTool(name)
+}
+
+// Call 执行官方 host 工具，结果为给模型看的 JSON 文本。
+func Call(ctx context.Context, rt Runtime, name string, args map[string]any) (string, error) {
+	switch {
+	case IsSQLTool(name):
+		return CallSQL(ctx, rt, name, args)
+	case IsSSHTool(name):
+		return CallSSH(ctx, rt, name, args)
+	default:
+		return "", fmt.Errorf("unknown host tool: %s", name)
 	}
 }
 

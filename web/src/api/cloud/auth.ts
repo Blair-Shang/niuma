@@ -61,6 +61,8 @@ export async function loginOtpComplete(email: string, code: string): Promise<Aut
 
 export async function refreshAccess(refreshToken: string): Promise<{
   accessToken: string
+  /** 云端轮换后的新 refresh；必须落盘，否则下次启动会 invalid_refresh。 */
+  refreshToken?: string
   expiresAt: string
   user: CloudUser
 }> {

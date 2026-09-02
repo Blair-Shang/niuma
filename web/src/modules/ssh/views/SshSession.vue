@@ -183,6 +183,18 @@ const { enqueue: enqueueTransfer, refresh: refreshTransfers } = useSshTransfer(s
 const remotePath = ref('.')
 /** 路径输入草稿：未回车前不参与上传/删除等操作，避免用错目录 */
 const remotePathDraft = ref('.')
+
+watch(
+  remotePath,
+  (path) => {
+    if (!props.tabId) {
+      return
+    }
+    tabStore.updateTabProps(props.tabId, { remotePath: path })
+  },
+  { immediate: true },
+)
+
 const entries = ref<SshSftpEntry[]>([])
 const connecting = ref(true)
 const loadingFiles = ref(false)

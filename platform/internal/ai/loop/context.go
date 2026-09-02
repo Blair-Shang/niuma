@@ -31,6 +31,8 @@ type ContextWorkspace struct {
 	Title     string `json:"title,omitempty"`
 	Database  string `json:"database,omitempty"`
 	Schema    string `json:"schema,omitempty"`
+	// Cwd 是 SSH/SFTP 当前远程目录（由页签 props.remotePath 注入）。
+	Cwd string `json:"cwd,omitempty"`
 	// DialectFamily / Capabilities：前端会话探测结果（DBeaver/Navicat 能力模型）。
 	DialectFamily string   `json:"dialectFamily,omitempty"`
 	Capabilities  []string `json:"capabilities,omitempty"`
@@ -70,6 +72,7 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 		ws.Title = truncateUTF8(strings.TrimSpace(ws.Title), 200)
 		ws.Database = strings.TrimSpace(ws.Database)
 		ws.Schema = strings.TrimSpace(ws.Schema)
+		ws.Cwd = strings.TrimSpace(ws.Cwd)
 		ws.DialectFamily = strings.TrimSpace(ws.DialectFamily)
 		ws.DialectRules = strings.TrimSpace(ws.DialectRules)
 		if len(ws.Capabilities) > 0 {
@@ -81,7 +84,7 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 			}
 			ws.Capabilities = cleaned
 		}
-		if ws.TabID != "" || ws.ModuleID != "" || ws.ProfileID != "" || ws.SessionID != "" || ws.Title != "" || ws.Database != "" || ws.Schema != "" || ws.DialectFamily != "" || len(ws.Capabilities) > 0 || ws.DialectRules != "" {
+		if ws.TabID != "" || ws.ModuleID != "" || ws.ProfileID != "" || ws.SessionID != "" || ws.Title != "" || ws.Database != "" || ws.Schema != "" || ws.Cwd != "" || ws.DialectFamily != "" || len(ws.Capabilities) > 0 || ws.DialectRules != "" {
 			out.Workspace = &ws
 		}
 	}
@@ -192,8 +195,8 @@ func formatContextPrompt(ws *ContextWorkspace, attachments []ContextAttachment) 
 	b.WriteString("[Context Pack]\n")
 	if ws != nil {
 		b.WriteString(fmt.Sprintf(
-			"workspace: module=%s profile=%s session=%s tab=%s\n",
-			dash(ws.ModuleID), dash(ws.ProfileID), dash(ws.SessionID), dash(ws.Title),
+			"workspace: module=%s profile=%s session=%s tab=%s cwd=%s\n",
+			dash(ws.ModuleID), dash(ws.ProfileID), dash(ws.SessionID), dash(ws.Title), dash(ws.Cwd),
 		))
 		if rules := strings.TrimSpace(ws.DialectRules); rules != "" {
 			b.WriteString(rules)
@@ -271,6 +274,8 @@ func moduleDialectPrompt(moduleID, family string, caps []string) string {
 	switch fam {
 	case "vastbase":
 		return dialectVastbasePrompt
+	case "ssh":
+		return workspaceSSHPrompt
 	default:
 		return ""
 	}

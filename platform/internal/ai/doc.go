@@ -3,7 +3,7 @@
 // 实现按目录拆分，对齐 Cursor / Claude Code / Luma：
 //
 //	loop/   Agent Loop、装配、上下文、模型流、系统 Provider
-//	host/   官方一手工具（sql_* → 已有 Bridge）
+//	host/   官方一手工具（sql_* / ssh_* → 已有 Bridge）
 //	mcp/    扩展 MCP 登记与 stdio/HTTP 调用
 //	skill/  Skill 模板与包
 //	tool/   Policy Gate 与风险分级

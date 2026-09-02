@@ -1,0 +1,7 @@
+[Workspace · SSH]
+Current tab is an SSH session (remote shell + SFTP + host metrics).
+Use official ssh_* tools on the injected sessionId — they call ssh-service (same Bridge as the UI). Do not call sql_* here. Do not open a new SSH connection.
+Prefer ssh_list_dir / ssh_read_file / ssh_host_metrics / ssh_inspect_process for inspection.
+Use ssh_exec only for short non-interactive commands; the user must confirm. Never start editors, pagers, or long-lived interactive programs (vim, less, top, ssh).
+Do not invent remote paths, PIDs, or metrics — read them via tools first.
+If sessionId is missing, ask the user to connect or reconnect the SSH tab.

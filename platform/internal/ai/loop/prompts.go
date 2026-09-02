@@ -18,6 +18,8 @@ var (
 	attachedFileTemplate  string
 	skillSectionTemplate  string
 	dialectVastbasePrompt string
+	workspaceSSHPrompt    string
+	currentTurnPrompt     string
 )
 
 func init() {
@@ -26,6 +28,8 @@ func init() {
 	attachedFileTemplate = mustPrompt("prompts/attached_file.txt")
 	skillSectionTemplate = mustPrompt("prompts/skill_section.txt")
 	dialectVastbasePrompt = mustPrompt("prompts/dialect_vastbase.txt")
+	workspaceSSHPrompt = mustPrompt("prompts/workspace_ssh.txt")
+	currentTurnPrompt = mustPrompt("prompts/current_turn.txt")
 }
 
 func mustPrompt(path string) string {

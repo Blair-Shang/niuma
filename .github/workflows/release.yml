@@ -318,13 +318,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout scripts for cloud push
-        if: env.NIUMA_CLOUD_PIPELINE_TOKEN != ''
+      - name: Checkout release scripts
         uses: actions/checkout@v5
         with:
-          path: cloud-push-src
+          path: release-scripts
           sparse-checkout: |
             .github/scripts/push-cloud-release.mjs
+            .github/scripts/prune-github-release-assets.mjs
             CHANGELOG.md
           sparse-checkout-cone-mode: false
 
@@ -335,5 +335,12 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           NIUMA_CHANNEL: stable
           NIUMA_PREVIEW_CHANNEL: beta
-          CHANGELOG_PATH: cloud-push-src/CHANGELOG.md
-        run: node cloud-push-src/.github/scripts/push-cloud-release.mjs release-files
+          CHANGELOG_PATH: release-scripts/CHANGELOG.md
+        run: node release-scripts/.github/scripts/push-cloud-release.mjs release-files
+
+      # 只删过旧 release 的安装包，保留页、tag、说明。官网分发走 niuma-cloud。
+      # github.token / GITHUB_REPOSITORY 由 Actions 注入，不必再配仓库 Secret。
+      - name: Prune old GitHub Release assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node release-scripts/.github/scripts/prune-github-release-assets.mjs

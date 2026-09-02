@@ -29,8 +29,8 @@ class LocalFs {
   static bool OpenExternalUrl(const std::string& url, std::string& error);
   /**
    * 拉起本机安装包（仅允许临时目录 niuma-update/ 下的安装程序）。
-   * Windows：ShellExecuteW；Linux：.run 直接执行，其它包 xdg-open；macOS：open。
-   * 不传静默参数，由用户确认系统向导。
+   * Windows：Inno 静默覆盖（/VERYSILENT），不弹向导；Linux：.run 直接执行，其它包
+   * xdg-open；macOS：open。
    */
   static bool LaunchInstaller(const std::string& path, std::string& error);
 

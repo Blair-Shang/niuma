@@ -45,6 +45,7 @@ export interface AiContextPack {
     title?: string
     database?: string
     schema?: string
+    cwd?: string
     dialectFamily?: string
     capabilities?: string[]
     dialectRules?: string
@@ -56,6 +57,29 @@ export interface AiContextPack {
 
 function tabLabel(tab: WorkspaceTab): string {
   return tab.title?.trim() || tab.titleKey || tab.moduleId || tab.tabId
+}
+
+/** 从工作区页签构造 @ 引用（拖入 AI / @ 列表共用）。 */
+export function attachmentFromTab(tab: WorkspaceTab): AiContextAttachment {
+  const sessionRegistry = useSessionRegistry()
+  const profileId = typeof tab.props.profileId === 'string' ? tab.props.profileId : undefined
+  const sessionId = sessionRegistry.getSessionIdForTab(tab.tabId) ?? undefined
+  const cwd = typeof tab.props.remotePath === 'string' ? tab.props.remotePath.trim() : ''
+  return {
+    id: `tab:${tab.tabId}`,
+    kind: 'tab',
+    label: tabLabel(tab),
+    detail: [tab.moduleId, profileId].filter(Boolean).join(' · '),
+    payload: {
+      tabId: tab.tabId,
+      moduleId: tab.moduleId,
+      profileId,
+      sessionId,
+      database: tab.props.database,
+      schema: tab.props.schema,
+      path: tab.moduleId === 'ssh' && cwd ? cwd : undefined,
+    },
+  }
 }
 
 function readDomSelectionSnippet(): string {
@@ -152,19 +176,7 @@ export function listMentionCandidates(): AiContextAttachment[] {
   const active = tabStore.activeTab
   if (active) {
     const profileId = typeof active.props.profileId === 'string' ? active.props.profileId : undefined
-    out.push({
-      id: `tab:${active.tabId}`,
-      kind: 'tab',
-      label: tabLabel(active),
-      detail: [active.moduleId, profileId].filter(Boolean).join(' · '),
-      payload: {
-        tabId: active.tabId,
-        moduleId: active.moduleId,
-        profileId,
-        database: active.props.database,
-        schema: active.props.schema,
-      },
-    })
+    out.push(attachmentFromTab(active))
     if (profileId) {
       out.push({
         id: `conn:${profileId}`,
@@ -178,22 +190,27 @@ export function listMentionCandidates(): AiContextAttachment[] {
     if (schemaHint) {
       out.push(schemaHint)
     }
+    const remotePath =
+      typeof active.props.remotePath === 'string' ? active.props.remotePath.trim() : ''
+    if (active.moduleId === 'ssh' && remotePath) {
+      out.push({
+        id: `cwd:${active.tabId}:${remotePath}`,
+        kind: 'tab',
+        label: remotePath,
+        detail: 'sftp',
+        payload: {
+          tabId: active.tabId,
+          moduleId: 'ssh',
+          path: remotePath,
+        },
+      })
+    }
   }
   for (const tab of tabStore.allTabs) {
     if (active && tab.tabId === active.tabId) {
       continue
     }
-    out.push({
-      id: `tab:${tab.tabId}`,
-      kind: 'tab',
-      label: tabLabel(tab),
-      detail: tab.moduleId,
-      payload: {
-        tabId: tab.tabId,
-        moduleId: tab.moduleId,
-        profileId: tab.props.profileId,
-      },
-    })
+    out.push(attachmentFromTab(tab))
   }
   const selection = selectionAttachmentFromWorkspace()
   if (selection) {
@@ -247,6 +264,7 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
     title: active ? tabLabel(active) : undefined,
     database: typeof active?.props.database === 'string' ? active.props.database : undefined,
     schema: typeof active?.props.schema === 'string' ? active.props.schema : undefined,
+    cwd: typeof active?.props.remotePath === 'string' ? active.props.remotePath : undefined,
     dialectFamily: dialect?.family,
     capabilities: dialect?.capabilities,
     dialectRules: dialect ? buildAiDialectRules(dialect) : undefined,
@@ -255,7 +273,7 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
   const lines: string[] = []
   if (workspace.moduleId || workspace.profileId || workspace.sessionId) {
     lines.push(
-      `[workspace] module=${workspace.moduleId ?? '-'} profile=${workspace.profileId ?? '-'} session=${workspace.sessionId ?? '-'} db=${workspace.database ?? '-'} schema=${workspace.schema ?? '-'} tab=${workspace.title ?? '-'}`,
+      `[workspace] module=${workspace.moduleId ?? '-'} profile=${workspace.profileId ?? '-'} session=${workspace.sessionId ?? '-'} db=${workspace.database ?? '-'} schema=${workspace.schema ?? '-'} cwd=${workspace.cwd ?? '-'} tab=${workspace.title ?? '-'}`,
     )
   }
   for (const a of attachments) {

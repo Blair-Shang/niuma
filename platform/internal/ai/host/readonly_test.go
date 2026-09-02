@@ -40,7 +40,7 @@ func TestNamespaceForKind(t *testing.T) {
 }
 
 func TestIsSQLTool(t *testing.T) {
-	if !IsSQLTool(ToolListTables) || IsSQLTool("list_tables") {
+	if !IsSQLTool(ToolListTables) || IsSQLTool("list_tables") || IsHostTool("mcp_foo") {
 		t.Fatal("sql_* only")
 	}
 }

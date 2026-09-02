@@ -578,7 +578,7 @@ export const useAiStore = defineStore('ai', () => {
     if (!items.length) {
       return
     }
-    pendingComposerAttachments.value = [...items]
+    pendingComposerAttachments.value = [...pendingComposerAttachments.value, ...items]
   }
 
   function takePendingComposerAttachments(): AiContextAttachment[] {

@@ -95,6 +95,7 @@ export interface WorkspaceTab {
    *
    * ### 其它模块
    * - `terminalSyncGroupId` / `terminalSyncSlot` — SSH 多终端同步组与槽位 `'A'|'B'|'C'|'D'`
+   * - `remotePath` — SSH/SFTP 当前远程目录（给 AI Context Pack 的 cwd）
    *
    * ### 刻意不进 props
    * - `sessionId` — 物理会话由 L4 Session Registry 管理，不落盘

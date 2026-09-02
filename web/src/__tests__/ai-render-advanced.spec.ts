@@ -48,6 +48,28 @@ describe('echarts-lite', () => {
     expect(Number(grid.top)).toBeGreaterThanOrEqual(56)
   })
 
+  it('parses compact chart when nm is not 1', () => {
+    const raw = JSON.stringify({
+      nm: 2,
+      type: 'bar',
+      title: 'Top 进程 RSS(GB)',
+      x: ['mongod', 'mysqld'],
+      series: [{ name: 'RSS(GB)', data: [10.5, 8.1] }],
+    })
+    const { option, error } = parseAiChartOption(raw)
+    expect(error).toBeNull()
+    expect(option?.series).toBeTruthy()
+    expect((option?.title as { text?: string }).text).toBe('Top 进程 RSS(GB)')
+  })
+
+  it('does not throw when full option title is a string', () => {
+    const { option, error } = parseAiChartOption(
+      JSON.stringify({ title: 'Top 进程 RSS(GB)', series: [{ type: 'bar', data: [1] }] }),
+    )
+    expect(error).toBeNull()
+    expect((option?.title as { text?: string }).text).toBe('Top 进程 RSS(GB)')
+  })
+
   it('accepts full option wrapper', () => {
     const { option, error } = parseAiChartOption(
       JSON.stringify({ option: { series: [{ type: 'line', data: [1] }] } }),

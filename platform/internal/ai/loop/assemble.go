@@ -58,7 +58,38 @@ func AssembleMessages(history []store.AIMessage, normalized NormalizedContext, s
 		}
 		out = append(out, ChatMessage{Role: role, Content: content})
 	}
+	return markCurrentTurn(out)
+}
+
+// markCurrentTurn 在连续用户消息（中间无助手回复）前插入本轮标记，避免模型把旧问题当当前任务。
+func markCurrentTurn(msgs []ChatMessage) []ChatMessage {
+	lastUser := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == MessageRoleUser {
+			lastUser = i
+			break
+		}
+	}
+	if lastUser <= 0 || !hasUnansweredPriorUser(msgs, lastUser) {
+		return msgs
+	}
+	out := make([]ChatMessage, 0, len(msgs)+1)
+	out = append(out, msgs[:lastUser]...)
+	out = append(out, ChatMessage{Role: MessageRoleSystem, Content: currentTurnPrompt})
+	out = append(out, msgs[lastUser:]...)
 	return out
+}
+
+func hasUnansweredPriorUser(msgs []ChatMessage, lastUser int) bool {
+	for i := lastUser - 1; i >= 0; i-- {
+		switch msgs[i].Role {
+		case MessageRoleAssistant:
+			return false
+		case MessageRoleUser:
+			return true
+		}
+	}
+	return false
 }
 
 func assembleUserMessage(raw string) (ChatMessage, bool) {

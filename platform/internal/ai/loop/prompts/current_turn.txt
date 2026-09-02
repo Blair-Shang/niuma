@@ -1,0 +1,1 @@
+[Current turn] Answer only the next user message. Earlier user messages without an assistant reply are background, not the current task.

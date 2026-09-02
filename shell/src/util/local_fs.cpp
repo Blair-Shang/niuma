@@ -532,8 +532,10 @@ bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
     error = "invalid path encoding";
     return false;
   }
+  // 覆盖升级：静默安装，沿用上次目录/权限；不弹向导。数据在用户目录，不在 {app}。
+  const wchar_t* silent_args = L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-";
   const HINSTANCE result =
-      ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+      ShellExecuteW(nullptr, L"open", wide.c_str(), silent_args, nullptr, SW_HIDE);
   if (reinterpret_cast<intptr_t>(result) <= 32) {
     error = "launch installer failed";
     return false;

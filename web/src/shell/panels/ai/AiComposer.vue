@@ -7,12 +7,15 @@ import type { RsSelectModelValue, RsSelectOption, RsSelectOptions } from '@niuma
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiStore } from '@/stores/ai'
+import { useTabStore } from '@/stores/tab'
 import {
   buildContextPack,
   encodeAttachmentMarkers,
   listMentionCandidates,
   type AiContextAttachment,
 } from './context-pack'
+import { acceptDroppedTab } from './drop-tab'
+import { isNiumaTabDrag } from '@/shell/workspace/tab-dnd'
 import {
   AI_FILE_ACCEPT,
   AI_FILE_MAX_COUNT,
@@ -37,6 +40,11 @@ import {
 
 const { t } = useI18n()
 const aiStore = useAiStore()
+const tabStore = useTabStore()
+
+const inputPlaceholder = computed(() =>
+  tabStore.activeTab?.moduleId === 'ssh' ? t('ai.inputPlaceholderSsh') : t('ai.inputPlaceholder'),
+)
 
 const draft = ref('')
 const attachments = ref<AiContextAttachment[]>([])
@@ -373,11 +381,18 @@ function onPaste(e: ClipboardEvent): void {
 
 function onDrop(e: DragEvent): void {
   e.preventDefault()
+  if (acceptDroppedTab(e)) {
+    e.stopPropagation()
+    return
+  }
   void addLocalFiles(e.dataTransfer?.files)
 }
 
 function onDragOver(e: DragEvent): void {
   e.preventDefault()
+  if (isNiumaTabDrag(e) && e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
 }
 
 function onPickFiles(e: Event): void {
@@ -524,8 +539,8 @@ function cancelEditing(): void {
           v-model="draft"
           class="nm-ai-composer__input rs-native-scrollbar"
           rows="2"
-          :placeholder="t('ai.inputPlaceholder')"
-          :aria-label="t('ai.inputPlaceholder')"
+          :placeholder="inputPlaceholder"
+          :aria-label="inputPlaceholder"
           :disabled="aiStore.sending && !aiStore.isStreaming"
           @keydown="onKeydown"
           @input="onInput"

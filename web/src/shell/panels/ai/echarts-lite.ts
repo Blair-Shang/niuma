@@ -3,8 +3,11 @@
  */
 import type { EChartsOption } from 'echarts'
 
+const LITE_TYPES = new Set(['bar', 'line', 'pie', 'scatter', 'radar'])
+
 export type NmChartLite = {
-  nm: 1
+  /** 简表标记；模型有时写成 nm:2 表示第 2 张图，仍按简表解析。 */
+  nm?: number
   type: 'bar' | 'line' | 'pie' | 'scatter' | 'radar'
   title?: string
   x?: Array<string | number>
@@ -45,7 +48,20 @@ function readChartTheme(): ChartTheme {
 }
 
 function isLite(v: unknown): v is NmChartLite {
-  return Boolean(v && typeof v === 'object' && (v as NmChartLite).nm === 1 && (v as NmChartLite).type)
+  if (!v || typeof v !== 'object') {
+    return false
+  }
+  const o = v as Record<string, unknown>
+  if (!LITE_TYPES.has(String(o.type))) {
+    return false
+  }
+  if ('xAxis' in o || 'yAxis' in o) {
+    return false
+  }
+  if (o.title != null && typeof o.title !== 'string') {
+    return false
+  }
+  return 'x' in o || 'series' in o || 'data' in o
 }
 
 function baseTheme(opts?: {
@@ -97,22 +113,39 @@ export function parseAiChartOption(raw: string): { option: EChartsOption | null;
     return { option: null, error: 'not-object' }
   }
   const obj = parsed as Record<string, unknown>
-  if ('option' in obj && obj.option && typeof obj.option === 'object') {
-    return { option: normalizeFullOption(obj.option as EChartsOption), error: null }
+  try {
+    if ('option' in obj && obj.option && typeof obj.option === 'object') {
+      return { option: normalizeFullOption(obj.option as EChartsOption), error: null }
+    }
+    if (isLite(parsed)) {
+      return { option: liteToOption(parsed), error: null }
+    }
+    return { option: normalizeFullOption(parsed as EChartsOption), error: null }
+  } catch (e) {
+    return { option: null, error: e instanceof Error ? e.message : String(e) }
   }
-  if (isLite(parsed)) {
-    return { option: liteToOption(parsed), error: null }
+}
+
+function titleText(title: EChartsOption['title'] | string | undefined): string {
+  if (typeof title === 'string') {
+    return title.trim()
   }
-  return { option: normalizeFullOption(parsed as EChartsOption), error: null }
+  if (Array.isArray(title)) {
+    return String(title[0]?.text ?? '').trim()
+  }
+  if (title && typeof title === 'object' && 'text' in title) {
+    return String(title.text ?? '').trim()
+  }
+  return ''
 }
 
 /** 完整 option 也做一层标题/图例防重叠修正（不覆盖用户显式 layout）。 */
 function normalizeFullOption(option: EChartsOption): EChartsOption {
   const next: EChartsOption = { ...option }
-  const title = next.title
-  const hasTitle = Boolean(
-    (Array.isArray(title) ? title[0]?.text : title && 'text' in title ? title.text : '') || '',
-  )
+  if (typeof next.title === 'string') {
+    next.title = { text: next.title }
+  }
+  const hasTitle = Boolean(titleText(next.title))
   if (hasTitle && next.legend && typeof next.legend === 'object' && !Array.isArray(next.legend)) {
     const legend = { ...next.legend }
     if (legend.top == null && legend.bottom == null) {

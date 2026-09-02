@@ -286,6 +286,8 @@ export interface AiContextDraft {
     title?: string
     database?: string
     schema?: string
+    /** SSH/SFTP 当前远程目录 */
+    cwd?: string
     dialectFamily?: string
     capabilities?: string[]
     dialectRules?: string

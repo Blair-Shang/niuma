@@ -32,6 +32,20 @@ func TestMergeWorkspaceArgs(t *testing.T) {
 	}
 }
 
+func TestMergeWorkspaceArgsInjectsCwd(t *testing.T) {
+	n := NormalizeContext(&ContextDraft{
+		Workspace: &ContextWorkspace{ProfileID: "p1", SessionID: "s1", Cwd: "/var/log"},
+	})
+	raw := mergeWorkspaceArgs(`{}`, n)
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatal(err)
+	}
+	if obj["cwd"] != "/var/log" || obj["path"] != "/var/log" {
+		t.Fatalf("%v", obj)
+	}
+}
+
 func TestSanitizeToolPrefix(t *testing.T) {
 	if got := sanitizeToolPrefix("vastbase readonly!"); got != "vastbase_readonly_" {
 		// trailing ! becomes _; trim behavior
@@ -46,7 +60,7 @@ func TestSanitizeToolPrefix(t *testing.T) {
 
 func TestBuildEnabledToolDefsIncludesHostSQL(t *testing.T) {
 	s := New(Deps{Host: stubHostRuntime{}})
-	defs, bound, err := s.buildEnabledToolDefs(context.Background())
+	defs, bound, err := s.buildEnabledToolDefs(context.Background(), "vastbase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +70,21 @@ func TestBuildEnabledToolDefsIncludesHostSQL(t *testing.T) {
 	b, ok := bound[host.ToolListTables]
 	if !ok || b.HostName != host.ToolListTables {
 		t.Fatalf("missing host tool: %+v", bound)
+	}
+}
+
+func TestBuildEnabledToolDefsIncludesHostSSH(t *testing.T) {
+	s := New(Deps{Host: stubHostRuntime{}})
+	defs, bound, err := s.buildEnabledToolDefs(context.Background(), "ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 5 {
+		t.Fatalf("defs=%d", len(defs))
+	}
+	b, ok := bound[host.ToolSSHListDir]
+	if !ok || b.HostName != host.ToolSSHListDir || b.Server.ServerID != host.ServerIDSSH {
+		t.Fatalf("missing ssh host tool: %+v", bound)
 	}
 }
 
