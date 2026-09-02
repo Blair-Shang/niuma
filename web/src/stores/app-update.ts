@@ -345,7 +345,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     })
   }
 
-  async function check(opts?: { manual?: boolean }) {
+  async function check(opts?: { manual?: boolean; prompt?: boolean }) {
     const bridge = useBridgeStore()
     const current = bridge.shellVersion?.trim()
     if (!current) {
@@ -358,7 +358,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
       phase.value === 'ready' ||
       phase.value === 'applying'
     if (busy) {
-      if (opts?.manual || forceUpdate.value) dialogOpen.value = true
+      if (opts?.manual || opts?.prompt || forceUpdate.value) dialogOpen.value = true
       return
     }
     phase.value = 'checking'
@@ -389,7 +389,8 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
           const sn = readSnooze()
           return !!(sn && sn.version === res.latest.version && sn.until > Date.now())
         })()
-      if (opts?.manual || forceUpdate.value) {
+      // 手动检查、强制更新、或启动后首次发现（未稍后提醒）才弹窗；每小时复查保持静默。
+      if (opts?.manual || forceUpdate.value || (opts?.prompt && !snoozed)) {
         dialogOpen.value = true
       }
       if (!snoozed || forceUpdate.value) {
@@ -403,10 +404,15 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
       }
       startSilentDownload()
     } catch (e) {
-      phase.value = 'error'
-      error.value = mapUpdateError(e, 'checkFailed')
-      if (opts?.manual) dialogOpen.value = true
-      else phase.value = 'idle'
+      // 自动检查失败不打扰；仅手动检查展示错误。
+      if (opts?.manual) {
+        phase.value = 'error'
+        error.value = mapUpdateError(e, 'checkFailed')
+        dialogOpen.value = true
+      } else {
+        error.value = ''
+        phase.value = 'idle'
+      }
     }
   }
 
@@ -490,10 +496,10 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
   const HOUR_MS = 60 * 60 * 1000
   let hourlyTimer: ReturnType<typeof setInterval> | null = null
 
-  /** 启动后延迟检查一次，之后每小时检查一次（手动检查不受影响）。 */
+  /** 启动完成后检查一次：有新版本弹窗，失败或已最新静默。之后每小时静默复查。 */
   function scheduleStartupCheck(delayMs = 10_000) {
     window.setTimeout(() => {
-      void check({ manual: false })
+      void check({ prompt: true })
     }, delayMs)
     if (hourlyTimer != null) {
       clearInterval(hourlyTimer)

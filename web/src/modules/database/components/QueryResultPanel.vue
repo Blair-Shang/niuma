@@ -10,8 +10,11 @@ import {
   copyTextToClipboard,
   type RsTableColumn,
 } from '@niuma/ui'
-import { computed, ref, watch } from 'vue'
-import BrowseCellEditorDialog from './BrowseCellEditorDialog.vue'
+import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
+import {
+  bindQueryCellDialog,
+  unbindQueryCellDialog,
+} from '../composables/query-cell-dialog-host'
 import {
   useCellViewDialog,
   type CellViewResolveFullValue,
@@ -105,9 +108,33 @@ function onCellView(
   openCellView(row, column)
 }
 
-async function onCellViewCopyFull(): Promise<void> {
-  await copyCellFull()
-}
+const cellDialogOwner = useId()
+
+watch(cellViewOpen, (open) => {
+  if (open) {
+    bindQueryCellDialog({
+      owner: cellDialogOwner,
+      open: cellViewOpen,
+      draft: cellViewDraft,
+      title: cellViewTitle,
+      labels: cellViewLabels,
+      copyFull: copyCellFull,
+    })
+    return
+  }
+  unbindQueryCellDialog(cellDialogOwner)
+})
+
+watch(
+  () => props.layoutActive,
+  (active) => {
+    if (!active && cellViewOpen.value) cellViewOpen.value = false
+  },
+)
+
+onBeforeUnmount(() => {
+  unbindQueryCellDialog(cellDialogOwner)
+})
 
 const messagesLayoutActive = computed(
   () => props.layoutActive && props.activePaneTab === 'messages',
@@ -559,17 +586,6 @@ function plainToneIcon(tone?: QueryResultMessageItem['tone']): string {
       </template>
     </div>
 
-    <BrowseCellEditorDialog
-      v-model:open="cellViewOpen"
-      v-model:draft="cellViewDraft"
-      :title="cellViewTitle"
-      readonly
-      :cancel-label="cellViewLabels().close"
-      :show-copy-full="true"
-      :copy-full-label="cellViewLabels().copyFull"
-      :copied-label="cellViewLabels().copied"
-      @copy-full="onCellViewCopyFull"
-    />
   </div>
 </template>
 

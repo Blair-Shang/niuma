@@ -5,6 +5,7 @@ import {
   type RsContextMenuItem,
   type RsSplitPaneItem,
 } from '@niuma/ui'
+import QueryCellDialogHost from './QueryCellDialogHost.vue'
 import SqlQueryToolbar from './SqlQueryToolbar.vue'
 import type { SqlQueryHistoryEntry, SqlQueryToolbarLabels } from '../types/sql-query-shell'
 
@@ -123,6 +124,7 @@ const emit = defineEmits<{
         </RsSplitPane>
       </div>
     </RsContextMenu>
+    <QueryCellDialogHost />
   </div>
 </template>
 
