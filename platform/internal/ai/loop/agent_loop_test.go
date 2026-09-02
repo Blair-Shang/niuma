@@ -1,9 +1,22 @@
-package ai
+package loop
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+
+	"niuma/platform/internal/ai/host"
 )
+
+type stubHostRuntime struct{}
+
+func (stubHostRuntime) Call(_ context.Context, _ string, _ map[string]any) (json.RawMessage, error) {
+	return json.RawMessage(`{"schemas":[],"truncated":false}`), nil
+}
+
+func (stubHostRuntime) KindOf(_ context.Context, _ string) (string, error) {
+	return "vastbase", nil
+}
 
 func TestMergeWorkspaceArgs(t *testing.T) {
 	n := NormalizeContext(&ContextDraft{
@@ -28,6 +41,34 @@ func TestSanitizeToolPrefix(t *testing.T) {
 	}
 	if got := sanitizeToolPrefix("9x"); got != "s_9x" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestBuildEnabledToolDefsIncludesHostSQL(t *testing.T) {
+	s := New(Deps{Host: stubHostRuntime{}})
+	defs, bound, err := s.buildEnabledToolDefs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 4 {
+		t.Fatalf("defs=%d", len(defs))
+	}
+	b, ok := bound[host.ToolListTables]
+	if !ok || b.HostName != host.ToolListTables {
+		t.Fatalf("missing host tool: %+v", bound)
+	}
+}
+
+func TestCallSQLListSchemasViaStub(t *testing.T) {
+	text, err := host.CallSQL(context.Background(), stubHostRuntime{}, host.ToolListSchemas, map[string]any{
+		"profileId": "p1",
+		"moduleId":  "vastbase",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text == "" {
+		t.Fatal("empty result")
 	}
 }
 

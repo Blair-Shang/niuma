@@ -26,6 +26,16 @@ function onChangelogOpen(open: boolean) {
   if (open) void store.openChangelog()
   else store.closeChangelog()
 }
+
+function formatReleaseDate(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 </script>
 
 <template>
@@ -113,13 +123,16 @@ function onChangelogOpen(open: boolean) {
             >
               <p class="nm-changelog__meta">
                 <span class="font-mono">{{ rel.version }}</span>
+                <span v-if="formatReleaseDate(rel.publishedAt)">
+                  · {{ formatReleaseDate(rel.publishedAt) }}
+                </span>
                 <span v-if="rel.title"> · {{ rel.title }}</span>
               </p>
               <RsMarkdown
                 class="nm-changelog__notes"
                 :model-value="rel.notesMd || t('appUpdate.noNotes')"
                 readonly
-                height="12rem"
+                height="10rem"
               />
             </article>
           </template>

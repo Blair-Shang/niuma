@@ -1,0 +1,15 @@
+NiuMa
+Copyright 2026 NiuMa Authors
+
+This product includes software developed by the NiuMa Authors
+(https://www.niuma007.com/).
+
+Licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+The NiuMa name and logos are trademarks. Apache License 2.0 does not
+grant trademark rights (see License section 6).
+
+Third-party components shipped with desktop builds (Chromium Embedded
+Framework and others) are listed in docs/compliance/NOTICES.txt and,
+in installers, licenses/NOTICES.txt.

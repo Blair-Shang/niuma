@@ -26,15 +26,20 @@ fi
 if [[ -f "$REPO_ROOT/third_party/cef/README.txt" ]]; then
   cp "$REPO_ROOT/third_party/cef/README.txt" "$DEST_DIR/licenses/CEF-README.txt"
 fi
+if [[ -f "$REPO_ROOT/LICENSE" ]]; then
+  cp "$REPO_ROOT/LICENSE" "$DEST_DIR/licenses/LICENSE"
+fi
+if [[ -f "$REPO_ROOT/NOTICE" ]]; then
+  cp "$REPO_ROOT/NOTICE" "$DEST_DIR/licenses/NOTICE"
+fi
 if [[ -f "$REPO_ROOT/docs/compliance/NOTICES.txt" ]]; then
   cp "$REPO_ROOT/docs/compliance/NOTICES.txt" "$DEST_DIR/licenses/NOTICES.txt"
 fi
-if [[ -f "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" ]]; then
-  cp "$REPO_ROOT/docs/legal/EULA.zh-CN.txt" "$DEST_DIR/licenses/EULA.zh-CN.txt"
-fi
-if [[ -f "$REPO_ROOT/docs/legal/EULA.en-US.txt" ]]; then
-  cp "$REPO_ROOT/docs/legal/EULA.en-US.txt" "$DEST_DIR/licenses/EULA.en-US.txt"
-fi
+for legal in DISCLAIMER.zh-CN.txt DISCLAIMER.en-US.txt EULA.zh-CN.txt EULA.en-US.txt; do
+  if [[ -f "$REPO_ROOT/docs/legal/$legal" ]]; then
+    cp "$REPO_ROOT/docs/legal/$legal" "$DEST_DIR/licenses/$legal"
+  fi
+done
 if [[ -f "$REPO_ROOT/build/version.json" ]]; then
   cp "$REPO_ROOT/build/version.json" "$DEST_DIR/version.json"
 fi

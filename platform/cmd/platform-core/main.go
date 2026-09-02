@@ -172,8 +172,10 @@ func run() error {
 		Components:   componentRegistry,
 		AppUpdate:    appUpdateMgr,
 		AI:           aiService,
+		APIHistory:   store.NewAPIHistoryStore(db),
 		Events:       eventHub,
 	})
+	aiService.BindHost(dispatcher.HostRuntime())
 	go aiService.SoftDiscoverBuiltinMCP(context.Background())
 	srv := server.New(ipcAddress(), dispatcher)
 	go func() {

@@ -1,3 +1,4 @@
+// 本文件实现工具组件包探测与安装（platform.components.*）。
 package handler
 
 import (
@@ -42,6 +43,7 @@ type componentsGetDownloadResult struct {
 	URL string `json:"url"`
 }
 
+// componentsList 处理 platform.components.list：列出组件包及探测状态。
 func (d *Dispatcher) componentsList(ctx context.Context, req Request) Response {
 	if d.components == nil {
 		return errorResponse(req.ID, "components registry not available")
@@ -59,6 +61,7 @@ func (d *Dispatcher) componentsList(ctx context.Context, req Request) Response {
 	return okResponse(req.ID, componentsListResult{Bundles: bundles})
 }
 
+// componentsDetect 处理 platform.components.detect：重新探测指定组件包。
 func (d *Dispatcher) componentsDetect(ctx context.Context, req Request) Response {
 	if d.components == nil {
 		return errorResponse(req.ID, "components registry not available")
@@ -77,6 +80,7 @@ func (d *Dispatcher) componentsDetect(ctx context.Context, req Request) Response
 	return okResponse(req.ID, componentsDetectResult{Bundle: bundle})
 }
 
+// componentsSetPath 处理 platform.components.setPath：设置或清除工具可执行路径。
 func (d *Dispatcher) componentsSetPath(ctx context.Context, req Request) Response {
 	if d.components == nil {
 		return errorResponse(req.ID, "components registry not available")
@@ -94,6 +98,7 @@ func (d *Dispatcher) componentsSetPath(ctx context.Context, req Request) Respons
 	return okResponse(req.ID, componentsSetPathResult{Updated: true})
 }
 
+// componentsGetDownload 处理 platform.components.getDownload：返回官方下载页 URL。
 func (d *Dispatcher) componentsGetDownload(ctx context.Context, req Request) Response {
 	if d.components == nil {
 		return errorResponse(req.ID, "components registry not available")
@@ -123,6 +128,7 @@ type componentsInstallResult struct {
 	Installed bool                       `json:"installed"`
 }
 
+// componentsInstall 处理 platform.components.install：下载并安装组件到 data/components。
 func (d *Dispatcher) componentsInstall(ctx context.Context, req Request) Response {
 	if d.components == nil {
 		return errorResponse(req.ID, "components registry not available")

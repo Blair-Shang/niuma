@@ -1,0 +1,64 @@
+NiuMa Official Disclaimer
+Version: 1.0.0    Issued by: an individual developer (not a registered company)
+
+[Official position — for the developer]
+
+To the maximum extent permitted by the laws of the People's Republic of China:
+
+1. The Developer is not responsible for any result of installing, using, updating, or uninstalling the Software, or of connecting to or operating any system with it.
+2. You decide whether to use it and you assume all risk. Use means you accept this disclaimer.
+3. The Software is provided free of charge and AS IS. No warranty of fitness, safety, or results.
+4. The Developer has no duty to support, fix defects, ship updates, publish security notices, or pay any compensation.
+5. If you obtained the Software free of charge, the Developer's total liability relating to it is zero.
+6. The Software is not a paid service, outsourcing engagement, professional advice, or SLA. Publishing source or an installer does not make the Developer responsible for your outcomes.
+
+This does not exclude liability that applicable law does not allow to be disclaimed in advance (for example intentional misconduct or gross negligence where such a waiver is void). Apart from that, the Developer is not responsible.
+
+────────────────────────────────
+
+1. Who is responsible for outcomes
+
+You are responsible for outcomes of using the Software. The Developer is not.
+
+That includes SQL, commands, scripts, configuration, and AI suggestions you enter or run; databases, hosts, and cloud accounts you connect; data, credentials, and backups on your machine; and whether you are authorized to access a target system.
+
+The Developer does not control, review, approve, or execute your actions, and makes no judgment about whether they are correct or harmful.
+
+2. No warranty (including defects)
+
+The Software may contain defects, stop working, corrupt data, have security holes, or be incompatible with your environment. That is not a breach and creates no duty to repair or compensate.
+
+The Windows installer may be unsigned. The OS or antivirus may block or warn. That is not a defect and not the Developer's responsibility.
+
+3. Scope of non-responsibility
+
+To the maximum extent permitted by law, the Developer is not liable for any of the following, whether direct or indirect, and even if advised of the possibility:
+
+- data loss, corruption, overwrite, or inability to recover
+- leak of credentials, keys, or certificates
+- business interruption, lost profits, downtime, or third-party claims
+- mistaken deletes, changes, or privilege/schema errors
+- failed install, update, uninstall, or leftover files
+- inaccurate, unsafe, or stale AI output
+- issues in third-party software, drivers, databases, or the OS
+- modified, redistributed, or spoofed builds (the Developer is not responsible for builds the Developer did not publish)
+
+4. You agree not to pursue the Developer
+
+To the maximum extent permitted by law, you waive claims against the Developer for compensation, repair, replacement, or breach arising from the Software.
+
+If your use of the Software (including unlawful use, lack of authorization, no backup, relying on AI, or touching production) causes a third party to claim against the Developer, you will handle that claim and bear the related cost and loss so the Developer is not burdened by it.
+
+Feedback, issues, email, or pull requests create no support, confidentiality, or indemnity duty.
+
+5. Liability cap
+
+The Developer's total liability relating to the Software, if any, will not exceed the amount you actually paid the Developer for it. If you obtained it free of charge, that amount is zero.
+
+6. Controlling text
+
+The official text is this file: docs/legal/DISCLAIMER.en-US.txt in the source repository, and licenses/DISCLAIMER.en-US.txt after install.
+
+Installer notices and the in-app About summary must match this position and must not narrow it.
+
+The copyright license remains Apache License 2.0, which already provides the work AS IS and limits liability. This disclaimer states the same official position. It is not a paid-services contract and grants no extra warranty.

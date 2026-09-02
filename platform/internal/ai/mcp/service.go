@@ -1,4 +1,4 @@
-package ai
+package mcp
 
 import (
 	"context"
@@ -7,23 +7,42 @@ import (
 	"log/slog"
 	"strings"
 
+	"niuma/platform/internal/ai/tool"
+	"niuma/platform/internal/idgen"
 	"niuma/platform/internal/store"
 )
 
+const (
+	credentialServicePrefix = "NiuMa/credential/"
+	credentialSecretAccount = "secret"
+)
+
+// API 管理外部 MCP Server 登记、发现与调用配置。
+type API struct {
+	Store   *store.AIMCPStore
+	ids     idgen.Generator
+	secrets store.SecretStore
+}
+
+// New 创建 MCP 配置 API。
+func New(st *store.AIMCPStore, ids idgen.Generator, secrets store.SecretStore) *API {
+	return &API{Store: st, ids: ids, secrets: secrets}
+}
+
 // MCPServerView 是 Bridge 回传的 Server 视图。
 type MCPServerView struct {
-	ServerID      string `json:"serverId"`
-	ServerName    string `json:"serverName"`
-	TransportKind string `json:"transportKind"`
-	EndpointURL   string `json:"endpointUrl,omitempty"`
-	CommandPath   string `json:"commandPath,omitempty"`
-	LaunchOptions string `json:"launchOptions"`
-	HasCredential bool   `json:"hasCredential"`
-	RecordStatus  string `json:"recordStatus"`
-	SortOrder     int64  `json:"sortOrder"`
-	RowVersion    int64  `json:"rowVersion"`
-	CreatedAt     string `json:"createdAt"`
-	UpdatedAt     string `json:"updatedAt"`
+	ServerID      string        `json:"serverId"`
+	ServerName    string        `json:"serverName"`
+	TransportKind string        `json:"transportKind"`
+	EndpointURL   string        `json:"endpointUrl,omitempty"`
+	CommandPath   string        `json:"commandPath,omitempty"`
+	LaunchOptions string        `json:"launchOptions"`
+	HasCredential bool          `json:"hasCredential"`
+	RecordStatus  string        `json:"recordStatus"`
+	SortOrder     int64         `json:"sortOrder"`
+	RowVersion    int64         `json:"rowVersion"`
+	CreatedAt     string        `json:"createdAt"`
+	UpdatedAt     string        `json:"updatedAt"`
 	Tools         []MCPToolView `json:"tools,omitempty"`
 }
 
@@ -81,7 +100,7 @@ func toMCPServerView(s store.AIMCPServer, tools []store.AIMCPTool) MCPServerView
 func toMCPToolView(t store.AIMCPTool) MCPToolView {
 	risk := t.RiskLevel
 	if risk == "" {
-		risk = InferToolRisk(t.ToolName)
+		risk = tool.InferToolRisk(t.ToolName)
 	}
 	return MCPToolView{
 		ToolID:          t.ToolID,
@@ -91,17 +110,17 @@ func toMCPToolView(t store.AIMCPTool) MCPToolView {
 		ToolDescription: t.ToolDescription,
 		InputSchema:     t.InputSchema,
 		Enabled:         t.Enabled,
-		RiskLevel:       NormalizeRiskLevel(risk),
+		RiskLevel:       tool.NormalizeRiskLevel(risk),
 		DiscoveredAt:    t.DiscoveredAt,
 	}
 }
 
 // ListMCPServers 列出 MCP Server（可选附带 tools）。
-func (s *Service) ListMCPServers(ctx context.Context, status string, withTools bool) ([]MCPServerView, error) {
-	if s == nil || s.MCP == nil {
+func (s *API) ListMCPServers(ctx context.Context, status string, withTools bool) ([]MCPServerView, error) {
+	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("ai: mcp store unavailable")
 	}
-	list, err := s.MCP.ListServers(ctx, status)
+	list, err := s.Store.ListServers(ctx, status)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +128,7 @@ func (s *Service) ListMCPServers(ctx context.Context, status string, withTools b
 	for _, srv := range list {
 		var tools []store.AIMCPTool
 		if withTools {
-			tools, err = s.MCP.ListTools(ctx, srv.ServerID)
+			tools, err = s.Store.ListTools(ctx, srv.ServerID)
 			if err != nil {
 				return nil, err
 			}
@@ -120,18 +139,18 @@ func (s *Service) ListMCPServers(ctx context.Context, status string, withTools b
 }
 
 // GetMCPServer 读取单个 Server + tools。
-func (s *Service) GetMCPServer(ctx context.Context, serverID string) (*MCPServerView, error) {
-	if s == nil || s.MCP == nil {
+func (s *API) GetMCPServer(ctx context.Context, serverID string) (*MCPServerView, error) {
+	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("ai: mcp store unavailable")
 	}
-	srv, err := s.MCP.GetServer(ctx, serverID)
+	srv, err := s.Store.GetServer(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
 	if srv == nil {
 		return nil, nil
 	}
-	tools, err := s.MCP.ListTools(ctx, serverID)
+	tools, err := s.Store.ListTools(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -140,8 +159,8 @@ func (s *Service) GetMCPServer(ctx context.Context, serverID string) (*MCPServer
 }
 
 // UpsertMCPServer 新建或更新 MCP Server。
-func (s *Service) UpsertMCPServer(ctx context.Context, params MCPUpsertParams) (*MCPServerView, error) {
-	if s == nil || s.MCP == nil || s.ids == nil {
+func (s *API) UpsertMCPServer(ctx context.Context, params MCPUpsertParams) (*MCPServerView, error) {
+	if s == nil || s.Store == nil || s.ids == nil {
 		return nil, fmt.Errorf("ai: mcp store unavailable")
 	}
 	name := strings.TrimSpace(params.ServerName)
@@ -173,7 +192,7 @@ func (s *Service) UpsertMCPServer(ctx context.Context, params MCPUpsertParams) (
 	var existing *store.AIMCPServer
 	var err error
 	if serverID != "" {
-		existing, err = s.MCP.GetServer(ctx, serverID)
+		existing, err = s.Store.GetServer(ctx, serverID)
 		if err != nil {
 			return nil, err
 		}
@@ -198,12 +217,12 @@ func (s *Service) UpsertMCPServer(ctx context.Context, params MCPUpsertParams) (
 			}
 		}
 		row.ServerID = serverID
-		if err := s.MCP.CreateServer(ctx, row); err != nil {
+		if err := s.Store.CreateServer(ctx, row); err != nil {
 			return nil, err
 		}
 	} else {
 		row.ServerID = existing.ServerID
-		_, ok, err := s.MCP.UpdateServer(ctx, row, params.RowVersion)
+		_, ok, err := s.Store.UpdateServer(ctx, row, params.RowVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -216,32 +235,32 @@ func (s *Service) UpsertMCPServer(ctx context.Context, params MCPUpsertParams) (
 }
 
 // DeleteMCPServer 删除 Server 及其工具缓存（凭据由 handler 清理）。
-func (s *Service) DeleteMCPServer(ctx context.Context, serverID string) (*store.AIMCPServer, error) {
-	if s == nil || s.MCP == nil {
+func (s *API) DeleteMCPServer(ctx context.Context, serverID string) (*store.AIMCPServer, error) {
+	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("ai: mcp store unavailable")
 	}
-	srv, err := s.MCP.GetServer(ctx, serverID)
+	srv, err := s.Store.GetServer(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
 	if srv == nil {
 		return nil, nil
 	}
-	if err := s.MCP.DeleteToolsByServer(ctx, serverID); err != nil {
+	if err := s.Store.DeleteToolsByServer(ctx, serverID); err != nil {
 		return nil, err
 	}
-	if err := s.MCP.DeleteServer(ctx, serverID); err != nil {
+	if err := s.Store.DeleteServer(ctx, serverID); err != nil {
 		return nil, err
 	}
 	return srv, nil
 }
 
 // RefreshMCPTools 发现工具并写入缓存。
-func (s *Service) RefreshMCPTools(ctx context.Context, serverID string) (*MCPServerView, error) {
-	if s == nil || s.MCP == nil || s.ids == nil {
+func (s *API) RefreshMCPTools(ctx context.Context, serverID string) (*MCPServerView, error) {
+	if s == nil || s.Store == nil || s.ids == nil {
 		return nil, fmt.Errorf("ai: mcp store unavailable")
 	}
-	srv, err := s.MCP.GetServer(ctx, serverID)
+	srv, err := s.Store.GetServer(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +282,7 @@ func (s *Service) RefreshMCPTools(ctx context.Context, serverID string) (*MCPSer
 		return nil, err
 	}
 
-	existing, err := s.MCP.ListTools(ctx, serverID)
+	existing, err := s.Store.ListTools(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -289,11 +308,11 @@ func (s *Service) RefreshMCPTools(ctx context.Context, serverID string) (*MCPSer
 		if schema == "" {
 			schema = "{}"
 		}
-		risk := InferToolRisk(d.Name)
+		risk := tool.InferToolRisk(d.Name)
 		if old, ok := byName[d.Name]; ok && old.RiskLevel != "" {
 			risk = old.RiskLevel
 		}
-		if err := s.MCP.UpsertDiscoveredTool(ctx, store.AIMCPTool{
+		if err := s.Store.UpsertDiscoveredTool(ctx, store.AIMCPTool{
 			ToolID:          toolID,
 			ServerID:        serverID,
 			ToolName:        d.Name,
@@ -311,7 +330,7 @@ func (s *Service) RefreshMCPTools(ctx context.Context, serverID string) (*MCPSer
 		if _, ok := seen[name]; ok {
 			continue
 		}
-		_ = s.MCP.DeleteTool(ctx, old.ToolID)
+		_ = s.Store.DeleteTool(ctx, old.ToolID)
 		_ = name
 	}
 
@@ -319,38 +338,38 @@ func (s *Service) RefreshMCPTools(ctx context.Context, serverID string) (*MCPSer
 }
 
 // SetMCPToolEnabled 启用/禁用工具。
-func (s *Service) SetMCPToolEnabled(ctx context.Context, toolID string, enabled bool) error {
-	if s == nil || s.MCP == nil {
+func (s *API) SetMCPToolEnabled(ctx context.Context, toolID string, enabled bool) error {
+	if s == nil || s.Store == nil {
 		return fmt.Errorf("ai: mcp store unavailable")
 	}
-	return s.MCP.SetToolEnabled(ctx, toolID, enabled)
+	return s.Store.SetToolEnabled(ctx, toolID, enabled)
 }
 
 // SetMCPToolRiskLevel 设置工具风险等级（Policy Gate）。
-func (s *Service) SetMCPToolRiskLevel(ctx context.Context, toolID, riskLevel string) error {
-	if s == nil || s.MCP == nil {
+func (s *API) SetMCPToolRiskLevel(ctx context.Context, toolID, riskLevel string) error {
+	if s == nil || s.Store == nil {
 		return fmt.Errorf("ai: mcp store unavailable")
 	}
 	risk := strings.ToLower(strings.TrimSpace(riskLevel))
 	switch risk {
-	case RiskRead, RiskWrite, RiskDangerous:
+	case tool.RiskRead, tool.RiskWrite, tool.RiskDangerous:
 	default:
 		return fmt.Errorf("ai: riskLevel must be read, write, or dangerous")
 	}
-	return s.MCP.SetToolRiskLevel(ctx, toolID, risk)
+	return s.Store.SetToolRiskLevel(ctx, toolID, risk)
 }
 
 // SoftDiscoverBuiltinMCP 后台尝试发现内置 Vastbase 只读 MCP 工具缓存。
 // 二进制缺失时静默跳过，不阻塞启动；不把工具逻辑编进 platform。
-func (s *Service) SoftDiscoverBuiltinMCP(ctx context.Context) {
-	if s == nil || s.MCP == nil {
+func (s *API) SoftDiscoverBuiltinMCP(ctx context.Context) {
+	if s == nil || s.Store == nil {
 		return
 	}
-	srv, err := s.MCP.GetServer(ctx, BuiltinMCPVastbaseReadonlyID)
+	srv, err := s.Store.GetServer(ctx, BuiltinMCPVastbaseReadonlyID)
 	if err != nil || srv == nil {
 		return
 	}
-	tools, err := s.MCP.ListTools(ctx, BuiltinMCPVastbaseReadonlyID)
+	tools, err := s.Store.ListTools(ctx, BuiltinMCPVastbaseReadonlyID)
 	if err != nil {
 		return
 	}
@@ -369,7 +388,7 @@ func (s *Service) SoftDiscoverBuiltinMCP(ctx context.Context) {
 	slog.Info("ai: builtin vastbase MCP tools discovered", "path", resolved)
 }
 
-func (s *Service) mcpBearerToken(credentialID string) string {
+func (s *API) mcpBearerToken(credentialID string) string {
 	if s == nil || s.secrets == nil || strings.TrimSpace(credentialID) == "" {
 		return ""
 	}

@@ -3,6 +3,7 @@ name = "niuma-serviceipc"
 description = "NiuMa Layer-1 能力服务应用 IPC 协议与服务端（与 Go serviceipc 契约对齐）"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 async-trait = "0.1"

@@ -12,9 +12,15 @@ const { t } = useI18n()
 
 const activities = computed(() => visibleActivityBarItems(moduleStore.items))
 
-/** 点击领域图标：切换分类并展开/收起侧栏（ActivityBar 只做分类，不直接开模块） */
+/** 点击领域图标：切换分类并展开/收起侧栏。API 入口按需加载，不在壳启动时拉集合 store。 */
 function onCategoryClick(category: (typeof activities.value)[number]['category']) {
+  const switched = shellStore.activeCategory !== category
   shellStore.selectCategory(category)
+  if (switched && category === 'devtools') {
+    void import('@/modules/api-tester/stores/api-tester').then(({ useApiTesterStore }) => {
+      useApiTesterStore().openEntryTab()
+    })
+  }
 }
 
 /** 显式切换 Primary Side Bar（与 Ctrl+B / 同项再点 Activity 共用 shellStore） */

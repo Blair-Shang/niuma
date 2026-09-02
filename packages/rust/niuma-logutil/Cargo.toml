@@ -3,6 +3,7 @@ name = "niuma-logutil"
 description = "NiuMa 桌面子进程落盘日志（与 Go logutil 目录策略对齐）"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

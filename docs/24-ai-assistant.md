@@ -1,8 +1,8 @@
 # 24 — AI 助手（Orchestrator · MCP · AiPanel）
 
-> 版本：v0.2.0 · 日期：2026-07-18  
-> 状态：**P1 已落地**；P2→P3 按 §15 合规切片推进（禁止违建捷径，见 §15.6）  
-> 对标：Cursor Agent Loop / Context `@` · Claude MCP · OpenAI/Claude tool calling  
+> 版本：v0.3.0 · 日期：2026-09-01  
+> 状态：**P1–P4 已落地**；工具栈按 §3 / §15.5 对齐大厂（官方 host + 扩展 MCP）  
+> 对标：Cursor / Claude Code 宿主工具 · Claude MCP（仅扩展）· OpenAI/Claude tool calling  
 > 关联：[architecture.md](./architecture.md) · [11 — Platform Core](./11-platform-core.md) · [09 — App Shell](./09-web-app-shell.md) · [database-schema.md](./database-schema.md) · [21 — Session Registry](./21-session-registry.md) · [22 — Vastbase](./22-vastbase-module.md) · [20 — 工具组件](./20-tool-components.md)
 
 ---
@@ -13,7 +13,7 @@
 |--------|------|
 | 产品形态 | **Shell 级右栏** `AiPanel`（`Ctrl+I`）；**不**注册为 Activity Bar 领域模块 |
 | 编排位置 | **platform 内置 AI 领域服务**（`platform/internal/ai`；handler 仅 IPC 入口） |
-| 工具执行 | **仅外部 MCP Server**；禁止编译进 platform / L1 业务服务 |
+| 工具执行 | **官方 host**（`platform/internal/ai/host/{族}`，调已有 Bridge）+ **扩展 MCP**；禁止把 Tool 写进 L1 |
 | Skills | DB/配置驱动的**提示词模板 + 参数**；无执行逻辑 |
 | 模型 / MCP / Tool / Skill 配置 | **一律存 SQLite 表**（`000004` 已建）；密钥走统一 `SecretStore`（见下） |
 | 配置 UI 入口 | **全局设置侧边栏**（`SettingsView` 左导航）；**不**塞进 AiPanel 当主配置面 |
@@ -25,7 +25,7 @@
 
 一句话：
 
-> **Platform 负责「怎么聊、怎么调、怎么审」；MCP 负责「工具本身干什么」；Web 只渲染与注入上下文。**
+> **Platform 负责「怎么聊、怎么调、怎么审」和一手工具适配；L1 负责「库上干什么」；MCP 只负责扩展；Web 只渲染与注入上下文。**
 
 **密钥存储（与连接密码同一套，勿写成「只走 Keychain」）：**
 
@@ -45,8 +45,9 @@
 |------|----------|
 | Provider / MCP / Skill 设置；流式对话；会话落库 | 对话摘要压缩（后期）；桌面审计 `nm_audit_log`（暂不做） |
 | Context Pack 结构化入模 + `@` / 选区 / 诊断 | SSH 终端选区 + 连接/SFTP/终端诊断已接；其他域可继续加深 |
-| Agent Loop + Policy Gate + 工具卡片 | MCP 生态仍薄（目前以 Vastbase 只读为主） |
-| 内置 `vastbase-readonly` MCP 种子 + 路径解析 | 需构建 `mcp-vastbase-readonly` 到 bin 后 refresh |
+| Agent Loop + Policy Gate + 工具卡片 | 官方 `host/sql` 覆盖多引擎只读；MCP 留给用户/第三方 |
+| `host/sql` 只读四工具（与 UI 同 Bridge） | 写库 / Explain 改写仍走 P4 确认 |
+| 过渡种子 `vastbase-readonly` MCP | 不再作为默认查库路径；仅可选对外 MCP |
 | 多模态 / 文本附件 / 外置 prompts / Skill paramSchema | `tool.progress` 未推；对话摘要压缩（后期） |
 
 ---
@@ -62,34 +63,31 @@
                              │ platform.ai.* + niuma:event
 ┌────────────────────────────▼────────────────────────────────────┐
 │  Platform · Orchestrator（薄）                                   │
-│  · Agent Loop · LLM Gateway · MCP Client · Skill 装配            │
+│  · Agent Loop · LLM Gateway · host/{sql,…} · MCP Client          │
 │  · Policy Gate · 审计 · 会话落库 · Provider/MCP 配置 CRUD         │
 └───────┬────────────────────┬────────────────────┬───────────────┘
         │                    │                    │
         ▼                    ▼                    ▼
-   LLM API            外部 MCP Servers      SQLite + Vault
-   (OpenAI/Claude/…)  (DB 只读 / Ops …)     (配置·会话·加密凭据)
-        │                    │
-        │                    ▼
-        │              L1 Capability Services
-        │              (vastbase / mongo / ssh … 经既有会话边界)
-        └────────────────────────────────────────────────────────
+   LLM API            官方 host → L1          SQLite + Vault
+   (OpenAI/Claude/…)  扩展 MCP（用户/第三方）  (配置·会话·加密凭据)
 ```
 
 | 层 | 做 | 不做 |
 |----|----|------|
 | Web AiPanel | UX、上下文采集、确认交互、订阅流式事件 | 直连 LLM、持有 API Key、执行工具 |
-| Orchestrator | 消息组装、调模型、路由 MCP、审批门闩、落库 | `case "query_sql"` 硬编码业务工具 |
-| MCP Server | 具体工具实现（查库、诊断…） | 替代 platform 的权限/凭据裁决 |
-| L1 服务 | 既有运维 API / session | 充当 LLM Tool 宿主或内置 Agent |
+| Orchestrator | 消息组装、调模型、Policy Gate、落库；分流 host / MCP | 在 Loop 里写 SQL 或直连数据库 |
+| **官方 host** | tool schema + 转到已有 `{ns}.*` Bridge | 驱动、连接池、方言、自管密码 |
+| MCP Server | 用户/第三方扩展 | 替代一手查库；按引擎镜像官方二进制 |
+| L1 服务 | 既有运维 API / session（UI 与 host 共用） | 充当 LLM Tool 宿主或内嵌 MCP |
 | C++ Shell | IPC 透传 + 事件推送 | 任何 AI 业务 |
 
-### 3.1 两类「工具」勿混用
+### 3.1 三类「工具」勿混用
 
 | 概念 | 用途 | 权威源 |
 |------|------|--------|
 | **工具组件** | 本机 CLI（mongosh、pg_dump…）路径探测与配置 | `platform.components.*` · [20](./20-tool-components.md) |
-| **MCP Tools** | 给模型调用的能力 | `nm_mcp_server` / `nm_mcp_tool` · 本文 |
+| **官方 host** | 给模型的一手能力（`sql_*` 等），与 UI 同 Bridge | `platform/internal/ai/host` · 本文 §15.5 |
+| **MCP Tools** | 用户登记的扩展 | `nm_mcp_server` / `nm_mcp_tool` · 本文 |
 
 ---
 
@@ -118,7 +116,7 @@
                                │ 写/危险 → 等用户确认    │
                                └───────────┬────────────┘
                                            ▼
-                               MCP Client.invoke
+                          官方 host  或  MCP Client.invoke
                                            │
                                            ▼
                                工具结果写入消息历史
@@ -303,7 +301,7 @@ SettingsView 左导航（规划）
 | **P0** | 文档与契约冻结 | — | 本文 + types 草案 |
 | **P1** | 能聊起来 | ChatGPT 纯聊天 | Provider CRUD + 流式对话 + 会话落库 |
 | **P2** | 有工作区感知 | Cursor `@file` | Context Pack + `@` UI |
-| **P3** | 能调工具 | Claude MCP | MCP Client + 只读 DB MCP |
+| **P3** | 能调工具 | Claude / Cursor 宿主工具 | 官方 `host/sql` + 扩展 MCP Client |
 | **P4** | 安全可写 | Cursor Apply/Reject | Policy Gate + 写确认 UX |
 | **P5** | 场景化 / 可演进 | Cursor Rules | Skills、审计增强；可选拆 ai-agent |
 
@@ -342,36 +340,22 @@ SettingsView 左导航（规划）
 
 **验收**：选中一段 SQL → `@` 附加 → 回复明确引用该片段；刷新后用户消息不丢 chip；后端日志可见截断生效。
 
-### P3 — MCP + 只读工具
+### P3 — 官方只读工具 + 扩展 MCP
 
-- [x] MCP Client（stdio `tools/list`；invoke 待 Slice C）  
-- [x] `platform.ai.mcp.*` + `refresh` 写入 `nm_mcp_tool`  
-- [x] Settings 左导航 `ai-mcp`：Server 注册 + 工具启用开关  
-- [x] 第一个外部 MCP：**Vastbase/PG 只读查库**（经 Platform Bridge 调 `vastbase.*`；凭据由 platform 注入）  
-- [x] Agent Loop：`tool_calls` →（只读）invoke → 结果回灌 → 再调模型；无轮次上限（用户 cancel）  
-- [x] 写入 `nm_ai_tool_invocation` + 推送 `platform.ai.tool.*`（面板卡片接线）  
+- [x] MCP Client（stdio / Streamable HTTP）+ Settings `ai-mcp`  
+- [x] Agent Loop：`tool_calls` → Policy Gate → invoke → 回灌；无轮次上限  
+- [x] 写入 `nm_ai_tool_invocation` + `platform.ai.tool.*`  
+- [x] **官方 `host/sql`**：`sql_list_schemas` / `sql_list_tables` / `sql_describe_table` / `sql_run_readonly`；按 `moduleId` / 连接 `kind` 转到 `{ns}.catalog.*` / `{ns}.query.exec`  
+- [x] 过渡：内置 `vastbase-readonly` MCP 种子仍可登记，**装配时若 host 可用则不再暴露给模型**  
 
-**验收**：问「当前库有哪些表」→ 模型调 MCP → 面板展示工具结果 → 自然语言总结。  
-**本阶段不做**：写操作 Policy（P4）、Skill 装配（P5）、拆 L1 ai-agent。  
-**已知缺口**：SSE 传输（旧版）未做；HTTP MCP 以 Streamable HTTP（JSON / SSE 响应）为主。
-
-#### Vastbase 只读 MCP 验收闭环（操作步骤）
-
-1. **构建外部二进制**（不进 platform）：`pnpm build:services` 或单独  
-   `go build -o services/bin/mcp-vastbase-readonly.exe ./services/mcp-vastbase-readonly`  
-2. **重启 platform-core**（跑迁移 `000008`；启动日志可出现 `builtin vastbase MCP tools discovered`）  
-3. **Settings → MCP**：应有 `vastbase-readonly`；若工具数为 0，点「内置 Vastbase」或「刷新工具」  
-4. **打开 Vastbase 已连接会话**（保证 Context Pack 带 `profileId`/`sessionId`）  
-5. **AiPanel** 提问：「当前库 public schema 有哪些表？」  
-6. **期望**：工具卡片出现 `list_tables`（或 `run_readonly_sql`）→ 结果回灌 → 自然语言总结  
-
-路径查找：`NIUMA_SERVICES_BIN` → `services/bin` / `services/bin/<os-arch>` → platform-core 旁 → PATH。
+**验收**：打开已连接库 → 问「当前库有哪些表」→ 工具卡片为 `sql_list_tables`（不必先构建 MCP 二进制）。  
+**本阶段不做**：写操作默认自动跑（P4 确认）、按引擎再开 `mcp-*-readonly`。
 
 ---
 
 ## 15. P2→P3 合规落地设计（v0.2）
 
-> 目标：在不违背 §1 / §3 / §11 / §12 与 `external-tools-mcp-skills` 规则的前提下，把「能聊」推进到「有工作区感知 + 能调只读工具」。
+> 目标：在不违背 §1 / §3 / §11 / §12 与 `external-tools-mcp-skills` 规则的前提下，把「能聊」推进到「有工作区感知 + 官方只读 host + 扩展 MCP」。
 
 ### 15.1 切片顺序（可并行的边界）
 
@@ -381,15 +365,15 @@ Slice A（P2 最小闭环）          Slice B（P3 配置面）
            \                     /
             \                   /
              v                 v
-            Slice C（P3 Agent Loop + 只读 MCP）
-              tools 暴露 → tool_calls → invoke → 回灌
+            Slice C（P3 Agent Loop + 官方 host/sql + 扩展 MCP）
+              tools 暴露 → tool_calls → host 或 MCP → 回灌
 ```
 
 | Slice | 交付 | 依赖 | 明确不做 |
 |-------|------|------|----------|
 | **A** | `StreamParams.Context` → Normalize → Assemble | P1 | 诊断深度、Skill |
 | **B** | MCP 表 CRUD / 发现缓存 / Settings `ai-mcp` | `000004` 表 | 真正 invoke |
-| **C** | Client.invoke + Loop + 外部只读 MCP | A 的 workspace 作用域 + B | 写确认（P4） |
+| **C** | Loop + `host/sql` + MCP.invoke | A 的 workspace 作用域 + B | 写确认（P4）；按引擎镜像 MCP |
 
 推荐实现顺序：**A → B → C**。C 启动前至少要有 `workspace.profileId`（可空则工具拒绝「需连接」）。
 
@@ -466,11 +450,11 @@ StartStream
        StreamOpenAICompatible(…, tools)
        if no tool_calls → 落库 assistant → done
        for each tool_call:
-         resolve tool → server_id
-         risk := tool.risk_level 默认 read（P3 全部当 read）
-         if risk != read → pending 事件并暂停（P4；P3 可直接拒绝 write）
+         resolve tool → host 或 server_id
+         risk := tool.risk_level 默认 read（官方 sql_* 为 read）
+         if risk != read → pending 事件并暂停（P4）
          publish tool.start
-         MCP.Client.CallTool
+         host.Call 或 MCP.Client.CallTool
          截断 result（建议 ≤16 KiB 摘要进模型）
          落库 role=tool + invocation 行
          publish tool.result
@@ -480,47 +464,55 @@ StartStream
 
 **OpenAI 兼容**：请求带 `tools: [{type:function, function:{name,description,parameters}}]`；名称用 MCP `tool_name`（已满足 `^[a-zA-Z0-9_-]+$`）。多 Server 重名时：`{serverName}__{toolName}` 映射表，回调用时拆回。
 
-**作用域注入（硬约束）**：CallTool 前把 `profileId`/`sessionId` 写入工具参数或 MCP `_meta`（实现二选一，文档化）；MCP Server **禁止**自带密码新建连接，只能拿 platform 侧已授权会话句柄（见首个 MCP 设计）。
+**作用域注入（硬约束）**：invoke 前把 `profileId`/`sessionId`/`moduleId` 写入工具参数；**不信任**前端「已授权」断言，host 走与 UI 相同的 Capability Dispatch（含会话校验与凭据注入）。官方工具与 MCP **均禁止**自带密码新建连接。
 
-### 15.5 首个外部 MCP：Vastbase 只读
+### 15.5 官方 host/sql（一手查库）
+
+对齐 Cursor 原生工具 / AWS Action Group：适配层在编排进程，执行仍走已有 API。
 
 | 项 | 约定 |
 |----|------|
-| 位置 | `services/mcp-vastbase-readonly/` 或独立扩展目录；**不**编进 platform / vastbase-service |
-| 工具示例 | `list_schemas` / `list_tables` / `describe_table` / `run_readonly_sql`（仅 SELECT/WITH；拒绝 DDL/DML） |
-| 鉴权 | 启动参数或 stdio 握手接收 `sessionId`；内部经既有 L1 `vastbase.*` 能力代理，与 UI 查库同边界 |
-| 风险 | 全部 `read`；`run_readonly_sql` 再加语句白名单 |
+| 位置 | `platform/internal/ai/host/`（与 Loop 同进程）；**不**进 L1，**不**按引擎再开 MCP 进程 |
+| 工具名 | `sql_list_schemas` / `sql_list_tables` / `sql_describe_table` / `sql_run_readonly` |
+| 路由 | `moduleId` 或连接 `kind` → namespace（`vastbase` / `postgres` / `mysql` / …）→ `{ns}.catalog.*` / `{ns}.query.exec` |
+| 鉴权 | 与 Web 相同：`sessionId` 优先，否则 `profileId` + platform 注入凭据 |
+| 风险 | 全部 `read`；`sql_run_readonly` 另加 SELECT/WITH 白名单（第一道滤网，硬闸在会话/账号） |
 
-禁止：在 `vastbase-service` 增加 `ai.*` 方法当 Tool；禁止 Orchestrator `case "list_tables"`。
+禁止：在 `vastbase-service` 增加 `ai.*`；在 Loop 里写 SQL；为 MySQL/PG 再做 `mcp-*-readonly`。
+
+**过渡**：`services/mcp-vastbase-readonly/` 可保留，供外部 MCP 客户端；Agent 默认不暴露其工具（避免与 `sql_*` 双份）。
 
 ### 15.6 红线清单（Code Review 必查）
 
 | # | 禁止 | 正确 |
 |---|------|------|
-| 1 | L1 业务服务内嵌 LLM Tool | 外部 MCP |
-| 2 | platform 硬编码 `query_sql` 业务 | MCP.invoke |
-| 3 | Web 直连 LLM / 执行工具 | 只调 `platform.ai.*` |
-| 4 | 跳过 Normalize 只信前端附录 | Orchestrator 校验截断 |
-| 5 | MCP 自管 DB 密码 | session / Vault 既有链路 |
-| 6 | P3 开放写库无确认 | 只读；写走 P4 |
-| 7 | MCP CRUD 主 UI 塞进 AiPanel | Settings `ai-mcp` |
-| 8 | 合并「工具组件」与 MCP 注册表 | 两套表、两套设置分区 |
+| 1 | L1 业务服务内嵌 LLM Tool / MCP 协议 | L1 只保留运维 Bridge |
+| 2 | Loop 里写 SQL 或直连数据库 | `host/sql` 只转 `{ns}.*` |
+| 3 | 官方查库再包一层 stdio MCP | 官方走 host；MCP 仅扩展 |
+| 4 | 按 L1 镜像 `mcp-mysql-readonly` 等 | 一套 `sql_*`，按 kind 分流 |
+| 5 | Web 直连 LLM / 执行工具 | 只调 `platform.ai.*` |
+| 6 | 跳过 Normalize 只信前端附录 | Orchestrator 校验截断 |
+| 7 | host / MCP 自管 DB 密码 | session / Vault 既有链路 |
+| 8 | 写库无确认 | 只读自动；写走 P4 |
+| 9 | MCP CRUD 主 UI 塞进 AiPanel | Settings `ai-mcp` |
+| 10 | 合并「工具组件」与 MCP / host | 三套概念、设置里分栏 |
 
 ### 15.7 源码落位（相对 §13 增量）
 
 ```
 platform/internal/ai/
-  context.go          # NormalizeContext / 脱敏截断
-  assemble.go         # 消息 + tools 装配
-  agent_loop.go       # tool_calls 循环
-  mcp/
-    client.go         # stdio / http 客户端
-    registry.go       # 读 nm_mcp_* 、enabled 列表
+  service.go / alias.go   # 组合根（Handler 只依赖本包）
+  loop/                   # Agent Loop、装配、上下文、模型流
+  host/                   # 官方 sql_* → 已有 Bridge
+  mcp/                    # 扩展 MCP 登记与调用
+  skill/                  # Skill 模板与包
+  tool/                   # Policy Gate
 platform/internal/handler/
   ai_mcp.go           # platform.ai.mcp.*
+  capability_proxy.go # host 复用同一条 Dispatch
 web/src/shell/views/ai-settings/
   AiMcpSettingsPanel.vue
-services/mcp-vastbase-readonly/   # 外部进程（独立 go.mod）
+services/mcp-vastbase-readonly/   # 可选对外 MCP，非默认查库路径
 ```
 
 ### 15.8 验收矩阵
@@ -530,8 +522,8 @@ services/mcp-vastbase-readonly/   # 外部进程（独立 go.mod）
 | A1 | 带 `@` selection 提问 | 模型引用选区内容；超长被截断提示 |
 | A2 | context 含伪 password 字段 | 入模前已剥离 |
 | B1 | Settings 注册 stdio MCP → refresh | `nm_mcp_tool` 有行；可禁用 |
-| C1 | 「当前库有哪些表」+ 已连接 profile | tool.start/result 事件 + 自然语言 |
-| C2 | 无 profileId 问查库 | 工具失败信息友好，不盲连 |
+| C1 | 「当前库有哪些表」+ 已连接 profile | `sql_list_tables` + tool.start/result + 自然语言 |
+| C2 | 无 profileId / moduleId 问查库 | 工具失败信息友好，不盲连 |
 | C3 | cancel 中途 | run cancelled；无孤儿 MCP 子进程（尽力） |
 
 ### P4 — Policy Gate
@@ -549,8 +541,9 @@ services/mcp-vastbase-readonly/   # 外部进程（独立 go.mod）
 - [x] 内置若干运维 Skill（慢查询分析、Explain 解读、连接排查；`000007_ai_skill_seed`）  
 - [x] 多模态最小闭环：粘贴/拖入截图 → `⟦nm-img:…⟧` 落库 → Vision content parts 入模（需模型支持视觉）  
 - [x] 通用附件：`paperclip` 支持图片 + 文本（`⟦nm-txt:…⟧` 展开为 Attached file 入模）  
-- [x] 入模提示词外置：`platform/internal/ai/prompts/*.txt`（`go:embed`）  
-- [x] 内置 Vastbase 只读 MCP 种子（`000008`）+ 相对 bin 路径解析 + Settings 一键注册/发现  
+- [x] 入模提示词外置：`platform/internal/ai/loop/prompts/*.txt`（`go:embed`）  
+- [x] 过渡：内置 Vastbase 只读 MCP 种子（`000008`）+ 路径解析；Agent 默认走 `host/sql`  
+- [x] 官方 `host/sql` 四工具 + Capability Dispatch（与 UI 同路径）  
 - [x] Agent Loop 工具轮次不设硬上限；由用户 cancel 中止  
 - [ ] 评估是否拆 L1 `ai-agent`  
 - [ ] 可选：对话摘要压缩（后期）  
@@ -561,7 +554,7 @@ services/mcp-vastbase-readonly/   # 外部进程（独立 go.mod）
 
 1. **密钥**：API Key / MCP Token 走 **VaultStore**（AES-256-GCM 密文 + Keychain 主密钥）；业务表仅 `credential_id`，禁止明文列。  
 2. **作用域**：Tool 调用必须绑定用户已授权的 `profileId`/`sessionId`；禁止 MCP 私自新建绕过凭据的连接。  
-3. **默认只读优先**：首发 MCP 以 read 为主；写路径必须过 Policy Gate。  
+3. **默认只读优先**：官方 `sql_*` 与扩展 MCP 的 read 可自动跑；写路径必须过 Policy Gate。  
 4. **脱敏**：Context / 工具结果入模前去掉密码、连接串中的 secret。  
 5. **审计**：至少记录 tool 名、风险级、approve/reject、session 引用（不含明文密钥）。  
 6. **配额**：单次 prompt / 工具结果字节上限；防把百万行结果塞进上下文。
@@ -571,6 +564,7 @@ services/mcp-vastbase-readonly/   # 外部进程（独立 go.mod）
 ## 12. 非目标（本阶段明确不做）
 
 - 不在 `vastbase-service` / `mongodb-service` 内嵌 `ai.*` 业务方法当 Tool  
+- 不为每个 L1 再开官方 `mcp-*-readonly`；一手查库只加 `host/sql` 的 kind 映射  
 - 不把 AI 注册为 `builtinModules`  
 - Web 不直连公网 LLM  
 - 不把 `components/*` CLI 管理与 MCP 注册表合并  
@@ -584,7 +578,12 @@ services/mcp-vastbase-readonly/   # 外部进程（独立 go.mod）
 ```
 platform/
   internal/
-    ai/                    # 会话、流式、Context Normalize、Agent Loop、MCP Client
+    ai/                    # 组合根
+    ai/loop/               # Agent Loop、装配、上下文
+    ai/host/               # 官方 sql_* → 已有 Bridge
+    ai/mcp/                # 扩展 MCP
+    ai/skill/              # Skill
+    ai/tool/               # Policy Gate
     handler/               # Bridge 入口 platform.ai.*（薄适配）
     migrate/sqlite/
       000004_ai.up.sql
@@ -598,7 +597,7 @@ web/src/
   shell/panels/ai/         # context-pack、消息/工具卡片等
   shell/views/ai-settings/ # Provider /（规划）MCP / Skills
 
-# 外部（独立模块，不进 platform 二进制）
+# 扩展 MCP（独立模块；官方查库不依赖此进程）
 services/mcp-vastbase-readonly/
 ```
 
@@ -615,3 +614,4 @@ services/mcp-vastbase-readonly/
 | v0.1.2 | 2026-07-17 | 密钥表述对齐实现：VaultStore 密文入库，OS Keychain 仅主密钥 |
 | v0.1.3 | 2026-07-17 | 领域逻辑落 `internal/ai`，handler 仅作 Bridge 入口 |
 | v0.2.0 | 2026-07-18 | 同步 P1 现状；新增 §15 P2→P3 合规落地设计（切片、契约、红线、验收） |
+| v0.3.0 | 2026-09-01 | 对齐大厂：官方 host/sql + 扩展 MCP；L1 不接待模型；废止「凡工具皆外部 MCP」 |

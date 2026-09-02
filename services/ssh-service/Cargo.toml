@@ -1,8 +1,9 @@
 [package]
 name = "niuma-ssh-service"
 description = "NiuMa SSH/SFTP 能力服务（Layer 1）"
-version = "1.0.2"
+version = "1.0.5"
 edition = "2021"
+license = "Apache-2.0"
 
 [[bin]]
 name = "niuma-ssh-service"

@@ -14,11 +14,19 @@ Inno Setup (Windows installer only)
 Windows installers are produced with Inno Setup 6, which may be used free of
 charge for commercial distribution. See: https://jrsoftware.org/files/is/license.txt
 
+NiuMa application code
+----------------------
+Portions written by the NiuMa Authors are licensed under Apache License 2.0.
+See licenses/LICENSE and licenses/NOTICE in this distribution (or LICENSE and
+NOTICE at the source repository root). The official no-liability statement is
+licenses/DISCLAIMER.zh-CN.txt and licenses/DISCLAIMER.en-US.txt. Additional
+install-time notices are in licenses/EULA.zh-CN.txt and licenses/EULA.en-US.txt;
+they do not reduce the rights granted by Apache 2.0.
+
 Open Source Dependencies
 ------------------------
 JavaScript, Go, and Rust dependencies are managed via pnpm, go modules, and
-Cargo respectively. NiuMa application code is licensed under the End User
-License Agreement shipped as licenses/EULA.zh-CN.txt and licenses/EULA.en-US.txt.
+Cargo respectively and remain under their own licenses.
 
 Oracle Instant Client (optional, not bundled by default)
 --------------------------------------------------------

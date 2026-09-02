@@ -1,3 +1,4 @@
+// 本文件实现本体安装包受限下载（platform.appUpdate.* / shell.update.*）。
 package handler
 
 import (
@@ -11,9 +12,12 @@ import (
 )
 
 const (
+	// MethodAppUpdateDownload 按白名单主机下载安装包并校验 SHA-256。
 	MethodAppUpdateDownload = "platform.appUpdate.download"
-	MethodAppUpdateVerify   = "platform.appUpdate.verify"
-	MethodAppUpdateCancel   = "platform.appUpdate.cancel"
+	// MethodAppUpdateVerify 校验本机已下载安装包的 SHA-256。
+	MethodAppUpdateVerify = "platform.appUpdate.verify"
+	// MethodAppUpdateCancel 取消进行中的安装包下载。
+	MethodAppUpdateCancel = "platform.appUpdate.cancel"
 )
 
 type appUpdateDownloadParams struct {
@@ -27,7 +31,9 @@ type appUpdateVerifyParams struct {
 	SHA256 string `json:"sha256"`
 }
 
+// appUpdateDownload 处理 platform.appUpdate.download：受限下载并回传本地路径。
 func (d *Dispatcher) appUpdateDownload(ctx context.Context, req Request) Response {
+
 	if d.appUpdate == nil {
 		return errorResponse(req.ID, "app update not available")
 	}
@@ -61,7 +67,9 @@ func (d *Dispatcher) appUpdateDownload(ctx context.Context, req Request) Respons
 	return okResponse(req.ID, map[string]any{"path": path, "bytes": bytes})
 }
 
+// appUpdateVerify 处理 platform.appUpdate.verify：校验已下载文件哈希。
 func (d *Dispatcher) appUpdateVerify(ctx context.Context, req Request) Response {
+
 	_ = ctx
 	if d.appUpdate == nil {
 		return errorResponse(req.ID, "app update not available")
@@ -82,7 +90,9 @@ func (d *Dispatcher) appUpdateVerify(ctx context.Context, req Request) Response 
 	return okResponse(req.ID, map[string]any{"ok": true})
 }
 
+// appUpdateCancel 处理 platform.appUpdate.cancel：中止当前下载。
 func (d *Dispatcher) appUpdateCancel(ctx context.Context, req Request) Response {
+
 	_ = ctx
 	if d.appUpdate == nil {
 		return errorResponse(req.ID, "app update not available")

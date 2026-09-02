@@ -1,0 +1,24 @@
+id: com.niuma.api
+name: API Service
+version: 0.1.0
+bridge:
+  namespace: api
+session:
+  inject_credentials: false
+  credential_methods: []
+runtime:
+  executable: bin/niuma-api-service.exe
+  executable_windows: bin/niuma-api-service.exe
+  executable_unix: bin/niuma-api-service
+  lang: go
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.api'
+  address_windows: '\\.\pipe\niuma.api'
+  address_unix: '/tmp/niuma.api.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

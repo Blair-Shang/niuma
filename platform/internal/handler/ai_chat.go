@@ -1,3 +1,4 @@
+// 本文件实现 AI 会话与流式对话的 Bridge 入口（platform.ai.conversation.* / chat.*）。
 package handler
 
 import (
@@ -46,6 +47,7 @@ type aiToolInvocationView struct {
 	CreatedAt      string `json:"createdAt"`
 }
 
+// toAIConversationView 将仓储会话转为 Bridge 视图。
 func toAIConversationView(c store.AIConversation) aiConversationView {
 	return aiConversationView{
 		ConversationID:    c.ConversationID,
@@ -59,6 +61,7 @@ func toAIConversationView(c store.AIConversation) aiConversationView {
 	}
 }
 
+// toAIMessageView 将仓储消息转为 Bridge 视图。
 func toAIMessageView(m store.AIMessage) aiMessageView {
 	var tokenCount *int64
 	if m.TokenCount.Valid {
@@ -76,6 +79,7 @@ func toAIMessageView(m store.AIMessage) aiMessageView {
 	}
 }
 
+// toAIToolInvocationView 将工具调用流水转为 Bridge 视图（截断参数摘要）。
 func toAIToolInvocationView(inv store.AIToolInvocation) aiToolInvocationView {
 	args := inv.ArgumentsJSON
 	if len(args) > 200 {
@@ -102,6 +106,7 @@ func toAIToolInvocationView(inv store.AIToolInvocation) aiToolInvocationView {
 	}
 }
 
+// requireAI 返回已装配的 AI 领域服务；未装配时为 nil。
 func (d *Dispatcher) requireAI() *ai.Service {
 	return d.ai
 }

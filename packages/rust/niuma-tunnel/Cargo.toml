@@ -3,6 +3,7 @@ name = "niuma-tunnel"
 description = "NiuMa 能力服务共用 SSH 隧道与本地转发"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 async-trait = "0.1"

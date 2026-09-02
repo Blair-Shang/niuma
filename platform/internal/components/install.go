@@ -46,12 +46,12 @@ type InstallProgressFunc func(InstallProgress)
 
 // InstallPackageSpec 描述单个平台安装包。
 type InstallPackageSpec struct {
-	ID      string   `yaml:"id"`
-	OS      string   `yaml:"os"`
-	Arch    string   `yaml:"arch"`
-	URL     string   `yaml:"url"`
-	Archive string   `yaml:"archive"`
-	BinDir  string   `yaml:"binDir"`
+	ID      string `yaml:"id"`
+	OS      string `yaml:"os"`
+	Arch    string `yaml:"arch"`
+	URL     string `yaml:"url"`
+	Archive string `yaml:"archive"`
+	BinDir  string `yaml:"binDir"`
 	// Tools 声明本包覆盖的工具 id；空则仅当 package.id == toolId 时匹配单工具安装。
 	Tools []string `yaml:"tools"`
 }
@@ -293,9 +293,9 @@ func downloadFile(ctx context.Context, url string, dest *os.File, onBytes func(r
 		total = 0
 	}
 	writer := &progressWriter{
-		w:        dest,
-		total:    total,
-		onBytes:  onBytes,
+		w:           dest,
+		total:       total,
+		onBytes:     onBytes,
 		minInterval: progressEmitMinInterval,
 	}
 	_, err = io.Copy(writer, resp.Body)

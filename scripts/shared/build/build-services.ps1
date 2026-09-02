@@ -253,6 +253,7 @@ function Build-RustService {
 }
 
 $platformOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-platform-core' -PlatformName $Platform)
+$apiOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-api-service' -PlatformName $Platform)
 $ftpOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ftp-service' -PlatformName $Platform)
 $sshOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ssh-service' -PlatformName $Platform)
 $redisOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-redis-service' -PlatformName $Platform)
@@ -282,6 +283,10 @@ try {
 Build-GoService -ModuleDir (Join-Path $Root 'platform') `
     -Package './cmd/platform-core' `
     -Output $platformOut
+
+Build-GoService -ModuleDir (Join-Path $Root 'services/api-service') `
+    -Package './cmd/api-service' `
+    -Output $apiOut
 
 Build-GoService -ModuleDir (Join-Path $Root 'services/ftp-service') `
     -Package './cmd/ftp-service' `
@@ -365,6 +370,7 @@ if (-not $SkipOracle) {
 
 if (Should-SyncLegacyBin) {
     $legacyPlatformOut = Join-Path $BinDir 'niuma-platform-core.exe'
+    $legacyApiOut = Join-Path $BinDir 'niuma-api-service.exe'
     $legacyFtpOut = Join-Path $BinDir 'niuma-ftp-service.exe'
     $legacySshOut = Join-Path $BinDir 'niuma-ssh-service.exe'
     $legacyRedisOut = Join-Path $BinDir 'niuma-redis-service.exe'
@@ -380,6 +386,7 @@ if (Should-SyncLegacyBin) {
     $legacyMcpVastOut = Join-Path $BinDir 'mcp-vastbase-readonly.exe'
     $legacyOracleOut = Join-Path $BinDir 'niuma-oracle-service.exe'
     Copy-Item -Force $platformOut $legacyPlatformOut
+    Copy-Item -Force $apiOut $legacyApiOut
     Copy-Item -Force $ftpOut $legacyFtpOut
     Copy-Item -Force $mongoOut $legacyMongoOut
     Copy-Item -Force $vastbaseOut $legacyVastbaseOut
@@ -404,6 +411,7 @@ if (Should-SyncLegacyBin) {
 
 Write-Host "==> services ready for ${Platform}/${Arch}:" -ForegroundColor Green
 Write-Host "    $platformOut"
+Write-Host "    $apiOut"
 Write-Host "    $ftpOut"
 Write-Host "    $mongoOut"
 Write-Host "    $vastbaseOut"

@@ -1,4 +1,4 @@
-package ai
+package tool
 
 import (
 	"testing"
@@ -40,9 +40,9 @@ func TestRequiresConfirm(t *testing.T) {
 }
 
 func TestPolicyGateApproveReject(t *testing.T) {
-	g := newPolicyGate()
-	ch := g.register("inv-1", "run-a")
-	if !g.decide("inv-1", true) {
+	g := NewGate()
+	ch := g.Register("inv-1", "run-a")
+	if !g.Decide("inv-1", true) {
 		t.Fatal("decide approve failed")
 	}
 	select {
@@ -54,8 +54,8 @@ func TestPolicyGateApproveReject(t *testing.T) {
 		t.Fatal("timeout waiting approve")
 	}
 
-	ch2 := g.register("inv-2", "run-a")
-	if !g.decide("inv-2", false) {
+	ch2 := g.Register("inv-2", "run-a")
+	if !g.Decide("inv-2", false) {
 		t.Fatal("decide reject failed")
 	}
 	select {
@@ -69,9 +69,9 @@ func TestPolicyGateApproveReject(t *testing.T) {
 }
 
 func TestPolicyGateRejectRun(t *testing.T) {
-	g := newPolicyGate()
-	ch := g.register("inv-x", "run-b")
-	g.rejectRun("run-b")
+	g := NewGate()
+	ch := g.Register("inv-x", "run-b")
+	g.RejectRun("run-b")
 	select {
 	case v := <-ch:
 		if v {
@@ -80,7 +80,7 @@ func TestPolicyGateRejectRun(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
 	}
-	if len(g.listPending("")) != 0 {
+	if len(g.ListPending("")) != 0 {
 		t.Fatal("waiters should be empty")
 	}
 }

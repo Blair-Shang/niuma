@@ -1,4 +1,4 @@
-package ai
+package loop
 
 import (
 	"net/url"
@@ -18,7 +18,7 @@ var nmImgMarkerRe = regexp.MustCompile(`⟦nm-img:(data:image/[a-zA-Z0-9.+-]+;ba
 var nmTxtMarkerRe = regexp.MustCompile(`(?s)⟦nm-txt:([^⟧]*)⟧\n?(.*?)\n?⟦/nm-txt⟧`)
 
 const (
-	maxImagesPerMessage = 3
+	maxImagesPerMessage    = 3
 	maxTextFilesPerMessage = 5
 	maxTextFileChars       = 100_000
 	// maxImageDataURLBytes 单张 data URL 上限（含前缀），防止把百万级 base64 塞进 prompt。

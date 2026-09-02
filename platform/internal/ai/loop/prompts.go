@@ -1,4 +1,4 @@
-package ai
+package loop
 
 import (
 	"embed"
@@ -13,11 +13,11 @@ var promptFS embed.FS
 
 // 入模提示词（启动时从 prompts/*.txt 加载）。
 var (
-	defaultSystemPrompt    string
-	userAttachOnlyPrompt   string
-	attachedFileTemplate   string
-	skillSectionTemplate   string
-	dialectVastbasePrompt  string
+	defaultSystemPrompt   string
+	userAttachOnlyPrompt  string
+	attachedFileTemplate  string
+	skillSectionTemplate  string
+	dialectVastbasePrompt string
 )
 
 func init() {

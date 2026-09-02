@@ -1,4 +1,4 @@
-package ai
+package skill
 
 import "testing"
 
@@ -11,7 +11,7 @@ func TestApplySkillTemplate_defaults(t *testing.T) {
     "threshold":{"type":"number","default":500}
   }
 }`
-	got := applySkillTemplate(tpl, schema)
+	got := ApplyTemplate(tpl, schema)
 	want := "分析库 appdb 的慢查询，阈值 500ms。"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
@@ -19,7 +19,7 @@ func TestApplySkillTemplate_defaults(t *testing.T) {
 }
 
 func TestApplySkillTemplate_keepsMissing(t *testing.T) {
-	got := applySkillTemplate("hello {{name}}", `{"properties":{}}`)
+	got := ApplyTemplate("hello {{name}}", `{"properties":{}}`)
 	if got != "hello {{name}}" {
 		t.Fatalf("got %q", got)
 	}

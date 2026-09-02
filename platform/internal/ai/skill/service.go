@@ -1,12 +1,26 @@
-package ai
+package skill
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
+	"niuma/platform/internal/ai/mcp"
+	"niuma/platform/internal/idgen"
 	"niuma/platform/internal/store"
 )
+
+// API 管理 Skill 模板与 Skill 包安装。
+type API struct {
+	Skills *store.AISkillStore
+	ids    idgen.Generator
+	mcp    *mcp.API
+}
+
+// New 创建 Skill API。
+func New(skills *store.AISkillStore, ids idgen.Generator, mcpAPI *mcp.API) *API {
+	return &API{Skills: skills, ids: ids, mcp: mcpAPI}
+}
 
 // SkillView 是 Bridge 回传的 Skill 视图。
 type SkillView struct {
@@ -56,7 +70,7 @@ func toSkillView(sk store.AISkill) SkillView {
 }
 
 // ListSkills 列出 Skill。
-func (s *Service) ListSkills(ctx context.Context, status string) ([]SkillView, error) {
+func (s *API) ListSkills(ctx context.Context, status string) ([]SkillView, error) {
 	if s == nil || s.Skills == nil {
 		return nil, fmt.Errorf("ai: skills unavailable")
 	}
@@ -72,7 +86,7 @@ func (s *Service) ListSkills(ctx context.Context, status string) ([]SkillView, e
 }
 
 // GetSkill 读取单个 Skill。
-func (s *Service) GetSkill(ctx context.Context, skillID string) (*SkillView, error) {
+func (s *API) GetSkill(ctx context.Context, skillID string) (*SkillView, error) {
 	if s == nil || s.Skills == nil {
 		return nil, fmt.Errorf("ai: skills unavailable")
 	}
@@ -88,7 +102,7 @@ func (s *Service) GetSkill(ctx context.Context, skillID string) (*SkillView, err
 }
 
 // UpsertSkill 新建或更新 Skill。
-func (s *Service) UpsertSkill(ctx context.Context, params SkillUpsertParams) (*SkillView, error) {
+func (s *API) UpsertSkill(ctx context.Context, params SkillUpsertParams) (*SkillView, error) {
 	if s == nil || s.Skills == nil || s.ids == nil {
 		return nil, fmt.Errorf("ai: skills unavailable")
 	}
@@ -172,7 +186,7 @@ func (s *Service) UpsertSkill(ctx context.Context, params SkillUpsertParams) (*S
 }
 
 // DeleteSkill 删除 Skill；若为已安装 Skill 包则同时卸载 MCP 与本机目录。
-func (s *Service) DeleteSkill(ctx context.Context, skillID string) (bool, error) {
+func (s *API) DeleteSkill(ctx context.Context, skillID string) (bool, error) {
 	if s == nil || s.Skills == nil {
 		return false, fmt.Errorf("ai: skills unavailable")
 	}

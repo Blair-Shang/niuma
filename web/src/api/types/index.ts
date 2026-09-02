@@ -12,6 +12,17 @@ export type {
 } from './diag'
 export type { DialogOpenFolderParams, DialogOpenFolderResult } from './dialog'
 export type {
+  ApiHistoryAppendParams,
+  ApiHistoryAppendResult,
+  ApiHistoryClearParams,
+  ApiHistoryClearResult,
+  ApiHistoryDeleteParams,
+  ApiHistoryDeleteResult,
+  ApiHistoryEntry,
+  ApiHistoryListParams,
+  ApiHistoryListResult,
+} from './api'
+export type {
   SettingGetParams,
   SettingGetResult,
   SettingSetParams,

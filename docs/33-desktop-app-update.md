@@ -323,7 +323,7 @@ Windows P0：
 3. 启动成功后退出当前 NiuMa 进程（先停 Platform 子进程）。
 4. 非 Windows：Shell 返回 `apply_unsupported_platform`；Web 改为 `openExternal(downloadUrl)`。
 
-当前 iss：固定 `AppId`、`PrivilegesRequired=admin`、`CloseApplications=yes`、`RestartApplications=no`。
+当前 iss：固定 `AppId`、`PrivilegesRequired=lowest`（默认当前用户、不弹 UAC）、`CloseApplications=yes`、`RestartApplications=no`。
 
 #### `shell.update.cancel`
 

@@ -1,4 +1,4 @@
-// Package handler — 文件工作台跨窗口协调（platform.fileEditor.*）。
+// 本文件实现文件工作台跨窗口协调（platform.fileEditor.*）。
 package handler
 
 import (
@@ -8,16 +8,21 @@ import (
 	"sync"
 )
 
-// 文件工作台 Bridge 方法名。
+// 文件工作台 Bridge 方法名（与 web 文件工作台契约一致）。
 const (
-	MethodFileEditorOpenTab          = "platform.fileEditor.openTab"
-	MethodFileEditorRegisterWindow   = "platform.fileEditor.registerWindow"
+	// MethodFileEditorOpenTab 在工作台打开或排队一个文件页。
+	MethodFileEditorOpenTab = "platform.fileEditor.openTab"
+	// MethodFileEditorRegisterWindow 登记已创建的工作台窗口。
+	MethodFileEditorRegisterWindow = "platform.fileEditor.registerWindow"
+	// MethodFileEditorUnregisterWindow 注销已关闭的工作台窗口。
 	MethodFileEditorUnregisterWindow = "platform.fileEditor.unregisterWindow"
-	MethodFileEditorListTabs         = "platform.fileEditor.listTabs"
+	// MethodFileEditorListTabs 列出待打开队列（尚无窗口时使用）。
+	MethodFileEditorListTabs = "platform.fileEditor.listTabs"
 )
 
 // EventPublisher 向 Shell 扇出 Platform 事件。
 type EventPublisher interface {
+	// Publish 投递一条事件；实现须可并发调用。
 	Publish(event map[string]any)
 }
 
@@ -150,11 +155,12 @@ func (c *FileEditorCoordinator) listTabs(ctx context.Context, req Request) Respo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return okResponse(req.ID, map[string]any{
-		"windowId":      c.windowID,
-		"pendingCount":  len(c.pending),
+		"windowId":     c.windowID,
+		"pendingCount": len(c.pending),
 	})
 }
 
+// emitTabOpen 向已登记工作台窗口推送打开文件页事件。
 func (c *FileEditorCoordinator) emitTabOpen(spec json.RawMessage) {
 	if c.events == nil {
 		return

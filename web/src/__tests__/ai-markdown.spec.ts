@@ -48,6 +48,18 @@ describe('splitMarkdownBlocks', () => {
     expect(blocks).toHaveLength(1)
     expect(blocks[0]?.kind).toBe('markdown')
   })
+
+  it('routes large json objects to the tree', () => {
+    const data: Record<string, string> = {}
+    for (let i = 0; i < 47; i += 1) {
+      data[`field_${i}`] = `value_${i}`
+    }
+    const body = JSON.stringify({ code: 200, message: 'success', data }, null, 2)
+    expect(body.length).toBeGreaterThan(400)
+    const blocks = splitMarkdownBlocks(`\`\`\`json\n${body}\n\`\`\``)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ kind: 'json-tree' })
+  })
 })
 
 describe('renderAiMarkdown', () => {

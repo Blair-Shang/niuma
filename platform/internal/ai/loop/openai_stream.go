@@ -1,4 +1,4 @@
-package ai
+package loop
 
 import (
 	"bufio"
@@ -219,7 +219,7 @@ type openAIStreamToolCallDelta struct {
 type openAIStreamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string                     `json:"content"`
+			Content   string                      `json:"content"`
 			ToolCalls []openAIStreamToolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`

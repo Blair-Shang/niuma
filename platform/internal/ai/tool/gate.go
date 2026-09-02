@@ -1,7 +1,6 @@
-package ai
+package tool
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 )
@@ -24,17 +23,19 @@ type pendingWait struct {
 	ch    chan bool // true = approve
 }
 
-// policyGate 在 Agent Loop 中阻塞等待用户确认（write / dangerous）。
-type policyGate struct {
+// Gate 在 Agent Loop 中阻塞等待用户确认（write / dangerous）。
+type Gate struct {
 	mu      sync.Mutex
 	waiters map[string]*pendingWait // invocationID → wait
 }
 
-func newPolicyGate() *policyGate {
-	return &policyGate{waiters: make(map[string]*pendingWait)}
+// NewGate 创建空的确认门闩。
+func NewGate() *Gate {
+	return &Gate{waiters: make(map[string]*pendingWait)}
 }
 
-func (g *policyGate) register(invocationID, runID string) <-chan bool {
+// Register 登记一次待确认调用并返回结果通道。
+func (g *Gate) Register(invocationID, runID string) <-chan bool {
 	if g == nil {
 		ch := make(chan bool, 1)
 		ch <- false
@@ -54,8 +55,8 @@ func (g *policyGate) register(invocationID, runID string) <-chan bool {
 	return ch
 }
 
-// decide 完成一次确认；找不到 pending 时返回 false。
-func (g *policyGate) decide(invocationID string, approve bool) bool {
+// Decide 完成一次确认；找不到 pending 时返回 false。
+func (g *Gate) Decide(invocationID string, approve bool) bool {
 	if g == nil || invocationID == "" {
 		return false
 	}
@@ -72,8 +73,8 @@ func (g *policyGate) decide(invocationID string, approve bool) bool {
 	return true
 }
 
-// cancel 移除单个 waiter（ctx 取消时由等待方调用，避免泄漏）。
-func (g *policyGate) cancel(invocationID string) {
+// Cancel 移除单个 waiter（ctx 取消时由等待方调用，避免泄漏）。
+func (g *Gate) Cancel(invocationID string) {
 	if g == nil || invocationID == "" {
 		return
 	}
@@ -82,8 +83,8 @@ func (g *policyGate) cancel(invocationID string) {
 	delete(g.waiters, invocationID)
 }
 
-// rejectRun 拒绝某 run 下全部待确认项（Cancel 时调用）。
-func (g *policyGate) rejectRun(runID string) {
+// RejectRun 拒绝某 run 下全部待确认项（Cancel 时调用）。
+func (g *Gate) RejectRun(runID string) {
 	if g == nil || runID == "" {
 		return
 	}
@@ -104,8 +105,8 @@ func (g *policyGate) rejectRun(runID string) {
 	}
 }
 
-// listPending 返回某 run（空则全部）的待确认 invocationId。
-func (g *policyGate) listPending(runID string) []string {
+// ListPending 返回某 run（空则全部）的待确认 invocationId。
+func (g *Gate) ListPending(runID string) []string {
 	if g == nil {
 		return nil
 	}
@@ -175,37 +176,4 @@ func ResolveToolRisk(stored, toolName string) string {
 		return NormalizeRiskLevel(stored)
 	}
 	return InferToolRisk(toolName)
-}
-
-// ConfirmPolicy 处理 platform.ai.policy.confirm。
-func (s *Service) ConfirmPolicy(invocationID, decision string) error {
-	if s == nil || s.policy == nil {
-		return fmt.Errorf("ai: policy unavailable")
-	}
-	invocationID = strings.TrimSpace(invocationID)
-	if invocationID == "" {
-		return fmt.Errorf("ai: invocationId required")
-	}
-	switch strings.ToLower(strings.TrimSpace(decision)) {
-	case PolicyDecisionApprove:
-		if !s.policy.decide(invocationID, true) {
-			return fmt.Errorf("ai: no pending invocation %q", invocationID)
-		}
-		return nil
-	case PolicyDecisionReject:
-		if !s.policy.decide(invocationID, false) {
-			return fmt.Errorf("ai: no pending invocation %q", invocationID)
-		}
-		return nil
-	default:
-		return fmt.Errorf("ai: decision must be approve or reject")
-	}
-}
-
-// ListPendingPolicy 处理 platform.ai.policy.listPending。
-func (s *Service) ListPendingPolicy(runID string) []string {
-	if s == nil || s.policy == nil {
-		return nil
-	}
-	return s.policy.listPending(strings.TrimSpace(runID))
 }

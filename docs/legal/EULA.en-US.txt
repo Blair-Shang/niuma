@@ -1,55 +1,51 @@
-NiuMa End-User License Agreement and Disclaimer (EULA)
-Version: 1.0.0    Applies to: desktop client installation and use
+NiuMa Additional Notices for Installation and Use
+Version: 2.1.0    Applies to: desktop client installation and use
 
-IMPORTANT: Read this agreement before installing, copying, or using NiuMa (the "Software").
-Installing or using the Software means you have read, understood, and agree to be bound by this agreement. If you do not agree, cancel installation and delete all copies.
+[Official position]
 
-The Software is provided by an individual developer (the "Developer"), not by a registered company as a contracting party. This agreement is not a paid services contract, outsourcing engagement, or service-level agreement (SLA).
+To the maximum extent permitted by law: the Developer is not responsible for any result of installing, using, updating, or uninstalling the Software, or of connecting to or operating any system with it. You assume all risk. The Software is provided free of charge and AS IS, with no warranty and no promised results. If you obtained it free, total liability is zero. The Developer has no duty to support, fix, or compensate. Liability that applicable law does not allow to be waived in advance is not excluded.
 
-1. License
-Subject to this agreement, the Developer grants you a personal, non-exclusive, non-transferable, revocable license to install and run the Software object code on devices you own or control, for your own use.
-Intellectual property in the Software, UI, docs, trademarks, and icons remains with the Developer or the respective owners. This agreement does not grant source-code rights and does not open-source the Software.
+The controlling official disclaimer is docs/legal/DISCLAIMER.en-US.txt (after install: licenses/DISCLAIMER.en-US.txt). Nothing below narrows that disclaimer.
 
-2. Restrictions
-You may not, without written permission: reverse engineer (except where mandatory law allows), crack, remove notices; redistribute modified builds as "official"; or use the Software for illegal, infringing, or harmful network activity.
-You may share unmodified official installers together with this agreement. You may not charge a license fee for the Software itself (reasonable media cost excepted).
+IMPORTANT: Read the official disclaimer, these notices, and Apache License 2.0 before installing, copying, or using NiuMa (the "Software"). Installing or using means you accept them. If you do not agree, cancel installation and delete all copies.
 
-3. Operations, connections, and data risk
-The Software is an operations and data tool and may connect to databases, SSH, FTP, cloud, and other systems that you configure. You agree that:
-(a) Targets, accounts, keys, certificates, commands, and SQL are chosen and executed by you. The Developer does not control your servers and is not responsible for your actions.
-(b) Destructive or incorrect operations can cause irreversible data loss or downtime. Back up production systems and confirm you are authorized to access them.
-(c) Credentials are stored by default in your local user profile. Protect the device. Loss from theft, shared accounts, malware, or misconfiguration is your responsibility.
-(d) Third-party databases, clouds, and OS licenses still apply. Optional components such as Oracle Instant Client are not bundled; if you install them, you must comply with their terms.
+Portions written by the NiuMa Authors are licensed under Apache License 2.0 (licenses/LICENSE or LICENSE at the repository root). These notices do not reduce the rights Apache 2.0 already grants.
 
-4. Artificial intelligence
-AI features (for example generated SQL or suggestions) may be wrong, stale, or unsafe. Review all output before execution. You bear losses from relying on AI output.
+The Software is provided by an individual developer (the "Developer"), not a registered company. These notices are not a paid service, outsourcing engagement, or SLA.
 
-5. As-is; no warranty
-The Software is provided "AS IS" and "AS AVAILABLE". To the maximum extent permitted by law, the Developer disclaims all warranties, express or implied, including merchantability, fitness for a particular purpose, non-infringement, uninterrupted or error-free operation, security, and compatibility.
-The current Windows installer may be unsigned. OS features such as Microsoft SmartScreen may warn you. That is not a defect and not a security guarantee. Continuing to install is at your own risk.
+1. Copyright license and trademarks
+The copyright license is Apache License 2.0. The NiuMa name and logos are trademarks; Apache 2.0 does not grant trademark rights. You may not label a modified build as "official NiuMa" without written permission. The Developer is not responsible for modified, redistributed, or spoofed builds the Developer did not publish.
 
-6. Limitation of liability
-To the maximum extent permitted by law:
-(a) The Developer is not liable for indirect, incidental, special, punitive, or consequential damages, including data loss, lost profits, business interruption, or third-party claims, even if advised of the possibility.
-(b) The Developer's total liability relating to the Software will not exceed the amount you actually paid the Developer for the Software (zero if you obtained it free of charge).
-(c) Some jurisdictions do not allow certain limitations. Those terms apply only to the extent allowed. Mandatory consumer rights are not waived.
+2. Operations, connections, and data risk
+The Software is an operations and data tool. Targets, accounts, keys, commands, and SQL are chosen and executed by you. The Developer does not control your servers, does not review your actions, and is not responsible for outcomes. Back up first and confirm you are authorized. Credentials stay in your local profile; leaks are your risk. Third-party and OS licenses still apply. Optional components such as Oracle Instant Client are not bundled. Do not use the Software for illegal or harmful network activity.
 
-7. Privacy and network
-The Software mainly runs on your device. Update checks, installer downloads, or feedback/diagnostics you submit may contact servers operated by the Developer or a designate (for example the website or update API). Do not include passwords, keys, or other people's personal data in feedback.
-The Developer is not the processor of databases or hosts you connect to; you are responsible for that compliance.
+3. Artificial intelligence
+AI output may be wrong, stale, or unsafe. Review it before execution. You bear losses from relying on it. The Developer is not responsible.
 
-8. Third-party components
-The Software includes Chromium Embedded Framework and other components. See licenses/NOTICES.txt and licenses/CEF-LICENSE.txt in the install directory. Those licenses govern the corresponding components if they conflict with this agreement.
+4. As-is; no warranty
+The Software is provided "AS IS" and "AS AVAILABLE". The Developer does not warrant merchantability, fitness, non-infringement, uninterrupted or error-free operation, security, or compatibility. Defects create no duty to repair or compensate. The Windows installer may be unsigned. OS warnings are not a defect and not a security guarantee.
 
-9. Updates and termination
-The Developer may provide, delay, or stop updates without notice and has no duty to support you. This license ends when you stop using and uninstall the Software; sections 3–8 and 10 survive.
-Breach of this agreement terminates the license immediately.
+5. The Developer is not responsible
+The official disclaimer controls. To the maximum extent permitted by law:
+(a) The Developer is not liable for any direct, indirect, incidental, special, punitive, or consequential damages, including data loss, lost profits, business interruption, or third-party claims, even if advised of the possibility.
+(b) Total liability will not exceed the amount you actually paid the Developer for the Software (zero if free).
+(c) If your use causes a third party to claim against the Developer, you will handle that claim and bear the cost so the Developer is not burdened by it.
+(d) Liability that law does not allow to be waived in advance (such as intentional misconduct or gross negligence where such a waiver is void) is not excluded. Apart from that, the Developer is not responsible.
+These terms apply together with Apache License 2.0 sections 7 and 8.
 
-10. Governing law
-This agreement is governed by the laws of the People's Republic of China (excluding conflict-of-law rules). Disputes shall be submitted to the people's court with jurisdiction at the Developer's domicile. Mandatory consumer rules in your jurisdiction, if any, still apply.
+6. Privacy and network
+The Software mainly runs on your device. Update checks, downloads, or feedback you submit may contact servers the Developer designates. Do not include passwords or other people's personal data in feedback. The Developer is not the processor of systems you connect to. Feedback and issues create no support or compensation duty.
 
-11. Entire agreement
-This is the entire agreement regarding use of the Software. Failure to enforce a term is not a waiver.
-A current copy may be published at https://www.niuma007.com . If the website text differs from the copy you accepted at install time, the accepted copy controls.
+7. Third-party components
+See LICENSE, NOTICE, NOTICES.txt, and CEF-LICENSE.txt under licenses/. Those licenses govern the corresponding components.
 
-By continuing installation you confirm you are of legal age (or have guardian consent) and accept this agreement.
+8. Updates
+The Developer may provide, delay, or stop updates without notice and has no duty to support you.
+
+9. Governing law
+These notices are governed by the laws of the People's Republic of China (excluding conflict-of-law rules). Disputes go to the people's court with jurisdiction at the Developer's domicile. The copyright license remains Apache License 2.0.
+
+10. Entire agreement
+Apache License 2.0, NOTICE, the official disclaimer, and these notices are the complete terms. The disclaimer controls the scope of non-responsibility. Failure to enforce a term is not a waiver. A copy may appear at https://www.niuma007.com ; the text shown at install time controls if they differ.
+
+By continuing installation you confirm you are of legal age (or have guardian consent) and accept the official disclaimer, these notices, and Apache License 2.0.

@@ -24,10 +24,10 @@ type ToolInstallSpec struct {
 
 // ToolSpec 是组件包内单个工具的声明。
 type ToolSpec struct {
-	ID          string           `yaml:"id"`
-	DisplayName string           `yaml:"displayName"`
-	Detect      ToolDetectSpec   `yaml:"detect"`
-	Install     ToolInstallSpec  `yaml:"install"`
+	ID          string          `yaml:"id"`
+	DisplayName string          `yaml:"displayName"`
+	Detect      ToolDetectSpec  `yaml:"detect"`
+	Install     ToolInstallSpec `yaml:"install"`
 }
 
 // BundleManifest 对应 components/<name>/manifest.yaml。

@@ -5,6 +5,7 @@ import { CloudApiError } from '@/api/cloud/client'
 import {
   checkAppUpdate,
   fetchLatestRelease,
+  fetchPublishedRelease,
   fetchReleaseHistory,
   recordUpdateHit,
   type UpdateRelease,
@@ -171,7 +172,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     const channel = updateChannel(platform)
     try {
       const [items, checkRes] = await Promise.all([
-        fetchReleaseHistory({ platform, arch, channel, limit: 20 }).catch(async (e) => {
+        fetchReleaseHistory({ platform, arch, channel, limit: 3 }).catch(async (e) => {
           if (e instanceof CloudApiError && (e.status === 404 || e.code === 'not_found')) {
             return [] as UpdateRelease[]
           }
@@ -182,8 +183,18 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
           ? checkAppUpdate({ current, platform, arch, channel }).catch(() => null)
           : Promise.resolve(null),
       ])
-      changelogItems.value = items
-      changelogRelease.value = items[0] ?? null
+      const cards = items.slice(0, 3)
+      const filled = await Promise.all(
+        cards.map((card) =>
+          card.notesMd
+            ? Promise.resolve(card)
+            : fetchPublishedRelease({ platform, arch, channel, version: card.version }).catch(
+                () => card,
+              ),
+        ),
+      )
+      changelogItems.value = filled
+      changelogRelease.value = filled[0] ?? null
       if (checkRes?.updateAvailable && checkRes.latest) {
         changelogHasUpdate.value = true
         latest.value = checkRes.latest

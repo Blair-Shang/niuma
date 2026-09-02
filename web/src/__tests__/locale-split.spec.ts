@@ -29,6 +29,9 @@ describe('locale module split', () => {
     expect(zh.modules?.mysql?.title).toBe('MySQL')
     expect(zh.modules?.vastbase?.title).toBe('Vastbase')
     expect(zh.modules?.database?.title).toBeTruthy()
+    expect(zh.modules?.api?.title).toBe('API 测试')
+    expect(zh.modules?.api?.send).toBe('发送')
+    expect(zh.modules?.api?.history).toBe('历史')
     expect(zh.fileEditor?.title).toBeTruthy()
 
     const en = i18n.global.getLocaleMessage('en-US') as Record<string, any>

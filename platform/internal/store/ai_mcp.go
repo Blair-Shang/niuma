@@ -10,18 +10,18 @@ import (
 
 // AIMCPServer 对应 nm_mcp_server 一行。
 type AIMCPServer struct {
-	ServerID       string
-	ServerName     string
-	TransportKind  string // stdio | sse | streamable_http
-	EndpointURL    string
-	CommandPath    string
-	LaunchOptions  string // JSON
-	CredentialID   string
-	RecordStatus   string
-	SortOrder      int64
-	RowVersion     int64
-	CreatedAt      string
-	UpdatedAt      string
+	ServerID      string
+	ServerName    string
+	TransportKind string // stdio | sse | streamable_http
+	EndpointURL   string
+	CommandPath   string
+	LaunchOptions string // JSON
+	CredentialID  string
+	RecordStatus  string
+	SortOrder     int64
+	RowVersion    int64
+	CreatedAt     string
+	UpdatedAt     string
 }
 
 // AIMCPTool 对应 nm_mcp_tool 一行（发现缓存）。

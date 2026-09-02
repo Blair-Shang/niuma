@@ -1,4 +1,4 @@
-package ai
+package skill
 
 import (
 	"encoding/json"
@@ -10,9 +10,9 @@ import (
 // skillPlaceholderRe 匹配模板中的 {{name}} / {{ name }}。
 var skillPlaceholderRe = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 
-// applySkillTemplate 用 param_schema.properties.*.default 填充 {{param}} 占位符。
+// ApplyTemplate 用 param_schema.properties.*.default 填充 {{param}} 占位符。
 // 无 default 的占位保留原文，便于作者发现未配置项。不做任意用户入参执行（Skills 仍是纯模板）。
-func applySkillTemplate(template, paramSchemaJSON string) string {
+func ApplyTemplate(template, paramSchemaJSON string) string {
 	template = strings.TrimSpace(template)
 	if template == "" {
 		return ""

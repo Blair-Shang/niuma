@@ -1,3 +1,4 @@
+// 本文件实现 Skill 模板与包安装的 Bridge 入口（platform.ai.skill.*）。
 package handler
 
 import (

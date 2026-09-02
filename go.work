@@ -8,6 +8,7 @@ use (
 	./packages/go/sqllsp
 	./packages/go/tunnel
 	./platform
+	./services/api-service
 	./services/clickhouse-service
 	./services/dameng-service
 	./services/ftp-service

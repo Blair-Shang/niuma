@@ -32,12 +32,27 @@ if (Test-Path $cefReadme) {
     Copy-Item -Force $cefReadme (Join-Path $licensesDir 'CEF-README.txt')
 }
 
+foreach ($pair in @(
+        @{ Src = 'LICENSE'; Dest = 'LICENSE' }
+        @{ Src = 'NOTICE'; Dest = 'NOTICE' }
+    )) {
+    $src = Join-Path $RepoRoot $pair.Src
+    if (Test-Path $src) {
+        Copy-Item -Force $src (Join-Path $licensesDir $pair.Dest)
+    }
+}
+
 $notices = Join-Path $RepoRoot 'docs/compliance/NOTICES.txt'
 if (Test-Path $notices) {
     Copy-Item -Force $notices (Join-Path $licensesDir 'NOTICES.txt')
 }
 
-foreach ($eulaName in @('EULA.zh-CN.txt', 'EULA.en-US.txt')) {
+foreach ($eulaName in @(
+        'DISCLAIMER.zh-CN.txt'
+        'DISCLAIMER.en-US.txt'
+        'EULA.zh-CN.txt'
+        'EULA.en-US.txt'
+    )) {
     $eulaSrc = Join-Path $RepoRoot "docs/legal/$eulaName"
     if (Test-Path $eulaSrc) {
         Copy-Item -Force $eulaSrc (Join-Path $licensesDir $eulaName)

@@ -1,3 +1,4 @@
+// 本文件实现本机可观测性查询（platform.diag.*），不上 APM。
 package handler
 
 import (

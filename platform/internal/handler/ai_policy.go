@@ -1,3 +1,4 @@
+// 本文件实现工具确认门闩的 Bridge 入口（platform.ai.policy.*）。
 package handler
 
 import (

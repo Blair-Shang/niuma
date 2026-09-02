@@ -140,9 +140,9 @@ GitHub 托管流水线：推送 `v*` tag 或手动运行 **Pack and Release**（
 
 `pnpm release:win` 在绿色目录基础上，使用 **Inno Setup 6** 生成可分发 `Setup.exe`：
 
-- 默认安装路径：`C:\Program Files\NiuMa\`（向导可选「仅当前用户」）
+- 默认当前用户：`%LOCALAPPDATA%\Programs\NiuMa\`，不弹 UAC；向导可选「所有用户」写入 `C:\Program Files\NiuMa\`
 - 控制面板可卸载；固定 `AppId` 覆盖升级
-- 中英双语安装向导（须同意 EULA 才能继续）
+- 中英双语安装向导（须同意 Apache 2.0 附加声明才能继续）
 - 企业静默：`NiuMa-<ver>-windows-x64-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
 - 有 `CODESIGN_CERT` 时签名 `niuma.exe` 与 `Setup.exe`；`REQUIRE_CODESIGN=1` 时未签名则失败
 - Inno Setup 可免费用于商业产品（见其官方许可证）

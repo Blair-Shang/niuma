@@ -1,3 +1,4 @@
+// 本文件按 manifest bridge.namespace 构建能力路由表。
 package handler
 
 import (
@@ -46,7 +47,8 @@ func NewCapabilityRegistry(sup *supervisor.Supervisor) (*CapabilityRegistry, err
 // resolve 按最长前缀匹配 method 对应的能力路由与服务内方法名。
 //
 // 例：ftp.session.open → namespace=ftp, action=session.open
-//     com.niuma.db-pg.query.exec → namespace=com.niuma.db-pg, action=query.exec
+//
+//	com.niuma.db-pg.query.exec → namespace=com.niuma.db-pg, action=query.exec
 func (r *CapabilityRegistry) resolve(method string) (*capabilityRoute, string, bool) {
 	if r == nil || len(r.routes) == 0 {
 		return nil, "", false

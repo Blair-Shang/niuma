@@ -12,20 +12,30 @@ import (
 
 // 连接类能力统一的 session 方法名（Web 与 service 内部一致，经 namespace 前缀区分）。
 const (
-	capabilityMethodSessionOpen  = "session.open"
+	// capabilityMethodSessionOpen 打开能力会话（platform 可注入凭据）。
+	capabilityMethodSessionOpen = "session.open"
+	// capabilityMethodSessionClose 关闭能力会话。
 	capabilityMethodSessionClose = "session.close"
-	capabilityMethodSessionTest  = "session.test"
+	// capabilityMethodSessionTest 探测连接是否可用。
+	capabilityMethodSessionTest = "session.test"
 )
 
 // FTP Bridge 方法名（与 web/src/api/ftp.ts 契约一致）。
 const (
-	MethodFTPSessionOpen  = "ftp.session.open"
+	// MethodFTPSessionOpen 打开 FTP 会话。
+	MethodFTPSessionOpen = "ftp.session.open"
+	// MethodFTPSessionClose 关闭 FTP 会话。
 	MethodFTPSessionClose = "ftp.session.close"
-	MethodFTPSessionTest  = "ftp.session.test"
-	MethodFTPDirList      = "ftp.dir.list"
-	MethodFTPDirMake      = "ftp.dir.make"
-	MethodFTPEntryDelete  = "ftp.entry.delete"
-	MethodFTPEntryRename  = "ftp.entry.rename"
+	// MethodFTPSessionTest 探测 FTP 连通性。
+	MethodFTPSessionTest = "ftp.session.test"
+	// MethodFTPDirList 列出远程目录。
+	MethodFTPDirList = "ftp.dir.list"
+	// MethodFTPDirMake 创建远程目录。
+	MethodFTPDirMake = "ftp.dir.make"
+	// MethodFTPEntryDelete 删除远程文件或目录。
+	MethodFTPEntryDelete = "ftp.entry.delete"
+	// MethodFTPEntryRename 重命名远程条目。
+	MethodFTPEntryRename = "ftp.entry.rename"
 )
 
 // connectBridgeParams 是 Web 发过来的原始连接请求参数。
@@ -119,6 +129,7 @@ func mergeWithCredentials(original json.RawMessage, cred injectedConnectParams) 
 	return json.Marshal(base)
 }
 
+// dispatchWithCredentials 在转发前从 profile 注入凭据，再调用能力服务。
 func (r *CapabilityRegistry) dispatchWithCredentials(
 	ctx context.Context,
 	d *Dispatcher,
@@ -173,6 +184,7 @@ func (r *CapabilityRegistry) dispatchWithCredentials(
 	}
 }
 
+// forward 不注入凭据，将参数原样转到能力服务（已有 sessionId 时走此路径）。
 func (r *CapabilityRegistry) forward(
 	ctx context.Context,
 	req Request,
@@ -202,6 +214,7 @@ func (r *CapabilityRegistry) forward(
 	return okResponse(req.ID, out)
 }
 
+// connectStoresAvailable 判断连接/凭据/密钥仓储是否已装配。
 func (d *Dispatcher) connectStoresAvailable() bool {
 	return d.connections != nil && d.credentials != nil && d.secrets != nil
 }
@@ -250,10 +263,12 @@ func inlineConnectOptions(opts, connectionOptions json.RawMessage) json.RawMessa
 	return json.RawMessage("{}")
 }
 
+// injectTunnelOptions 把 SSH 隧道站点信息写入连接 options，供能力服务建连。
 func (d *Dispatcher) injectTunnelOptions(ctx context.Context, opts json.RawMessage) (json.RawMessage, error) {
 	return tunnel.InjectSSHProfile(ctx, opts, tunnel.ProfileResolverFunc(d.resolveTunnelSSHProfile))
 }
 
+// resolveTunnelSSHProfile 按 profileId 读取 SSH 隧道站点（含解密后的密钥）。
 func (d *Dispatcher) resolveTunnelSSHProfile(ctx context.Context, profileID string) (tunnel.SSHProfile, error) {
 	if !d.connectStoresAvailable() {
 		return tunnel.SSHProfile{}, fmt.Errorf("connection store unavailable")
@@ -293,6 +308,7 @@ func normalizeInlinePort(overridePort, profilePort int) int {
 	return 0
 }
 
+// resolveProfileConnectParams 以已存站点为主，允许 Web 内联覆盖主机/端口/账号。
 func (d *Dispatcher) resolveProfileConnectParams(
 	ctx context.Context,
 	params connectBridgeParams,
@@ -320,6 +336,7 @@ func (d *Dispatcher) resolveProfileConnectParams(
 	return connect, nil
 }
 
+// resolveInlineConnectParams 在无 profileId 时用请求内联主机信息建连参数。
 func (d *Dispatcher) resolveInlineConnectParams(
 	ctx context.Context,
 	params connectBridgeParams,

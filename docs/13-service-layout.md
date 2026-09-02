@@ -12,6 +12,10 @@ services/
 ├── bin/                    # 编译产物（git 忽略 *.exe，保留 .gitkeep）
 │   ├── platform-core.exe
 │   └── ftp-service.exe
+├── api-service/            # API 管理（Go；P0 = TCP/UDP 套接字，见 docs/36）
+│   ├── go.mod
+│   ├── cmd/api-service/
+│   └── internal/             # handler · socket · codec · eventpub
 ├── ftp-service/            # 独立 Go 模块
 │   ├── go.mod
 │   ├── cmd/ftp-service/
@@ -71,6 +75,7 @@ packages/
 仓库根 `go.work` 串联（节选）：
 
 - `platform`
+- `services/api-service`
 - `services/ftp-service`
 - `services/mongodb-service`
 - `services/vastbase-service`
@@ -136,4 +141,5 @@ Oracle（独立，需 VS + ODPI 源码；Instant Client 仅运行时）：
 - [31 — 人大金仓模块](./31-kingbase-module.md)
 - [32 — SQL Server 模块](./32-sqlserver-module.md)
 - [34 — PostgreSQL 模块](./34-postgresql-module.md)
+- [36 — API 管理模块](./36-api-module.md)
 - [11 — Platform Core](./11-platform-core.md)

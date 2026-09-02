@@ -278,7 +278,7 @@ func scanAIConversation(sc rowScanner) (AIConversation, error) {
 
 func scanAIMessage(sc rowScanner) (AIMessage, error) {
 	var (
-		m      AIMessage
+		m       AIMessage
 		content sql.NullString
 		toolID  sql.NullString
 	)

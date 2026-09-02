@@ -19,10 +19,10 @@ func TestCapabilityRegistryResolve(t *testing.T) {
 	}
 
 	tests := []struct {
-		method      string
-		wantNS      string
-		wantAction  string
-		wantOK      bool
+		method     string
+		wantNS     string
+		wantAction string
+		wantOK     bool
 	}{
 		{"ftp.session.open", "ftp", "session.open", true},
 		{"ftp.dir.list", "ftp", "dir.list", true},

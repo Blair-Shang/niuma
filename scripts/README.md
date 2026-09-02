@@ -184,7 +184,7 @@ sudo apt-get install -f   # 补依赖
 
 - 四平台 × x64/arm64 矩阵脚本与统一产物路径
 - 单一版本源：semver + channel + buildNumber；`v*` tag 必须与 `package.json` 一致
-- 各平台安装包内含 `licenses/`（CEF 许可、NOTICES）与 `version.json`
+- 各平台安装包内含 `licenses/`（Apache 2.0 `LICENSE` / `NOTICE`、CEF 许可、第三方 NOTICES）与 `version.json`
 - Windows：Inno 管理员/当前用户、静默参数、Authenticode；macOS：Hardened Runtime + 公证；Linux：`.deb` 为主
 - 本机构建校验，禁止跨 OS 打包
 

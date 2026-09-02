@@ -11,9 +11,7 @@ import { RsContextMenu, RsIcon, RsInput, RsLoading, RsTree, useRsToast } from '@
 import type { RsContextMenuItem, RsTreeDropPosition, RsTreeNode } from '@niuma/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, toRef, toRefs, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getModuleById } from '@/extensions/registry/extension-registry'
 import type { ModuleCategory } from '@/extensions/types/module'
-import { useRoute, useRouter } from 'vue-router'
 import ConnectionFormDialog from '@/modules/ops/components/ConnectionFormDialog.vue'
 import ConnImportExportDialog from '@/modules/ops/components/ConnImportExportDialog.vue'
 import type { ConnIoDialogMode } from '@/modules/ops/components/ConnImportExportDialog.vue'
@@ -61,8 +59,6 @@ const props = withDefaults(
 
 const { t } = useI18n()
 const toast = useRsToast()
-const route = useRoute()
-const router = useRouter()
 const { connect } = useConnectionNavigation()
 const tabStore = useTabStore()
 const sessionRegistry = useSessionRegistry()
@@ -355,15 +351,21 @@ const rootCtxItems = computed<RsContextMenuItem[]>(() => [
   { key: 'refresh-connections', label: t('opsNav.refresh'), icon: 'refresh-cw' },
 ])
 
+function openModuleById(moduleId: string): void {
+  if (moduleId === 'api') {
+    void import('@/modules/api-tester/stores/api-tester').then(({ useApiTesterStore }) => {
+      useApiTesterStore().openEntryTab()
+    })
+    return
+  }
+  tabStore.openModule(moduleId)
+}
+
 function onRootCtx(key: string): void {
   const hit = CONN_KIND_DEFS.find((k) => key === `new-${k.kind}`)
   if (hit) { void cx.openCreate(hit.kind); return }
   if (key.startsWith('open-module:')) {
-    const moduleId = key.slice('open-module:'.length)
-    const mod = getModuleById(moduleId)
-    if (mod && route.path !== mod.routePath) {
-      router.push(mod.routePath).catch(() => undefined)
-    }
+    openModuleById(key.slice('open-module:'.length))
     return
   }
   if (key === 'import-connections') {

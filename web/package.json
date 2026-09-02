@@ -1,7 +1,8 @@
 {
   "name": "@niuma/web",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -1,54 +1,64 @@
 ---
-description: 工具、MCP、Skills 必须作为外部服务调用，禁止集成进平台代码
+description: 官方工具走 platform host；扩展 MCP 外置；Skills 无执行逻辑
 alwaysApply: true
 ---
 
-# 工具 / MCP / Skills 外部化原则
+# 工具 / MCP / Skills
+
+对齐 Cursor / Claude Code / AWS Action Group：**一手产品能力是宿主工具；MCP 只做扩展。**
+细则见 [docs/24-ai-assistant.md](../../docs/24-ai-assistant.md)。
 
 ## 核心约定
 
-**新增的工具（Tool）、MCP Server、Skills 能力，一律作为独立外部服务实现，通过配置注册，禁止编译进平台 Server 二进制。**
+1. **官方工具**（查已授权库、本机已有能力）放 `platform/internal/ai/host/{族}`，与 Agent Loop 同进程。只做 tool schema、Policy 风险、把参数转到**已有** Bridge（如 `vastbase.catalog.tables`）。禁止在此实现驱动、连接池、方言。
+2. **扩展工具**（用户登记、第三方、跨产品）一律独立 MCP 进程，经 `nm_mcp_server` 注册。禁止编进 platform / L1。
+3. **L1 能力服务**（`vastbase-service` 等）只服务桌面与 Bridge，不接待模型，不加 `ai.*` / MCP 协议。
+4. **Skills** 是提示词模板 + 参数，配置/数据库驱动，无执行逻辑。
 
 ## 禁止做的事
 
 ```go
-// ❌ 禁止在 toolsvc 内新增内置工具
-func (s *Service) Register(BuiltinXxx, handler) { ... }
+// 禁止：把 Tool 写进 L1 业务服务
+func (d *Dispatcher) aiListTables(...) { ... }
 
-// ❌ 禁止在 orchestrator / agentsvc 内硬编码新工具逻辑
-case "my_new_tool":
-    return doSomething()
+// 禁止：在 Agent Loop 里写查库 SQL / 直连数据库
+case "sql_list_tables":
+    db.Query(`SELECT ...`)
+
+// 禁止：为每个 L1 再复制一个官方 MCP 二进制（mcp-mysql-readonly 等）
+// 禁止：官方能力只走外部 MCP（stdio 子进程包一层 Bridge）
 ```
 
 ## 正确做法
 
-所有新工具、能力通过 **外部 MCP Server** 提供，在配置文件中注册地址：
+```go
+// 官方：host/sql 转到已有 Bridge，按 profile.kind 选 namespace
+host.Call(ctx, "sql_list_tables", args) // → vastbase.catalog.tables
 
-```toml
-# config.toml
-[tools]
-mcp_servers = [
-  { id = "my-tool", url = "http://localhost:9100/mcp" },
-]
+// 扩展：用户 MCP
+mcp.CallTool(ctx, server, "sentry_issues", args)
 ```
 
-平台只负责：
-1. 发现并调用外部 MCP Server 上的工具
-2. 将工具名透传给模型（MCP 协议保证命名合法）
-3. 路由工具调用结果回模型
+平台负责：
 
-## 现有内置工具的处理
+1. 装配官方 host 工具 + 已启用 MCP 工具给模型
+2. Policy Gate（read 自动 / write·dangerous 确认）
+3. 注入并校验 `profileId` / `sessionId`；官方工具禁止自带密码
+4. 路由：host → 既有 `{ns}.*`；其它 → MCP Client
 
-当前已存在的 `datetime_now`、`text_stats`、`web_search` 是历史遗留，**不再扩展**，后续迁移目标是将其也改造为外部 MCP Server。
+## 现有内置 MCP
+
+`mcp-vastbase-readonly` 是 P3 过渡种子。官方查库以 `host/sql` 为准；该二进制仅保留给外部 MCP 客户端（Claude Desktop 等），不要再按引擎镜像新开 `mcp-*-readonly`。
+
+`datetime_now`、`text_stats`、`web_search` 若仍残留在编排器内，**不再扩展**；新官方能力开 `host/{族}`，新外部能力开 MCP。
 
 ## Skills
 
-- Skills 是提示词模板 + 参数，保持配置/数据库驱动
-- 禁止把新的 Skill 执行逻辑写成 Go 代码编译进服务
+- 只做提示词模板 + 参数
+- 禁止把 Skill 执行逻辑写成 Go 编进 platform 或 L1
 
 ## 原因
 
-- 内置工具名需符合各模型 API 的命名约束（`^[a-zA-Z0-9_-]+$`），容易引入 bug
-- 外部 MCP 可独立部署、更新、重启，不影响主服务
-- 支持任意语言实现工具，不受 Go 限制
-- 工具崩溃不影响主进程稳定性
+- 一手工具与 UI 共用 L1 / 会话 / 凭据，避免契约漂移和多余进程
+- 扩展隔离：第三方 MCP 崩溃不影响 platform
+- 工具名仍须符合 `^[a-zA-Z0-9_-]+$`（host 与 MCP 相同）

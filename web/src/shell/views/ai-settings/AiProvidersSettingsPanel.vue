@@ -4,8 +4,8 @@
  *
  * 布局对齐「工具组件」：左列表 + 右详情；API Key 经 Vault 加密，从不回显明文。
  */
-import { RsButton, RsEmpty, RsIcon, RsInput, RsSelect, RsTooltip } from '@niuma/ui'
-import type { RsSelectOption } from '@niuma/ui'
+import { RsButton, RsEmpty, RsIcon, RsInput, RsSelect, RsTooltip, unwrapSelectEntry } from '@niuma/ui'
+import type { RsSelectModelValue, RsSelectOption } from '@niuma/ui'
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref, watch } from 'vue'
 import { aiApi } from '@/api/ai'
@@ -137,8 +137,20 @@ function applyPreset(presetId: string, opts?: { fillName?: boolean }): void {
   }
 }
 
-function onPresetChange(value: string): void {
-  const presetId = value || AI_PROVIDER_PRESET_CUSTOM
+function selectTokens(value: RsSelectModelValue): string[] {
+  let entries: RsSelectModelValue[]
+  if (Array.isArray(value)) entries = value
+  else if (value === '' || value == null) entries = []
+  else entries = [value]
+  return entries
+    .map((item) => unwrapSelectEntry(item))
+    .filter((item): item is NonNullable<typeof item> => item != null)
+    .map(String)
+}
+
+function onPresetChange(value: RsSelectModelValue): void {
+  const raw = unwrapSelectEntry(value)
+  const presetId = raw == null ? AI_PROVIDER_PRESET_CUSTOM : String(raw)
   if (!presetId || presetId === AI_PROVIDER_PRESET_CUSTOM) {
     formPresetId.value = AI_PROVIDER_PRESET_CUSTOM
     remoteModelIds.value = []
@@ -147,8 +159,8 @@ function onPresetChange(value: string): void {
   applyPreset(presetId, { fillName: creating.value })
 }
 
-function onModelsSelect(value: string[]): void {
-  formSelectedModels.value = value
+function onModelsSelect(value: RsSelectModelValue): void {
+  formSelectedModels.value = selectTokens(value)
   modelSearchQuery.value = ''
 }
 

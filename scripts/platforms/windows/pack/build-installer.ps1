@@ -177,7 +177,10 @@ MinVersion=10.0
 SetupMutex=NiuMa.Desktop.Setup
 UsePreviousAppDir=yes
 UsePreviousLanguage=yes
-PrivilegesRequired=admin
+UsePreviousPrivileges=yes
+; 默认当前用户（%LOCALAPPDATA%\Programs\NiuMa），不弹 UAC。
+; 向导可选「所有用户」再提权写 Program Files。覆盖升级沿用上次权限。
+PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=$archAllowed
 ArchitecturesInstallIn64BitMode=$archInstallMode
@@ -193,8 +196,7 @@ VersionInfoCopyright=Copyright (C) {#MyAppPublisher}
 VersionInfoDescription=$AppDescription
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion=$AppVersion
-; 静默安装：Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
-; 仅当前用户：Setup.exe /CURRENTUSER（需配合 OverridesAllowed=dialog）
+; 静默：默认当前用户、不提权。所有用户：Setup.exe /ALLUSERS（会 UAC）
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "$eulaEnEscaped"

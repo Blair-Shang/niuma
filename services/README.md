@@ -7,6 +7,7 @@ services/
 ├── manifests/           # service.yaml（platform-core supervisor 懒拉起）
 ├── bin/                 # 编译产物
 │   └── runtime/         # 厂商 native 旁载（如 oracle Instant Client）
+├── api-service/         # API 管理（P0：TCP/UDP，见 docs/36）
 ├── ftp-service/ …       # Go 能力服务
 ├── mysql-service/
 ├── sqlite-service/

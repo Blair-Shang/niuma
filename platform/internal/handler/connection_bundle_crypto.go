@@ -1,3 +1,4 @@
+// 本文件实现连接导出包中的凭据信封（Argon2id + AES-256-GCM），不含明文密码。
 package handler
 
 import (
@@ -15,12 +16,17 @@ import (
 )
 
 const (
+	// bundleSecretsKDF 是导出包 secrets 信封使用的口令派生算法名。
 	bundleSecretsKDF = "argon2id"
-	// 口令派生参数：桌面端可接受的耗时与内存占用。
-	argonTime    = 3
-	argonMemory  = 64 * 1024 // 64 MiB
+	// argonTime 是 Argon2id 迭代次数。
+	argonTime = 3
+	// argonMemory 是 Argon2id 内存参数，单位 KiB（64 MiB）。
+	argonMemory = 64 * 1024
+	// argonThreads 是 Argon2id 并行度。
 	argonThreads = 4
-	argonKeyLen  = 32
+	// argonKeyLen 是派生密钥字节数（AES-256）。
+	argonKeyLen = 32
+	// argonSaltLen 是随机盐字节数。
 	argonSaltLen = 16
 )
 
@@ -46,10 +52,12 @@ type connectionSecretsPayload struct {
 	ByExportID map[string]connectionSecretEntry `json:"byExportId"`
 }
 
+// deriveBundleKey 用 Argon2id 从口令派生对称密钥。
 func deriveBundleKey(passphrase string, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
 	return argon2.IDKey([]byte(passphrase), salt, time, memory, threads, keyLen)
 }
 
+// encryptBundleSecrets 将凭据明文载荷封入导出包 secrets 信封。
 func encryptBundleSecrets(passphrase string, payload connectionSecretsPayload) (*connectionBundleSecrets, error) {
 	if strings.TrimSpace(passphrase) == "" {
 		return nil, errors.New("passphrase required when includeSecrets")
@@ -78,6 +86,7 @@ func encryptBundleSecrets(passphrase string, payload connectionSecretsPayload) (
 	}, nil
 }
 
+// decryptBundleSecrets 用口令解开导出包 secrets 信封。
 func decryptBundleSecrets(passphrase string, env *connectionBundleSecrets) (connectionSecretsPayload, error) {
 	var empty connectionSecretsPayload
 	if env == nil {
@@ -124,6 +133,7 @@ func decryptBundleSecrets(passphrase string, env *connectionBundleSecrets) (conn
 	return payload, nil
 }
 
+// aesgcmSeal 用 AES-256-GCM 加密并返回 base64 密文（含 nonce）。
 func aesgcmSeal(key, plaintext []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -141,6 +151,7 @@ func aesgcmSeal(key, plaintext []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(sealed), nil
 }
 
+// aesgcmOpen 解密 aesgcmSeal 产出的 base64 密文。
 func aesgcmOpen(key []byte, cipherB64 string) ([]byte, error) {
 	data, err := base64.StdEncoding.DecodeString(cipherB64)
 	if err != nil {

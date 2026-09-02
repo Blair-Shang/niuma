@@ -59,8 +59,7 @@ const (
 	MethodComponentsGetDownload = "platform.components.getDownload"
 	// MethodComponentsInstall 下载并安装组件包至 data/components/。
 	MethodComponentsInstall = "platform.components.install"
-	// MethodAppUpdateDownload / Verify / Cancel：本体安装包受限下载（见 appupdate）。
-	// Web/Shell 契约亦接受 shell.update.*，由壳层改写或直达此处。
+	// MethodAppUpdate* 定义见 app_update.go（壳层亦可改写 shell.update.*）。
 	// MethodAIProviderList 列出 LLM Provider。
 	MethodAIProviderList = "platform.ai.provider.list"
 	// MethodAIProviderGet 读取单个 Provider（含模型列表）。
@@ -181,6 +180,7 @@ type Deps struct {
 	Components   *components.Registry
 	AppUpdate    *appupdate.Manager
 	AI           *ai.Service
+	APIHistory   *store.APIHistoryStore
 	Events       EventPublisher
 }
 
@@ -197,6 +197,7 @@ type Dispatcher struct {
 	components   *components.Registry
 	appUpdate    *appupdate.Manager
 	ai           *ai.Service
+	apiHistory   *store.APIHistoryStore
 	events       EventPublisher
 }
 
@@ -214,6 +215,7 @@ func New(deps Deps) *Dispatcher {
 		components:   deps.Components,
 		appUpdate:    deps.AppUpdate,
 		ai:           deps.AI,
+		apiHistory:   deps.APIHistory,
 		events:       deps.Events,
 	}
 }
@@ -237,6 +239,7 @@ func (d *Dispatcher) dispatch(ctx context.Context, req Request) Response {
 	return resp
 }
 
+// dispatchMethod 按 method 路由到 settings / AI / 组件 / 诊断或能力代理。
 func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 	switch req.Method {
 	case MethodSettingsGet:
@@ -355,6 +358,14 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.diagSummary(ctx, req)
 	case MethodDiagCrashes:
 		return d.diagCrashes(ctx, req)
+	case MethodAPIHistoryList:
+		return d.apiHistoryList(ctx, req)
+	case MethodAPIHistoryAppend:
+		return d.apiHistoryAppend(ctx, req)
+	case MethodAPIHistoryDelete:
+		return d.apiHistoryDelete(ctx, req)
+	case MethodAPIHistoryClear:
+		return d.apiHistoryClear(ctx, req)
 	default:
 		if d.fileEditor != nil {
 			if resp, handled := d.fileEditor.Dispatch(ctx, req); handled {

@@ -1,4 +1,4 @@
-package ai
+package skill
 
 import (
 	"archive/zip"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"niuma/platform/internal/ai/mcp"
 )
 
 const (
@@ -54,7 +55,7 @@ type SkillPackExportParams struct {
 
 // InstallSkillPack 安装 OpenClaw 风格 Skill 包：复制到 skills 根目录、写入 nm_ai_skill；
 // 若含 scripts/ 则注册外部 mcp-skill-runner 并尝试发现工具。
-func (s *Service) InstallSkillPack(ctx context.Context, params SkillPackInstallParams) (*SkillPackInstallResult, error) {
+func (s *API) InstallSkillPack(ctx context.Context, params SkillPackInstallParams) (*SkillPackInstallResult, error) {
 	if s == nil || s.Skills == nil || s.ids == nil {
 		return nil, fmt.Errorf("ai: skills unavailable")
 	}
@@ -180,7 +181,7 @@ func (s *Service) InstallSkillPack(ctx context.Context, params SkillPackInstallP
 		PackPath:    dest,
 	}
 
-	if !hasScripts || s.MCP == nil {
+	if !hasScripts || s.mcp == nil {
 		return result, nil
 	}
 
@@ -189,10 +190,10 @@ func (s *Service) InstallSkillPack(ctx context.Context, params SkillPackInstallP
 		"timeoutMs": 60000,
 	})
 	var rowVersion int64
-	if prev, err := s.MCP.GetServer(ctx, mcpID); err == nil && prev != nil {
+	if prev, err := s.mcp.Store.GetServer(ctx, mcpID); err == nil && prev != nil {
 		rowVersion = prev.RowVersion
 	}
-	mcpView, err := s.UpsertMCPServer(ctx, MCPUpsertParams{
+	mcpView, err := s.mcp.UpsertMCPServer(ctx, mcp.MCPUpsertParams{
 		ServerID:      mcpID,
 		ServerName:    "Skill · " + code,
 		TransportKind: "stdio",
@@ -207,7 +208,7 @@ func (s *Service) InstallSkillPack(ctx context.Context, params SkillPackInstallP
 	}
 	result.MCPServerID = mcpView.ServerID
 
-	refreshed, err := s.RefreshMCPTools(ctx, mcpView.ServerID)
+	refreshed, err := s.mcp.RefreshMCPTools(ctx, mcpView.ServerID)
 	if err != nil {
 		result.Warning = "skill installed; tool discovery failed (build mcp-skill-runner?): " + err.Error()
 		return result, nil
@@ -217,7 +218,7 @@ func (s *Service) InstallSkillPack(ctx context.Context, params SkillPackInstallP
 }
 
 // UninstallSkillPack 卸载包：删 MCP（若有）、删 Skill、删安装目录。
-func (s *Service) UninstallSkillPack(ctx context.Context, skillID string) (bool, error) {
+func (s *API) UninstallSkillPack(ctx context.Context, skillID string) (bool, error) {
 	if s == nil || s.Skills == nil {
 		return false, fmt.Errorf("ai: skills unavailable")
 	}
@@ -233,8 +234,8 @@ func (s *Service) UninstallSkillPack(ctx context.Context, skillID string) (bool,
 		return false, nil
 	}
 	meta := parseSkillPackMeta(sk.SkillOptions)
-	if meta != nil && meta.MCPServerID != "" && s.MCP != nil {
-		_, _ = s.DeleteMCPServer(ctx, meta.MCPServerID)
+	if meta != nil && meta.MCPServerID != "" && s.mcp != nil {
+		_, _ = s.mcp.DeleteMCPServer(ctx, meta.MCPServerID)
 	}
 	if err := s.Skills.Delete(ctx, skillID); err != nil {
 		return false, err
@@ -252,7 +253,7 @@ func (s *Service) UninstallSkillPack(ctx context.Context, skillID string) (bool,
 }
 
 // ExportSkillPack 将已安装包打成 zip 写到 destPath（供「下载/分享」）。
-func (s *Service) ExportSkillPack(ctx context.Context, params SkillPackExportParams) (string, error) {
+func (s *API) ExportSkillPack(ctx context.Context, params SkillPackExportParams) (string, error) {
 	if s == nil || s.Skills == nil {
 		return "", fmt.Errorf("ai: skills unavailable")
 	}

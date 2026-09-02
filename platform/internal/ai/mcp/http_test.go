@@ -1,4 +1,4 @@
-package ai
+package mcp
 
 import (
 	"encoding/json"

@@ -1,3 +1,4 @@
+// 本文件实现模型接入的 Bridge 入口（platform.ai.provider.* / model.*）。
 package handler
 
 import (

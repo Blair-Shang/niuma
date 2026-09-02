@@ -1,3 +1,4 @@
+// 本文件记录 IPC 分发失败（id / traceId / errorCode），取消请求不记。
 package handler
 
 import (

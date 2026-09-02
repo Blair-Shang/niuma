@@ -658,6 +658,7 @@ func sanitizeConnectionOptionsJSON(raw string) (json.RawMessage, error) {
 	return json.RawMessage(out), nil
 }
 
+// normalizeOrganizationJSON 将空或非法组织层 JSON 规范为 []。
 func normalizeOrganizationJSON(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil

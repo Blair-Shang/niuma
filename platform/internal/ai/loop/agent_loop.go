@@ -1,4 +1,4 @@
-package ai
+package loop
 
 import (
 	"context"
@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"niuma/platform/internal/ai/host"
+	"niuma/platform/internal/ai/mcp"
+	"niuma/platform/internal/ai/tool"
 	"niuma/platform/internal/store"
 )
 
@@ -22,21 +25,53 @@ var nonToolNameRe = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 type boundTool struct {
 	ExposeName string // 给模型的名称（可能带 server 前缀）
+	HostName   string // 非空表示官方 host 工具
 	Server     store.AIMCPServer
 	Tool       store.AIMCPTool
 }
 
-// buildEnabledToolDefs 读取已启用工具并生成 OpenAI tools + 名称映射。
+// buildEnabledToolDefs 读取官方 host + 已启用 MCP 工具并生成 OpenAI tools + 名称映射。
 func (s *Service) buildEnabledToolDefs(ctx context.Context) ([]ToolDef, map[string]boundTool, error) {
-	if s == nil || s.MCP == nil {
+	if s == nil {
 		return nil, nil, nil
+	}
+	defs := make([]ToolDef, 0, 8)
+	bound := make(map[string]boundTool)
+
+	if s.host != nil {
+		for _, spec := range host.SQLToolSpecs() {
+			defs = append(defs, ToolDef{
+				Type: "function",
+				Function: ToolFunctionDef{
+					Name:        spec.Name,
+					Description: spec.Description,
+					Parameters:  spec.Parameters,
+				},
+			})
+			bound[spec.Name] = boundTool{
+				ExposeName: spec.Name,
+				HostName:   spec.Name,
+				Tool: store.AIMCPTool{
+					ServerID:        host.ServerID,
+					ToolName:        spec.Name,
+					ToolDescription: spec.Description,
+					InputSchema:     string(spec.Parameters),
+					RiskLevel:       spec.Risk,
+				},
+				Server: store.AIMCPServer{ServerID: host.ServerID, ServerName: "host-sql"},
+			}
+		}
+	}
+
+	if s.MCP == nil {
+		return defs, bound, nil
 	}
 	tools, err := s.MCP.ListEnabledTools(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	if len(tools) == 0 {
-		return nil, nil, nil
+		return defs, bound, nil
 	}
 	servers := make(map[string]store.AIMCPServer)
 	list, err := s.MCP.ListServers(ctx, "active")
@@ -47,21 +82,28 @@ func (s *Service) buildEnabledToolDefs(ctx context.Context) ([]ToolDef, map[stri
 		servers[srv.ServerID] = srv
 	}
 
-	// 检测重名
+	// 检测重名（含官方 host）
 	nameCount := map[string]int{}
+	for name := range bound {
+		nameCount[name]++
+	}
 	for _, t := range tools {
+		if s.host != nil && t.ServerID == mcp.BuiltinMCPVastbaseReadonlyID {
+			continue
+		}
 		nameCount[t.ToolName]++
 	}
 
-	defs := make([]ToolDef, 0, len(tools))
-	bound := make(map[string]boundTool, len(tools))
 	for _, t := range tools {
+		if s.host != nil && t.ServerID == mcp.BuiltinMCPVastbaseReadonlyID {
+			continue
+		}
 		srv, ok := servers[t.ServerID]
 		if !ok {
 			continue
 		}
 		expose := t.ToolName
-		if nameCount[t.ToolName] > 1 {
+		if nameCount[t.ToolName] > 1 || bound[t.ToolName].HostName != "" {
 			expose = sanitizeToolPrefix(srv.ServerName) + "__" + t.ToolName
 		}
 		schema := json.RawMessage(t.InputSchema)
@@ -209,7 +251,7 @@ func (s *Service) invokeBoundTool(
 	}
 	args := mergeWorkspaceArgs(tc.Function.Arguments, normalized)
 	argsSummary := truncateUTF8(string(args), 200)
-	risk := ResolveToolRisk(b.Tool.RiskLevel, b.Tool.ToolName)
+	risk := tool.ResolveToolRisk(b.Tool.RiskLevel, b.Tool.ToolName)
 
 	invocationID, err := s.ids.NextString()
 	if err != nil {
@@ -217,7 +259,7 @@ func (s *Service) invokeBoundTool(
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	initialStatus := "running"
-	if RequiresConfirm(risk) {
+	if tool.RequiresConfirm(risk) {
 		initialStatus = "pending"
 	}
 	_ = s.Conversations.UpsertToolInvocation(context.Background(), store.AIToolInvocation{
@@ -233,7 +275,7 @@ func (s *Service) invokeBoundTool(
 		UpdatedAt:      now,
 	})
 
-	if RequiresConfirm(risk) {
+	if tool.RequiresConfirm(risk) {
 		s.publish(map[string]any{
 			"type":           "platform.ai.tool.pending",
 			"runId":          runID,
@@ -243,7 +285,7 @@ func (s *Service) invokeBoundTool(
 			"argsSummary":    argsSummary,
 			"risk":           risk,
 		})
-		ch := s.policy.register(invocationID, runID)
+		ch := s.policy.Register(invocationID, runID)
 		select {
 		case approve := <-ch:
 			if !approve {
@@ -262,7 +304,7 @@ func (s *Service) invokeBoundTool(
 				return result, fmt.Errorf("%s", errMsg)
 			}
 		case <-ctx.Done():
-			s.policy.cancel(invocationID)
+			s.policy.Cancel(invocationID)
 			errMsg := "cancelled"
 			result := "ERROR: " + errMsg
 			_ = s.Conversations.UpdateToolInvocation(context.Background(), invocationID, "cancelled", "", errMsg)
@@ -292,14 +334,22 @@ func (s *Service) invokeBoundTool(
 
 	var result string
 	var callErr error
-	bearer := s.mcpBearerToken(b.Server.CredentialID)
-	switch b.Server.TransportKind {
-	case "stdio":
-		result, callErr = CallMCPToolStdio(ctx, b.Server.CommandPath, b.Server.LaunchOptions, b.Tool.ToolName, args)
-	case "streamable_http":
-		result, callErr = CallMCPToolHTTP(ctx, b.Server.EndpointURL, b.Server.LaunchOptions, bearer, b.Tool.ToolName, args)
-	default:
-		callErr = fmt.Errorf("mcp invoke not implemented for transport %q", b.Server.TransportKind)
+	if b.HostName != "" {
+		var argMap map[string]any
+		if err := json.Unmarshal(args, &argMap); err != nil {
+			argMap = map[string]any{}
+		}
+		result, callErr = host.CallSQL(ctx, s.host, b.HostName, argMap)
+	} else {
+		bearer := s.mcpBearerToken(b.Server.CredentialID)
+		switch b.Server.TransportKind {
+		case "stdio":
+			result, callErr = mcp.CallMCPToolStdio(ctx, b.Server.CommandPath, b.Server.LaunchOptions, b.Tool.ToolName, args)
+		case "streamable_http":
+			result, callErr = mcp.CallMCPToolHTTP(ctx, b.Server.EndpointURL, b.Server.LaunchOptions, bearer, b.Tool.ToolName, args)
+		default:
+			callErr = fmt.Errorf("mcp invoke not implemented for transport %q", b.Server.TransportKind)
+		}
 	}
 
 	status := "done"

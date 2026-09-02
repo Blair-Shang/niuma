@@ -1,4 +1,4 @@
-package ai
+package loop
 
 import (
 	"fmt"
@@ -18,19 +18,19 @@ var sensitiveKeyRe = regexp.MustCompile(`(?i)(password|passwd|secret|api[_-]?key
 
 // ContextDraft 是 Web 采集的 Context Pack 草稿（对齐 docs/24 §15.2）。
 type ContextDraft struct {
-	Workspace   *ContextWorkspace    `json:"workspace,omitempty"`
-	Attachments []ContextAttachment  `json:"attachments,omitempty"`
+	Workspace   *ContextWorkspace   `json:"workspace,omitempty"`
+	Attachments []ContextAttachment `json:"attachments,omitempty"`
 }
 
 // ContextWorkspace 限定工具作用域。
 type ContextWorkspace struct {
-	TabID       string   `json:"tabId,omitempty"`
-	ModuleID    string   `json:"moduleId,omitempty"`
-	ProfileID   string   `json:"profileId,omitempty"`
-	SessionID   string   `json:"sessionId,omitempty"`
-	Title       string   `json:"title,omitempty"`
-	Database    string   `json:"database,omitempty"`
-	Schema      string   `json:"schema,omitempty"`
+	TabID     string `json:"tabId,omitempty"`
+	ModuleID  string `json:"moduleId,omitempty"`
+	ProfileID string `json:"profileId,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Database  string `json:"database,omitempty"`
+	Schema    string `json:"schema,omitempty"`
 	// DialectFamily / Capabilities：前端会话探测结果（DBeaver/Navicat 能力模型）。
 	DialectFamily string   `json:"dialectFamily,omitempty"`
 	Capabilities  []string `json:"capabilities,omitempty"`

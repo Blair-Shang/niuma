@@ -11,10 +11,10 @@ import (
 )
 
 /**
- * mcp-vastbase-readonly — 外部 MCP（stdio JSON-RPC）。
+ * mcp-vastbase-readonly — 可选对外 MCP（stdio JSON-RPC）。
  *
- * 经 NIUMA_PLATFORM_IPC 回调 Platform Bridge（vastbase.*），
- * 凭据由 platform 注入；本进程不持有 DB 密码。
+ * 官方查库走 platform/internal/ai/host/sql；本进程仅供 Claude Desktop 等
+ * 外部客户端。经 NIUMA_PLATFORM_IPC 调 vastbase.*，不持有 DB 密码。
  */
 
 func main() {

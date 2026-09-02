@@ -1,5 +1,7 @@
 # NiuMa — 全能 AI 运维平台
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
+
 桌面端：**自封装 CEF + C++ 壳层 + Vue 3 Web + 多语言可插拔后端**。
 
 ## 快速开始
@@ -274,4 +276,8 @@ Vue 3 Web  ──① CEF IPC──>  C++ Shell  ──② Named Pipe/UDS + JSON�
 
 ## 许可证
 
-待定
+本仓库源码以及发行包中由 NiuMa 编写的部分，按 [Apache License 2.0](./LICENSE) 授权。版权与署名见 [NOTICE](./NOTICE)。
+
+第三方组件（含捆绑的 Chromium Embedded Framework 等）按其自身许可证分发，清单见 [docs/compliance/NOTICES.txt](./docs/compliance/NOTICES.txt)。「NiuMa」名称与图标为商标，Apache 2.0 **不授予**商标权。
+
+官方免责见 [docs/legal/DISCLAIMER.zh-CN.txt](./docs/legal/DISCLAIMER.zh-CN.txt)：在法律允许范围内，开发者对使用后果不承担责任；免费获得时责任上限为零。安装向导附加声明不得缩小该范围，也不削减 Apache 2.0 已授予的复制、修改与再分发权利。

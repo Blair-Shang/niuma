@@ -3,6 +3,7 @@ name = "niuma-redis-service"
 description = "NiuMa Redis 能力服务（Layer 1）"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
 
 [[bin]]
 name = "niuma-redis-service"

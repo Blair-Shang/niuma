@@ -1,3 +1,4 @@
+// 本文件实现扩展 MCP 登记与工具开关的 Bridge 入口（platform.ai.mcp.*）。
 package handler
 
 import (

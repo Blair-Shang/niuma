@@ -8,6 +8,8 @@ export type UpdateRelease = {
   version: string
   title: string
   notesMd: string
+  notesExcerpt?: string
+  notesTruncated?: boolean
   downloadUrl: string
   sha256: string
   fileSize: number
@@ -58,16 +60,28 @@ export function fetchLatestRelease(params: UpdateLatestParams): Promise<UpdateRe
   return cloudFetch<UpdateRelease>(`/api/v1/updates/latest?${updateQuery(params)}`)
 }
 
-/** 已发布版本列表（semver 降序），供帮助菜单更新日志。 */
+/** 已发布版本目录（无全文）。单条完整说明请用 fetchPublishedRelease。 */
 export async function fetchReleaseHistory(
-  params: UpdateLatestParams & { limit?: number },
+  params: UpdateLatestParams & { limit?: number; offset?: number },
 ): Promise<UpdateRelease[]> {
   const q = new URLSearchParams(updateQuery(params))
   if (params.limit && params.limit > 0) {
     q.set('limit', String(params.limit))
   }
+  if (params.offset && params.offset > 0) {
+    q.set('offset', String(params.offset))
+  }
   const data = await cloudFetch<{ items?: UpdateRelease[] }>(`/api/v1/updates/releases?${q}`)
   return Array.isArray(data.items) ? data.items : []
+}
+
+/** 某一已发布版本的完整说明。 */
+export function fetchPublishedRelease(
+  params: UpdateLatestParams & { version: string },
+): Promise<UpdateRelease> {
+  const q = new URLSearchParams(updateQuery(params))
+  q.set('version', params.version)
+  return cloudFetch<UpdateRelease>(`/api/v1/updates/releases?${q}`)
 }
 
 export type UpdateHitParams = {

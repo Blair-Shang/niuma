@@ -1,4 +1,4 @@
-package ai
+package loop
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"niuma/platform/internal/ai/skill"
 	"niuma/platform/internal/store"
 )
 
@@ -395,7 +396,7 @@ func (s *Service) resolveSkillPrompt(ctx context.Context, skillCode string) stri
 	if sk.RecordStatus != "" && sk.RecordStatus != "active" {
 		return ""
 	}
-	return applySkillTemplate(sk.PromptTemplate, sk.ParamSchema)
+	return skill.ApplyTemplate(sk.PromptTemplate, sk.ParamSchema)
 }
 
 // Cancel 取消进行中的流式 run；不存在时返回 cancelled=false。
@@ -409,7 +410,7 @@ func (s *Service) Cancel(runID string) (cancelled bool) {
 		return false
 	}
 	if s.policy != nil {
-		s.policy.rejectRun(runID)
+		s.policy.RejectRun(runID)
 	}
 	cancel()
 	s.publish(map[string]any{
@@ -479,6 +480,17 @@ func (s *Service) resolveChatProvider(ctx context.Context, providerID, modelCode
 		return nil, "", "", fmt.Errorf("ai: api key not configured")
 	}
 	return provider, secret, resolvedModel, nil
+}
+
+func (s *Service) mcpBearerToken(credentialID string) string {
+	if s == nil || s.secrets == nil || strings.TrimSpace(credentialID) == "" {
+		return ""
+	}
+	secret, ok, err := s.secrets.GetSecret(credentialServicePrefix+credentialID, credentialSecretAccount)
+	if err != nil || !ok {
+		return ""
+	}
+	return strings.TrimSpace(secret)
 }
 
 func truncateRunes(s string, max int) string {
