@@ -449,6 +449,39 @@ pub async fn terminal_resize(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct HostkeyRememberParams {
+    host: String,
+    #[serde(default)]
+    port: u16,
+}
+
+/// hostkey_remember 把上次被拒绝的主机密钥写入 ~/.ssh/known_hosts。
+pub fn hostkey_remember(id: &str, params: Value) -> Response {
+    let params: HostkeyRememberParams = match serde_json::from_value(params) {
+        Ok(v) => v,
+        Err(e) => return Response::err(id, format!("invalid params: {e}")),
+    };
+    let host = params.host.trim();
+    if host.is_empty() {
+        return Response::err(id, "host required");
+    }
+    let port = if params.port == 0 { 22 } else { params.port };
+    match crate::session::write_remembered(host, port) {
+        Ok(remembered) => Response::ok(
+            id,
+            &serde_json::json!({
+                "remembered": true,
+                "host": remembered.host,
+                "port": remembered.port,
+                "fingerprint": remembered.fingerprint,
+                "algorithm": remembered.algorithm,
+            }),
+        ),
+        Err(e) => Response::err(id, e),
+    }
+}
+
 pub async fn terminal_close(
     sessions: &SessionManager,
     id: &str,

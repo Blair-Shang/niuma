@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
+import type { SshRemoteEncoding } from '@/api/types/ssh'
 import SshTerminalPane from '@/modules/ssh/components/SshTerminalPane.vue'
 
 const emit = defineEmits<{
   /** 当开启 syncInput 时，由任意分屏捕获到用户输入并上报父组件 */
   (e: 'broadcastInput', data: string): void
+  (e: 'reconnect'): void
 }>()
 
 const props = defineProps<{
   sessionId: string | null
   termType?: string
+  encoding?: SshRemoteEncoding
   /** 最多开启几个分屏 PTY */
   maxPanes?: number
   /** 外部控制分屏数量 */
@@ -102,8 +105,10 @@ defineExpose({
         :ref="setPaneRef(i - 1)"
         :session-id="sessionIdAt(i - 1)"
         :term-type="termType"
+        :encoding="encoding"
         :sync-broadcast="syncInput"
         @broadcastInput="onBroadcastInput"
+        @reconnect="emit('reconnect')"
       />
     </div>
   </section>

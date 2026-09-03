@@ -16,6 +16,16 @@ export const builtinModules: ModuleDescriptor[] = [
     load: () => import('@/modules/ssh/views/SshHome.vue'),
   },
   {
+    id: 'sftp',
+    source: 'builtin',
+    labelKey: 'nav.sftp',
+    icon: 'hard-drive',
+    routePath: '/sftp',
+    order: 12,
+    category: 'ops',
+    load: () => import('@/modules/sftp/views/SftpHome.vue'),
+  },
+  {
     id: 'ftp',
     source: 'builtin',
     labelKey: 'nav.ftp',

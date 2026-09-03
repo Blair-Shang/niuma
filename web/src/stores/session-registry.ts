@@ -48,6 +48,7 @@ import {
   clickhouseApi,
   damengApi,
   ftpApi,
+  sftpApi,
   kingbaseApi,
   mongodbApi,
   mysqlApi,
@@ -175,6 +176,8 @@ export const useSessionRegistry = defineStore('session-registry', () => {
     switch (kind) {
       case 'ssh':
         return { sessionId: (await sshApi.sessionOpen({ profileId })).sessionId }
+      case 'sftp':
+        return { sessionId: (await sftpApi.sessionOpen({ profileId })).sessionId }
       case 'ftp':
         return { sessionId: (await ftpApi.sessionOpen({ profileId })).sessionId }
       case 'redis':
@@ -253,6 +256,9 @@ export const useSessionRegistry = defineStore('session-registry', () => {
       switch (kind) {
         case 'ssh':
           await sshApi.sessionClose({ sessionId })
+          break
+        case 'sftp':
+          await sftpApi.sessionClose({ sessionId })
           break
         case 'ftp':
           await ftpApi.sessionClose({ sessionId })

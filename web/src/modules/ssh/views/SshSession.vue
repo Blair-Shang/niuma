@@ -38,6 +38,8 @@ import { useTabStore } from '@/stores/tab'
 import { useConnectionProfiles } from '@/modules/ops/composables/useConnectionProfiles'
 import { useSshTerminalSync } from '@/modules/ssh/composables/useSshTerminalSync'
 import { createId } from '@/utils/id'
+import { parseHostKeyRejected } from '@/modules/ssh/hostkey'
+import { resolveSshTextEncoding } from '@/modules/ssh/terminal-data'
 
 const props = defineProps<{
   profileId: string
@@ -154,6 +156,13 @@ interface TransferPlanItem {
 }
 
 const profile = ref<ConnectionProfile | null>(null)
+/** 远程目录仅在展开「远程文件」Tab 后才列，打开 SSH 不占终端会话。 */
+const sftpActiveTab = ref<'files' | 'monitor'>('files')
+const sftpUiCollapsed = ref(true)
+const filesListed = ref(false)
+const filesPaneVisible = computed(
+  () => !sftpUiCollapsed.value && sftpActiveTab.value === 'files',
+)
 
 const { sessionId, acquireSession, reconnectSession } = useSessionLease({
   kind: 'ssh',
@@ -165,8 +174,12 @@ const { sessionId, acquireSession, reconnectSession } = useSessionLease({
       provider: 'ssh',
       label: sessionLabel(),
     })
-    await refreshRemote()
+    filesListed.value = false
+    entries.value = []
     await refreshTransfers()
+    if (filesPaneVisible.value) {
+      await refreshRemote()
+    }
   },
   buildOnRelease: () => [
     () => {
@@ -305,9 +318,6 @@ function applyMultiHostSplit(): void {
   multiHostOpen.value = false
 }
 
-/** SFTP 区域当前活动 Tab */
-const sftpActiveTab = ref<'files' | 'monitor'>('files')
-
 function onSftpTabClick(tab: 'files' | 'monitor'): void {
   sftpActiveTab.value = tab
   if (sftpUiCollapsed.value) {
@@ -331,7 +341,6 @@ const splitPanes = computed((): RsSplitPaneItem[] => [
 ])
 
 const sftpSplitSizes = ref([88, 12])
-const sftpUiCollapsed = ref(true)
 
 const sftpConstraints = computed(() => resolveSplitConstraints(splitPanes.value))
 
@@ -434,6 +443,32 @@ function parentRemotePath(path: string): string {
   return parts.length ? parts.join('/') : '.'
 }
 
+const sshTextEncoding = computed(() =>
+  resolveSshTextEncoding(profile.value?.connectionOptions?.encoding),
+)
+
+async function trustHostKeyIfRejected(message: string): Promise<boolean> {
+  const info = parseHostKeyRejected(message)
+  if (!info) {
+    return false
+  }
+  const key = info.reason === 'changed'
+    ? 'connection.form.sshHostKeyChanged'
+    : 'connection.form.sshHostKeyUnknown'
+  const ok = await showConfirm(t(key, {
+    host: info.host,
+    port: info.port,
+    fingerprint: info.fingerprint,
+    algorithm: info.algorithm,
+  }))
+  if (!ok) {
+    return false
+  }
+  await sshApi.hostkeyRemember({ host: info.host, port: info.port })
+  toast.info(t('connection.form.sshHostKeyTrusted'))
+  return true
+}
+
 function sessionLabel(): string {
   const p = profile.value
   if (!p) {
@@ -448,35 +483,41 @@ async function loadProfile(): Promise<void> {
 }
 
 async function openSession(): Promise<void> {
-  connecting.value = true
-  error.value = null
-  try {
-    await acquireSession()
-    clearDiagnostic(`ssh-conn:${props.profileId}`)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : t('modules.ssh.session.connectError')
-    toast.error(error.value)
-    publishDiagnostic({
-      id: `ssh-conn:${props.profileId}`,
-      label: 'SSH Connect',
-      detail: props.profileId,
-      text: error.value,
-      kind: 'ssh',
-      tabId: useTabStore().activeTabId || undefined,
-    })
-  } finally {
-    connecting.value = false
-  }
+  await connectOrRetry(() => acquireSession())
 }
 
 async function reconnect(): Promise<void> {
+  await connectOrRetry(() => reconnectSession())
+}
+
+async function connectOrRetry(run: () => Promise<void>): Promise<void> {
   connecting.value = true
   error.value = null
   try {
-    await reconnectSession()
+    await run()
     clearDiagnostic(`ssh-conn:${props.profileId}`)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('modules.ssh.session.connectError')
+    const message = e instanceof Error ? e.message : t('modules.ssh.session.connectError')
+    try {
+      if (await trustHostKeyIfRejected(message)) {
+        await run()
+        clearDiagnostic(`ssh-conn:${props.profileId}`)
+        return
+      }
+    } catch (retryErr) {
+      error.value = retryErr instanceof Error ? retryErr.message : message
+      toast.error(error.value)
+      publishDiagnostic({
+        id: `ssh-conn:${props.profileId}`,
+        label: 'SSH Connect',
+        detail: props.profileId,
+        text: error.value,
+        kind: 'ssh',
+        tabId: useTabStore().activeTabId || undefined,
+      })
+      return
+    }
+    error.value = message
     toast.error(error.value)
     publishDiagnostic({
       id: `ssh-conn:${props.profileId}`,
@@ -507,6 +548,7 @@ async function refreshRemote(): Promise<void> {
     remotePath.value = nextPath
     remotePathDraft.value = nextPath
     entries.value = result.entries ?? []
+    filesListed.value = true
     clearDiagnostic(`ssh-sftp:${props.profileId}`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('modules.ssh.session.listError')
@@ -837,6 +879,12 @@ onBeforeUnmount(() => {
   dialogMountEl = null
 })
 
+watch(filesPaneVisible, (visible) => {
+  if (visible && sessionId.value && !filesListed.value) {
+    void refreshRemote()
+  }
+})
+
 watch(
   () => sessionActionStore.reconnectSignals[props.profileId],
   (val) => {
@@ -882,7 +930,9 @@ watch(
           :sync-input="terminalSyncEnabled"
           :max-panes="TERMINAL_MAX_PANES"
           :term-type="String(profile?.connectionOptions?.term_type ?? 'xterm-256color')"
+          :encoding="sshTextEncoding"
           @broadcastInput="onTerminalBroadcastInput"
+          @reconnect="void reconnect()"
         />
       </template>
 
@@ -939,6 +989,17 @@ watch(
               <button
                 type="button"
                 class="nm-ssh-session__mh-btn"
+                :disabled="connecting"
+                :title="t('modules.ssh.session.reconnect')"
+                @click="void reconnect()"
+              >
+                <RsIcon name="refresh-cw" :size="14" />
+                <span>{{ t('modules.ssh.session.reconnect') }}</span>
+              </button>
+
+              <button
+                type="button"
+                class="nm-ssh-session__mh-btn"
                 :title="'多主机分屏'"
                 @click="openMultiHostDialog"
               >
@@ -956,7 +1017,7 @@ watch(
 
           <!-- 远程文件面板 -->
           <FtpFilePane
-            v-show="!sftpUiCollapsed && sftpActiveTab === 'files'"
+            v-if="filesPaneVisible"
             ref="remotePaneRef"
             side="remote"
             :label="t('modules.ssh.session.remoteFiles')"

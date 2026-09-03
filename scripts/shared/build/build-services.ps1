@@ -256,6 +256,7 @@ $platformOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-platform
 $apiOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-api-service' -PlatformName $Platform)
 $ftpOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ftp-service' -PlatformName $Platform)
 $sshOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-ssh-service' -PlatformName $Platform)
+$sftpOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-sftp-service' -PlatformName $Platform)
 $redisOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-redis-service' -PlatformName $Platform)
 $mongoOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-mongodb-service' -PlatformName $Platform)
 $vastbaseOut = Join-Path $TargetBinDir (Get-BinaryName -BaseName 'niuma-vastbase-service' -PlatformName $Platform)
@@ -344,6 +345,10 @@ $sshBuilt = Build-RustService -CrateDir (Join-Path $Root 'services/ssh-service')
     -BinName 'niuma-ssh-service' `
     -Output $sshOut
 
+$sftpBuilt = Build-RustService -CrateDir (Join-Path $Root 'services/sftp-service') `
+    -BinName 'niuma-sftp-service' `
+    -Output $sftpOut
+
 $redisBuilt = Build-RustService -CrateDir (Join-Path $Root 'services/redis-service') `
     -BinName 'niuma-redis-service' `
     -Output $redisOut
@@ -373,6 +378,7 @@ if (Should-SyncLegacyBin) {
     $legacyApiOut = Join-Path $BinDir 'niuma-api-service.exe'
     $legacyFtpOut = Join-Path $BinDir 'niuma-ftp-service.exe'
     $legacySshOut = Join-Path $BinDir 'niuma-ssh-service.exe'
+    $legacySftpOut = Join-Path $BinDir 'niuma-sftp-service.exe'
     $legacyRedisOut = Join-Path $BinDir 'niuma-redis-service.exe'
     $legacyMongoOut = Join-Path $BinDir 'niuma-mongodb-service.exe'
     $legacyVastbaseOut = Join-Path $BinDir 'niuma-vastbase-service.exe'
@@ -401,6 +407,9 @@ if (Should-SyncLegacyBin) {
     if ($sshBuilt -and (Test-Path $sshOut)) {
         Copy-Item -Force $sshOut $legacySshOut
     }
+    if ($sftpBuilt -and (Test-Path $sftpOut)) {
+        Copy-Item -Force $sftpOut $legacySftpOut
+    }
     if ($redisBuilt -and (Test-Path $redisOut)) {
         Copy-Item -Force $redisOut $legacyRedisOut
     }
@@ -427,6 +436,11 @@ if ($sshBuilt -and (Test-Path $sshOut)) {
     Write-Host "    $sshOut"
 } elseif (Test-Path $sshOut) {
     Write-Host "    $sshOut (existing file, not rebuilt in this run)" -ForegroundColor Yellow
+}
+if ($sftpBuilt -and (Test-Path $sftpOut)) {
+    Write-Host "    $sftpOut"
+} elseif (Test-Path $sftpOut) {
+    Write-Host "    $sftpOut (existing file, not rebuilt in this run)" -ForegroundColor Yellow
 }
 if ($redisBuilt -and (Test-Path $redisOut)) {
     Write-Host "    $redisOut"

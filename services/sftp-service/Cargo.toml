@@ -1,0 +1,27 @@
+[package]
+name = "niuma-sftp-service"
+description = "NiuMa SFTP 能力服务（Layer 1；仅 SFTP 子系统，不申请 shell）"
+version = "1.0.8"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "niuma-sftp-service"
+path = "src/main.rs"
+
+[dependencies]
+async-trait = "0.1"
+niuma-logutil = { path = "../../packages/rust/niuma-logutil" }
+niuma-netproxy = { path = "../../packages/rust/niuma-netproxy" }
+niuma-serviceipc = { path = "../../packages/rust/niuma-serviceipc" }
+niuma-tunnel = { path = "../../packages/rust/niuma-tunnel" }
+russh = "0.44"
+russh-keys = "0.44"
+russh-sftp = "2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ssh-key = "0.6"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"

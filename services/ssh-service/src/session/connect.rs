@@ -14,8 +14,11 @@ const DEFAULT_DIAL_TIMEOUT_SECS: u64 = 30;
 /// default_ssh_port 是 SSH 默认端口。
 const DEFAULT_SSH_PORT: u16 = 22;
 const AUTH_TYPE_PASSWORD: &str = "password";
+const AUTH_TYPE_KEYBOARD_INTERACTIVE: &str = "keyboard_interactive";
 const AUTH_TYPE_PRIVATE_KEY: &str = "private_key";
 const AUTH_TYPE_PRIVATE_KEY_FILE: &str = "private_key_file";
+/// kbdint 最多往返轮数，避免服务端空请求死循环。
+const KBDINT_MAX_ROUNDS: usize = 8;
 
 /// ConnectParams 是建连参数（含明文密码，仅进程内使用）。
 #[derive(Debug, Clone, Deserialize)]
@@ -100,8 +103,14 @@ pub enum ConnectError {
     PrivateKeyPathRequired,
     #[error("ssh: unsupported auth type: {0}")]
     UnsupportedAuthType(String),
-    #[error("ssh: host key rejected for {host}:{port} — add it to ~/.ssh/known_hosts or disable verify_host_key")]
-    HostKeyRejected { host: String, port: u16 },
+    #[error("ssh: host key rejected for {host}:{port} fingerprint={fingerprint} algo={algorithm} reason={reason}")]
+    HostKeyRejected {
+        host: String,
+        port: u16,
+        fingerprint: String,
+        algorithm: String,
+        reason: String,
+    },
     #[error("ssh: tunnel: {0}")]
     Tunnel(#[from] niuma_tunnel::TunnelError),
     #[error("ssh: proxy: {0}")]
@@ -133,26 +142,8 @@ impl client::Handler for SshClientHandler {
         if !self.verify {
             return Ok(true);
         }
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .unwrap_or_default();
-        let known_hosts = std::path::Path::new(&home).join(".ssh").join("known_hosts");
-        if !known_hosts.exists() {
-            // 严格模式下无 known_hosts 文件 → 拒绝（fail-safe）
-            self.host_key_rejected.store(true, Ordering::Relaxed);
-            return Ok(false);
-        }
-        let accepted = match russh_keys::check_known_hosts_path(
-            &self.host,
-            self.port,
-            server_public_key,
-            &known_hosts,
-        ) {
-            // russh_keys returns Ok(true) if key matches, Ok(false) if key not present.
-            Ok(found) => found,
-            // Err covers key-changed or parse errors → reject (fail-safe).
-            Err(_) => false,
-        };
+        let (accepted, _reason) =
+            super::hostkey::verify_or_reject(&self.host, self.port, server_public_key);
         if !accepted {
             self.host_key_rejected.store(true, Ordering::Relaxed);
         }
@@ -187,11 +178,14 @@ pub async fn connect_ssh(
         keepalive_interval: keepalive,
         ..Default::default()
     });
+    // known_hosts 始终对照最终目标，不用隧道本地转发地址。
+    let verify_host = params.host_address.clone();
+    let verify_port = params.port_or_default();
     let host_key_rejected = Arc::new(AtomicBool::new(false));
     let handler = SshClientHandler {
         verify: params.options.verify_host_key,
-        host:   actual_host.clone(),
-        port:   actual_port,
+        host: verify_host.clone(),
+        port: verify_port,
         host_key_rejected: Arc::clone(&host_key_rejected),
     };
 
@@ -206,10 +200,7 @@ pub async fn connect_ssh(
     let mut handle = match tokio::time::timeout(params.dial_timeout(), connect_fut).await {
         Ok(Ok(h)) => h,
         Ok(Err(ConnectError::Other(_))) if host_key_rejected.load(Ordering::Relaxed) => {
-            return Err(ConnectError::HostKeyRejected {
-                host: actual_host,
-                port: actual_port,
-            });
+            return Err(host_key_rejected_error(&verify_host, verify_port));
         }
         Ok(Err(e)) => return Err(e),
         Err(_) => {
@@ -238,10 +229,10 @@ async fn authenticate(
     params: &ConnectParams,
 ) -> Result<bool, ConnectError> {
     match params.options.auth_type.as_str() {
-        "" | AUTH_TYPE_PASSWORD => handle
-            .authenticate_password(user, &params.secret)
-            .await
-            .map_err(ConnectError::Other),
+        "" | AUTH_TYPE_PASSWORD => authenticate_password_or_kbdint(handle, user, &params.secret).await,
+        AUTH_TYPE_KEYBOARD_INTERACTIVE => {
+            authenticate_keyboard_interactive(handle, user, &params.secret).await
+        }
         AUTH_TYPE_PRIVATE_KEY => {
             if params.secret.trim().is_empty() {
                 return Err(ConnectError::PrivateKeyRequired);
@@ -267,6 +258,81 @@ async fn authenticate(
         }
         other => Err(ConnectError::UnsupportedAuthType(other.to_string())),
     }
+}
+
+fn host_key_rejected_error(host: &str, port: u16) -> ConnectError {
+    let (fingerprint, algorithm, reason) = super::hostkey::peek_rejected(host, port)
+        .unwrap_or_else(|| {
+            (
+                String::new(),
+                String::new(),
+                "unknown".to_string(),
+            )
+        });
+    ConnectError::HostKeyRejected {
+        host: host.to_string(),
+        port,
+        fingerprint,
+        algorithm,
+        reason,
+    }
+}
+
+/// authenticate_password_or_kbdint 先试 password，失败再走 keyboard-interactive（许多堡垒机只开后者）。
+async fn authenticate_password_or_kbdint(
+    handle: &mut client::Handle<SshClientHandler>,
+    user: &str,
+    secret: &str,
+) -> Result<bool, ConnectError> {
+    if handle
+        .authenticate_password(user, secret)
+        .await
+        .map_err(ConnectError::Other)?
+    {
+        return Ok(true);
+    }
+    if secret.is_empty() {
+        return Ok(false);
+    }
+    authenticate_keyboard_interactive(handle, user, secret).await
+}
+
+/// authenticate_keyboard_interactive 用已存口令回答 echo=false 的提示（Password: 等）。
+/// 多轮 OTP 等 echo=true / 额外提示暂不弹窗，填空后由服务端拒绝。
+async fn authenticate_keyboard_interactive(
+    handle: &mut client::Handle<SshClientHandler>,
+    user: &str,
+    secret: &str,
+) -> Result<bool, ConnectError> {
+    use russh::client::KeyboardInteractiveAuthResponse;
+
+    let mut reply = handle
+        .authenticate_keyboard_interactive_start(user, None::<String>)
+        .await
+        .map_err(ConnectError::Other)?;
+    for _ in 0..KBDINT_MAX_ROUNDS {
+        match reply {
+            KeyboardInteractiveAuthResponse::Success => return Ok(true),
+            KeyboardInteractiveAuthResponse::Failure => return Ok(false),
+            KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
+                let responses: Vec<String> = prompts
+                    .iter()
+                    .map(|prompt| {
+                        if prompt.echo {
+                            String::new()
+                        } else {
+                            secret.to_string()
+                        }
+                    })
+                    .collect();
+                reply = handle
+                    .authenticate_keyboard_interactive_respond(responses)
+                    .await
+                    .map_err(ConnectError::Other)?;
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn optional_passphrase(passphrase: &str) -> Option<&str> {

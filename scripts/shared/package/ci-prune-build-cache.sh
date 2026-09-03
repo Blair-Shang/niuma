@@ -34,6 +34,7 @@ prune_rust_target() {
 }
 
 prune_rust_target "$REPO_ROOT/services/ssh-service/target"
+prune_rust_target "$REPO_ROOT/services/sftp-service/target"
 prune_rust_target "$REPO_ROOT/services/redis-service/target"
 if [[ -d "$REPO_ROOT/packages/rust" ]]; then
   find "$REPO_ROOT/packages/rust" -mindepth 2 -maxdepth 2 -type d -name target -print0 \

@@ -130,6 +130,7 @@ nm_log "go generate (sync SQL migrations)"
 platform_out="$TARGET_BIN_DIR/$(binary_name niuma-platform-core "$PLATFORM")"
 ftp_out="$TARGET_BIN_DIR/$(binary_name niuma-ftp-service "$PLATFORM")"
 ssh_out="$TARGET_BIN_DIR/$(binary_name niuma-ssh-service "$PLATFORM")"
+sftp_out="$TARGET_BIN_DIR/$(binary_name niuma-sftp-service "$PLATFORM")"
 redis_out="$TARGET_BIN_DIR/$(binary_name niuma-redis-service "$PLATFORM")"
 mongo_out="$TARGET_BIN_DIR/$(binary_name niuma-mongodb-service "$PLATFORM")"
 vastbase_out="$TARGET_BIN_DIR/$(binary_name niuma-vastbase-service "$PLATFORM")"
@@ -162,6 +163,10 @@ ssh_built="false"
 if build_rust_service "$REPO_ROOT/services/ssh-service" "niuma-ssh-service" "$ssh_out"; then
   ssh_built="true"
 fi
+sftp_built="false"
+if build_rust_service "$REPO_ROOT/services/sftp-service" "niuma-sftp-service" "$sftp_out"; then
+  sftp_built="true"
+fi
 redis_built="false"
 if build_rust_service "$REPO_ROOT/services/redis-service" "niuma-redis-service" "$redis_out"; then
   redis_built="true"
@@ -182,6 +187,9 @@ if should_sync_legacy_bin; then
   cp "$mcp_vast_out" "$BIN_DIR/$(binary_name mcp-vastbase-readonly "$PLATFORM")"
   if [[ "$ssh_built" == "true" && -f "$ssh_out" ]]; then
     cp "$ssh_out" "$BIN_DIR/$(binary_name niuma-ssh-service "$PLATFORM")"
+  fi
+  if [[ "$sftp_built" == "true" && -f "$sftp_out" ]]; then
+    cp "$sftp_out" "$BIN_DIR/$(binary_name niuma-sftp-service "$PLATFORM")"
   fi
   if [[ "$redis_built" == "true" && -f "$redis_out" ]]; then
     cp "$redis_out" "$BIN_DIR/$(binary_name niuma-redis-service "$PLATFORM")"

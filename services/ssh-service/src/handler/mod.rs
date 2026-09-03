@@ -37,6 +37,7 @@ pub mod method {
     pub const TERMINAL_INPUT: &str = "terminal.input";
     pub const TERMINAL_RESIZE: &str = "terminal.resize";
     pub const TERMINAL_CLOSE: &str = "terminal.close";
+    pub const HOSTKEY_REMEMBER: &str = "hostkey.remember";
 }
 
 /// Dispatcher 管理 SSH 会话并处理方法。
@@ -82,6 +83,7 @@ impl Dispatcher {
             method::TERMINAL_INPUT => methods::terminal_input(&self.sessions, id, params).await,
             method::TERMINAL_RESIZE => methods::terminal_resize(&self.sessions, id, params).await,
             method::TERMINAL_CLOSE => methods::terminal_close(&self.sessions, id, params).await,
+            method::HOSTKEY_REMEMBER => methods::hostkey_remember(id, params),
             other => Response::err(id, format!("method not found: {other}")),
         }
     }

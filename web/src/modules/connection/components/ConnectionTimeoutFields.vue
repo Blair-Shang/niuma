@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsInput, RsLabel } from '@niuma/ui'
+import { RsInput, RsLabel, RsTooltip } from '@niuma/ui'
 import { useI18n } from 'vue-i18n'
 import type { ConnectionFormState } from '@/modules/ops/composables/useConnectionProfiles'
 
@@ -16,16 +16,20 @@ const { t } = useI18n()
 <template>
   <section class="nm-conn-form__section">
     <div class="nm-conn-form__field nm-conn-form__field--timeout">
-      <RsLabel class="nm-conn-form__label-nowrap">{{ t('connection.form.connectTimeoutSeconds') }}</RsLabel>
+      <RsTooltip
+        icon
+        :content="t('connection.form.connectTimeoutSecondsHint', { default: defaultSeconds })"
+        side="top"
+        align="start"
+      >
+        <RsLabel class="nm-conn-form__label-nowrap">{{ t('connection.form.connectTimeoutSeconds') }}</RsLabel>
+      </RsTooltip>
       <RsInput
         v-model="form.connectTimeoutSeconds"
         autocomplete="off"
         :placeholder="String(defaultSeconds)"
       />
     </div>
-    <p class="nm-conn-form__hint">
-      {{ t('connection.form.connectTimeoutSecondsHint', { default: defaultSeconds }) }}
-    </p>
   </section>
 </template>
 
@@ -49,11 +53,5 @@ const { t } = useI18n()
 
 .nm-conn-form__label-nowrap {
   white-space: nowrap;
-}
-
-.nm-conn-form__hint {
-  margin: 0;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
 }
 </style>

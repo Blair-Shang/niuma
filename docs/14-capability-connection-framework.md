@@ -44,7 +44,7 @@ Web cefQuery
 | `sqlserver.session.open` | `sqlserver` | `session.open` |
 | `com.niuma.db-pg.query.exec` | `com.niuma.db-pg` | `query.exec` |
 
-常见 `connection_kind` / `bridge.namespace`：`ftp` · `ssh` · `mongodb` · `vastbase` · `mysql` · `sqlite` · `dameng` · `oracle` · `clickhouse` · `kingbase` · `postgres` · `sqlserver`（详见各模块文档与 `services/manifests/*.yaml`）。`api` 只有 namespace、没有 `connection_kind`（套接字按请求打开，见 [36](./36-api-module.md)）。
+常见 `connection_kind` / `bridge.namespace`：`ftp` · `ssh` · `sftp` · `mongodb` · `vastbase` · `mysql` · `sqlite` · `dameng` · `oracle` · `clickhouse` · `kingbase` · `postgres` · `sqlserver`（详见各模块文档与 `services/manifests/*.yaml`）。`api` 只有 namespace、没有 `connection_kind`（套接字按请求打开，见 [36](./36-api-module.md)）。`sftp` 是独立能力服务：只开 SFTP 子系统，不申请 shell（账号可以没有 SSH 终端权限）。
 
 凭据注入：manifest `session.inject_credentials: true` 时，`session.open` / `session.test`（可配置）由 platform 从 Vault 解密后注入转发。
 

@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { subscribeBridgeEventByPrefix } from '@/api/event-bus'
-import { ftpApi } from '@/api'
+import { ftpApi, sftpApi } from '@/api'
 import type { FtpTransferState, FtpTransferTask } from '@/api/types/ftp'
 
 const ACTIVE_STATES = new Set<FtpTransferState>(['queued', 'running', 'paused'])
 
-export type TransferProvider = 'ftp' | 'ssh'
+export type TransferProvider = 'ftp' | 'ssh' | 'sftp'
 
 export interface HubTransferTask extends FtpTransferTask {
   provider: TransferProvider
@@ -88,6 +88,8 @@ export const useTransferHubStore = defineStore('transfer-hub', () => {
       provider = 'ftp'
     } else if (type.startsWith('ssh.transfer.')) {
       provider = 'ssh'
+    } else if (type.startsWith('sftp.transfer.')) {
+      provider = 'sftp'
     } else {
       return
     }
@@ -166,6 +168,16 @@ export const useTransferHubStore = defineStore('transfer-hub', () => {
           speedBps: task.speedBps > 0 ? task.speedBps : (last?.speedBps ?? 0),
         })
       }
+    } else if (meta.provider === 'sftp') {
+      const result = await sftpApi.transferList({ sessionId })
+      for (const task of result.tasks ?? []) {
+        const last = prev.get(task.taskId)
+        prev.set(task.taskId, {
+          ...task,
+          provider: 'sftp',
+          speedBps: task.speedBps > 0 ? task.speedBps : (last?.speedBps ?? 0),
+        })
+      }
     } else {
       const { sshApi } = await import('@/api/ssh')
       const result = await sshApi.transferList({ sessionId })
@@ -192,6 +204,8 @@ export const useTransferHubStore = defineStore('transfer-hub', () => {
     }
     if (task.provider === 'ftp') {
       await ftpApi.transferCancel({ taskId })
+    } else if (task.provider === 'sftp') {
+      await sftpApi.transferCancel({ taskId })
     } else {
       const { sshApi } = await import('@/api/ssh')
       await sshApi.transferCancel({ taskId })
@@ -208,6 +222,10 @@ export const useTransferHubStore = defineStore('transfer-hub', () => {
       await ftpApi.transferPause({ taskId })
       return
     }
+    if (task.provider === 'sftp') {
+      await sftpApi.transferPause({ taskId })
+      return
+    }
     const { sshApi } = await import('@/api/ssh')
     await sshApi.transferPause({ taskId })
   }
@@ -221,12 +239,17 @@ export const useTransferHubStore = defineStore('transfer-hub', () => {
       await ftpApi.transferResume({ taskId })
       return
     }
+    if (task.provider === 'sftp') {
+      await sftpApi.transferResume({ taskId })
+      return
+    }
     const { sshApi } = await import('@/api/ssh')
     await sshApi.transferResume({ taskId })
   }
 
   subscribeBridgeEventByPrefix('ftp.transfer.', applyEvent)
   subscribeBridgeEventByPrefix('ssh.transfer.', applyEvent)
+  subscribeBridgeEventByPrefix('sftp.transfer.', applyEvent)
 
   return {
     tasks,

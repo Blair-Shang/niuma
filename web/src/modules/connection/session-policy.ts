@@ -28,6 +28,7 @@ export interface SessionPolicy {
 
 export const SESSION_POLICY: Record<ConnKind, SessionPolicy> = {
   ssh: { sharing: 'per_tab', closeOnRelease: true },
+  sftp: { sharing: 'per_tab', closeOnRelease: true },
   ftp: { sharing: 'per_tab', closeOnRelease: true },
   redis: { sharing: 'scoped', scopeField: 'database', closeOnRelease: false, idleMs: 60_000 },
   mongodb: { sharing: 'per_profile', closeOnRelease: false, idleMs: 60_000 },

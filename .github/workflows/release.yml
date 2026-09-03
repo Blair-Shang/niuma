@@ -145,6 +145,7 @@ jobs:
         with:
           workspaces: |
             NiuMa/services/ssh-service
+            NiuMa/services/sftp-service
             NiuMa/services/redis-service
             NiuMa/packages/rust
 

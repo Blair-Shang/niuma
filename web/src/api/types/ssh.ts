@@ -3,7 +3,8 @@
  */
 import type { ConnectionOptionsBase } from './connection'
 
-export type SshAuthType = 'password' | 'private_key' | 'private_key_file'
+export type SshAuthType = 'password' | 'keyboard_interactive' | 'private_key' | 'private_key_file'
+export type SshRemoteEncoding = 'utf-8' | 'gbk'
 
 /** SSH 连接选项（存于 connection_options JSON） */
 export interface SshConnectionOptions extends ConnectionOptionsBase {
@@ -14,10 +15,9 @@ export interface SshConnectionOptions extends ConnectionOptionsBase {
   /** 交互终端类型；由 Web 在 `ssh.terminal.open` 时读取，非 ConnectOptions */
   term_type: string
   /**
-   * 远程输出编码。
-   * @remarks v0.1 仅持久化。
+   * 远程 PTY 输出解码。服务端始终推送原始字节（base64）；Web 按此字段解码后写入 xterm。
    */
-  encoding: 'utf-8'
+  encoding: SshRemoteEncoding
   /**
    * 是否展示 SFTP 入口。
    * @remarks v0.1 仅持久化；UI 始终展示 SFTP。
@@ -174,7 +174,24 @@ export interface SshTerminalDataEvent {
   terminalId: string
   sessionId: string
   stream: 'stdout' | 'stderr'
+  /** `base64` 表示 data 为原始 PTY 字节；缺省按 UTF-8 文本兼容旧事件。 */
+  encoding?: 'base64' | 'utf-8'
   data: string
+}
+
+/** `ssh.hostkey.remember` 入参 */
+export interface SshHostkeyRememberParams {
+  host: string
+  port?: number
+}
+
+/** `ssh.hostkey.remember` 返回 */
+export interface SshHostkeyRememberResult {
+  remembered: boolean
+  host: string
+  port: number
+  fingerprint: string
+  algorithm: string
 }
 
 /** `ssh.terminal.exit` 事件 */

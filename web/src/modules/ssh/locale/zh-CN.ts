@@ -19,6 +19,8 @@ export default {
         terminalWaiting: '等待 SSH 会话建立…',
         terminalError: '终端打开失败',
         terminalLost: '终端连接已断开',
+        reconnect: '重新连接',
+        reconnected: '连接已恢复',
         commandPlaceholder: '输入远程命令，例如：ls -la /var/www',
         run: '执行',
         cwd: '当前路径：{path}',

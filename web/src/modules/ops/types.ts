@@ -3,6 +3,7 @@ import type { ConnectionProfile } from '@/api/types/connection'
 /** 运维侧栏支持的连接类型（新增类型只改 CONN_KIND_DEFS） */
 export const CONN_KIND_DEFS = [
   { kind: 'ssh' as const, label: 'SSH', icon: 'square-terminal', defaultPort: 22 },
+  { kind: 'sftp' as const, label: 'SFTP', icon: 'hard-drive', defaultPort: 22 },
   { kind: 'ftp' as const, label: 'FTP', icon: 'ftp', defaultPort: 21 },
   { kind: 'redis' as const, label: 'Redis', icon: 'redis', defaultPort: 6379 },
   { kind: 'mongodb' as const, label: 'MongoDB', icon: 'mongodb', defaultPort: 27017 },

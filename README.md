@@ -64,6 +64,7 @@ pnpm dev              # 构建并启动 niuma.exe（真实 CEF 桌面窗口）
 | Platform Core | Go | 占位，`platform/` |
 | FTP Service | Go | 已接入，`services/ftp-service/` |
 | SSH Service | Rust | 开发中，`services/ssh-service/` |
+| SFTP Service | Rust | 独立 SFTP（无 shell），`services/sftp-service/` |
 | Rust 公共包 | Rust workspace | `packages/rust/` |
 
 后端开发额外依赖：
@@ -72,13 +73,13 @@ pnpm dev              # 构建并启动 niuma.exe（真实 CEF 桌面窗口）
 |------|------|------|-------------|
 | Go | 1.25.x | `platform/`、`ftp-service/`、共享 Go 包 | [go.dev/dl](https://go.dev/dl/) |
 | Rustup | stable | 安装 / 管理 Rust toolchain | [rustup.rs](https://rustup.rs/) |
-| Rust | stable（当前固定 `1.96.x`） | `ssh-service`、`packages/rust/` | [rust-lang.org](https://www.rust-lang.org/tools/install) / [发布说明](https://github.com/rust-lang/rust/releases) |
+| Rust | stable（当前固定 `1.96.x`） | `ssh-service`、`sftp-service`、`packages/rust/` | [rust-lang.org](https://www.rust-lang.org/tools/install) / [发布说明](https://github.com/rust-lang/rust/releases) |
 
 说明：
 
 - 仓库根存在 `rust-toolchain.toml`，进入仓库后会强制使用 `stable` toolchain。
 - Rust 公共能力放在 `packages/rust/`，当前包含 `niuma-logutil` 与 `niuma-serviceipc` 两个 crate。
-- `scripts/shared/build/build-services.ps1` 会同时构建 Go 服务与 Rust 的 `niuma-ssh-service`；日常使用仍建议通过 `pnpm build:services` 或 `scripts/entry/build.ps1 -Target services` 进入。
+- `scripts/shared/build/build-services.ps1` 会同时构建 Go 服务与 Rust 的 `niuma-ssh-service`、`niuma-sftp-service`；日常使用仍建议通过 `pnpm build:services` 或 `scripts/entry/build.ps1 -Target services` 进入。
 - 升级校对：以本表「版本」列为仓库基线，对照各官网下载页 / Releases 确认是否有安全补丁或破坏性变更，再改版本约束与脚本。
 
 ## 环境准备（首次）
@@ -261,7 +262,8 @@ NiuMa/
 ├── packages/rust/             # Rust 公共 crate（日志 / IPC 等）
 ├── packages/ui/               # @niuma/ui 组件库 + playground
 ├── platform/                  # Platform Core（Go）
-├── services/ssh-service/      # SSH / SFTP 能力服务（Rust）
+├── services/ssh-service/      # SSH（终端 / exec / 会话内 SFTP）
+├── services/sftp-service/     # 独立 SFTP（仅子系统，无 shell）
 ├── services/manifests/
 ├── plugins/
 └── proto/                     # 非当前契约（见 proto/README.md）

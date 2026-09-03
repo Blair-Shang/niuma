@@ -4,6 +4,8 @@
 
 use std::time::Duration;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use niuma_serviceipc::write_frame;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -65,7 +67,7 @@ impl AsyncPublisher {
                                     }
                                 }
                                 if is_terminal_data(&event) {
-                                    if contains_escape_sequence(terminal_data_bytes(&event)) {
+                                    if contains_escape_bytes(&decode_terminal_bytes(&event)) {
                                         if let Some(buf) = coalesce.take() {
                                             if let Err(err) = writer.publish(buf.into_event()).await {
                                                 warn!(%err, "ssh terminal event publish failed");
@@ -138,22 +140,31 @@ fn is_terminal_data(event: &Value) -> bool {
     event.get("type").and_then(Value::as_str) == Some("ssh.terminal.data")
 }
 
-fn contains_escape_sequence(data: &str) -> bool {
-    data.as_bytes().contains(&0x1b) || data.as_bytes().contains(&0x9b)
+fn contains_escape_bytes(data: &[u8]) -> bool {
+    data.contains(&0x1b) || data.contains(&0x9b)
 }
 
-fn terminal_data_bytes(event: &Value) -> &str {
-    event
+/// encode_terminal_b64 把 PTY 原始字节编成 JSON 可传输的 base64。
+pub fn encode_terminal_b64(data: &[u8]) -> String {
+    STANDARD.encode(data)
+}
+
+fn decode_terminal_bytes(event: &Value) -> Vec<u8> {
+    let data = event
         .get("data")
         .and_then(Value::as_str)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    match event.get("encoding").and_then(Value::as_str) {
+        Some("base64") => STANDARD.decode(data).unwrap_or_default(),
+        _ => data.as_bytes().to_vec(),
+    }
 }
 
 struct CoalesceBuffer {
     terminal_id: String,
     session_id: String,
     stream: String,
-    data: String,
+    data: Vec<u8>,
 }
 
 impl CoalesceBuffer {
@@ -174,11 +185,7 @@ impl CoalesceBuffer {
                 .and_then(Value::as_str)
                 .unwrap_or("stdout")
                 .to_string(),
-            data: event
-                .get("data")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            data: decode_terminal_bytes(&event),
         }
     }
 
@@ -191,9 +198,7 @@ impl CoalesceBuffer {
     }
 
     fn append(&mut self, event: &Value) {
-        if let Some(chunk) = event.get("data").and_then(Value::as_str) {
-            self.data.push_str(chunk);
-        }
+        self.data.extend_from_slice(&decode_terminal_bytes(event));
     }
 
     fn byte_len(&self) -> usize {
@@ -206,7 +211,8 @@ impl CoalesceBuffer {
             "sessionId": self.session_id,
             "terminalId": self.terminal_id,
             "stream": self.stream,
-            "data": self.data,
+            "encoding": "base64",
+            "data": encode_terminal_b64(&self.data),
         })
     }
 }
@@ -294,4 +300,43 @@ fn is_transient_unix_connect(err: &std::io::Error) -> bool {
             | std::io::ErrorKind::ConnectionReset
             | std::io::ErrorKind::WouldBlock
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{contains_escape_bytes, decode_terminal_bytes, encode_terminal_b64, CoalesceBuffer};
+    use serde_json::json;
+
+    #[test]
+    fn coalesce_merges_decoded_bytes_not_base64_text() {
+        let first = json!({
+            "type": "ssh.terminal.data",
+            "sessionId": "s1",
+            "terminalId": "t1",
+            "stream": "stdout",
+            "encoding": "base64",
+            "data": encode_terminal_b64(b"hello"),
+        });
+        let second = json!({
+            "type": "ssh.terminal.data",
+            "sessionId": "s1",
+            "terminalId": "t1",
+            "stream": "stdout",
+            "encoding": "base64",
+            "data": encode_terminal_b64(b" world"),
+        });
+        let mut buf = CoalesceBuffer::from_event(first);
+        assert!(buf.can_merge(&second));
+        buf.append(&second);
+        assert_eq!(buf.byte_len(), 11);
+        let merged = buf.into_event();
+        assert_eq!(merged["encoding"], "base64");
+        assert_eq!(decode_terminal_bytes(&merged), b"hello world");
+    }
+
+    #[test]
+    fn escape_detected_on_raw_bytes() {
+        assert!(contains_escape_bytes(&[0x1b, b'[', b'H']));
+        assert!(!contains_escape_bytes(b"plain"));
+    }
 }

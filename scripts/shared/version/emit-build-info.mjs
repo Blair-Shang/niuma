@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 单一版本源：读取根 package.json，生成 build/version.json，
- * 同步 web 与 ssh-service Cargo.toml 版本字段。
+ * 同步 web 与 ssh-service / sftp-service Cargo.toml 版本字段。
  * niuma-ui 为独立仓与独立 SemVer，禁止改写其 package.json。
  */
 import { execSync } from 'node:child_process'
@@ -81,13 +81,15 @@ function syncPackageVersion(relPath, version) {
 }
 
 function syncCargoVersion(version) {
-  const cargoPath = join(repoRoot, 'services/ssh-service/Cargo.toml')
-  if (!existsSync(cargoPath)) return
-  const text = readFileSync(cargoPath, 'utf8')
-  const next = text.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`)
-  if (next === text) return
-  writeFileSync(cargoPath, next, 'utf8')
-  process.stderr.write(`synced services/ssh-service/Cargo.toml -> ${version}\n`)
+  for (const rel of ['services/ssh-service/Cargo.toml', 'services/sftp-service/Cargo.toml']) {
+    const cargoPath = join(repoRoot, rel)
+    if (!existsSync(cargoPath)) continue
+    const text = readFileSync(cargoPath, 'utf8')
+    const next = text.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`)
+    if (next === text) continue
+    writeFileSync(cargoPath, next, 'utf8')
+    process.stderr.write(`synced ${rel} -> ${version}\n`)
+  }
 }
 
 const rootPkg = readJson(join(repoRoot, 'package.json'))

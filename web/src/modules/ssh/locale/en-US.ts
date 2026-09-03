@@ -19,6 +19,8 @@ export default {
         terminalWaiting: 'Waiting for SSH session…',
         terminalError: 'Failed to open terminal',
         terminalLost: 'Terminal connection lost',
+        reconnect: 'Reconnect',
+        reconnected: 'Connection restored',
         commandPlaceholder: 'Enter a remote command, for example: ls -la /var/www',
         run: 'Run',
         cwd: 'Current path: {path}',

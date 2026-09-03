@@ -20,12 +20,15 @@
 
 - SSH agent forwarding
 - 端口转发、本地/远程隧道（Redis 侧 SSH 隧道见 [14 §9.2](./14-capability-connection-framework.md)）
-- `known_hosts` 严格校验（MVP 先信任首次主机密钥，见 §4.1）
+- 交互式 OTP / 多轮 keyboard-interactive 弹窗（当前仅用已存口令回答 Password 提示）
 
 ### 1.2.1 已纳入（相对初版文档）
 
 - 密码 / 内联私钥 / 私钥文件三种认证（`auth_type`）
+- 密码失败后自动回退 keyboard-interactive（堡垒机常见）
 - SFTP 文件浏览与在线编辑（不依赖 `sftp_enabled` 开关）
+- `keepalive_seconds`、`verify_host_key`（对照 `~/.ssh/known_hosts`，可确认指纹后写入）
+- 终端 PTY 以 base64 推送原始字节；`encoding`（utf-8 / gbk）在 Web 解码
 
 ### 1.3 关键决策
 
@@ -34,7 +37,7 @@
 | 能力服务落位 | **独立 Layer-1 进程 `ssh-service`** | SSH / SFTP 长连接、流式输出、崩溃隔离需求明显 |
 | 服务语言 | **Rust** | 适合连接复用、并发 I/O、终端/SFTP 双通道 |
 | 进程拉起层 | **platform-core 拉起并路由** | 与 FTP 一致，壳层零业务 |
-| 文件协议 | **SFTP 归属 SSH 模块** | 避免与 FTP 语义混淆，文件工作台直接按 Provider 复用 |
+| 文件协议 | **SSH 会话内 SFTP 仍属 ssh-service；无 shell 账号走独立 `sftp-service`** | 避免与 FTP 语义混淆；仅有 SFTP 权限的账号不申请 PTY/exec |
 | 凭据边界 | **平台注入明文密码，能力服务进程内使用** | UI 不见明文，沿用现有凭据模型 |
 
 ---
@@ -64,7 +67,7 @@
 要点：
 
 - 壳层只负责桥接与进程承载，**不处理 SSH/SFTP 业务**。
-- `ssh-service` 与 `ftp-service` 平级，均由 `platform-core` 按 manifest 懒拉起。
+- `ssh-service`、`sftp-service` 与 `ftp-service` 平级，均由 `platform-core` 按 manifest 懒拉起。
 - SFTP 大文件内容不经过 UI 常规 RPC 传输；在线编辑仅支持受限大小文本，超大文件未来走下载/上传链路。
 
 ---
@@ -81,7 +84,11 @@ packages/rust/
 
 services/
 ├── manifests/ssh-service.yaml
-└── ssh-service/
+├── manifests/sftp-service.yaml
+├── ssh-service/               # 终端 / exec / 会话内 SFTP
+│   ├── Cargo.toml
+│   └── src/
+└── sftp-service/              # 仅 SFTP 子系统，不申请 shell
     ├── Cargo.toml
     └── src/
         ├── main.rs
@@ -141,9 +148,9 @@ SSH 连接配置复用现有三张表：
 | `auth_type`, `private_key_path`, `passphrase` | **已生效**；私钥内容经 Vault 加密存储，经 platform `password` 字段注入 |
 | `proxy` | **已生效** |
 | `term_type` | **Web 终端**打开时使用（`ssh.terminal.open` 参数 `termType`），非 ConnectOptions |
-| `keepalive_seconds` | **仅存储** |
-| `verify_host_key` | **未生效**；服务当前恒接受主机密钥（与 MVP「信任首次」一致） |
-| `encoding` | **仅存储** |
+| `keepalive_seconds` | **ssh-service / sftp-service 已生效**（russh `keepalive_interval`；0 禁用） |
+| `verify_host_key` | **已生效**；`true` 时对照 `~/.ssh/known_hosts`。未知或变更则拒绝，Web 可确认指纹后调用 `*.hostkey.remember` |
+| `encoding` | **Web 终端已生效**；L1 推送原始字节（`encoding=base64`），前端按 utf-8 / gbk 解码 |
 | `sftp_enabled` | **仅存储**；UI 始终展示 SFTP 入口 |
 | `accentColor` | Web UI 标签色 |
 | `tunnel` | **未实现**（SSH 服务不消费；历史数据原样保留） |
@@ -151,7 +158,7 @@ SSH 连接配置复用现有三张表：
 说明：
 
 - 密码 / 私钥 PEM **不进入** `connection_options`；`private_key_file` 模式仅保存路径。
-- `verify_host_key: false` 为类型默认值；即便设为 `true`，v0.1 后端仍未校验指纹。
+- `verify_host_key: false` 为类型默认值（兼容旧资料）。开启后未知主机可在连接失败弹窗中信任并写入 known_hosts。
 - 公共字段与测试超时约定见 [14 §9](./14-capability-connection-framework.md)。
 
 ---
@@ -178,6 +185,7 @@ SSH 连接配置复用现有三张表：
 | `ssh.session.open` | `{ profileId }` 或内联连接参数 | `{ sessionId }` |
 | `ssh.session.close` | `{ sessionId }` | `{ closed: true }` |
 | `ssh.session.test` | `{ profileId }` 或内联连接参数 | `{ ok, message }` |
+| `ssh.hostkey.remember` | `{ host, port }` | `{ remembered, host, port, fingerprint, algorithm }` |
 
 ### 5.2 命令执行
 
@@ -357,20 +365,23 @@ cargo build --release
 
 ---
 
-## 11. 与 FTP 模块的边界
+## 11. 与 FTP、独立 SFTP 服务的边界
 
-| 能力 | SSH / SFTP | FTP |
-|------|------------|-----|
-| 远程命令执行 | 是 | 否 |
-| 远程文件系统 | SFTP | FTP / FTPS |
-| 安全通道 | SSH 加密 | FTP 明文 / FTPS |
-| 文件工作台 Provider | `ssh-sftp` | `ftp` |
-| 适用场景 | 主机运维、配置修改、日志查看 | 建站上传、站点资源管理 |
+| 能力 | SSH（含会话内 SFTP） | 独立 SFTP | FTP |
+|------|----------------------|-----------|-----|
+| 远程命令执行 / 终端 | 是 | 否 | 否 |
+| 远程文件系统 | `ssh.sftp.*`（挂在同一 SSH 会话） | `sftp.*`（只开 SFTP 子系统） | FTP / FTPS |
+| 安全通道 | SSH 加密 | SSH 传输 + SFTP 子系统 | FTP 明文 / FTPS |
+| 文件工作台 Provider | `ssh-sftp` | `sftp` | `ftp` |
+| 适用场景 | 有 shell 权限的主机运维 | 仅有 SFTP 权限、没有 SSH 终端 | 建站上传、站点资源管理 |
+| Layer-1 进程 | `ssh-service` | `sftp-service` | `ftp-service` |
 
 结论：
 
-- **SFTP 不并入 FTP 模块**
-- 两者共享连接树、平台凭据与文件工作台抽象
+- **独立 SFTP 不并入 FTP 模块**，也不替代 SSH 会话内的 SFTP 侧栏
+- 账号只有 `ForceCommand internal-sftp` / 无 PTY / 无 exec 时，应建 `connection_kind = sftp` 站点，由 `sftp-service` 建连并立刻打开 SFTP 子系统
+- `sftp.session.test` 会校验 SFTP 子系统可用，不只做 SSH 认证
+- 三者共享连接树、平台凭据与文件工作台抽象
 - 协议实现、UI 语义、错误模型仍各自独立
 
 ---

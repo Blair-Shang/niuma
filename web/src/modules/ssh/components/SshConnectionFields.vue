@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsInput, RsLabel, RsSelect } from '@niuma/ui'
+import { RsInput, RsLabel, RsSelect, RsTooltip } from '@niuma/ui'
 import type { RsSelectOptions } from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -29,6 +29,7 @@ const { t } = useI18n()
 
 const authOptions = computed<RsSelectOptions>(() => [
   { value: 'password', label: t('connection.form.sshAuthPassword') },
+  { value: 'keyboard_interactive', label: t('connection.form.sshAuthKeyboardInteractive') },
   { value: 'private_key', label: t('connection.form.sshAuthPrivateKey') },
   { value: 'private_key_file', label: t('connection.form.sshAuthPrivateKeyFile') },
 ])
@@ -49,8 +50,20 @@ const authOptions = computed<RsSelectOptions>(() => [
     </div>
 
     <!-- 密码认证 -->
-    <div v-if="props.form.sshAuthType === 'password'" class="nm-conn-form__field">
-      <RsLabel :required="formMode === 'create'">{{ t('opsNav.form.password') }}</RsLabel>
+    <div
+      v-if="props.form.sshAuthType === 'password' || props.form.sshAuthType === 'keyboard_interactive'"
+      class="nm-conn-form__field"
+    >
+      <RsTooltip
+        v-if="props.form.sshAuthType === 'keyboard_interactive'"
+        icon
+        :content="t('connection.form.sshAuthKeyboardInteractiveHint')"
+        side="top"
+        align="start"
+      >
+        <RsLabel :required="formMode === 'create'">{{ t('opsNav.form.password') }}</RsLabel>
+      </RsTooltip>
+      <RsLabel v-else :required="formMode === 'create'">{{ t('opsNav.form.password') }}</RsLabel>
       <RsInput v-model="props.form.password" type="password" autocomplete="new-password" />
     </div>
 
@@ -71,24 +84,29 @@ const authOptions = computed<RsSelectOptions>(() => [
 
     <!-- 私钥文件路径 -->
     <div v-if="props.form.sshAuthType === 'private_key_file'" class="nm-conn-form__field">
-      <RsLabel required>{{ t('connection.form.privateKeyPath') }}</RsLabel>
+      <RsTooltip
+        v-if="formMode === 'edit'"
+        icon
+        :content="t('opsNav.form.passwordHint')"
+        side="top"
+        align="start"
+      >
+        <RsLabel required>{{ t('connection.form.privateKeyPath') }}</RsLabel>
+      </RsTooltip>
+      <RsLabel v-else required>{{ t('connection.form.privateKeyPath') }}</RsLabel>
       <RsInput v-model="props.form.sshPrivateKeyPath" autocomplete="off" placeholder="~/.ssh/id_rsa" />
     </div>
 
     <!-- Passphrase（非密码认证时显示） -->
-    <div v-if="props.form.sshAuthType !== 'password'" class="nm-conn-form__field">
-      <RsLabel>{{ t('connection.form.passphrase') }}</RsLabel>
-      <RsInput v-model="props.form.sshPassphrase" type="password" autocomplete="new-password" />
-      <p class="nm-conn-form__hint">{{ t('connection.form.passphraseHint') }}</p>
-    </div>
-
-    <!-- 私钥文件路径模式编辑时的提示 -->
-    <p
-      v-if="formMode === 'edit' && props.form.sshAuthType === 'private_key_file'"
-      class="nm-conn-form__hint"
+    <div
+      v-if="props.form.sshAuthType !== 'password' && props.form.sshAuthType !== 'keyboard_interactive'"
+      class="nm-conn-form__field"
     >
-      {{ t('opsNav.form.passwordHint') }}
-    </p>
+      <RsTooltip icon :content="t('connection.form.passphraseHint')" side="top" align="start">
+        <RsLabel>{{ t('connection.form.passphrase') }}</RsLabel>
+      </RsTooltip>
+      <RsInput v-model="props.form.sshPassphrase" type="password" autocomplete="new-password" />
+    </div>
   </section>
 </template>
 
@@ -138,11 +156,5 @@ const authOptions = computed<RsSelectOptions>(() => [
 
 .nm-conn-form__textarea:focus {
   border-color: var(--rs-primary);
-}
-
-.nm-conn-form__hint {
-  margin: 0;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
 }
 </style>

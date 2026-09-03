@@ -8,7 +8,9 @@
 services/
 ├── manifests/              # 服务注册（platform-core supervisor 读取）
 │   ├── platform-core.yaml  # Layer 2 注册契约（com.niuma.platform）
-│   └── ftp-service.yaml
+│   ├── ftp-service.yaml
+│   ├── ssh-service.yaml
+│   └── sftp-service.yaml
 ├── bin/                    # 编译产物（git 忽略 *.exe，保留 .gitkeep）
 │   ├── platform-core.exe
 │   └── ftp-service.exe
@@ -130,7 +132,7 @@ Oracle（独立，需 VS + ODPI 源码；Instant Client 仅运行时）：
 ## 相关文档
 
 - [12 — FTP 模块](./12-ftp-module.md)
-- [16 — SSH / SFTP 模块](./16-ssh-sftp-module.md)
+- [16 — SSH / SFTP 模块](./16-ssh-sftp-module.md)（SSH 会话内 SFTP + 独立 `sftp-service`）
 - [19 — MongoDB 模块](./19-mongodb-module.md)
 - [22 — Vastbase 模块](./22-vastbase-module.md)
 - [25 — MySQL 模块](./25-mysql-module.md)

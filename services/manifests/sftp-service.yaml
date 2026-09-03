@@ -1,0 +1,27 @@
+id: com.niuma.sftp
+name: SFTP Service
+version: 0.1.0
+bridge:
+  namespace: sftp
+  connection_kind: sftp
+session:
+  inject_credentials: true
+  credential_methods:
+    - session.open
+    - session.test
+runtime:
+  executable: bin/niuma-sftp-service.exe
+  executable_windows: bin/niuma-sftp-service.exe
+  executable_unix: bin/niuma-sftp-service
+  lang: rust
+ipc:
+  transport: named_pipe
+  transport_windows: named_pipe
+  transport_unix: unix_socket
+  address: '\\.\pipe\niuma.sftp'
+  address_windows: '\\.\pipe\niuma.sftp'
+  address_unix: '/tmp/niuma.sftp.sock'
+  protocol: length_prefixed_json
+lifecycle:
+  startup: lazy
+permissions: []

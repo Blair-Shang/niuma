@@ -1,5 +1,7 @@
 import { bridgeInvoke } from '@/api/client'
 import type {
+  SshHostkeyRememberParams,
+  SshHostkeyRememberResult,
   SshExecRunParams,
   SshExecRunResult,
   SshMonitorMetricsParams,
@@ -49,6 +51,10 @@ export const sshApi = {
 
   sessionTest(params: SshSessionTestParams): Promise<SshSessionTestResult> {
     return bridgeInvoke<SshSessionTestResult>('ssh.session.test', params)
+  },
+
+  hostkeyRemember(params: SshHostkeyRememberParams): Promise<SshHostkeyRememberResult> {
+    return bridgeInvoke<SshHostkeyRememberResult>('ssh.hostkey.remember', params)
   },
 
   execRun(params: SshExecRunParams): Promise<SshExecRunResult> {

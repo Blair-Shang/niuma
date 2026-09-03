@@ -14,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex, Notify};
 use tracing::{error, warn};
 
-use crate::eventpub::AsyncPublisher;
+use crate::eventpub::{encode_terminal_b64, AsyncPublisher};
 
 use super::connect::{SshClientHandler, MAX_FILE_READ_SIZE};
 
@@ -785,6 +785,9 @@ async fn run_terminal_task(
                                 "state": TerminalState::Error.as_str(),
                                 "message": err.to_string(),
                             }));
+                            if is_transport_lost(&err.to_string()) {
+                                lost = true;
+                            }
                             break;
                         }
                         let _ = writer.flush().await;
@@ -805,22 +808,16 @@ async fn run_terminal_task(
             msg = channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { data }) => {
-                        events.emit(json!({
-                            "type": "ssh.terminal.data",
-                            "sessionId": session_id,
-                            "terminalId": terminal_id,
-                            "stream": "stdout",
-                            "data": String::from_utf8_lossy(&data).into_owned(),
-                        }));
+                        emit_terminal_data(&events, &session_id, &terminal_id, "stdout", &data);
                     }
                     Some(ChannelMsg::ExtendedData { data, ext }) => {
-                        events.emit(json!({
-                            "type": "ssh.terminal.data",
-                            "sessionId": session_id,
-                            "terminalId": terminal_id,
-                            "stream": if ext == 1 { "stderr" } else { "stdout" },
-                            "data": String::from_utf8_lossy(&data).into_owned(),
-                        }));
+                        emit_terminal_data(
+                            &events,
+                            &session_id,
+                            &terminal_id,
+                            if ext == 1 { "stderr" } else { "stdout" },
+                            &data,
+                        );
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
                         saw_exit = true;
@@ -849,6 +846,31 @@ async fn run_terminal_task(
         "terminalId": terminal_id,
         "state": if lost { TerminalState::Lost.as_str() } else { TerminalState::Closed.as_str() },
         "message": "",
+    }));
+    if lost {
+        events.emit(json!({
+            "type": "ssh.session.state",
+            "sessionId": session_id,
+            "state": "lost",
+            "message": "terminal transport lost",
+        }));
+    }
+}
+
+fn emit_terminal_data(
+    events: &AsyncPublisher,
+    session_id: &str,
+    terminal_id: &str,
+    stream: &str,
+    data: &[u8],
+) {
+    events.emit(json!({
+        "type": "ssh.terminal.data",
+        "sessionId": session_id,
+        "terminalId": terminal_id,
+        "stream": stream,
+        "encoding": "base64",
+        "data": encode_terminal_b64(data),
     }));
 }
 

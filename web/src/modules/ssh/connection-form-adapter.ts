@@ -17,6 +17,9 @@ export const sshConnectionFormAdapter: ConnectionFormAdapter = {
     sshPrivateKey: '',
     sshPrivateKeyPath: '',
     sshPassphrase: '',
+    sshKeepaliveSeconds: String(DEFAULT_SSH_OPTIONS.keepalive_seconds),
+    sshVerifyHostKey: DEFAULT_SSH_OPTIONS.verify_host_key ? 'true' : 'false',
+    encoding: DEFAULT_SSH_OPTIONS.encoding,
   }),
   applyProfile(form, item) {
     const opts = item.connectionOptions as unknown as SshConnectionOptions | undefined
@@ -24,9 +27,13 @@ export const sshConnectionFormAdapter: ConnectionFormAdapter = {
     form.sshPrivateKey = ''
     form.sshPrivateKeyPath = opts?.private_key_path ?? ''
     form.sshPassphrase = opts?.passphrase ?? ''
+    form.sshKeepaliveSeconds = String(opts?.keepalive_seconds ?? DEFAULT_SSH_OPTIONS.keepalive_seconds)
+    form.sshVerifyHostKey = opts?.verify_host_key ? 'true' : 'false'
+    form.encoding = opts?.encoding === 'gbk' ? 'gbk' : 'utf-8'
     applyStoredTimeout(form, opts as Record<string, unknown> | undefined, DEFAULT_SSH_OPTIONS.timeout_seconds)
   },
   buildOptions({ form, accent, proxy, tunnel }) {
+    const keepalive = Number.parseInt(String(form.sshKeepaliveSeconds ?? ''), 10)
     return {
       ...DEFAULT_SSH_OPTIONS,
       ...accent,
@@ -34,6 +41,11 @@ export const sshConnectionFormAdapter: ConnectionFormAdapter = {
       private_key_path: form.sshPrivateKeyPath.trim(),
       passphrase: form.sshPassphrase,
       timeout_seconds: buildTimeoutSeconds(form, DEFAULT_SSH_OPTIONS.timeout_seconds),
+      keepalive_seconds: Number.isFinite(keepalive) && keepalive >= 0
+        ? keepalive
+        : DEFAULT_SSH_OPTIONS.keepalive_seconds,
+      verify_host_key: form.sshVerifyHostKey === 'true',
+      encoding: form.encoding === 'gbk' ? 'gbk' : 'utf-8',
       proxy,
       tunnel,
     }
@@ -61,7 +73,7 @@ export const sshConnectionFormAdapter: ConnectionFormAdapter = {
     if (form.sshAuthType === 'private_key') {
       return form.sshPrivateKey.trim()
     }
-    if (form.sshAuthType === 'password') {
+    if (form.sshAuthType === 'password' || form.sshAuthType === 'keyboard_interactive') {
       return form.password.trim()
     }
     return ''

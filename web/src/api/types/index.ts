@@ -138,6 +138,18 @@ export type {
   FtpSessionTestParams,
   FtpSessionTestResult,
 } from './ftp'
+export { DEFAULT_SFTP_OPTIONS } from './sftp'
+export type {
+  SftpConnectionOptions,
+  SftpDirListParams,
+  SftpDirListResult,
+  SftpEntry,
+  SftpSessionCloseParams,
+  SftpSessionOpenParams,
+  SftpSessionOpenResult,
+  SftpSessionTestParams,
+  SftpSessionTestResult,
+} from './sftp'
 export { DEFAULT_SSH_OPTIONS } from './ssh'
 export type {
   SshConnectionOptions,

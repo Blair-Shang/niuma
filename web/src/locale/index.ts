@@ -5,6 +5,8 @@ import { mergeMessages } from './merge-messages'
 
 import sshZh from '../modules/ssh/locale/zh-CN'
 import sshEn from '../modules/ssh/locale/en-US'
+import sftpZh from '../modules/sftp/locale/zh-CN'
+import sftpEn from '../modules/sftp/locale/en-US'
 import ftpZh from '../modules/ftp/locale/zh-CN'
 import ftpEn from '../modules/ftp/locale/en-US'
 import redisZh from '../modules/redis/locale/zh-CN'
@@ -35,6 +37,7 @@ import apiEn from '../modules/api-tester/locale/en-US'
 const zhMessages = mergeMessages(
   zhCN,
   sshZh,
+  sftpZh,
   ftpZh,
   redisZh,
   mongodbZh,
@@ -53,6 +56,7 @@ const zhMessages = mergeMessages(
 const enMessages = mergeMessages(
   enUS,
   sshEn,
+  sftpEn,
   ftpEn,
   redisEn,
   mongodbEn,

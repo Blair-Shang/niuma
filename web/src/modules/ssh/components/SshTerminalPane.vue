@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsTerminal, containsEscapeSequence, type RsTerminalExpose } from '@niuma/ui'
+import { RsButton, RsTerminal, containsEscapeSequence, type RsTerminalExpose } from '@niuma/ui'
+import type { SshRemoteEncoding } from '@/api/types/ssh'
 import { useSshTerminal } from '@/modules/ssh/composables/useSshTerminal'
+import { decodeSshTerminalData } from '@/modules/ssh/terminal-data'
 import {
   clearDiagnostic,
   clearEditorSelection,
@@ -14,6 +16,7 @@ import { useTabStore } from '@/stores/tab'
 const props = defineProps<{
   sessionId: string | null
   termType?: string
+  encoding?: SshRemoteEncoding
   /** 当开启“同步输入”时，由父组件广播输入到所有分屏 */
   syncBroadcast?: boolean
 }>()
@@ -25,12 +28,21 @@ const terminalReady = ref(false)
 const startupError = ref('')
 let pendingOutput = ''
 let flushRaf = 0
-const TERMINAL_SCROLLBACK = 5_000
+const TERMINAL_SCROLLBACK = 20_000
 const syncBroadcast = computed(() => props.syncBroadcast ?? false)
+const textEncoding = computed<SshRemoteEncoding>(() => props.encoding ?? 'utf-8')
 
 const emit = defineEmits<{
   (e: 'broadcastInput', data: string): void
+  (e: 'reconnect'): void
 }>()
+
+const canReconnect = computed(() => {
+  if (startupError.value) {
+    return true
+  }
+  return pane.state.value === 'error' || pane.state.value === 'lost'
+})
 
 const pane = useSshTerminal()
 let openingForSessionId = ''
@@ -129,7 +141,7 @@ async function openForSession(sessionId: string): Promise<void> {
         rows: Math.max(geometry.rows, 5),
         termType: props.termType || 'xterm-256color',
       },
-      (event) => writeChunk(event.data, event.stream),
+      (event) => writeChunk(decodeSshTerminalData(event, textEncoding.value), event.stream),
     )
     await syncPtySize()
   } catch (e) {
@@ -271,6 +283,8 @@ defineExpose({
     ref="terminalRef"
     :overlay="overlayText"
     show-ask-ai
+    copy-on-select
+    search-enabled
     :scrollback="TERMINAL_SCROLLBACK"
     :right-click-selects-word="false"
     :snap-viewport-on-tui-write="false"
@@ -285,5 +299,11 @@ defineExpose({
     @resize="() => void refreshSize()"
     @selection-change="onSelectionChange"
     @ask-ai="(text) => void askAiAboutSelection(text)"
-  />
+  >
+    <template v-if="canReconnect" #overlayAction>
+      <RsButton size="sm" variant="primary" @click="emit('reconnect')">
+        {{ t('modules.ssh.session.reconnect') }}
+      </RsButton>
+    </template>
+  </RsTerminal>
 </template>
