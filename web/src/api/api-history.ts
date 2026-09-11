@@ -6,6 +6,8 @@ import type {
   ApiHistoryClearResult,
   ApiHistoryDeleteParams,
   ApiHistoryDeleteResult,
+  ApiHistoryGetParams,
+  ApiHistoryGetResult,
   ApiHistoryListParams,
   ApiHistoryListResult,
 } from '@/api/types/api'
@@ -17,6 +19,10 @@ import type {
 export const apiHistoryApi = {
   list(params?: ApiHistoryListParams): Promise<ApiHistoryListResult> {
     return bridgeInvoke<ApiHistoryListResult>('platform.api.history.list', params ?? {})
+  },
+
+  get(params: ApiHistoryGetParams): Promise<ApiHistoryGetResult> {
+    return bridgeInvoke<ApiHistoryGetResult>('platform.api.history.get', params)
   },
 
   append(params: ApiHistoryAppendParams): Promise<ApiHistoryAppendResult> {

@@ -1,4 +1,4 @@
-import type { ApiHistoryEntry } from '@/api/types/api'
+import type { ApiHistoryEntry, ApiHistorySummary } from '@/api/types/api'
 import type { ApiExchange, ApiHistoryItem, ApiKvRow, ApiMethod, ApiRequest } from '../types'
 
 const METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'WS', 'TCP', 'UDP']
@@ -59,7 +59,7 @@ export function parseHistoryExchange(raw: unknown): ApiExchange | null {
   }
 }
 
-export function toHistoryItem(entry: ApiHistoryEntry): ApiHistoryItem {
+export function toHistorySummary(entry: ApiHistorySummary): ApiHistoryItem {
   return {
     historyId: entry.historyId,
     requestId: entry.requestId,
@@ -67,10 +67,18 @@ export function toHistoryItem(entry: ApiHistoryEntry): ApiHistoryItem {
     method: asMethod(entry.httpMethod),
     url: entry.requestUrl,
     environmentName: entry.environmentName,
-    request: parseHistoryRequest(entry.requestJson),
-    exchange: parseHistoryExchange(entry.exchangeJson),
+    request: null,
+    exchange: null,
     durationMs: entry.durationMs,
     httpStatus: entry.httpStatus,
     createdAt: entry.createdAt,
+  }
+}
+
+export function toHistoryItem(entry: ApiHistoryEntry): ApiHistoryItem {
+  return {
+    ...toHistorySummary(entry),
+    request: parseHistoryRequest(entry.requestJson),
+    exchange: parseHistoryExchange(entry.exchangeJson),
   }
 }

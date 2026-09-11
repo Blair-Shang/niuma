@@ -144,6 +144,12 @@ async function openForSession(sessionId: string): Promise<void> {
       (event) => writeChunk(decodeSshTerminalData(event, textEncoding.value), event.stream),
     )
     await syncPtySize()
+    // 分屏/字体就绪前第一次 fit 常停在 80×24；再量两次把真实行列推给 PTY
+    await nextTick()
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    })
+    await syncPtySize()
   } catch (e) {
     startupError.value = e instanceof Error ? e.message : t('modules.ssh.session.terminalError')
     publishDiagnostic({
@@ -287,7 +293,6 @@ defineExpose({
     search-enabled
     :scrollback="TERMINAL_SCROLLBACK"
     :right-click-selects-word="false"
-    :snap-viewport-on-tui-write="false"
     wheel-scroll-modifier="shift"
     @ready="async () => {
       terminalReady = true

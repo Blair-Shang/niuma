@@ -113,7 +113,7 @@ onBeforeUnmount(() => {
 
 /*
  * 桌面 Shell 对话框安全区（RsDialog / RsConfirmDialog 读取）。
- * Teleport 到 body 时仍生效，避免 window 布局全屏/缩放覆盖顶栏与状态栏。
+ * Teleport 到 body 时仍生效，避免覆盖顶栏与状态栏。
  */
 :root {
   --rs-dialog-inset-top: var(--nm-topbar-h);

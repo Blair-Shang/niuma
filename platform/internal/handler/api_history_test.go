@@ -73,6 +73,34 @@ func TestAPIHistoryAppendListDeleteClear(t *testing.T) {
 	if len(listed.Entries) != 1 || listed.Entries[0].HTTPMethod != "GET" || listed.Entries[0].RequestID != "req-1" {
 		t.Fatalf("listed=%+v", listed)
 	}
+	var listedRaw map[string]any
+	if err := json.Unmarshal([]byte(listResp.Result), &listedRaw); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := listedRaw["entries"].([]any)
+	first, _ := entries[0].(map[string]any)
+	if _, ok := first["requestJson"]; ok {
+		t.Fatalf("list must omit requestJson: %+v", first)
+	}
+	if _, ok := first["exchangeJson"]; ok {
+		t.Fatalf("list must omit exchangeJson: %+v", first)
+	}
+	getResp := invokeMap(t, d, handler.MethodAPIHistoryGet, map[string]any{"historyId": listed.Entries[0].HistoryID})
+	if !getResp.OK {
+		t.Fatalf("get: %s", getResp.Error)
+	}
+	var got struct {
+		Entry struct {
+			RequestJSON  map[string]any `json:"requestJson"`
+			ExchangeJSON map[string]any `json:"exchangeJson"`
+		} `json:"entry"`
+	}
+	if err := json.Unmarshal([]byte(getResp.Result), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Entry.ExchangeJSON["body"] != `{"ok":true}` {
+		t.Fatalf("get body=%v", got.Entry.ExchangeJSON)
+	}
 	delResp := invokeMap(t, d, handler.MethodAPIHistoryDelete, map[string]any{"historyId": listed.Entries[0].HistoryID})
 	if !delResp.OK {
 		t.Fatalf("delete: %s", delResp.Error)

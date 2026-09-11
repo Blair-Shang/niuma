@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"niuma/platform/internal/store"
 )
 
 const (
-	// MethodAPIHistoryList 列出 API 发送历史。
+	// MethodAPIHistoryList 列出 API 发送历史摘要（不含报文正文）。
 	MethodAPIHistoryList = "platform.api.history.list"
+	// MethodAPIHistoryGet 读取一条完整发送快照。
+	MethodAPIHistoryGet = "platform.api.history.get"
 	// MethodAPIHistoryAppend 追加一条发送快照。
 	MethodAPIHistoryAppend = "platform.api.history.append"
 	// MethodAPIHistoryDelete 删除一条历史。
@@ -25,6 +28,10 @@ type apiHistoryListParams struct {
 	WorkspaceID string `json:"workspaceId"`
 	RequestID   string `json:"requestId"`
 	Limit       int    `json:"limit"`
+}
+
+type apiHistoryGetParams struct {
+	HistoryID string `json:"historyId"`
 }
 
 type apiHistoryAppendParams struct {
@@ -63,6 +70,40 @@ type apiHistoryView struct {
 	DurationMS      int64           `json:"durationMs"`
 	HTTPStatus      *int64          `json:"httpStatus"`
 	CreatedAt       string          `json:"createdAt"`
+}
+
+type apiHistorySummaryView struct {
+	HistoryID       string `json:"historyId"`
+	WorkspaceID     string `json:"workspaceId"`
+	RequestID       string `json:"requestId"`
+	RequestName     string `json:"requestName"`
+	HTTPMethod      string `json:"httpMethod"`
+	RequestURL      string `json:"requestUrl"`
+	EnvironmentID   string `json:"environmentId"`
+	EnvironmentName string `json:"environmentName"`
+	DurationMS      int64  `json:"durationMs"`
+	HTTPStatus      *int64 `json:"httpStatus"`
+	CreatedAt       string `json:"createdAt"`
+}
+
+func toAPIHistorySummary(rec store.APIHistoryRecord) apiHistorySummaryView {
+	view := apiHistorySummaryView{
+		HistoryID:       rec.HistoryID,
+		WorkspaceID:     rec.WorkspaceID,
+		RequestID:       rec.RequestID,
+		RequestName:     rec.RequestName,
+		HTTPMethod:      rec.HTTPMethod,
+		RequestURL:      rec.RequestURL,
+		EnvironmentID:   rec.EnvironmentID,
+		EnvironmentName: rec.EnvironmentName,
+		DurationMS:      rec.DurationMS,
+		CreatedAt:       rec.CreatedAt,
+	}
+	if rec.HTTPStatus.Valid {
+		status := rec.HTTPStatus.Int64
+		view.HTTPStatus = &status
+	}
+	return view
 }
 
 func toAPIHistoryView(rec store.APIHistoryRecord) apiHistoryView {
@@ -114,11 +155,31 @@ func (d *Dispatcher) apiHistoryList(ctx context.Context, req Request) Response {
 	if err != nil {
 		return errorResponse(req.ID, err.Error())
 	}
-	views := make([]apiHistoryView, 0, len(list))
+	views := make([]apiHistorySummaryView, 0, len(list))
 	for _, rec := range list {
-		views = append(views, toAPIHistoryView(rec))
+		views = append(views, toAPIHistorySummary(rec))
 	}
 	return okResponse(req.ID, map[string]any{"entries": views})
+}
+
+// apiHistoryGet 处理 platform.api.history.get。
+func (d *Dispatcher) apiHistoryGet(ctx context.Context, req Request) Response {
+	storeRef := d.requireAPIHistory()
+	if storeRef == nil {
+		return errorResponse(req.ID, "api history store unavailable")
+	}
+	var params apiHistoryGetParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
+	}
+	if strings.TrimSpace(params.HistoryID) == "" {
+		return errorResponse(req.ID, "historyId required")
+	}
+	rec, err := storeRef.Get(ctx, params.HistoryID)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	return okResponse(req.ID, map[string]any{"entry": toAPIHistoryView(rec)})
 }
 
 // apiHistoryAppend 处理 platform.api.history.append。
@@ -155,17 +216,13 @@ func (d *Dispatcher) apiHistoryAppend(ctx context.Context, req Request) Response
 	if params.HTTPStatus != nil {
 		rec.HTTPStatus = sql.NullInt64{Int64: *params.HTTPStatus, Valid: true}
 	}
+	if rec.CreatedAt == "" {
+		rec.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 	if err := storeRef.Append(ctx, rec); err != nil {
 		return errorResponse(req.ID, err.Error())
 	}
-	list, err := storeRef.List(ctx, rec.WorkspaceID, "", 1)
-	if err != nil {
-		return errorResponse(req.ID, err.Error())
-	}
-	if len(list) == 0 {
-		return okResponse(req.ID, map[string]any{"entry": toAPIHistoryView(rec)})
-	}
-	return okResponse(req.ID, map[string]any{"entry": toAPIHistoryView(list[0])})
+	return okResponse(req.ID, map[string]any{"entry": toAPIHistorySummary(rec)})
 }
 
 // apiHistoryDelete 处理 platform.api.history.delete。

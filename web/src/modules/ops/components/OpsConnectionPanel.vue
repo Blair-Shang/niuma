@@ -196,6 +196,31 @@ watch(searchQuery, (v) => {
   }, 250)
 })
 
+watch(
+  () => connTreeSync.createTick,
+  () => {
+    const kind = connTreeSync.createKind
+    if (kind) {
+      void cx.openCreate(kind)
+    }
+  },
+)
+
+watch(
+  () => connTreeSync.importTick,
+  () => {
+    openImportDialog(null)
+  },
+)
+
+watch(
+  allProfiles,
+  (list) => {
+    connTreeSync.setProfiles(list)
+  },
+  { immediate: true },
+)
+
 onUnmounted(() => {
   if (_searchTimer !== null) clearTimeout(_searchTimer)
 })
@@ -743,8 +768,11 @@ async function onSave(): Promise<void> {
 
 async function onDelete(): Promise<void> {
   const ok = await cx.deleteConnection()
-  if (ok) toast.success(t('opsNav.deleted'))
-  else if (formError.value) toast.error(formError.value)
+  if (ok) {
+    toast.success(t('opsNav.deleted'))
+  } else if (formError.value) {
+    toast.error(formError.value)
+  }
 }
 
 onMounted(() => {

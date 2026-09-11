@@ -97,6 +97,8 @@ defineExpose({
       :style="{
         gridTemplateColumns:
           effectivePaneCount === 1 ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))',
+        gridTemplateRows:
+          effectivePaneCount <= 2 ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))',
       }"
     >
       <SshTerminalPane
@@ -127,7 +129,14 @@ defineExpose({
   flex: 1;
   min-height: 0;
   display: grid;
+  grid-auto-rows: minmax(0, 1fr);
   overflow: hidden;
+}
+
+.nm-ssh-term-group__grid > :deep(*) {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 </style>
 

@@ -20,19 +20,17 @@
  * @see docs/09-web-app-shell.md 第 6.3 节
  * @see docs/21-session-registry.md §0
  */
-import { RsIcon } from '@niuma/ui'
 import { computed, defineAsyncComponent, watch, type Component } from 'vue'
-import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { resolveModuleComponent } from '@/extensions/host/resolve-module'
 import { getModuleById, getModuleByRoutePath } from '@/extensions/registry/extension-registry'
 import { getInternalView } from '@/shell/internal-views'
 import { useTabStore, type EditorGroup, type WorkspaceTab } from '@/stores/tab'
 import TabBar from '../bars/TabBar.vue'
+import WorkspaceEmpty from './WorkspaceEmpty.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
 const tabStore = useTabStore()
 
 /** 分屏拖拽的最小组宽（px） */
@@ -205,11 +203,7 @@ watch(
       </template>
     </div>
 
-    <div v-show="!tabStore.allTabs.length" class="nm-workspace-empty">
-      <RsIcon name="layout-dashboard" :size="40" class="nm-workspace-empty__icon" />
-      <p class="nm-section-title">{{ t('workspace.emptyTitle') }}</p>
-      <p class="nm-section-desc">{{ t('workspace.emptyDesc') }}</p>
-    </div>
+    <WorkspaceEmpty v-if="!tabStore.allTabs.length" />
   </main>
 </template>
 
@@ -274,22 +268,5 @@ watch(
 
 .nm-group__resizer:hover {
   background: var(--rs-primary);
-}
-
-.nm-workspace-empty {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--rs-space-xs);
-  padding: var(--rs-space-lg);
-  text-align: center;
-  color: var(--rs-muted);
-}
-
-.nm-workspace-empty__icon {
-  margin-bottom: var(--rs-space-sm);
-  color: var(--rs-placeholder);
 }
 </style>

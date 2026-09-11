@@ -29,7 +29,8 @@
 .nm-api-sock__toolbar,
 .nm-api-sock__peers-bar,
 .nm-api-sock__stream-bar,
-.nm-api-sock__compose-bar {
+.nm-api-sock__compose-bar,
+.nm-api-sock__compose-foot {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -387,6 +388,14 @@
 .nm-api-sock__compose-bar {
   flex-wrap: wrap;
   padding: 0.4rem 0.75rem 0.15rem;
+  color: var(--rs-muted);
+  font-size: 12px;
+}
+
+.nm-api-sock__compose-foot {
+  flex-shrink: 0;
+  justify-content: flex-end;
+  padding: 0.3rem 0.75rem 0.45rem;
   color: var(--rs-muted);
   font-size: 12px;
 }

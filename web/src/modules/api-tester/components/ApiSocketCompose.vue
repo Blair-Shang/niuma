@@ -75,15 +75,6 @@ const lineEnds: { id: SocketLineEnd; labelKey: string }[] = [
           </button>
         </fieldset>
       </div>
-      <span class="nm-api-sock__hint">{{ encodeHint }} · {{ $t('modules.api.socketPayloadHint') }}</span>
-      <RsButton
-        variant="primary"
-        size="sm"
-        :disabled="!canSend"
-        @click="emit('send')"
-      >
-        {{ sendLabel }}
-      </RsButton>
     </div>
     <div class="nm-api-sock__draft" @keydown="emit('keydown', $event)">
       <RsCodeEditor
@@ -96,6 +87,17 @@ const lineEnds: { id: SocketLineEnd; labelKey: string }[] = [
         embedded
         height="100%"
       />
+    </div>
+    <div class="nm-api-sock__compose-foot">
+      <span class="nm-api-sock__hint">{{ encodeHint }} · {{ $t('modules.api.socketPayloadHint') }}</span>
+      <RsButton
+        variant="primary"
+        size="sm"
+        :disabled="!canSend"
+        @click="emit('send')"
+      >
+        {{ sendLabel }}
+      </RsButton>
     </div>
   </footer>
 </template>

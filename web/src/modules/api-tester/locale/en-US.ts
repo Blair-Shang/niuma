@@ -128,6 +128,8 @@ export default {
       history: 'History',
       searchHistory: 'Search history',
       historyEmpty: 'No requests sent yet',
+      historyToday: 'Today',
+      historyYesterday: 'Yesterday',
       openHistory: 'Open',
       deleteHistory: 'Delete entry',
       deleteHistoryConfirm: 'Delete the send record for “{name}”?',

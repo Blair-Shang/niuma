@@ -8,7 +8,7 @@ import { watchSocketSession } from '../composables/useApiSocketHub'
 import { cloneRequest, defaultEnvironments, defaultFolders, newId, parseWorkspace, serializeWorkspace, uniqueName } from '../utils/collection-io'
 import { applyPaneDefaults } from '../pane-registry'
 import { buildCurl, interpolateEnv, resolveRequestUrl } from '../utils/format'
-import { toHistoryItem } from '../utils/history-map'
+import { toHistoryItem, toHistorySummary } from '../utils/history-map'
 import { tabTitle, tabTooltip } from '../utils/tab-chrome'
 import { isSocketMethod, type SocketTarget } from '../utils/target'
 import type { ApiEnvironment, ApiExchange, ApiFolder, ApiHistoryItem, ApiLiveSocket, ApiMethod, ApiRequest, ApiSideView } from '../types'
@@ -569,7 +569,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     if (!isBridgeAvailable()) return
     try {
       const res = await withPlatformRetry(() => apiHistoryApi.list({ limit: 200 }))
-      replaceList(history, (res.entries ?? []).map(toHistoryItem))
+      replaceList(history, (res.entries ?? []).map(toHistorySummary))
     } catch (error) {
       if (isPlatformUnavailable(error)) return
       console.warn('[api-tester] history load failed', error)
@@ -578,6 +578,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
 
   async function rememberHistory(req: ApiRequest, exchange: ApiExchange): Promise<void> {
     const env = environment.value
+    const offline = !isBridgeAvailable()
     const itemHint: ApiHistoryItem = {
       historyId: `local-${Date.now()}`,
       requestId: req.id,
@@ -585,15 +586,17 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       method: req.method,
       url: resolveRequestUrl(req, env),
       environmentName: env?.name ?? '',
-      request: { ...req, params: req.params.map((row) => ({ ...row })), headers: req.headers.map((row) => ({ ...row })) },
-      exchange,
+      request: offline
+        ? { ...req, params: req.params.map((row) => ({ ...row })), headers: req.headers.map((row) => ({ ...row })) }
+        : null,
+      exchange: offline ? exchange : null,
       durationMs: exchange.durationMs,
       httpStatus: exchange.status,
       createdAt: new Date().toISOString(),
     }
     history.unshift(itemHint)
     if (history.length > 200) history.splice(200)
-    if (!isBridgeAvailable()) return
+    if (offline) return
     try {
       const res = await withPlatformRetry(() =>
         apiHistoryApi.append({
@@ -618,7 +621,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
         }),
       )
       if (res.entry) {
-        const mapped = toHistoryItem(res.entry)
+        const mapped = toHistorySummary(res.entry)
         const idx = history.findIndex((row) => row.historyId === itemHint.historyId)
         if (idx >= 0) history.splice(idx, 1, mapped)
         else history.unshift(mapped)
@@ -629,18 +632,34 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     }
   }
 
-  function openHistory(historyId: string): void {
+  async function openHistory(historyId: string): Promise<void> {
     const item = history.find((row) => row.historyId === historyId)
     if (!item) return
+    let request = item.request
+    let exchange = item.exchange
+    if ((!request || !exchange) && isBridgeAvailable() && !historyId.startsWith('local-')) {
+      try {
+        const res = await withPlatformRetry(() => apiHistoryApi.get({ historyId }))
+        if (res.entry) {
+          const full = toHistoryItem(res.entry)
+          request = full.request
+          exchange = full.exchange
+        }
+      } catch (error) {
+        if (!isPlatformUnavailable(error)) {
+          console.warn('[api-tester] history get failed', error)
+        }
+      }
+    }
     let requestId = item.requestId
-    if (!requestById(requestId) && item.request) {
+    if (!requestById(requestId) && request) {
       const folder = ensureDrafts()
-      const copy = cloneRequest(item.request, uniqueName(item.request.name, folder.requests.map((row) => row.name)))
+      const copy = cloneRequest(request, uniqueName(request.name, folder.requests.map((row) => row.name)))
       folder.requests.push(copy)
       requestId = copy.id
     }
     if (!requestId || !requestById(requestId)) return
-    if (item.exchange) exchanges[requestId] = item.exchange
+    if (exchange) exchanges[requestId] = exchange
     openRequestTab(requestId)
   }
 

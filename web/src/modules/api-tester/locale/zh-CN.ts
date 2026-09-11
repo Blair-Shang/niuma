@@ -128,6 +128,8 @@ export default {
       history: '历史',
       searchHistory: '搜索历史',
       historyEmpty: '还没有发送记录',
+      historyToday: '今天',
+      historyYesterday: '昨天',
       openHistory: '打开',
       deleteHistory: '删除记录',
       deleteHistoryConfirm: '删除「{name}」这条发送记录？',

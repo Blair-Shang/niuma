@@ -360,6 +360,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.diagCrashes(ctx, req)
 	case MethodAPIHistoryList:
 		return d.apiHistoryList(ctx, req)
+	case MethodAPIHistoryGet:
+		return d.apiHistoryGet(ctx, req)
 	case MethodAPIHistoryAppend:
 		return d.apiHistoryAppend(ctx, req)
 	case MethodAPIHistoryDelete:

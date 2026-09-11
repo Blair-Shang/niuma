@@ -149,6 +149,7 @@ onUnmounted(() => {
         <template #editor>
           <div class="nm-editor h-full flex flex-col min-w-0 min-h-0">
             <ModuleWorkspace />
+            <BottomDock />
           </div>
         </template>
         <template #ai>
@@ -156,7 +157,6 @@ onUnmounted(() => {
         </template>
       </RsSplitPane>
     </div>
-    <BottomDock />
     <DataTaskHost />
     <AccountHost />
     <UpdateHost />

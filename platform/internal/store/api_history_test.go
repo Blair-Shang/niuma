@@ -53,6 +53,16 @@ func TestAPIHistoryAppendListDelete(t *testing.T) {
 	if len(list) != 1 || list[0].HistoryID != "h1" || list[0].HTTPMethod != "GET" {
 		t.Fatalf("list=%+v", list)
 	}
+	if list[0].RequestJSON != "" || list[0].ExchangeJSON != "" {
+		t.Fatalf("list must omit snapshot bodies: %+v", list[0])
+	}
+	got, err := s.Get(ctx, "h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExchangeJSON == "" || !strings.Contains(got.ExchangeJSON, `"body":"ok"`) {
+		t.Fatalf("get=%+v", got)
+	}
 	if err := s.Delete(ctx, "h1"); err != nil {
 		t.Fatal(err)
 	}
@@ -88,19 +98,23 @@ func TestAPIHistoryPrune(t *testing.T) {
 	}
 }
 
-func TestClipExchangeJSON(t *testing.T) {
-	body := strings.Repeat("测", maxAPIExchangeBodyRunes+40)
-	rawBytes, err := json.Marshal(map[string]any{"body": body})
+func TestClipSnapshotJSON(t *testing.T) {
+	body := strings.Repeat("测", maxAPISnapshotBodyRunes+40)
+	rawBytes, err := json.Marshal(map[string]any{"body": body, "hex": strings.Repeat("ab", maxAPISnapshotBodyRunes+8)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	clipped := clipExchangeJSON(string(rawBytes))
+	clipped := clipSnapshotJSON(string(rawBytes))
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(clipped), &payload); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := payload["body"].(string)
-	if utf8.RuneCountInString(got) != maxAPIExchangeBodyRunes {
+	if utf8.RuneCountInString(got) != maxAPISnapshotBodyRunes {
 		t.Fatalf("runes=%d", utf8.RuneCountInString(got))
+	}
+	hex, _ := payload["hex"].(string)
+	if utf8.RuneCountInString(hex) != maxAPISnapshotBodyRunes {
+		t.Fatalf("hex runes=%d", utf8.RuneCountInString(hex))
 	}
 }

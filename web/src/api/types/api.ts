@@ -6,7 +6,7 @@ export interface ApiHistoryListParams {
   limit?: number
 }
 
-export interface ApiHistoryEntry {
+export interface ApiHistorySummary {
   historyId: string
   workspaceId: string
   requestId: string
@@ -15,15 +15,26 @@ export interface ApiHistoryEntry {
   requestUrl: string
   environmentId: string
   environmentName: string
-  requestJson: unknown
-  exchangeJson: unknown
   durationMs: number
   httpStatus: number | null
   createdAt: string
 }
 
+export interface ApiHistoryEntry extends ApiHistorySummary {
+  requestJson?: unknown
+  exchangeJson?: unknown
+}
+
 export interface ApiHistoryListResult {
-  entries: ApiHistoryEntry[]
+  entries: ApiHistorySummary[]
+}
+
+export interface ApiHistoryGetParams {
+  historyId: string
+}
+
+export interface ApiHistoryGetResult {
+  entry: ApiHistoryEntry
 }
 
 export interface ApiHistoryAppendParams {
@@ -41,7 +52,7 @@ export interface ApiHistoryAppendParams {
 }
 
 export interface ApiHistoryAppendResult {
-  entry: ApiHistoryEntry
+  entry: ApiHistorySummary
 }
 
 export interface ApiHistoryDeleteParams {

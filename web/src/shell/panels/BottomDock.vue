@@ -40,120 +40,96 @@ onBeforeUnmount(() => stopDrag?.())
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="nm-dock-slide">
-      <!--
-        必须用 v-show：数据任务内容经 Teleport 挂到 Dock 内挂载点。
-        v-if 销毁挂载点时会把已 teleport 的表单一起卸掉，折叠再展开后内容空白。
-      -->
-      <section
-        v-show="shellStore.bottomDockOpen"
-        class="nm-bottom-dock"
-        :style="{ height: `${shellStore.bottomDockHeight}px` }"
+  <!--
+    必须用 v-show：数据任务内容经 Teleport 挂到 Dock 内挂载点。
+    v-if 销毁挂载点时会把已 teleport 的表单一起卸掉，折叠再展开后内容空白。
+  -->
+  <section
+    v-show="shellStore.bottomDockOpen"
+    class="nm-bottom-dock"
+    :style="{ height: `${shellStore.bottomDockHeight}px` }"
+  >
+    <div class="nm-bottom-dock__resizer" @pointerdown="beginResize" />
+
+    <header class="nm-bottom-dock__head">
+      <div class="nm-bottom-dock__tabs">
+        <button
+          type="button"
+          class="nm-bottom-dock__tab"
+          :class="{ 'nm-bottom-dock__tab--active': shellStore.bottomDockTab === 'transfers' }"
+          @click="shellStore.bottomDockTab = 'transfers'"
+        >
+          {{ t('shell.bottomDock.transfers') }}
+          <span v-if="transferHub.activeCount > 0" class="nm-bottom-dock__badge">
+            {{ transferHub.activeCount }}
+          </span>
+        </button>
+        <button
+          type="button"
+          class="nm-bottom-dock__tab"
+          :class="{ 'nm-bottom-dock__tab--active': shellStore.bottomDockTab === 'dataTasks' }"
+          @click="shellStore.bottomDockTab = 'dataTasks'"
+        >
+          {{ t('shell.bottomDock.dataTasks') }}
+          <span v-if="dataTaskHub.tasks.length > 0" class="nm-bottom-dock__badge">
+            {{
+              dataTaskHub.activeCount > 0 ? dataTaskHub.activeCount : dataTaskHub.tasks.length
+            }}
+          </span>
+        </button>
+      </div>
+      <button
+        type="button"
+        class="nm-bottom-dock__close"
+        :aria-label="t('shell.bottomDock.collapse')"
+        @click="shellStore.closeBottomDock()"
       >
-        <div class="nm-bottom-dock__resizer" @pointerdown="beginResize" />
+        <RsIcon name="chevron-down" :size="14" />
+      </button>
+    </header>
 
-        <header class="nm-bottom-dock__head">
-          <div class="nm-bottom-dock__tabs">
-            <button
-              type="button"
-              class="nm-bottom-dock__tab"
-              :class="{ 'nm-bottom-dock__tab--active': shellStore.bottomDockTab === 'transfers' }"
-              @click="shellStore.bottomDockTab = 'transfers'"
-            >
-              {{ t('shell.bottomDock.transfers') }}
-              <span
-                v-if="transferHub.activeCount > 0"
-                class="nm-bottom-dock__badge"
-              >
-                {{ transferHub.activeCount }}
-              </span>
-            </button>
-            <button
-              type="button"
-              class="nm-bottom-dock__tab"
-              :class="{ 'nm-bottom-dock__tab--active': shellStore.bottomDockTab === 'dataTasks' }"
-              @click="shellStore.bottomDockTab = 'dataTasks'"
-            >
-              {{ t('shell.bottomDock.dataTasks') }}
-              <span
-                v-if="dataTaskHub.tasks.length > 0"
-                class="nm-bottom-dock__badge"
-              >
-                {{
-                  dataTaskHub.activeCount > 0
-                    ? dataTaskHub.activeCount
-                    : dataTaskHub.tasks.length
-                }}
-              </span>
-            </button>
-          </div>
-          <button
-            type="button"
-            class="nm-bottom-dock__close"
-            :aria-label="t('shell.bottomDock.collapse')"
-            @click="shellStore.closeBottomDock()"
-          >
-            <RsIcon name="chevron-down" :size="14" />
-          </button>
-        </header>
-
-        <div class="nm-bottom-dock__body">
-          <TransferQueue
-            v-show="shellStore.bottomDockTab === 'transfers'"
-            class="nm-bottom-dock__queue"
-            hide-header
-            :tasks="transferHub.tasks"
-            :sessions="transferHub.sessions"
-            @cancel="(id) => void transferHub.cancel(id)"
-            @pause="(id) => void transferHub.pause(id)"
-            @resume="(id) => void transferHub.resume(id)"
-          />
-          <DataTaskDockPanel
-            v-show="shellStore.bottomDockTab === 'dataTasks'"
-            class="nm-bottom-dock__queue"
-          />
-        </div>
-      </section>
-    </Transition>
-  </Teleport>
+    <div class="nm-bottom-dock__body">
+      <TransferQueue
+        v-show="shellStore.bottomDockTab === 'transfers'"
+        class="nm-bottom-dock__queue"
+        hide-header
+        :tasks="transferHub.tasks"
+        :sessions="transferHub.sessions"
+        @cancel="(id) => void transferHub.cancel(id)"
+        @pause="(id) => void transferHub.pause(id)"
+        @resume="(id) => void transferHub.resume(id)"
+      />
+      <DataTaskDockPanel
+        v-show="shellStore.bottomDockTab === 'dataTasks'"
+        class="nm-bottom-dock__queue"
+      />
+    </div>
+  </section>
 </template>
 
 <style scoped>
 .nm-bottom-dock {
-  position: fixed;
-  right: 0;
-  bottom: var(--nm-statusbar-h, 1.625rem);
-  left: 0;
-  z-index: var(--rs-z-panel, 80);
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
-  border-top: 1px solid var(--rs-border-subtle);
-  border-right: none;
-  border-left: none;
+  width: 100%;
+  min-height: 0;
   background: var(--nm-editor-bg, var(--rs-surface));
-  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
-}
-
-.nm-dock-slide-enter-from,
-.nm-dock-slide-leave-to {
-  transform: translateY(105%);
-  opacity: 0;
-}
-
-.nm-dock-slide-enter-active,
-.nm-dock-slide-leave-active {
-  transition:
-    transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 0.18s ease;
 }
 
 .nm-bottom-dock__resizer {
-  flex-shrink: 0;
-  height: 4px;
+  position: relative;
+  flex: 0 0 1px;
+  height: 1px;
   cursor: row-resize;
-  background: transparent;
-  transition: background var(--rs-transition-fast);
+  background: var(--rs-border-subtle);
+}
+
+.nm-bottom-dock__resizer::before {
+  content: '';
+  position: absolute;
+  inset: -3px 0;
+  z-index: 2;
 }
 
 .nm-bottom-dock__resizer:hover {

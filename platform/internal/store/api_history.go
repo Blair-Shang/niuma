@@ -18,8 +18,8 @@ const (
 	maxAPIHistoryList = 200
 	// defaultAPIHistoryList 未指定 limit 时的默认条数。
 	defaultAPIHistoryList = 80
-	// maxAPIExchangeBodyRunes 响应体写入库前的最大 rune 数（约 64KiB 量级）。
-	maxAPIExchangeBodyRunes = 64 * 1024
+	// maxAPISnapshotBodyRunes 请求/响应正文写入库前的最大 rune 数（约 64KiB）。
+	maxAPISnapshotBodyRunes = 64 * 1024
 )
 
 // APIHistoryRecord 对应 nm_api_history 一行发送快照。
@@ -52,6 +52,9 @@ func NewAPIHistoryStore(db *sql.DB) *APIHistoryStore {
 const apiHistoryColumns = `history_id, workspace_id, request_id, request_name, http_method, request_url,
     environment_id, environment_name, request_json, exchange_json, duration_ms, http_status, created_at`
 
+const apiHistorySummaryColumns = `history_id, workspace_id, request_id, request_name, http_method, request_url,
+    environment_id, environment_name, duration_ms, http_status, created_at`
+
 func workspaceOrAPIDefault(workspaceID string) string {
 	if workspaceID == "" {
 		return DefaultAPIHistoryWorkspace
@@ -59,26 +62,52 @@ func workspaceOrAPIDefault(workspaceID string) string {
 	return workspaceID
 }
 
-func clipExchangeJSON(raw string) string {
+func clipJSONStringField(payload map[string]any, key string, maxRunes int) {
+	text, _ := payload[key].(string)
+	if utf8.RuneCountInString(text) <= maxRunes {
+		return
+	}
+	payload[key] = string([]rune(text)[:maxRunes])
+}
+
+func clipSnapshotJSON(raw string) string {
 	if raw == "" {
 		return "{}"
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		if utf8.RuneCountInString(raw) <= maxAPIExchangeBodyRunes {
+		if utf8.RuneCountInString(raw) <= maxAPISnapshotBodyRunes {
 			return raw
 		}
-		return string([]rune(raw)[:maxAPIExchangeBodyRunes])
+		return string([]rune(raw)[:maxAPISnapshotBodyRunes])
 	}
-	body, _ := payload["body"].(string)
-	if utf8.RuneCountInString(body) > maxAPIExchangeBodyRunes {
-		payload["body"] = string([]rune(body)[:maxAPIExchangeBodyRunes])
-	}
+	clipJSONStringField(payload, "body", maxAPISnapshotBodyRunes)
+	clipJSONStringField(payload, "hex", maxAPISnapshotBodyRunes)
 	clipped, err := json.Marshal(payload)
 	if err != nil {
 		return raw
 	}
 	return string(clipped)
+}
+
+func scanAPIHistorySummary(scanner interface{ Scan(dest ...any) error }) (APIHistoryRecord, error) {
+	var (
+		rec    APIHistoryRecord
+		reqID  sql.NullString
+		envID  sql.NullString
+		status sql.NullInt64
+	)
+	err := scanner.Scan(
+		&rec.HistoryID, &rec.WorkspaceID, &reqID, &rec.RequestName, &rec.HTTPMethod, &rec.RequestURL,
+		&envID, &rec.EnvironmentName, &rec.DurationMS, &status, &rec.CreatedAt,
+	)
+	if err != nil {
+		return APIHistoryRecord{}, fmt.Errorf("store: scan api history summary: %w", err)
+	}
+	rec.RequestID = reqID.String
+	rec.EnvironmentID = envID.String
+	rec.HTTPStatus = status
+	return rec, nil
 }
 
 func scanAPIHistory(scanner interface{ Scan(dest ...any) error }) (APIHistoryRecord, error) {
@@ -101,7 +130,7 @@ func scanAPIHistory(scanner interface{ Scan(dest ...any) error }) (APIHistoryRec
 	return rec, nil
 }
 
-// List 按创建时间倒序返回历史；requestID 非空时只看该请求。
+// List 按创建时间倒序返回历史摘要（不含 request_json / exchange_json）；requestID 非空时只看该请求。
 func (s *APIHistoryStore) List(ctx context.Context, workspaceID, requestID string, limit int) ([]APIHistoryRecord, error) {
 	workspaceID = workspaceOrAPIDefault(workspaceID)
 	if limit <= 0 {
@@ -117,11 +146,11 @@ func (s *APIHistoryStore) List(ctx context.Context, workspaceID, requestID strin
 	)
 	if requestID != "" {
 		rows, err = s.db.QueryContext(ctx,
-			"SELECT "+apiHistoryColumns+" FROM nm_api_history WHERE workspace_id = ? AND request_id = ? ORDER BY created_at DESC LIMIT ?",
+			"SELECT "+apiHistorySummaryColumns+" FROM nm_api_history WHERE workspace_id = ? AND request_id = ? ORDER BY created_at DESC LIMIT ?",
 			workspaceID, requestID, limit)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			"SELECT "+apiHistoryColumns+" FROM nm_api_history WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
+			"SELECT "+apiHistorySummaryColumns+" FROM nm_api_history WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
 			workspaceID, limit)
 	}
 	if err != nil {
@@ -131,7 +160,7 @@ func (s *APIHistoryStore) List(ctx context.Context, workspaceID, requestID strin
 
 	out := make([]APIHistoryRecord, 0)
 	for rows.Next() {
-		rec, scanErr := scanAPIHistory(rows)
+		rec, scanErr := scanAPIHistorySummary(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -152,10 +181,8 @@ func (s *APIHistoryStore) Append(ctx context.Context, rec APIHistoryRecord) erro
 	if rec.CreatedAt == "" {
 		rec.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	if rec.RequestJSON == "" {
-		rec.RequestJSON = "{}"
-	}
-	rec.ExchangeJSON = clipExchangeJSON(rec.ExchangeJSON)
+	rec.RequestJSON = clipSnapshotJSON(rec.RequestJSON)
+	rec.ExchangeJSON = clipSnapshotJSON(rec.ExchangeJSON)
 
 	var reqID, envID any
 	if rec.RequestID != "" {
@@ -198,6 +225,19 @@ WHERE workspace_id = ?
 		return fmt.Errorf("store: prune api history: %w", err)
 	}
 	return nil
+}
+
+// Get 按 history_id 返回完整快照（含请求/响应正文）。
+func (s *APIHistoryStore) Get(ctx context.Context, historyID string) (APIHistoryRecord, error) {
+	if historyID == "" {
+		return APIHistoryRecord{}, fmt.Errorf("store: get api history: history_id required")
+	}
+	row := s.db.QueryRowContext(ctx, "SELECT "+apiHistoryColumns+" FROM nm_api_history WHERE history_id = ?", historyID)
+	rec, err := scanAPIHistory(row)
+	if err != nil {
+		return APIHistoryRecord{}, err
+	}
+	return rec, nil
 }
 
 // Delete 按 history_id 物理删除一行。

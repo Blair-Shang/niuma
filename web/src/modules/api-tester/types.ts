@@ -34,7 +34,7 @@ export interface ApiEnvironment {
   baseUrl: string
 }
 
-/** 侧栏历史一条：解析后的发送快照。 */
+/** 侧栏历史一条：默认只有摘要；request/exchange 仅离线或打开后才有。 */
 export interface ApiHistoryItem {
   historyId: string
   requestId: string
