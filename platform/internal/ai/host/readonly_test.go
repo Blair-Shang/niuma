@@ -13,6 +13,15 @@ func TestAssertReadonlySQL(t *testing.T) {
 		{"SELECT 1; DROP TABLE t", false},
 		{"SELECT * FROM t WHERE x = 1", true},
 		{"update t set x=1", false},
+		{"SHOW GLOBAL STATUS LIKE 'Threads%'", true},
+		{"SHOW CREATE TABLE t", true},
+		{"SHOW PROCESSLIST", true},
+		{"DESCRIBE t", true},
+		{"DESC t", true},
+		{"EXPLAIN SELECT 1", true},
+		{"EXPLAIN ANALYZE SELECT 1", true},
+		{"EXPLAIN INSERT INTO t VALUES (1)", false},
+		{"DELETE FROM t", false},
 	}
 	for _, tc := range cases {
 		err := AssertReadonlySQL(tc.sql)

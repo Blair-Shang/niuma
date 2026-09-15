@@ -413,6 +413,22 @@ func (s *Service) Cancel(runID string) (cancelled bool) {
 		s.policy.RejectRun(runID)
 	}
 	cancel()
+	if s.Conversations != nil {
+		invs, err := s.Conversations.CancelOpenInvocations(context.Background(), runID, "cancelled")
+		if err == nil {
+			for _, inv := range invs {
+				s.publish(map[string]any{
+					"type":           "platform.ai.tool.result",
+					"runId":          runID,
+					"conversationId": inv.ConversationID,
+					"invocationId":   inv.InvocationID,
+					"ok":             false,
+					"resultSummary":  "ERROR: cancelled",
+					"error":          "cancelled",
+				})
+			}
+		}
+	}
 	s.publish(map[string]any{
 		"type":   "platform.ai.run.status",
 		"runId":  runID,

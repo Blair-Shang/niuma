@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RsIcon, RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
-import { QueryResultPanel, SqlQueryShell } from '@/modules/database'
+import { RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
+import { QueryResultPanel, SqlQueryIdentity, SqlQueryShell } from '@/modules/database'
 import { usePostgresQueryPane } from '@/modules/postgres/composables/usePostgresQueryPane'
 
 const props = defineProps<{
@@ -100,12 +100,10 @@ const {
     @rollback="rollbackTx"
   >
     <template #identity>
-      <div class="nm-postgres-query__identity" :title="identityTitle">
-        <RsIcon name="postgres" :size="15" class="nm-postgres-query__brand" />
-        <span v-if="database" class="nm-postgres-query__db">{{ database }}</span>
-        <span v-if="database && schema" class="nm-postgres-query__schema">{{ schema }}</span>
-        <span v-else-if="!database" class="nm-postgres-query__scope-fallback">{{ t('modules.postgres.query.noDatabase') }}</span>
-      </div>
+      <SqlQueryIdentity icon="postgres" :title="identityTitle">
+        <template v-if="database">{{ schema ? `${database} · ${schema}` : database }}</template>
+        <template v-else>{{ t('modules.postgres.query.noDatabase') }}</template>
+      </SqlQueryIdentity>
     </template>
 
     <template #editor>
@@ -160,50 +158,6 @@ const {
 </template>
 
 <style scoped>
-.nm-postgres-query__identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-postgres-query__brand {
-  flex-shrink: 0;
-}
-
-.nm-postgres-query__db {
-  color: var(--rs-foreground);
-  font-weight: 600;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.nm-postgres-query__schema {
-  color: var(--rs-muted);
-  font-weight: 500;
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-postgres-query__schema::before {
-  content: '·';
-  margin-right: 6px;
-  color: var(--rs-muted);
-}
-
-.nm-postgres-query__scope-fallback {
-  color: var(--rs-muted);
-  font-weight: 500;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
 .nm-postgres-query__editor {
   flex: 1;
   min-height: 0;

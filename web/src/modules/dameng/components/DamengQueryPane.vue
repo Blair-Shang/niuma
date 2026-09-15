@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RsIcon, RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
-import { QueryResultPanel, SqlQueryShell } from '@/modules/database'
+import { RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
+import { QueryResultPanel, SqlQueryIdentity, SqlQueryShell } from '@/modules/database'
 import { useDamengQueryPane } from '@/modules/dameng/composables/useDamengQueryPane'
 
 const props = defineProps<{
@@ -99,11 +99,10 @@ const {
     @rollback="rollbackTx"
   >
     <template #identity>
-      <div class="nm-dameng-query__identity" :title="identityTitle">
-        <RsIcon name="dameng" :size="15" class="nm-dameng-query__brand" />
-        <span v-if="schema" class="nm-dameng-query__db">{{ schema }}</span>
-        <span v-else class="nm-dameng-query__scope-fallback">{{ t('modules.dameng.query.noSchema') }}</span>
-      </div>
+      <SqlQueryIdentity icon="dameng" :title="identityTitle">
+        <span v-if="schema">{{ schema }}</span>
+        <span v-else>{{ t('modules.dameng.query.noSchema') }}</span>
+      </SqlQueryIdentity>
     </template>
 
     <template #editor>
@@ -152,34 +151,6 @@ const {
 </template>
 
 <style scoped>
-.nm-dameng-query__identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-dameng-query__brand {
-  flex-shrink: 0;
-}
-
-.nm-dameng-query__db {
-  color: var(--rs-foreground);
-  font-weight: 600;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.nm-dameng-query__scope-fallback {
-  color: var(--rs-muted);
-  font-weight: 500;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
 .nm-dameng-query__editor {
   flex: 1;
   min-height: 0;

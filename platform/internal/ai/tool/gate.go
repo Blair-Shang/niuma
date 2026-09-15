@@ -11,6 +11,13 @@ const (
 	PolicyDecisionReject  = "reject"
 )
 
+// TrustScope 是允许执行的有效范围（内存，不落库）。
+const (
+	TrustOnce         = "once"
+	TrustRun          = "run"
+	TrustConversation = "conversation"
+)
+
 // Risk levels for MCP tools / invocations.
 const (
 	RiskRead      = "read"
@@ -19,23 +26,32 @@ const (
 )
 
 type pendingWait struct {
-	runID string
-	ch    chan bool // true = approve
+	runID          string
+	conversationID string
+	toolName       string
+	ch             chan bool // true = approve
 }
 
 // Gate 在 Agent Loop 中阻塞等待用户确认（write / dangerous）。
+// 用户可选择允许一次，或对本轮 / 本会话的同类工具不再询问。
 type Gate struct {
-	mu      sync.Mutex
-	waiters map[string]*pendingWait // invocationID → wait
+	mu        sync.Mutex
+	waiters   map[string]*pendingWait        // invocationID → wait
+	runTrust  map[string]map[string]struct{} // runID → toolName
+	convTrust map[string]map[string]struct{} // conversationID → toolName
 }
 
 // NewGate 创建空的确认门闩。
 func NewGate() *Gate {
-	return &Gate{waiters: make(map[string]*pendingWait)}
+	return &Gate{
+		waiters:   make(map[string]*pendingWait),
+		runTrust:  make(map[string]map[string]struct{}),
+		convTrust: make(map[string]map[string]struct{}),
+	}
 }
 
 // Register 登记一次待确认调用并返回结果通道。
-func (g *Gate) Register(invocationID, runID string) <-chan bool {
+func (g *Gate) Register(invocationID, runID, conversationID, toolName string) <-chan bool {
 	if g == nil {
 		ch := make(chan bool, 1)
 		ch <- false
@@ -51,12 +67,50 @@ func (g *Gate) Register(invocationID, runID string) <-chan bool {
 		delete(g.waiters, invocationID)
 	}
 	ch := make(chan bool, 1)
-	g.waiters[invocationID] = &pendingWait{runID: runID, ch: ch}
+	g.waiters[invocationID] = &pendingWait{
+		runID:          runID,
+		conversationID: conversationID,
+		toolName:       toolName,
+		ch:             ch,
+	}
 	return ch
 }
 
-// Decide 完成一次确认；找不到 pending 时返回 false。
+// Trusted 表示本轮或本会话已允许该工具，可跳过确认。
+func (g *Gate) Trusted(conversationID, runID, toolName string) bool {
+	if g == nil {
+		return false
+	}
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if runID != "" {
+		if names, ok := g.runTrust[runID]; ok {
+			if _, hit := names[toolName]; hit {
+				return true
+			}
+		}
+	}
+	if conversationID != "" {
+		if names, ok := g.convTrust[conversationID]; ok {
+			if _, hit := names[toolName]; hit {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Decide 完成一次确认（仅本次）；找不到 pending 时返回 false。
 func (g *Gate) Decide(invocationID string, approve bool) bool {
+	return g.DecideWithScope(invocationID, approve, TrustOnce)
+}
+
+// DecideWithScope 完成一次确认；approve 且 scope 为本轮/本会话时记住同类工具。
+func (g *Gate) DecideWithScope(invocationID string, approve bool, scope string) bool {
 	if g == nil || invocationID == "" {
 		return false
 	}
@@ -65,12 +119,55 @@ func (g *Gate) Decide(invocationID string, approve bool) bool {
 	if ok {
 		delete(g.waiters, invocationID)
 	}
+	if ok && approve {
+		g.rememberLocked(w, scope)
+	}
 	g.mu.Unlock()
 	if !ok {
 		return false
 	}
 	w.ch <- approve
 	return true
+}
+
+func (g *Gate) rememberLocked(w *pendingWait, scope string) {
+	if w == nil || strings.TrimSpace(w.toolName) == "" {
+		return
+	}
+	switch NormalizeTrustScope(scope) {
+	case TrustRun:
+		if w.runID == "" {
+			return
+		}
+		names := g.runTrust[w.runID]
+		if names == nil {
+			names = make(map[string]struct{})
+			g.runTrust[w.runID] = names
+		}
+		names[w.toolName] = struct{}{}
+	case TrustConversation:
+		if w.conversationID == "" {
+			return
+		}
+		names := g.convTrust[w.conversationID]
+		if names == nil {
+			names = make(map[string]struct{})
+			g.convTrust[w.conversationID] = names
+		}
+		names[w.toolName] = struct{}{}
+	}
+}
+
+// NormalizeTrustScope 规范化信任范围；未知值视为一次。
+func NormalizeTrustScope(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case TrustRun:
+		return TrustRun
+	case TrustConversation, "session", "chat":
+		return TrustConversation
+	default:
+		return TrustOnce
+	}
 }
 
 // Cancel 移除单个 waiter（ctx 取消时由等待方调用，避免泄漏）。
@@ -96,6 +193,7 @@ func (g *Gate) RejectRun(runID string) {
 			delete(g.waiters, id)
 		}
 	}
+	delete(g.runTrust, runID)
 	g.mu.Unlock()
 	for _, w := range victims {
 		select {
@@ -152,6 +250,7 @@ func InferToolRisk(name string) string {
 		"shell", "exec_command", "execute_command", "run_command",
 		"run_skill_script", "drop_database", "drop_schema", "format_disk",
 		"ssh_exec",
+		"sql_exec",
 	}
 	for _, k := range dangerousHints {
 		if strings.Contains(n, k) {

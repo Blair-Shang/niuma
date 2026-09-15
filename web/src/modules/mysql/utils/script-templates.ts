@@ -178,8 +178,37 @@ export function createDatabaseSql(
   return `${parts.join(' ')};`
 }
 
+/** 修改库默认字符集 / 排序规则（MySQL 不能用 ALTER 改库名）。 */
+export function alterDatabaseSql(
+  name: string,
+  options?: { charset?: string; collation?: string },
+): string {
+  const parts = [`ALTER DATABASE ${quoteIdent(name)}`]
+  const charset = options?.charset?.trim()
+  const collation = options?.collation?.trim()
+  if (charset) {
+    parts.push(`CHARACTER SET ${charset}`)
+  }
+  if (collation) {
+    parts.push(`COLLATE ${collation}`)
+  }
+  if (parts.length === 1) {
+    throw new Error('charset or collation required')
+  }
+  return `${parts.join(' ')};`
+}
+
 export function showCreateDatabaseSql(database: string): string {
   return `SHOW CREATE DATABASE ${quoteIdent(database)}`
+}
+
+/** 读取 information_schema 中库的默认字符集与排序规则。 */
+export function selectDatabaseCharsetSql(name: string): string {
+  const lit = name.replaceAll("'", "''")
+  return (
+    `SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME ` +
+    `FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '${lit}'`
+  )
 }
 
 export function showCreateTableSql(database: string, table: string): string {

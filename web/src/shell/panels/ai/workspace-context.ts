@@ -102,3 +102,26 @@ export function listDiagnostics(): AiDiagnosticSnapshot[] {
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 8)
 }
+
+/**
+ * 发送时自动附带的诊断：只取当前激活页签。
+ * 诊断表是全局的；后台 SSH 报错若按时间最新，会在数据库查询对话里冒出「SSH Terminal」。
+ */
+export function latestDiagnosticForTab(tabId?: string | null): AiDiagnosticSnapshot | null {
+  if (!tabId) {
+    return null
+  }
+  return listDiagnostics().find((d) => d.tabId === tabId) ?? null
+}
+
+/** 发送时是否采用当前选区：已标注 tab 的选区必须属于激活页签。 */
+export function editorSelectionBelongsToTab(tabId?: string | null): boolean {
+  const snap = editorSelection
+  if (!snap?.text.trim()) {
+    return false
+  }
+  if (!snap.tabId) {
+    return true
+  }
+  return Boolean(tabId) && snap.tabId === tabId
+}

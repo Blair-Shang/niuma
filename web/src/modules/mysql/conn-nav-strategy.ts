@@ -16,6 +16,7 @@ import {
 } from '@/modules/mysql/pane-registry'
 import type { MysqlObjectKind } from '@/modules/mysql/types/object-script'
 import { objectKindIcon } from '@/modules/mysql/types/object-script'
+import { isCategoryId, type CategoryId } from '@/modules/mysql/conn-tree-shared'
 
 function segmentName(ctx: ConnOpenContext | undefined, kind: string): string | undefined {
   const seg = ctx?.resourcePath?.segments.find((s) => s.kind === kind)
@@ -75,6 +76,11 @@ function featureLabel(tab: MysqlSessionTab, routineKind?: 'function' | 'procedur
     )
   }
   return i18n.global.t(mysqlPaneRegistry[tab].labelKey)
+}
+
+function resolveCatalogCategory(ctx?: ConnOpenContext): CategoryId {
+  const category = segmentName(ctx, 'category')
+  return isCategoryId(category) ? category : 'tables'
 }
 
 function resolveFeature(ctx?: ConnOpenContext): MysqlSessionTab {
@@ -263,6 +269,30 @@ function buildMysqlTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
     }
   }
 
+  if (feature === 'catalog') {
+    const database = segmentName(ctx, 'database')
+    const catalogCategory = resolveCatalogCategory(ctx)
+    const catalogLabel = featureLabel('catalog')
+    const props: Record<string, unknown> = {
+      profileId: item.profileId,
+      initialTab: 'catalog',
+      catalogCategory,
+    }
+    if (database) props.database = database
+    return {
+      moduleId: 'mysql',
+      title: database || item.profileName,
+      tooltip: buildConnectionTabTooltip(
+        item.profileName,
+        item.hostAddress,
+        database || undefined,
+        catalogLabel,
+      ),
+      icon: kindIcon('mysql'),
+      props,
+    }
+  }
+
   const database = segmentName(ctx, 'database')
   const table = segmentName(ctx, 'table')
   const routine = segmentName(ctx, 'routine')
@@ -309,6 +339,7 @@ function buildMysqlTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
 
 /**
  * MySQL：查询可多开；browse/ddl/objectScript/monitor/tools/call 按 profile+资源+feature 去重。
+ * catalog 按连接复用（切库只更新同一 Tab，对齐 Navicat 对象列表）。
  */
 export const mysqlConnectionNavStrategy: ConnectionNavStrategy = {
   kind: 'mysql',
@@ -334,7 +365,7 @@ export const mysqlConnectionNavStrategy: ConnectionNavStrategy = {
         typeof tab.props.initialTab === 'string' ? tab.props.initialTab : undefined,
       )
       if (tabFeature !== feature) return false
-      if (feature === 'monitor') return true
+      if (feature === 'monitor' || feature === 'catalog') return true
       if (feature === 'tools') {
         const tabDb = typeof tab.props.database === 'string' ? tab.props.database : undefined
         return tabDb === database

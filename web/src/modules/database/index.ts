@@ -52,6 +52,11 @@ export type { BrowseDataRow, BrowseDataShellLabels } from './types/browse-data'
 
 export type { DdlShellLabels } from './types/ddl-shell'
 
+export type {
+  ObjectCatalogCategoryTab,
+  ObjectCatalogShellLabels,
+} from './types/object-catalog'
+
 export {
   BATCH_SQL_PREVIEW_CHARS,
   MAX_BATCH_STATEMENTS,
@@ -99,6 +104,7 @@ export { useDataTransferPresentation } from './composables/useDataTransferPresen
 
 export { default as QueryResultPanel } from './components/QueryResultPanel.vue'
 export { default as SqlQueryToolbar } from './components/SqlQueryToolbar.vue'
+export { default as SqlQueryIdentity } from './components/SqlQueryIdentity.vue'
 export { default as SqlQueryShell } from './components/SqlQueryShell.vue'
 export { default as DataTransferShell } from './components/DataTransferShell.vue'
 export { default as DataTransferPanel } from './components/DataTransferPanel.vue'
@@ -108,6 +114,7 @@ export { default as DataTransferCheck } from './components/DataTransferCheck.vue
 export { default as TableDesignShell } from './components/TableDesignShell.vue'
 export { default as TableDesignPreviewPopover } from './components/TableDesignPreviewPopover.vue'
 export { default as ObjectScriptShell } from './components/ObjectScriptShell.vue'
+export { default as SqlIdeToolbarButton } from './components/SqlIdeToolbarButton.vue'
 export { default as DebugShell } from './components/DebugShell.vue'
 export { default as DebugParamsGrid } from './components/DebugParamsGrid.vue'
 export { default as DebugResultPanel } from './components/DebugResultPanel.vue'
@@ -118,6 +125,7 @@ export { default as BrowseIoMenu } from './components/BrowseIoMenu.vue'
 export { default as BrowseDataGrid } from './components/BrowseDataGrid.vue'
 export { default as BrowseCellEditorDialog } from './components/BrowseCellEditorDialog.vue'
 export { default as DdlShell } from './components/DdlShell.vue'
+export { default as ObjectCatalogShell } from './components/ObjectCatalogShell.vue'
 
 export {
   formatRowsAsTsv,

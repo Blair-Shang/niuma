@@ -27,6 +27,8 @@ const (
 	ToolListTables    = "sql_list_tables"
 	ToolDescribeTable = "sql_describe_table"
 	ToolRunReadonly   = "sql_run_readonly"
+	// ToolExec 对齐 ssh_exec：任意 SQL，Policy Gate 先让用户确认。
+	ToolExec = "sql_exec"
 )
 
 // 官方 SSH 工具名（须符合 ^[a-zA-Z0-9_-]+$）。
@@ -59,7 +61,7 @@ type ToolSpec struct {
 // IsSQLTool 判断名称是否为官方 sql_*。
 func IsSQLTool(name string) bool {
 	switch name {
-	case ToolListSchemas, ToolListTables, ToolDescribeTable, ToolRunReadonly:
+	case ToolListSchemas, ToolListTables, ToolDescribeTable, ToolRunReadonly, ToolExec:
 		return true
 	default:
 		return false
@@ -105,12 +107,13 @@ func objectSchema(props map[string]any, required []string) json.RawMessage {
 	return b
 }
 
-// SQLToolSpecs 返回官方只读 SQL 工具列表。
+// SQLToolSpecs 返回官方 SQL 工具列表。
+// 只读（含 SHOW/EXPLAIN）自动执行；sql_exec 与 ssh_exec 一样需用户确认。
 func SQLToolSpecs() []ToolSpec {
 	scope := map[string]any{
 		"profileId": map[string]any{"type": "string", "description": "NiuMa connection profile id"},
 		"sessionId": map[string]any{"type": "string", "description": "Optional active session id"},
-		"database":  map[string]any{"type": "string", "description": "Optional database name"},
+		"database":  map[string]any{"type": "string", "description": "Current database (MySQL/ClickHouse: also used as catalog schema)"},
 		"moduleId":  map[string]any{"type": "string", "description": "Connection kind / module (vastbase, postgres, mysql, …)"},
 	}
 	schemaProps := func(extra map[string]any) map[string]any {
@@ -126,15 +129,15 @@ func SQLToolSpecs() []ToolSpec {
 	return []ToolSpec{
 		{
 			Name:        ToolListSchemas,
-			Description: "List schemas in the current database connection (read-only).",
+			Description: "List schemas (PostgreSQL) or databases (MySQL/ClickHouse) on the current connection (read-only).",
 			Parameters:  objectSchema(schemaProps(nil), nil),
 			Risk:        "read",
 		},
 		{
 			Name:        ToolListTables,
-			Description: "List tables in a schema (read-only).",
+			Description: "List tables in a schema (read-only). MySQL/ClickHouse: schema is the database name from the open tab; do not send PostgreSQL public.",
 			Parameters: objectSchema(schemaProps(map[string]any{
-				"schema": map[string]any{"type": "string", "description": "Schema name, default public"},
+				"schema": map[string]any{"type": "string", "description": "Schema name. PostgreSQL-family defaults to public; MySQL/ClickHouse use the current database."},
 			}), nil),
 			Risk: "read",
 		},
@@ -142,18 +145,26 @@ func SQLToolSpecs() []ToolSpec {
 			Name:        ToolDescribeTable,
 			Description: "Describe columns of a table (read-only).",
 			Parameters: objectSchema(schemaProps(map[string]any{
-				"schema": map[string]any{"type": "string"},
+				"schema": map[string]any{"type": "string", "description": "Schema or MySQL database name"},
 				"table":  map[string]any{"type": "string"},
 			}), []string{"table"}),
 			Risk: "read",
 		},
 		{
 			Name:        ToolRunReadonly,
-			Description: "Run a read-only SQL query (SELECT/WITH only) on the current connection.",
+			Description: "Run a read-only statement (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE) on the current connection. For INSERT/UPDATE/DELETE/DDL use sql_exec so the user can confirm.",
 			Parameters: objectSchema(schemaProps(map[string]any{
 				"sql": map[string]any{"type": "string"},
 			}), []string{"sql"}),
 			Risk: "read",
+		},
+		{
+			Name:        ToolExec,
+			Description: "Run SQL on the current connection (DML/DDL). Requires user confirmation, same as ssh_exec. Prefer sql_run_readonly for SELECT/SHOW/EXPLAIN.",
+			Parameters: objectSchema(schemaProps(map[string]any{
+				"sql": map[string]any{"type": "string", "description": "SQL to execute after the user approves"},
+			}), []string{"sql"}),
+			Risk: "dangerous",
 		},
 	}
 }

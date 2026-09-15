@@ -46,6 +46,8 @@ const canReconnect = computed(() => {
 
 const pane = useSshTerminal()
 let openingForSessionId = ''
+/** 切走后 activeTabId 已是新页签；卸载时按本终端所属 tab 清选区。 */
+const ownerTabId = useTabStore().activeTabId || undefined
 
 const overlayText = computed(() => {
   if (startupError.value) {
@@ -274,7 +276,7 @@ onBeforeUnmount(() => {
   cancelScheduledFlush()
   cancelScheduledSelectionClear()
   lastNonEmptySelection = ''
-  clearEditorSelection(useTabStore().activeTabId || undefined)
+  clearEditorSelection(ownerTabId)
   pane.close().catch(() => undefined)
 })
 

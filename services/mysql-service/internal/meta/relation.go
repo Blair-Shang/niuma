@@ -1,9 +1,9 @@
 // Package meta 提供 MySQL 对象元数据查询（列、索引、DDL）。
 //
 // 约定（docs/25 §5.5）：
-//   - 与 tree 包解耦：树保持轻量，元数据由 browse / DDL 面板按需拉取；
+//   - 与 tree 包解耦：树保持轻量，元数据由 browse / DDL / 对象一览按需拉取；
 //   - 无独立 schema：RelationRef 使用 Database + Name；
-//   - 不做行数 / 体积统计，避免面板打开打满生产库。
+//   - 浏览单表时不做 COUNT(*) / 体积统计；对象一览用 information_schema 估算行。
 package meta
 
 import (

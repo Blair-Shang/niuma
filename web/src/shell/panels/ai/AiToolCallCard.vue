@@ -3,8 +3,9 @@
  * 工具调用过程卡：running / ok / error / pending，可展开参数与结果；pending 可 Approve/Reject。
  */
 import { computed, ref, watch } from 'vue'
-import { RsButton, RsIcon } from '@niuma/ui'
+import { RsIcon } from '@niuma/ui'
 import { useI18n } from 'vue-i18n'
+import AiToolConfirmActions from './AiToolConfirmActions.vue'
 
 export type AiToolStatus = 'running' | 'ok' | 'error' | 'pending'
 
@@ -33,7 +34,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  approve: []
+  approve: [scope: 'once' | 'run' | 'conversation']
   reject: []
 }>()
 
@@ -129,9 +130,9 @@ const showConfirm = computed(
   () => props.confirmable && displayStatus.value === 'pending',
 )
 
-async function onApprove(): Promise<void> {
+async function onApprove(scope: 'once' | 'run' | 'conversation' = 'once'): Promise<void> {
   deciding.value = true
-  emit('approve')
+  emit('approve', scope)
 }
 
 async function onReject(): Promise<void> {
@@ -174,16 +175,9 @@ async function onReject(): Promise<void> {
         </div>
         <pre>{{ resultText }}</pre>
       </div>
-      <div v-if="showConfirm" class="nm-ai-tool__actions">
+      <div v-if="showConfirm" class="nm-ai-tool__actions" data-ai-pending-actions>
         <p class="nm-ai-tool__hint">{{ t('ai.toolConfirmHint') }}</p>
-        <div class="nm-ai-tool__btns">
-          <RsButton size="sm" variant="primary" :loading="deciding" @click.stop="onApprove">
-            {{ t('ai.toolApprove') }}
-          </RsButton>
-          <RsButton size="sm" variant="ghost" :disabled="deciding" @click.stop="onReject">
-            {{ t('ai.toolReject') }}
-          </RsButton>
-        </div>
+        <AiToolConfirmActions :deciding="deciding" @approve="onApprove" @reject="onReject" />
       </div>
     </div>
   </div>
@@ -312,6 +306,7 @@ async function onReject(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  scroll-margin-bottom: 16px;
 }
 
 .nm-ai-tool__hint {
@@ -320,9 +315,4 @@ async function onReject(): Promise<void> {
   color: var(--rs-muted);
 }
 
-.nm-ai-tool__btns {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 </style>

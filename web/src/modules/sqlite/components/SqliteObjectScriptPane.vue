@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RsButton, RsLoading, RsMonacoEditor } from '@niuma/ui'
+import { RsLoading, RsMonacoEditor } from '@niuma/ui'
 import {
   ObjectScriptShell,
+  SqlIdeToolbarButton,
   TableDesignPreviewPopover,
   type ObjectScriptShellLabels,
 } from '@/modules/database'
@@ -65,6 +66,11 @@ const typeLabel = computed(() =>
   modeCreate.value ? shellLabels.value.modeCreate : kindLabel.value,
 )
 
+const scopeLabel = computed(() => {
+  if (props.schema && objectName.value) return `${props.schema}.${objectName.value}`
+  return props.schema || objectName.value || ''
+})
+
 const message = computed(() => lastError.value || lastMessage.value)
 const messageTone = computed(() => {
   if (lastError.value) return 'error' as const
@@ -79,6 +85,7 @@ const hasObject = computed(() => Boolean(objectName.value || modeCreate.value))
   <ObjectScriptShell
     :labels="shellLabels"
     :session-label="sessionLabel || 'SQLite'"
+    :scope-label="scopeLabel"
     :type-label="typeLabel"
     :icon="kindIcon"
     :mode="designMode"
@@ -106,15 +113,11 @@ const hasObject = computed(() => Boolean(objectName.value || modeCreate.value))
         :empty-label="t('modules.sqlite.objectScript.previewEmpty')"
         @update:open="onPreviewOpenChange"
       >
-        <RsButton
-          size="sm"
-          variant="ghost"
+        <SqlIdeToolbarButton
           icon="eye"
-          :disabled="!sessionId || !sqlText.trim() || saving || loading"
-          :loading="previewLoading"
-        >
-          {{ t('modules.sqlite.objectScript.preview') }}
-        </RsButton>
+          :disabled="!sessionId || !sqlText.trim() || saving || loading || previewLoading"
+          :title="t('modules.sqlite.objectScript.preview')"
+        />
       </TableDesignPreviewPopover>
     </template>
 

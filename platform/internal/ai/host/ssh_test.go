@@ -52,11 +52,23 @@ func TestHostToolSpecsByModule(t *testing.T) {
 		}
 	}
 	sql := HostToolSpecs("vastbase")
-	if len(sql) != 4 {
+	if len(sql) != 5 {
 		t.Fatalf("sql specs=%d", len(sql))
 	}
+	var sawExec bool
+	for _, spec := range sql {
+		if spec.Name == ToolExec {
+			sawExec = true
+			if spec.Risk != "dangerous" {
+				t.Fatalf("sql_exec risk=%s", spec.Risk)
+			}
+		}
+	}
+	if !sawExec {
+		t.Fatal("missing sql_exec")
+	}
 	both := HostToolSpecs("")
-	if len(both) != 9 {
+	if len(both) != 10 {
 		t.Fatalf("both specs=%d", len(both))
 	}
 }

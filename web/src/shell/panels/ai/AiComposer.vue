@@ -9,11 +9,13 @@ import { useI18n } from 'vue-i18n'
 import { useAiStore } from '@/stores/ai'
 import { useTabStore } from '@/stores/tab'
 import {
+  activeTabAttachment,
   buildContextPack,
   encodeAttachmentMarkers,
   listMentionCandidates,
   type AiContextAttachment,
 } from './context-pack'
+import { mergeActiveTabAttachment } from './merge-tab-attachment'
 import { acceptDroppedTab } from './drop-tab'
 import { isNiumaTabDrag } from '@/shell/workspace/tab-dnd'
 import {
@@ -52,6 +54,33 @@ const files = ref<AiComposerFile[]>([])
 const mentionOpen = ref(false)
 const mentionQuery = ref('')
 const attachError = ref<string | null>(null)
+/** 用户关掉当前页签的自动引用后，换页签再恢复。 */
+const dismissedAutoTabId = ref<string | null>(null)
+
+const autoTabAttachment = computed((): AiContextAttachment | null => {
+  const active = activeTabAttachment()
+  if (!active) {
+    return null
+  }
+  if (dismissedAutoTabId.value === active.id) {
+    return null
+  }
+  if (attachments.value.some((a) => a.id === active.id)) {
+    return null
+  }
+  return active
+})
+
+const composerAttachments = computed((): AiContextAttachment[] =>
+  mergeActiveTabAttachment(attachments.value, autoTabAttachment.value),
+)
+
+watch(
+  () => tabStore.activeTabId,
+  () => {
+    dismissedAutoTabId.value = null
+  },
+)
 
 const modelSelectOptions = computed((): RsSelectOptions =>
   buildModelSelectOptions(
@@ -156,7 +185,7 @@ const mentionEntries = computed((): MentionEntry[] => {
     }
   }
 
-  const ctx = listMentionCandidates().filter((c) => !attachments.value.some((a) => a.id === c.id))
+  const ctx = listMentionCandidates().filter((c) => !composerAttachments.value.some((a) => a.id === c.id))
   for (const c of ctx) {
     if (
       !q ||
@@ -242,6 +271,10 @@ function addAttachment(item: AiContextAttachment): void {
 }
 
 function removeAttachment(id: string): void {
+  if (autoTabAttachment.value?.id === id) {
+    dismissedAutoTabId.value = id
+    return
+  }
   attachments.value = attachments.value.filter((a) => a.id !== id)
 }
 
@@ -267,28 +300,32 @@ async function onSend(): Promise<void> {
   if ((!text.trim() && !files.value.length) || aiStore.sending) {
     return
   }
-  // 发送前若未显式 @ 选区，但编辑器仍有选区，自动并入 Context
+  // 发送前若未显式 @ 选区，但当前页签仍有选区，自动并入 Context
   const { selectionAttachmentFromWorkspace } = await import('./context-pack')
-  const { listDiagnostics } = await import('./workspace-context')
+  const { editorSelectionBelongsToTab, latestDiagnosticForTab } = await import('./workspace-context')
+  const activeTabId = tabStore.activeTabId
   let nextAttachments = [...attachments.value]
-  if (!nextAttachments.some((a) => a.kind === 'selection')) {
+  if (autoTabAttachment.value) {
+    nextAttachments = mergeActiveTabAttachment(nextAttachments, autoTabAttachment.value)
+  }
+  if (!nextAttachments.some((a) => a.kind === 'selection') && editorSelectionBelongsToTab(activeTabId)) {
     const sel = selectionAttachmentFromWorkspace()
     if (sel) {
       nextAttachments = [...nextAttachments, sel]
     }
   }
-  // 若未 @ 诊断，自动附带最近一条查询/Explain 诊断（若有）
+  // 若未 @ 诊断，只自动附带当前激活页签的查询/Explain 等诊断，不带后台 SSH 页签的过期项
   if (!nextAttachments.some((a) => a.kind === 'diagnostic')) {
-    const diags = listDiagnostics()
-    if (diags[0]) {
+    const diag = latestDiagnosticForTab(activeTabId)
+    if (diag) {
       nextAttachments = [
         ...nextAttachments,
         {
-          id: diags[0].id,
+          id: diag.id,
           kind: 'diagnostic' as const,
-          label: diags[0].label,
-          detail: diags[0].detail,
-          payload: { text: diags[0].text, kind: diags[0].kind },
+          label: diag.label,
+          detail: diag.detail,
+          payload: { text: diag.text, kind: diag.kind },
         },
       ]
     }
@@ -302,6 +339,7 @@ async function onSend(): Promise<void> {
   attachments.value = []
   files.value = []
   attachError.value = null
+  dismissedAutoTabId.value = null
   await aiStore.send(sendText, {
     markers,
     context: {
@@ -492,7 +530,7 @@ function cancelEditing(): void {
       </div>
       <p v-if="attachError" class="nm-ai-composer__attach-error">{{ attachError }}</p>
       <div
-        v-if="attachments.length || aiStore.selectedSkillCode"
+        v-if="composerAttachments.length || aiStore.selectedSkillCode"
         class="nm-ai-composer__chips rs-native-scrollbar"
         role="list"
       >
@@ -514,7 +552,7 @@ function cancelEditing(): void {
           </button>
         </div>
         <div
-          v-for="a in attachments"
+          v-for="a in composerAttachments"
           :key="a.id"
           class="nm-ai-chip"
           role="listitem"

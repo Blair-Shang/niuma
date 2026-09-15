@@ -1,7 +1,8 @@
 /**
  * MySQL Session 功能面板标识。
- * query / browse / ddl / objectScript / monitor / design / tools / call。
+ * query / browse / ddl / objectScript / monitor / design / tools / call / catalog。
  */
+import type { CategoryId } from '@/modules/mysql/conn-tree-shared'
 import type { MysqlObjectKind, MysqlObjectScriptMode } from '@/modules/mysql/types/object-script'
 
 export type MysqlSessionTab =
@@ -13,6 +14,7 @@ export type MysqlSessionTab =
   | 'design'
   | 'tools'
   | 'call'
+  | 'catalog'
 
 /** 面板解析所需的静态资源范围。 */
 export interface MysqlPaneScope {
@@ -26,6 +28,8 @@ export interface MysqlPaneScope {
   objectKind?: MysqlObjectKind
   /** 对象脚本目标名（create 可为占位名） */
   objectName?: string
+  /** 对象一览当前分类 */
+  catalogCategory?: CategoryId
 }
 
 export interface MysqlPaneContext extends MysqlPaneScope {
@@ -126,6 +130,16 @@ function designProps(ctx: MysqlPaneContext): Record<string, unknown> {
   }
 }
 
+function catalogProps(ctx: MysqlPaneContext): Record<string, unknown> {
+  return {
+    sessionId: ctx.sessionId,
+    profileId: ctx.profileId,
+    database: ctx.database,
+    catalogCategory: ctx.catalogCategory ?? 'tables',
+    sessionLabel: ctx.sessionLabel,
+  }
+}
+
 export const mysqlPaneRegistry: Record<MysqlSessionTab, MysqlFeatureDef> = {
   query: {
     icon: 'code-2',
@@ -192,6 +206,14 @@ export const mysqlPaneRegistry: Record<MysqlSessionTab, MysqlFeatureDef> = {
       buildProps: callProps,
     }),
   },
+  catalog: {
+    icon: 'layout-grid',
+    labelKey: 'modules.mysql.session.tabCatalog',
+    resolvePane: () => ({
+      loader: () => import('@/modules/mysql/components/MysqlObjectCatalogPane.vue'),
+      buildProps: catalogProps,
+    }),
+  },
 }
 
 export function normalizeMysqlFeature(tab: string | undefined): MysqlSessionTab {
@@ -203,7 +225,8 @@ export function normalizeMysqlFeature(tab: string | undefined): MysqlSessionTab 
     tab === 'monitor' ||
     tab === 'design' ||
     tab === 'tools' ||
-    tab === 'call'
+    tab === 'call' ||
+    tab === 'catalog'
   ) {
     return tab
   }
@@ -220,6 +243,7 @@ export function mysqlFeatureEmbedsChrome(tab: MysqlSessionTab): boolean {
     tab === 'monitor' ||
     tab === 'design' ||
     tab === 'tools' ||
-    tab === 'call'
+    tab === 'call' ||
+    tab === 'catalog'
   )
 }

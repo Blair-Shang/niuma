@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RsIcon, RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
-import { QueryResultPanel, SqlQueryShell } from '@/modules/database'
+import { RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
+import { QueryResultPanel, SqlQueryIdentity, SqlQueryShell } from '@/modules/database'
 import { useVastQueryPane } from '@/modules/vastbase/composables/useVastQueryPane'
 import type { VastSessionTab } from '@/modules/vastbase/sql-seed'
 
@@ -42,8 +42,6 @@ const {
   filterText,
   scopeLabel,
   identityTitle,
-  featureIcon,
-  featureLabelKey,
   messageItems,
   hasMessages,
   resultSummaryText,
@@ -97,18 +95,12 @@ const {
     @context-select="onContextMenuSelect"
   >
     <template #identity>
-      <div
-        class="nm-vast-query__identity"
+      <SqlQueryIdentity
+        icon="vastbase"
         :title="`${identityTitle}\n${t('modules.vastbase.session.dialectHint')}`"
       >
-        <RsIcon name="vastbase" :size="15" class="nm-vast-query__brand" />
-        <span v-if="sessionLabel" class="nm-vast-query__session">{{ sessionLabel }}</span>
-        <span class="nm-vast-query__scope">{{ scopeLabel }}</span>
-        <span class="nm-vast-query__feature">
-          <RsIcon :name="featureIcon" :size="12" />
-          {{ t(featureLabelKey) }}
-        </span>
-      </div>
+        <span>{{ scopeLabel }}</span>
+      </SqlQueryIdentity>
     </template>
 
     <template #editor>
@@ -156,48 +148,6 @@ const {
 </template>
 
 <style scoped>
-.nm-vast-query__identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-vast-query__brand {
-  flex-shrink: 0;
-}
-
-.nm-vast-query__session {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-vast-query__scope {
-  color: var(--rs-foreground);
-  font-weight: 500;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.nm-vast-query__feature {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--rs-radius-sm);
-  background: var(--rs-bg-muted, rgba(127, 127, 127, 0.12));
-  color: var(--rs-muted);
-  font-size: var(--rs-font-size-xs);
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
 .nm-vast-query__editor {
   flex: 1;
   min-height: 0;

@@ -16,11 +16,12 @@ func (d *Dispatcher) aiPolicyConfirm(_ context.Context, req Request) Response {
 	var params struct {
 		InvocationID string `json:"invocationId"`
 		Decision     string `json:"decision"`
+		Scope        string `json:"scope"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, fmt.Sprintf("invalid params: %v", err))
 	}
-	if err := svc.ConfirmPolicy(params.InvocationID, params.Decision); err != nil {
+	if err := svc.ConfirmPolicy(params.InvocationID, params.Decision, params.Scope); err != nil {
 		return errorResponse(req.ID, err.Error())
 	}
 	return okResponse(req.ID, map[string]any{"ok": true})

@@ -28,7 +28,6 @@ import { useSshTransfer } from '@/modules/ssh/composables/useSshTransfer'
 import SshMonitorPane from '@/modules/ssh/components/SshMonitorPane.vue'
 import SshTerminalGroup from '@/modules/ssh/components/SshTerminalGroup.vue'
 import { useSessionActionStore } from '@/stores/session-actions'
-import { useShellStore } from '@/stores/shell'
 import {
   clearDiagnostic,
   publishDiagnostic,
@@ -55,7 +54,6 @@ const { t } = useI18n()
 const toast = useRsToast()
 const sessionActionStore = useSessionActionStore()
 const transferHub = useTransferHubStore()
-const shellStore = useShellStore()
 const tabStore = useTabStore()
 const sshProfiles = useConnectionProfiles(['ssh'])
 
@@ -673,7 +671,6 @@ async function enqueueUploadPaths(localPaths: string[], remoteDir: string): Prom
       })
     }
     await transferHub.refreshSession(sessionId.value)
-    shellStore.openBottomDock('transfers')
     toast.success(t('modules.ftp.session.transferQueued'))
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t('modules.ftp.session.transferError'))
@@ -722,7 +719,6 @@ async function enqueueTransferItems(
       })
     }
     await transferHub.refreshSession(sessionId.value)
-    shellStore.openBottomDock('transfers')
     toast.success(t('modules.ftp.session.transferQueued'))
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t('modules.ftp.session.transferError'))

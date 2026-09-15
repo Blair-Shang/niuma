@@ -46,6 +46,7 @@ const (
 	MethodMetaInnoDBDeadlock    = "meta.innodbDeadlock"
 	MethodMetaPrimaryKey        = "meta.primaryKey"
 	MethodMetaForeignKeys       = "meta.foreignKeys"
+	MethodMetaObjectCatalog     = "meta.objectCatalog"
 
 	MethodCatalogSchemas = "catalog.schemas"
 	MethodCatalogTables  = "catalog.tables"
@@ -197,6 +198,8 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.metaPrimaryKey(ctx, req)
 	case MethodMetaForeignKeys:
 		return d.metaForeignKeys(ctx, req)
+	case MethodMetaObjectCatalog:
+		return d.metaObjectCatalog(ctx, req)
 	case MethodCatalogSchemas:
 		return d.catalogSchemas(ctx, req)
 	case MethodCatalogTables:

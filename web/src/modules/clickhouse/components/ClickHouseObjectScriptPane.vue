@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RsButton, RsLoading, RsMonacoEditor } from '@niuma/ui'
+import { RsLoading, RsMonacoEditor } from '@niuma/ui'
 import {
   ObjectScriptShell,
+  SqlIdeToolbarButton,
   TableDesignPreviewPopover,
   type ObjectScriptShellLabels,
 } from '@/modules/database'
@@ -115,15 +116,11 @@ const scopeLabel = computed(() => {
         :empty-label="t('modules.clickhouse.objectScript.previewEmpty')"
         @update:open="onPreviewOpenChange"
       >
-        <RsButton
-          size="sm"
-          variant="ghost"
+        <SqlIdeToolbarButton
           icon="eye"
-          :disabled="!sessionId || !sqlText.trim() || saving || loading"
-          :loading="previewLoading"
-        >
-          {{ t('modules.clickhouse.objectScript.preview') }}
-        </RsButton>
+          :disabled="!sessionId || !sqlText.trim() || saving || loading || previewLoading"
+          :title="t('modules.clickhouse.objectScript.preview')"
+        />
       </TableDesignPreviewPopover>
     </template>
 

@@ -1,29 +1,30 @@
 <script setup lang="ts">
 /**
  * 对象脚本外壳：视图 / 过程 / 函数等新建与编辑共用布局。
- * 方言侧注入 labels、身份信息与右键菜单；通过 #editor 挂 Monaco。
+ * 顶栏与 SqlQueryToolbar 同一套 IDE 密度；方言侧注入 labels、身份与右键菜单。
  */
+import { computed } from 'vue'
 import {
-  RsButton,
   RsContextMenu,
   RsEmpty,
   RsIcon,
   type RsContextMenuItem,
 } from '@niuma/ui'
+import SqlQueryIdentity from './SqlQueryIdentity.vue'
 import type {
   ObjectScriptMessageTone,
   ObjectScriptMode,
   ObjectScriptShellLabels,
 } from '../types/object-script'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     labels: ObjectScriptShellLabels
-    /** 连接/会话展示名 */
+    /** 连接/会话展示名（仅 tooltip；Tab 已含连接名） */
     sessionLabel?: string
-    /** 作用域，如 database.object（对象名建议放 Tab，避免与编辑器改名不一致） */
+    /** 作用域，如 database.object */
     scopeLabel?: string
-    /** 类型徽章：新建 / 视图 / 过程 … */
+    /** 类型：新建 / 视图 / 过程 … */
     typeLabel?: string
     icon?: string
     mode?: ObjectScriptMode
@@ -66,58 +67,88 @@ const emit = defineEmits<{
   apply: []
   contextSelect: [key: string]
 }>()
+
+const busy = computed(() => props.saving || props.loading)
+
+const applyLabel = computed(() =>
+  props.mode === 'create' ? props.labels.create : props.labels.save,
+)
+
+const identityText = computed(() => {
+  if (props.mode === 'create') {
+    return props.typeLabel || props.labels.modeCreate
+  }
+  return props.scopeLabel || props.typeLabel
+})
+
+const identityTitle = computed(() =>
+  [props.sessionLabel, props.scopeLabel, props.typeLabel].filter(Boolean).join(' · '),
+)
+
+const showReload = computed(() => props.showRefresh && props.mode !== 'create')
 </script>
 
 <template>
   <div class="nm-object-script">
-    <header class="nm-object-script__chrome">
-      <div class="nm-object-script__identity" :title="sessionLabel">
-        <RsIcon :name="icon" :size="16" />
-        <span class="nm-object-script__session">{{ sessionLabel || 'SQL' }}</span>
-        <span v-if="scopeLabel" class="nm-object-script__scope">{{ scopeLabel }}</span>
-        <span v-if="typeLabel" class="nm-object-script__type">{{ typeLabel }}</span>
-      </div>
-      <div class="nm-object-script__actions">
-        <slot name="toolbar-start" />
-        <RsButton
-          variant="ghost"
-          size="sm"
-          icon="braces"
-          :disabled="!canFormat || saving || loading"
-          :tooltip="labels.formatTooltip"
-          @click="emit('format')"
-        >
-          {{ labels.format }}
-        </RsButton>
-        <RsButton
-          variant="ghost"
-          size="sm"
-          icon="copy"
-          :disabled="!canCopy"
-          @click="emit('copy')"
-        >
-          {{ labels.copy }}
-        </RsButton>
-        <RsButton
-          v-if="showRefresh && mode !== 'create'"
-          variant="ghost"
-          size="sm"
-          icon="refresh-cw"
-          :loading="loading"
-          @click="emit('refresh')"
-        >
-          {{ labels.refresh }}
-        </RsButton>
-        <RsButton
-          variant="primary"
-          size="sm"
-          icon="play"
-          :loading="saving"
-          :disabled="!canApply"
+    <header class="nm-sql-tb" role="toolbar" :aria-label="applyLabel">
+      <div class="nm-sql-tb__lead">
+        <div class="nm-sql-tb__scope">
+          <SqlQueryIdentity :icon="icon" :title="identityTitle">
+            {{ identityText }}
+          </SqlQueryIdentity>
+        </div>
+
+        <span class="nm-sql-tb__sep" aria-hidden="true" />
+
+        <button
+          type="button"
+          class="nm-sql-tb__btn nm-sql-tb__btn--run"
+          :disabled="!canApply || busy"
+          :aria-label="applyLabel"
+          :title="applyLabel"
           @click="emit('apply')"
         >
-          {{ mode === 'create' ? labels.create : labels.save }}
-        </RsButton>
+          <RsIcon name="play" size="md" :stroke-width="2.25" />
+        </button>
+
+        <span class="nm-sql-tb__sep" aria-hidden="true" />
+
+        <button
+          type="button"
+          class="nm-sql-tb__btn"
+          :disabled="!canFormat || busy"
+          :aria-label="labels.format"
+          :title="labels.formatTooltip"
+          @click="emit('format')"
+        >
+          <RsIcon name="align-left" size="md" />
+        </button>
+        <button
+          type="button"
+          class="nm-sql-tb__btn"
+          :disabled="!canCopy || busy"
+          :aria-label="labels.copy"
+          :title="labels.copy"
+          @click="emit('copy')"
+        >
+          <RsIcon name="copy" size="md" />
+        </button>
+
+        <slot name="toolbar-start" />
+      </div>
+
+      <div class="nm-sql-tb__trail">
+        <button
+          v-if="showReload"
+          type="button"
+          class="nm-sql-tb__btn"
+          :disabled="busy"
+          :aria-label="labels.refresh"
+          :title="labels.refresh"
+          @click="emit('refresh')"
+        >
+          <RsIcon name="refresh-cw" size="md" />
+        </button>
         <slot name="toolbar-end" />
       </div>
     </header>
@@ -153,6 +184,7 @@ const emit = defineEmits<{
   </div>
 </template>
 
+<style scoped src="./sql-ide-toolbar.css"></style>
 <style scoped>
 .nm-object-script {
   display: flex;
@@ -161,51 +193,6 @@ const emit = defineEmits<{
   min-height: 0;
   border-radius: 0;
   overflow: hidden;
-}
-
-.nm-object-script__chrome {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-sm);
-  padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid var(--rs-border-subtle);
-  flex-shrink: 0;
-  border-radius: 0;
-}
-
-.nm-object-script__identity {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  min-width: 0;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-object-script__session {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-object-script__scope,
-.nm-object-script__type {
-  color: var(--rs-fg-muted);
-  font-weight: 400;
-}
-
-.nm-object-script__type {
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: var(--rs-font-size-xs);
-}
-
-.nm-object-script__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
 }
 
 .nm-object-script__empty {

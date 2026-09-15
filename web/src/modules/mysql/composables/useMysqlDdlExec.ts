@@ -11,6 +11,7 @@ import {
 import { segmentName } from '@/modules/mysql/conn-tree-shared'
 import { execMysqlSql } from '@/modules/mysql/composables/useMysqlSessionSql'
 import {
+  alterDatabaseSql,
   createDatabaseSql,
   dropDatabaseSql,
   dropFunctionSql,
@@ -49,6 +50,14 @@ function buildDdlSql(req: MysqlPendingDdlAction, newName?: string): string {
       const name = (newName ?? req.name ?? '').trim()
       if (!name) throw new Error('name required')
       return createDatabaseSql(name, {
+        charset: req.createOptions?.charset,
+        collation: req.createOptions?.collation,
+      })
+    }
+    case 'alter_database': {
+      const name = (req.name ?? '').trim()
+      if (!name) throw new Error('name required')
+      return alterDatabaseSql(name, {
         charset: req.createOptions?.charset,
         collation: req.createOptions?.collation,
       })
@@ -110,16 +119,18 @@ export function useMysqlDdlExec() {
           : pending.createOptions,
       }
       const sql = buildDdlSql(req, opts?.newName)
-      // DROP/CREATE DATABASE 不绑库；表级 DDL 绑当前 database
+      // DROP/CREATE/ALTER DATABASE 不绑库；表级 DDL 绑当前 database
       const database =
-        req.action === 'drop_database' || req.action === 'create_database'
+        req.action === 'drop_database' ||
+        req.action === 'create_database' ||
+        req.action === 'alter_database'
           ? undefined
           : req.database
       await execMysqlSql(req.profileId, sql, database)
       toast.success(t('modules.mysql.ddl.done'))
       if (conn) {
         const countDelta = req.action.startsWith('drop_') ? -1 : 0
-        if (req.action !== 'truncate_table') {
+        if (req.action !== 'truncate_table' && req.action !== 'alter_database') {
           await refreshTreeAfterDdl(conn, refreshPath, refreshDeep, prunePaths, countDelta)
         }
       } else {

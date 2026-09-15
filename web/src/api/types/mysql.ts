@@ -536,6 +536,38 @@ export interface MysqlMetaForeignKeysResult {
   foreignKeys: MysqlForeignKeyInfo[]
 }
 
+/** 库对象一览（information_schema 估算，非 COUNT(*)） */
+export interface MysqlMetaObjectCatalogParams {
+  sessionId?: string
+  profileId?: string
+  database: string
+  /** table / view / procedure / function；空则 table */
+  types?: string[]
+  limit?: number
+}
+
+export interface MysqlObjectCatalogItem {
+  name: string
+  type: string
+  comment?: string
+  rows?: number | null
+  dataLength?: number | null
+  indexLength?: number | null
+  autoIncrement?: number | null
+  engine?: string
+  charset?: string
+  collation?: string
+  createdAt?: string
+  updatedAt?: string
+  definer?: string
+  returns?: string
+}
+
+export interface MysqlMetaObjectCatalogResult {
+  items: MysqlObjectCatalogItem[]
+  truncated?: boolean
+}
+
 // ─── DDL: table design ──────────────────────────────────────────────────────
 
 export interface MysqlDesignColumnSpec {

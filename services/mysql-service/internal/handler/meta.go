@@ -420,3 +420,40 @@ func (d *Dispatcher) metaForeignKeys(ctx context.Context, req Request) Response 
 	logOpInfo(MethodMetaForeignKeys, "session", params.SessionID, "database", ref.Database, "table", ref.Name, "count", len(result.ForeignKeys))
 	return okResponse(req.ID, result)
 }
+
+type metaObjectCatalogParams struct {
+	SessionID string   `json:"sessionId"`
+	Database  string   `json:"database"`
+	Types     []string `json:"types"`
+	Limit     int      `json:"limit"`
+}
+
+func (d *Dispatcher) metaObjectCatalog(ctx context.Context, req Request) Response {
+	var params metaObjectCatalogParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return errorResponse(req.ID, fmt.Sprintf(errInvalidParamsFmt, err))
+	}
+	database := strings.TrimSpace(params.Database)
+	if database == "" {
+		return errorResponse(req.ID, "database required")
+	}
+
+	// information_schema 不依赖当前库，沿用会话连接，避免切库重建会话。
+	db, _, release, err := d.resolveDB(ctx, req.Params)
+	if err != nil {
+		return errorResponse(req.ID, err.Error())
+	}
+	defer release()
+
+	result, err := meta.ListObjectCatalog(ctx, db, meta.ObjectCatalogParams{
+		Database: database,
+		Types:    params.Types,
+		Limit:    params.Limit,
+	})
+	if err != nil {
+		logOpWarn(MethodMetaObjectCatalog, err, "session", params.SessionID, "database", database)
+		return errorResponse(req.ID, err.Error())
+	}
+	logOpInfo(MethodMetaObjectCatalog, "session", params.SessionID, "database", database, "count", len(result.Items))
+	return okResponse(req.ID, result)
+}

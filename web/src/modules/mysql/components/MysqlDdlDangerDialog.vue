@@ -14,7 +14,14 @@ const description = computed(() => pending.value?.description ?? '')
 
 async function onConfirm(): Promise<void> {
   const req = pending.value
-  if (!req || req.kind === 'rename' || req.kind === 'create_database') return
+  if (
+    !req ||
+    req.kind === 'rename' ||
+    req.kind === 'create_database' ||
+    req.kind === 'alter_database'
+  ) {
+    return
+  }
   await exec()
 }
 </script>

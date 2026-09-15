@@ -20,6 +20,7 @@ import {
   type MysqlSessionTab,
 } from '@/modules/mysql/pane-registry'
 import type { MysqlObjectKind } from '@/modules/mysql/types/object-script'
+import type { CategoryId } from '@/modules/mysql/conn-tree-shared'
 
 const props = defineProps<{
   profileId: string
@@ -36,6 +37,7 @@ const props = defineProps<{
   autoRunInitialSql?: boolean
   /** design / objectScript：create=新建；alter=编辑 */
   designMode?: 'create' | 'alter'
+  catalogCategory?: CategoryId
   tabId?: string
 }>()
 
@@ -61,7 +63,7 @@ const { sessionId, acquireSession, reconnectSession } = useSessionLease({
   kind: 'mysql',
   profileId: () => props.profileId,
   tabId: () => props.tabId,
-  connectDatabase: () => effectiveDatabase.value,
+  connectDatabase: () => (feature === 'catalog' || feature === 'monitor' ? profileDatabase.value : effectiveDatabase.value),
 })
 
 const sessionLabel = computed(() => {
@@ -77,6 +79,7 @@ const pane = featureDef.resolvePane({
   designMode: props.designMode,
   objectKind: props.objectKind,
   objectName: props.objectName,
+  catalogCategory: props.catalogCategory,
 })
 const PaneView = defineAsyncComponent(pane.loader)
 
@@ -105,6 +108,7 @@ const paneProps = computed(() => ({
     autoRunInitialSql: props.autoRunInitialSql,
     sessionLabel: sessionLabel.value,
     designMode: props.designMode,
+    catalogCategory: props.catalogCategory,
   }),
   active: paneActive.value,
 }))

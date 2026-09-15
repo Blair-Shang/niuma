@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RsIcon, RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
-import { QueryResultPanel, SqlQueryShell } from '@/modules/database'
+import { RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
+import { QueryResultPanel, SqlQueryIdentity, SqlQueryShell } from '@/modules/database'
 import { useSqliteQueryPane } from '@/modules/sqlite/composables/useSqliteQueryPane'
 
 const props = defineProps<{
@@ -100,11 +100,10 @@ const {
     @rollback="rollbackTx"
   >
     <template #identity>
-      <div class="nm-sqlite-query__identity" :title="identityTitle">
-        <RsIcon name="sqlite" :size="15" class="nm-sqlite-query__brand" />
-        <span v-if="schema" class="nm-sqlite-query__db">{{ schema }}</span>
-        <span v-else class="nm-sqlite-query__scope-fallback">{{ t('modules.sqlite.query.noSchema') }}</span>
-      </div>
+      <SqlQueryIdentity icon="sqlite" :title="identityTitle">
+        <span v-if="schema">{{ schema }}</span>
+        <span v-else>{{ t('modules.sqlite.query.noSchema') }}</span>
+      </SqlQueryIdentity>
     </template>
 
     <template #editor>
@@ -153,34 +152,6 @@ const {
 </template>
 
 <style scoped>
-.nm-sqlite-query__identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-sqlite-query__brand {
-  flex-shrink: 0;
-}
-
-.nm-sqlite-query__db {
-  color: var(--rs-foreground);
-  font-weight: 600;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.nm-sqlite-query__scope-fallback {
-  color: var(--rs-muted);
-  font-weight: 500;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
 .nm-sqlite-query__editor {
   flex: 1;
   min-height: 0;

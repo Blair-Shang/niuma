@@ -195,7 +195,7 @@ async function onBranch(): Promise<void> {
             :error="tool.error"
             :risk="tool.risk"
             :confirmable="tool.status === 'pending'"
-            @approve="aiStore.confirmTool(tool.invocationId, 'approve')"
+            @approve="(scope) => aiStore.confirmTool(tool.invocationId, 'approve', scope)"
             @reject="aiStore.confirmTool(tool.invocationId, 'reject')"
           />
         </div>
@@ -219,7 +219,7 @@ async function onBranch(): Promise<void> {
           :error="tool.error"
           :risk="tool.risk"
           :confirmable="tool.status === 'pending'"
-          @approve="aiStore.confirmTool(tool.invocationId, 'approve')"
+          @approve="(scope) => aiStore.confirmTool(tool.invocationId, 'approve', scope)"
           @reject="aiStore.confirmTool(tool.invocationId, 'reject')"
         />
       </div>

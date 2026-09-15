@@ -1,0 +1,87 @@
+/* SQL 查询 / 对象脚本共用：28px 灰底图标工具条（IDEA / DataGrip 密度）。 */
+
+.nm-sql-tb {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--rs-border-subtle, #e5e7eb);
+  background: color-mix(in srgb, var(--rs-text) 4.5%, var(--rs-surface));
+  flex-shrink: 0;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.nm-sql-tb__lead,
+.nm-sql-tb__trail {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+
+.nm-sql-tb__lead {
+  flex: 1;
+}
+
+.nm-sql-tb__trail {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.nm-sql-tb__scope {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 14rem;
+  margin-right: 2px;
+}
+
+.nm-sql-tb__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--rs-muted);
+  cursor: pointer;
+}
+
+.nm-sql-tb__btn:hover:not(:disabled),
+.nm-sql-tb__btn.is-on,
+.nm-sql-tb__btn[data-state='open'] {
+  background: var(--rs-item-hover);
+  color: var(--rs-text);
+}
+
+.nm-sql-tb__btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.nm-sql-tb__btn:focus-visible {
+  outline: 2px solid var(--rs-focus-ring, var(--rs-primary));
+  outline-offset: -2px;
+}
+
+.nm-sql-tb__btn--run:not(:disabled) {
+  color: var(--rs-success, #34c759);
+}
+
+.nm-sql-tb__btn--run:hover:not(:disabled) {
+  color: var(--rs-success, #34c759);
+  background: color-mix(in srgb, var(--rs-success, #34c759) 16%, transparent);
+}
+
+.nm-sql-tb__sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 5px;
+  background: var(--rs-border-subtle);
+  flex-shrink: 0;
+}

@@ -57,6 +57,11 @@ const typeLabel = computed(() =>
   modeCreate.value ? shellLabels.value.modeCreate : kindLabel.value,
 )
 
+const scopeLabel = computed(() => {
+  if (props.database && objectName.value) return `${props.database}.${objectName.value}`
+  return props.database || objectName.value || ''
+})
+
 const message = computed(() => lastError.value || lastMessage.value)
 const messageTone = computed(() => {
   if (lastError.value) return 'error' as const
@@ -71,6 +76,7 @@ const hasObject = computed(() => Boolean(props.database && objectName.value))
   <ObjectScriptShell
     :labels="shellLabels"
     :session-label="sessionLabel || 'MySQL'"
+    :scope-label="scopeLabel"
     :type-label="typeLabel"
     :icon="kindIcon"
     :mode="designMode"

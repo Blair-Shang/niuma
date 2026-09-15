@@ -491,9 +491,13 @@ export interface AiMcpSetToolRiskResult {
   ok: boolean
 }
 
+export type AiPolicyTrustScope = 'once' | 'run' | 'conversation'
+
 export interface AiPolicyConfirmParams {
   invocationId: string
   decision: 'approve' | 'reject'
+  /** approve 时：once 仅本次；run 本轮同类工具；conversation 本会话同类工具。 */
+  scope?: AiPolicyTrustScope
 }
 
 export interface AiPolicyConfirmResult {

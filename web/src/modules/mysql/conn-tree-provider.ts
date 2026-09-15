@@ -324,16 +324,22 @@ export const mysqlConnTreeProvider: ConnTreeChildProvider = {
     if (!last || last.kind === 'hint') return []
 
     if (last.kind === 'database') {
-      // 对齐 Navicat / DBeaver 库节点常用集；不含 Vastbase 的 Owner/Rename/Schema/Grant。
-      // 壳层会追加「刷新」。
+      // 对齐 Navicat Edit Database / DBeaver 库属性；不含 Vastbase 的 Owner/Rename/Schema/Grant。
+      // 壳层会追加「刷新」。系统库不提供编辑 / 删除。
       const protectedDb = isProtectedDatabase(last.name)
       return [
+        { key: 'open', label: t('modules.mysql.tree.dbOpen'), icon: 'layout-grid' },
         { key: 'query', label: t('modules.mysql.tree.dbQuery'), icon: 'code-2' },
         databaseCreateMenus(),
         ...databaseToolsMenus(),
         ...(!protectedDb
           ? ([
               { key: 'sep-mutate', label: '', separator: true },
+              {
+                key: 'editDatabase',
+                label: t('modules.mysql.tree.editDatabase'),
+                icon: 'pencil',
+              },
               {
                 key: 'drop',
                 label: t('modules.mysql.tree.dropDatabase'),
@@ -355,6 +361,11 @@ export const mysqlConnTreeProvider: ConnTreeChildProvider = {
     if (last.kind === 'category' && isCategoryId(last.name)) {
       // 表/视图/过程/函数：各一条「新建…」；表统一走设计器（不再并列「用设计器新建表」）。
       return [
+        {
+          key: 'open',
+          label: t('modules.mysql.tree.catOpen'),
+          icon: 'layout-grid',
+        },
         {
           key: 'create',
           label: t(`modules.mysql.tree.create.${last.name}`),

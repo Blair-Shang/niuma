@@ -8,7 +8,8 @@ import (
 )
 
 // ConfirmPolicy 处理 platform.ai.policy.confirm。
-func (s *Service) ConfirmPolicy(invocationID, decision string) error {
+// scope 仅在 approve 时生效：once / run / conversation（空视为 once）。
+func (s *Service) ConfirmPolicy(invocationID, decision, scope string) error {
 	if s == nil || s.policy == nil {
 		return fmt.Errorf("ai: policy unavailable")
 	}
@@ -18,12 +19,12 @@ func (s *Service) ConfirmPolicy(invocationID, decision string) error {
 	}
 	switch strings.ToLower(strings.TrimSpace(decision)) {
 	case tool.PolicyDecisionApprove:
-		if !s.policy.Decide(invocationID, true) {
+		if !s.policy.DecideWithScope(invocationID, true, scope) {
 			return fmt.Errorf("ai: no pending invocation %q", invocationID)
 		}
 		return nil
 	case tool.PolicyDecisionReject:
-		if !s.policy.Decide(invocationID, false) {
+		if !s.policy.DecideWithScope(invocationID, false, tool.TrustOnce) {
 			return fmt.Errorf("ai: no pending invocation %q", invocationID)
 		}
 		return nil

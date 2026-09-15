@@ -59,6 +59,27 @@ function tabLabel(tab: WorkspaceTab): string {
   return tab.title?.trim() || tab.titleKey || tab.moduleId || tab.tabId
 }
 
+/** MySQL / ClickHouse 无独立 schema：catalog 用当前库名，禁止落到 PostgreSQL 的 public。 */
+function catalogSchemaOf(
+  moduleId: string | undefined,
+  database: unknown,
+  schema: unknown,
+): string | undefined {
+  const sch = typeof schema === 'string' ? schema.trim() : ''
+  const db = typeof database === 'string' ? database.trim() : ''
+  if (usesDatabaseAsSchema(moduleId)) {
+    if (db && (!sch || (sch.toLowerCase() === 'public' && db.toLowerCase() !== 'public'))) {
+      return db
+    }
+    return sch || db || undefined
+  }
+  return sch || undefined
+}
+
+function usesDatabaseAsSchema(moduleId: string | undefined): boolean {
+  return moduleId === 'mysql' || moduleId === 'mariadb' || moduleId === 'clickhouse'
+}
+
 /** 从工作区页签构造 @ 引用（拖入 AI / @ 列表共用）。 */
 export function attachmentFromTab(tab: WorkspaceTab): AiContextAttachment {
   const sessionRegistry = useSessionRegistry()
@@ -76,10 +97,19 @@ export function attachmentFromTab(tab: WorkspaceTab): AiContextAttachment {
       profileId,
       sessionId,
       database: tab.props.database,
-      schema: tab.props.schema,
+      schema: catalogSchemaOf(tab.moduleId, tab.props.database, tab.props.schema),
       path: tab.moduleId === 'ssh' && cwd ? cwd : undefined,
     },
   }
+}
+
+/** 当前工作区激活页签的 @ 引用；无页签时为 null。 */
+export function activeTabAttachment(): AiContextAttachment | null {
+  const tab = useTabStore().activeTab
+  if (!tab) {
+    return null
+  }
+  return attachmentFromTab(tab)
 }
 
 function readDomSelectionSnippet(): string {
@@ -141,14 +171,14 @@ function schemaHintFromTab(tab: WorkspaceTab | null | undefined): AiContextAttac
     return null
   }
   const database = typeof tab.props.database === 'string' ? tab.props.database : undefined
-  const schema = typeof tab.props.schema === 'string' ? tab.props.schema : undefined
+  const schema = catalogSchemaOf(tab.moduleId, tab.props.database, tab.props.schema)
   const table =
     typeof tab.props.table === 'string'
       ? tab.props.table
       : typeof tab.props.objectName === 'string'
         ? tab.props.objectName
         : undefined
-  const parts = [database, schema, table].filter(Boolean) as string[]
+  const parts = [database, schema !== database ? schema : undefined, table].filter(Boolean) as string[]
   if (!parts.length) {
     return null
   }
@@ -263,7 +293,11 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
     sessionId,
     title: active ? tabLabel(active) : undefined,
     database: typeof active?.props.database === 'string' ? active.props.database : undefined,
-    schema: typeof active?.props.schema === 'string' ? active.props.schema : undefined,
+    schema: catalogSchemaOf(
+      active?.moduleId,
+      active?.props.database,
+      active?.props.schema,
+    ),
     cwd: typeof active?.props.remotePath === 'string' ? active.props.remotePath : undefined,
     dialectFamily: dialect?.family,
     capabilities: dialect?.capabilities,

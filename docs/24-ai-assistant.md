@@ -193,7 +193,7 @@
 
 | method | 行为 |
 |--------|------|
-| `platform.ai.policy.confirm` | `{ invocationId, decision: approve\|reject }` |
+| `platform.ai.policy.confirm` | `{ invocationId, decision: approve\|reject, scope?: once\|run\|conversation }` |
 | `platform.ai.policy.listPending` | 当前 run 待确认工具 |
 
 ### 6.5 事件（`niuma:event`）

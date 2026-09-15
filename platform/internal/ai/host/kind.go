@@ -46,6 +46,17 @@ func SpecServerID(spec ToolSpec) string {
 	return ServerIDSQL
 }
 
+// UsesDatabaseAsSchema 表示 catalog 的 schema 槽位就是 database 名（无独立 schema 层）。
+// MySQL / MariaDB / ClickHouse 如此；PostgreSQL 族仍用 public。
+func UsesDatabaseAsSchema(kind string) bool {
+	ns, err := NamespaceForKind(kind)
+	if err != nil {
+		k := strings.ToLower(strings.TrimSpace(kind))
+		return k == "mysql" || k == "mariadb" || k == "clickhouse"
+	}
+	return ns == "mysql" || ns == "clickhouse"
+}
+
 // NamespaceForKind 将连接 kind / moduleId 映射为 Bridge namespace。
 //
 // 未识别的 kind 原样返回（已是 namespace 时）；空串报错。

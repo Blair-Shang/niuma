@@ -13,7 +13,9 @@ const dialogKind = computed(() => pending.value?.kind ?? 'danger')
 </script>
 
 <template>
-  <MysqlDatabaseCreateDialog v-if="dialogKind === 'create_database'" />
+  <MysqlDatabaseCreateDialog
+    v-if="dialogKind === 'create_database' || dialogKind === 'alter_database'"
+  />
   <MysqlDdlRenameDialog v-else-if="dialogKind === 'rename'" />
   <MysqlDdlDangerDialog v-else-if="pending" />
 </template>

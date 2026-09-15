@@ -7,7 +7,7 @@ import {
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
-export type MysqlDdlDialogKind = 'danger' | 'rename' | 'create_database'
+export type MysqlDdlDialogKind = 'danger' | 'rename' | 'create_database' | 'alter_database'
 
 export type MysqlDdlAction =
   | 'drop_database'
@@ -18,6 +18,7 @@ export type MysqlDdlAction =
   | 'truncate_table'
   | 'rename_table'
   | 'create_database'
+  | 'alter_database'
 
 export interface MysqlDatabaseCreateOptions {
   charset: string

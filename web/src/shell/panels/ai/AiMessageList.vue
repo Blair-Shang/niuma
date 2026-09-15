@@ -11,6 +11,7 @@ import { useAiStore } from '@/stores/ai'
 import { useTabStore } from '@/stores/tab'
 import { isSystemAiProvider } from './system-provider'
 import AiMessageItem from './AiMessageItem.vue'
+import AiToolConfirmActions from './AiToolConfirmActions.vue'
 import { extractAttachmentMarkers } from './context-pack'
 import { extractImageMarkers, extractTextMarkers } from './attachment-utils'
 import { parseAssistantContent } from './parse-assistant-content'
@@ -40,6 +41,11 @@ const listEl = ref<HTMLElement | null>(null)
 const bottomEl = ref<HTMLElement | null>(null)
 /** 用户是否贴近底部；上翻阅读时不强制抢走滚动。 */
 const stickToBottom = ref(true)
+/** 列表内待确认卡片是否还在视口里；滚走后改用底部固定条。 */
+const pendingCardInView = ref(true)
+const decidingId = ref('')
+let pendingObserver: IntersectionObserver | null = null
+let revealTimer = 0
 
 const NEAR_BOTTOM_PX = 96
 
@@ -177,6 +183,102 @@ function toolsForMessage(messageId: string): AiLiveToolInvocation[] {
   return toolsByMessageId.value.get(messageId) ?? []
 }
 
+const pendingTools = computed(() => aiStore.displayTools.filter((x) => x.status === 'pending'))
+const pendingKey = computed(() => pendingTools.value.map((x) => x.invocationId).join('|'))
+const showPendingBar = computed(() => pendingTools.value.length > 0 && !pendingCardInView.value)
+
+function disconnectPendingObserver(): void {
+  pendingObserver?.disconnect()
+  pendingObserver = null
+}
+
+function observePendingCards(): void {
+  disconnectPendingObserver()
+  const root = listEl.value
+  if (!root || !pendingTools.value.length) {
+    pendingCardInView.value = true
+    return
+  }
+  const actions = root.querySelectorAll<HTMLElement>('[data-ai-pending-actions]')
+  const targets = actions.length
+    ? actions
+    : root.querySelectorAll<HTMLElement>('.nm-ai-tool--pending')
+  if (!targets.length) {
+    pendingCardInView.value = false
+    return
+  }
+  pendingObserver = new IntersectionObserver(
+    (entries) => {
+      pendingCardInView.value = entries.some((e) => e.isIntersecting)
+    },
+    { root, threshold: 0.35, rootMargin: '0px 0px -8px 0px' },
+  )
+  targets.forEach((node) => pendingObserver?.observe(node))
+}
+
+/** 只滚消息列表，避免 scrollIntoView 带动外层容器。 */
+function scrollChildIntoList(child: HTMLElement, align: 'nearest' | 'end'): void {
+  const el = listEl.value
+  if (!el) {
+    return
+  }
+  const listRect = el.getBoundingClientRect()
+  const childRect = child.getBoundingClientRect()
+  const visible =
+    childRect.top >= listRect.top && childRect.bottom <= listRect.bottom
+  if (align === 'nearest' && visible) {
+    return
+  }
+  const nextTop =
+    align === 'end'
+      ? el.scrollTop + (childRect.bottom - listRect.bottom) + 12
+      : el.scrollTop + (childRect.top - listRect.top) - 8
+  el.scrollTop = Math.max(0, nextTop)
+}
+
+function scrollPendingIntoView(): void {
+  const el = listEl.value
+  if (!el) {
+    return
+  }
+  const actions = el.querySelector<HTMLElement>('[data-ai-pending-actions]')
+  const card = el.querySelector<HTMLElement>('.nm-ai-tool--pending')
+  const target = actions || card
+  if (!target) {
+    return
+  }
+  scrollChildIntoList(target, 'end')
+  requestAnimationFrame(() => observePendingCards())
+}
+
+function scheduleRevealPending(): void {
+  if (revealTimer) {
+    window.clearTimeout(revealTimer)
+    revealTimer = 0
+  }
+  let attempt = 0
+  const run = (): void => {
+    if (!pendingTools.value.length) {
+      return
+    }
+    const ready = Boolean(
+      listEl.value?.querySelector('[data-ai-pending-actions], .nm-ai-tool--pending'),
+    )
+    if (ready) {
+      scrollPendingIntoView()
+      observePendingCards()
+      return
+    }
+    // 卡片尚未挂上（异步组件）时先露出底部条，避免确认按钮消失
+    pendingCardInView.value = false
+    if (attempt < 10) {
+      attempt += 1
+      revealTimer = window.setTimeout(run, 50)
+    }
+  }
+  void nextTick(run)
+}
+
 let scrollRaf = 0
 
 function isNearBottom(el: HTMLElement): boolean {
@@ -191,8 +293,11 @@ function onListScroll(): void {
   stickToBottom.value = isNearBottom(el)
 }
 
-/** 滚到最新输出；force 用于用户刚发送时。 */
+/** 滚到最新输出；force 用于用户刚发送时。待确认期间改为钉住确认区，避免被后续正文顶走。 */
 function scrollToBottom(force = false): void {
+  if (pendingTools.value.length && !force) {
+    return
+  }
   if (!force && !stickToBottom.value) {
     return
   }
@@ -201,6 +306,9 @@ function scrollToBottom(force = false): void {
   }
   scrollRaf = requestAnimationFrame(() => {
     scrollRaf = 0
+    if (pendingTools.value.length && !force) {
+      return
+    }
     const el = listEl.value
     const anchor = bottomEl.value
     if (!el) {
@@ -213,6 +321,9 @@ function scrollToBottom(force = false): void {
     }
     // Markdown / 图表异步增高后再补一次
     requestAnimationFrame(() => {
+      if (pendingTools.value.length && !force) {
+        return
+      }
       if (!force && !stickToBottom.value) {
         return
       }
@@ -233,6 +344,10 @@ async function scrollToBottomAfterPaint(force = false): Promise<void> {
 watch(
   () => aiStore.messages.length,
   () => {
+    if (pendingTools.value.length) {
+      void nextTick(() => scrollPendingIntoView())
+      return
+    }
     stickToBottom.value = true
     void scrollToBottomAfterPaint(true)
   },
@@ -249,17 +364,58 @@ watch(
   () => aiStore.runStatus,
   (status) => {
     if (status === 'done' || status === 'error' || status === 'cancelled') {
+      if (pendingTools.value.length) {
+        void nextTick(() => scrollPendingIntoView())
+        return
+      }
       void scrollToBottomAfterPaint(true)
     }
   },
 )
 
+watch(pendingKey, (key) => {
+  decidingId.value = ''
+  if (!key) {
+    if (revealTimer) {
+      window.clearTimeout(revealTimer)
+      revealTimer = 0
+    }
+    disconnectPendingObserver()
+    pendingCardInView.value = true
+    return
+  }
+  scheduleRevealPending()
+})
+
+async function onPendingDecide(
+  invocationId: string,
+  decision: 'approve' | 'reject',
+  scope: 'once' | 'run' | 'conversation' = 'once',
+): Promise<void> {
+  decidingId.value = invocationId
+  try {
+    await aiStore.confirmTool(invocationId, decision, scope)
+  } finally {
+    if (decidingId.value === invocationId) {
+      decidingId.value = ''
+    }
+  }
+}
+
 onMounted(() => {
   listEl.value?.addEventListener('scroll', onListScroll, { passive: true })
+  if (pendingKey.value) {
+    observePendingCards()
+  }
 })
 
 onBeforeUnmount(() => {
   listEl.value?.removeEventListener('scroll', onListScroll)
+  disconnectPendingObserver()
+  if (revealTimer) {
+    window.clearTimeout(revealTimer)
+    revealTimer = 0
+  }
   if (scrollRaf) {
     cancelAnimationFrame(scrollRaf)
   }
@@ -285,6 +441,7 @@ function focusAttachment(id: string): void {
 </script>
 
 <template>
+  <div class="nm-ai-messages-wrap">
   <div ref="listEl" class="nm-ai-messages rs-native-scrollbar">
     <div v-if="aiStore.loading && !aiStore.messages.length" class="nm-ai-messages__welcome">
       <span class="nm-ai-messages__spinner" aria-hidden="true" />
@@ -378,9 +535,36 @@ function focusAttachment(id: string): void {
       </details>
     </div>
   </div>
+
+  <aside v-if="showPendingBar" class="nm-ai-pending-bar" :aria-label="t('ai.toolPending')">
+    <div
+      v-for="tool in pendingTools"
+      :key="tool.invocationId"
+      class="nm-ai-pending-bar__row"
+    >
+      <div class="nm-ai-pending-bar__copy">
+        <span class="nm-ai-pending-bar__name">{{ tool.toolName || t('ai.toolCall') }}</span>
+        <span class="nm-ai-pending-bar__hint">{{ t('ai.toolConfirmHint') }}</span>
+      </div>
+      <AiToolConfirmActions
+        class="nm-ai-pending-bar__btns"
+        :deciding="decidingId === tool.invocationId"
+        @approve="(scope) => onPendingDecide(tool.invocationId, 'approve', scope)"
+        @reject="onPendingDecide(tool.invocationId, 'reject')"
+      />
+    </div>
+  </aside>
+  </div>
 </template>
 
 <style scoped>
+.nm-ai-messages-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .nm-ai-messages {
   flex: 1;
   min-height: 0;
@@ -390,6 +574,53 @@ function focusAttachment(id: string): void {
   flex-direction: column;
   gap: 22px;
   scroll-behavior: auto;
+}
+
+.nm-ai-pending-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--rs-warning, #d97706) 35%, var(--rs-border-subtle));
+  background: color-mix(in srgb, var(--rs-warning, #d97706) 8%, var(--nm-editor-bg));
+}
+
+.nm-ai-pending-bar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.nm-ai-pending-bar__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nm-ai-pending-bar__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rs-text);
+}
+
+.nm-ai-pending-bar__hint {
+  font-size: 11.5px;
+  color: var(--rs-muted);
+}
+
+.nm-ai-pending-bar__btns {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .nm-ai-messages__anchor {

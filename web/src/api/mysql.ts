@@ -36,6 +36,8 @@ import type {
   MysqlMetaLocksResult,
   MysqlMetaInnoDBDeadlockParams,
   MysqlMetaInnoDBDeadlockResult,
+  MysqlMetaObjectCatalogParams,
+  MysqlMetaObjectCatalogResult,
   MysqlMetaPrimaryKeyParams,
   MysqlMetaPrimaryKeyResult,
   MysqlMetaProcesslistParams,
@@ -73,6 +75,8 @@ import type {
   MysqlTxSetAutoCommitParams,
   MysqlTxState,
 } from '@/api/types/mysql'
+
+export type { MysqlMetaObjectCatalogParams, MysqlMetaObjectCatalogResult }
 
 /**
  * MySQL 会话、查询、对象树、元数据与补全目录能力（platform-core 代理至 mysql-service）。
@@ -226,6 +230,10 @@ export const mysqlApi = {
 
   metaForeignKeys(params: MysqlMetaForeignKeysParams): Promise<MysqlMetaForeignKeysResult> {
     return bridgeInvoke<MysqlMetaForeignKeysResult>('mysql.meta.foreignKeys', params)
+  },
+
+  metaObjectCatalog(params: MysqlMetaObjectCatalogParams): Promise<MysqlMetaObjectCatalogResult> {
+    return bridgeInvoke<MysqlMetaObjectCatalogResult>('mysql.meta.objectCatalog', params)
   },
 
   ddlDesignPreview(params: MysqlDdlDesignPreviewParams): Promise<MysqlDdlDesignPreviewResult> {

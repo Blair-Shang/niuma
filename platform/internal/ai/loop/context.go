@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"niuma/platform/internal/ai/host"
 )
 
 const (
@@ -85,6 +87,7 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 			ws.Capabilities = cleaned
 		}
 		if ws.TabID != "" || ws.ModuleID != "" || ws.ProfileID != "" || ws.SessionID != "" || ws.Title != "" || ws.Database != "" || ws.Schema != "" || ws.Cwd != "" || ws.DialectFamily != "" || len(ws.Capabilities) > 0 || ws.DialectRules != "" {
+			fillSQLCatalogScope(&ws)
 			out.Workspace = &ws
 		}
 	}
@@ -129,6 +132,7 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 				}
 			}
 		}
+		fillSQLCatalogScope(out.Workspace)
 	}
 
 	block, truncated := formatContextPrompt(out.Workspace, out.Attachments)
@@ -137,6 +141,19 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 	}
 	out.PromptBlock = block
 	return out
+}
+
+// fillSQLCatalogScope 把 MySQL/ClickHouse 的 database 填进 schema，避免 catalog 落到 public。
+func fillSQLCatalogScope(ws *ContextWorkspace) {
+	if ws == nil || !host.UsesDatabaseAsSchema(ws.ModuleID) {
+		return
+	}
+	if ws.Database != "" && (ws.Schema == "" || (strings.EqualFold(ws.Schema, "public") && !strings.EqualFold(ws.Database, "public"))) {
+		ws.Schema = ws.Database
+	}
+	if ws.Database == "" && ws.Schema != "" {
+		ws.Database = ws.Schema
+	}
 }
 
 func sanitizePayload(in map[string]any) (map[string]any, bool) {

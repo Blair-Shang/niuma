@@ -99,10 +99,18 @@ export const useAiStore = defineStore('ai', () => {
     records: AiToolInvocationRecord[] | undefined,
     confirmableIds?: Set<string>,
   ): AiLiveToolInvocation[] {
+    const currentRun = runId.value
     return (records ?? []).map((r) => {
       let status = mapInvocationStatus(String(r.status))
+      let error = r.error
       if (status === 'pending' && confirmableIds && !confirmableIds.has(r.invocationId)) {
         status = 'error'
+        if (!error) error = 'stale pending'
+      }
+      // 停止后库里可能仍短暂为 running：非当前 run 的进行中卡片按已取消回放
+      if (status === 'running' && (!currentRun || (r.runId && r.runId !== currentRun))) {
+        status = 'error'
+        if (!error) error = 'cancelled'
       }
       return {
         invocationId: r.invocationId,
@@ -110,7 +118,7 @@ export const useAiStore = defineStore('ai', () => {
         status,
         argsSummary: r.argsSummary,
         resultSummary: r.resultSummary,
-        error: status === 'error' && !r.error && r.status === 'pending' ? 'stale pending' : r.error,
+        error: status === 'error' && !error && r.status === 'pending' ? 'stale pending' : error,
         risk: r.risk,
         createdAt: r.createdAt,
         runId: r.runId,
@@ -209,12 +217,23 @@ export const useAiStore = defineStore('ai', () => {
       if (runId.value && ev.runId !== runId.value) {
         return
       }
-      const hit = liveTools.value.find((t) => t.invocationId === ev.invocationId)
-      if (hit) {
-        hit.status = ev.ok ? 'ok' : 'error'
-        hit.resultSummary = ev.resultSummary
-        hit.error = ev.error
+      const applyResult = (t: AiLiveToolInvocation): AiLiveToolInvocation => {
+        if (t.invocationId !== ev.invocationId) {
+          return t
+        }
+        // 已因停止标成 cancelled 的卡片，不接受随后跑完的成功结果
+        if (t.error === 'cancelled' && ev.ok) {
+          return t
+        }
+        return {
+          ...t,
+          status: ev.ok ? 'ok' : 'error',
+          resultSummary: ev.resultSummary,
+          error: ev.error,
+        }
       }
+      liveTools.value = liveTools.value.map(applyResult)
+      toolHistory.value = toolHistory.value.map(applyResult)
       return
     }
     if (ev.type === 'platform.ai.run.status') {
@@ -244,11 +263,12 @@ export const useAiStore = defineStore('ai', () => {
         runStatus.value = 'cancelled'
         sending.value = false
         runId.value = null
-        liveTools.value = liveTools.value.map((t) =>
+        const markStopped = (t: (typeof liveTools.value)[number]) =>
           t.status === 'running' || t.status === 'pending'
-            ? { ...t, status: 'error', error: 'cancelled' }
-            : t,
-        )
+            ? { ...t, status: 'error' as const, error: t.error || 'cancelled' }
+            : t
+        liveTools.value = liveTools.value.map(markStopped)
+        toolHistory.value = toolHistory.value.map(markStopped)
         if (activeConversationId.value) {
           void reloadToolHistory(activeConversationId.value)
         }
@@ -260,11 +280,12 @@ export const useAiStore = defineStore('ai', () => {
         sending.value = false
         runId.value = null
         streamingText.value = ''
-        liveTools.value = liveTools.value.map((t) =>
+        const markFailed = (t: (typeof liveTools.value)[number]) =>
           t.status === 'running' || t.status === 'pending'
-            ? { ...t, status: 'error', error: runError.value ?? undefined }
-            : t,
-        )
+            ? { ...t, status: 'error' as const, error: runError.value ?? t.error }
+            : t
+        liveTools.value = liveTools.value.map(markFailed)
+        toolHistory.value = toolHistory.value.map(markFailed)
         if (activeConversationId.value) {
           void reloadToolHistory(activeConversationId.value)
         }
@@ -684,9 +705,17 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  async function confirmTool(invocationId: string, decision: 'approve' | 'reject'): Promise<void> {
+  async function confirmTool(
+    invocationId: string,
+    decision: 'approve' | 'reject',
+    scope: 'once' | 'run' | 'conversation' = 'once',
+  ): Promise<void> {
     try {
-      await aiApi.confirmPolicy({ invocationId, decision })
+      await aiApi.confirmPolicy({
+        invocationId,
+        decision,
+        scope: decision === 'approve' ? scope : 'once',
+      })
       const hit =
         liveTools.value.find((t) => t.invocationId === invocationId) ||
         toolHistory.value.find((t) => t.invocationId === invocationId)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RsIcon, RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
-import { QueryResultPanel, SqlQueryShell } from '@/modules/database'
+import { RsLoading, RsMonacoEditor, type RsSplitPaneItem } from '@niuma/ui'
+import { QueryResultPanel, SqlQueryIdentity, SqlQueryShell } from '@/modules/database'
 import { useOracleQueryPane } from '@/modules/oracle/composables/useOracleQueryPane'
 
 const props = defineProps<{
@@ -101,11 +101,10 @@ const {
     @context-select="onContextMenuSelect"
   >
     <template #identity>
-      <div class="nm-oracle-query__identity" :title="identityTitle">
-        <RsIcon name="database" :size="15" class="nm-oracle-query__brand" />
-        <span v-if="schema" class="nm-oracle-query__schema">{{ schema }}</span>
-        <span v-else class="nm-oracle-query__scope-fallback">{{ t('modules.oracle.query.noSchema') }}</span>
-      </div>
+      <SqlQueryIdentity :title="identityTitle">
+        <span v-if="schema">{{ schema }}</span>
+        <span v-else>{{ t('modules.oracle.query.noSchema') }}</span>
+      </SqlQueryIdentity>
     </template>
     <template #editor>
       <RsMonacoEditor
@@ -153,34 +152,6 @@ const {
 </template>
 
 <style scoped>
-.nm-oracle-query__identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-oracle-query__brand {
-  flex-shrink: 0;
-}
-
-.nm-oracle-query__schema {
-  color: var(--rs-foreground);
-  font-weight: 600;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.nm-oracle-query__scope-fallback {
-  color: var(--rs-muted);
-  font-weight: 500;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
 .nm-oracle-query__editor {
   flex: 1;
   min-height: 0;

@@ -264,8 +264,9 @@ func (s *Service) invokeBoundTool(
 		return "", err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	needsConfirm := tool.RequiresConfirm(risk) && !s.policy.Trusted(conversationID, runID, b.Tool.ToolName)
 	initialStatus := "running"
-	if tool.RequiresConfirm(risk) {
+	if needsConfirm {
 		initialStatus = "pending"
 	}
 	_ = s.Conversations.UpsertToolInvocation(context.Background(), store.AIToolInvocation{
@@ -281,7 +282,7 @@ func (s *Service) invokeBoundTool(
 		UpdatedAt:      now,
 	})
 
-	if tool.RequiresConfirm(risk) {
+	if needsConfirm {
 		s.publish(map[string]any{
 			"type":           "platform.ai.tool.pending",
 			"runId":          runID,
@@ -291,7 +292,7 @@ func (s *Service) invokeBoundTool(
 			"argsSummary":    argsSummary,
 			"risk":           risk,
 		})
-		ch := s.policy.Register(invocationID, runID)
+		ch := s.policy.Register(invocationID, runID, conversationID, b.Tool.ToolName)
 		select {
 		case approve := <-ch:
 			if !approve {
@@ -367,18 +368,28 @@ func (s *Service) invokeBoundTool(
 		okFlag = false
 		result = "ERROR: " + errMsg
 	}
+	if ctx.Err() != nil {
+		status = "cancelled"
+		errMsg = "cancelled"
+		okFlag = false
+		result = "ERROR: cancelled"
+	}
 	summary := truncateUTF8(result, 400)
-	_ = s.Conversations.UpdateToolInvocation(context.Background(), invocationID, status, summary, errMsg)
-
-	s.publish(map[string]any{
-		"type":           "platform.ai.tool.result",
-		"runId":          runID,
-		"conversationId": conversationID,
-		"invocationId":   invocationID,
-		"ok":             okFlag,
-		"resultSummary":  summary,
-		"error":          errMsg,
-	})
+	wrote, _ := s.Conversations.UpdateToolInvocationIfOpen(context.Background(), invocationID, status, summary, errMsg)
+	if wrote {
+		s.publish(map[string]any{
+			"type":           "platform.ai.tool.result",
+			"runId":          runID,
+			"conversationId": conversationID,
+			"invocationId":   invocationID,
+			"ok":             okFlag,
+			"resultSummary":  summary,
+			"error":          errMsg,
+		})
+	}
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
 	if callErr != nil {
 		return result, callErr
 	}
@@ -407,8 +418,12 @@ func mergeWorkspaceArgs(rawArgs string, normalized NormalizedContext) json.RawMe
 		if _, ok := obj["database"]; !ok && normalized.Workspace.Database != "" {
 			obj["database"] = normalized.Workspace.Database
 		}
-		if _, ok := obj["schema"]; !ok && normalized.Workspace.Schema != "" {
-			obj["schema"] = normalized.Workspace.Schema
+		if _, ok := obj["schema"]; !ok {
+			if normalized.Workspace.Schema != "" {
+				obj["schema"] = normalized.Workspace.Schema
+			} else if db := normalized.Workspace.Database; db != "" && host.UsesDatabaseAsSchema(normalized.Workspace.ModuleID) {
+				obj["schema"] = db
+			}
 		}
 		if cwd := strings.TrimSpace(normalized.Workspace.Cwd); cwd != "" {
 			if _, ok := obj["cwd"]; !ok {

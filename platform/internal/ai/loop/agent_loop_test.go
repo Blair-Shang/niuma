@@ -32,6 +32,28 @@ func TestMergeWorkspaceArgs(t *testing.T) {
 	}
 }
 
+func TestMergeWorkspaceArgsMySQLSchemaFromDatabase(t *testing.T) {
+	n := NormalizeContext(&ContextDraft{
+		Workspace: &ContextWorkspace{
+			ModuleID:  "mysql",
+			ProfileID: "p1",
+			SessionID: "s1",
+			Database:  "ai_coding",
+		},
+	})
+	if n.Workspace == nil || n.Workspace.Schema != "ai_coding" {
+		t.Fatalf("schema=%v", n.Workspace)
+	}
+	raw := mergeWorkspaceArgs(`{}`, n)
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatal(err)
+	}
+	if obj["schema"] != "ai_coding" || obj["database"] != "ai_coding" {
+		t.Fatalf("%v", obj)
+	}
+}
+
 func TestMergeWorkspaceArgsInjectsCwd(t *testing.T) {
 	n := NormalizeContext(&ContextDraft{
 		Workspace: &ContextWorkspace{ProfileID: "p1", SessionID: "s1", Cwd: "/var/log"},
@@ -64,7 +86,7 @@ func TestBuildEnabledToolDefsIncludesHostSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 4 {
+	if len(defs) != 5 {
 		t.Fatalf("defs=%d", len(defs))
 	}
 	b, ok := bound[host.ToolListTables]

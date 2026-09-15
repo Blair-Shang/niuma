@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RsIcon, RsLoading, RsMonacoEditor, RsSelect, type RsSplitPaneItem } from '@niuma/ui'
-import { QueryResultPanel, SqlQueryShell } from '@/modules/database'
+import { RsLoading, RsMonacoEditor, RsSelect, type RsSplitPaneItem } from '@niuma/ui'
+import { QueryResultPanel, SqlQueryIdentity, SqlQueryShell } from '@/modules/database'
 import { useClickHouseQueryPane } from '@/modules/clickhouse/composables/useClickHouseQueryPane'
 
 const props = defineProps<{
@@ -91,15 +91,16 @@ const {
     @context-select="onContextMenuSelect"
   >
     <template #identity>
-      <div class="nm-clickhouse-query__identity" :title="identityTitle">
-        <RsIcon name="clickhouse" :size="15" class="nm-clickhouse-query__brand" />
-        <span v-if="database" class="nm-clickhouse-query__db">{{ database }}</span>
-        <span v-else class="nm-clickhouse-query__scope-fallback">{{ t('modules.clickhouse.query.noDatabase') }}</span>
+      <div class="nm-clickhouse-query__identity">
+        <SqlQueryIdentity icon="clickhouse" :title="identityTitle">
+          <span v-if="database">{{ database }}</span>
+          <span v-else>{{ t('modules.clickhouse.query.noDatabase') }}</span>
+        </SqlQueryIdentity>
         <span class="nm-clickhouse-query__explain-sep" aria-hidden="true" />
         <RsSelect
           v-model="explainMode"
           class="nm-clickhouse-query__explain-mode"
-          size="sm"
+          size="ssm"
           :options="explainModeOptions"
           :disabled="running"
           :aria-label="t('modules.clickhouse.query.explainMode')"
@@ -158,27 +159,6 @@ const {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 100%;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 600;
-}
-
-.nm-clickhouse-query__brand {
-  flex-shrink: 0;
-}
-
-.nm-clickhouse-query__db {
-  color: var(--rs-foreground);
-  font-weight: 600;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.nm-clickhouse-query__scope-fallback {
-  color: var(--rs-muted);
-  font-weight: 500;
-  flex-shrink: 0;
-  white-space: nowrap;
 }
 
 .nm-clickhouse-query__explain-sep {

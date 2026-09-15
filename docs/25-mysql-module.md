@@ -214,7 +214,8 @@ web/src/modules/mysql/
 
 # 跨库 UI 壳（样式复用，无 MySQL 业务）
 web/src/modules/database/
-├── components/ObjectScriptShell.vue   # 与 TableDesignShell / SqlQueryShell 同级
+├── components/ObjectScriptShell.vue   # 与 TableDesignShell / SqlQueryShell / ObjectCatalogShell 同级
+├── components/ObjectCatalogShell.vue  # 库对象一览（列与 RPC 在方言侧）
 └── types/object-script.ts
 
 web/src/api/
@@ -288,8 +289,11 @@ connection → database → {Tables|Views|Procedures|Functions} → object
 
 分类节点（Tables / Views / …）展开前通过 `tree.categoryCounts` 显示子对象数量后缀（如 `Tables (12)`）。
 **树右键（对齐 Navicat / DBeaver 常用集，密度低于 Vastbase）**：
-- **库节点**：新建查询、新建（表设计器 / 视图 / 过程 / 函数）、工具（转储 SQL / 执行 SQL / 备份还原）、删除库、复制名称、复制 `CREATE DATABASE`；壳层追加刷新。不含 Owner / Rename / Schema / Grant。
+- **库节点**：打开对象列表、新建查询、新建（表设计器 / 视图 / 过程 / 函数）、工具（转储 SQL / 执行 SQL / 备份还原）、删除库、复制名称、复制 `CREATE DATABASE`；壳层追加刷新。不含 Owner / Rename / Schema / Grant。
+- **分类节点**：打开对象列表、新建该类对象、新建查询、整类转储。
 - **对象节点**：查询表数据、查看·复制 DDL（表）、编辑视图定义、生成 CRUD/COUNT、表维护、重命名/Truncate/Drop、例程调用/编辑源码、导入导出、复制名；连接级 **进程列表 Monitor**。
+
+**对象一览（catalog）**：双击库或 Tables/Views/… 分类 → Session Tab `catalog`（公共 [`ObjectCatalogShell`](../web/src/modules/database/components/ObjectCatalogShell.vue) + [`MysqlObjectCatalogPane`](../web/src/modules/mysql/components/MysqlObjectCatalogPane.vue)）。同一 **连接只复用一个** catalog Tab，切库/切分类更新内容（对齐 Navicat 主对象列表；查询 / 浏览仍各开 Tab）。数据走 `meta.objectCatalog`（`information_schema.TABLES` / `ROUTINES` 估算，**禁止**对每张表 `COUNT(*)`）；树 `tree.tables` 仍只返回 name/type。
 
 **P2 面板**：双击/「打开」→ 只读 Browse（数据 / 列 / 索引）；表「查看 DDL」→ DDL Tab（`meta.ddl`，只读）。Query 仍用于任意脚本与维护 SQL。
 
@@ -343,6 +347,7 @@ MySQL 映射：
 | 方法 | 说明 |
 |------|------|
 | `meta.columns` / `indexes` / `ddl` | 表级 Browse/DDL；视图编辑亦可读 `meta.ddl` |
+| `meta.objectCatalog` | 库对象一览（表状态 / 例程列表；TABLE_ROWS 为估算） |
 | `meta.routineSource` | 过程 / 函数对象脚本（编辑加载） |
 | `meta.processlist` / `meta.kill` | 进程列表与 KILL（非 `query.cancel`） |
 | `meta.instanceOverview` / `meta.locks` | 实例概览与锁等待 |

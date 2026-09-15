@@ -19,25 +19,49 @@ const dbName = ref('')
 const charset = ref('utf8mb4')
 const collation = ref('')
 
+const isAlter = computed(() => pending.value?.kind === 'alter_database')
 const title = computed(() => pending.value?.title ?? '')
 const description = computed(() => pending.value?.description ?? '')
+const confirmText = computed(() =>
+  isAlter.value ? t('modules.mysql.ddl.confirmAlter') : t('modules.mysql.ddl.confirmCreate'),
+)
+
 const canConfirm = computed(() => {
-  if (!pending.value || pending.value.kind !== 'create_database') return false
-  return dbName.value.trim().length > 0
+  const req = pending.value
+  if (!req) return false
+  if (req.kind === 'create_database') {
+    return dbName.value.trim().length > 0
+  }
+  if (req.kind !== 'alter_database') return false
+  const origCs = normalizeMysqlCharset(req.createOptions?.charset, 'utf8mb4')
+  const origColl = normalizeMysqlCollation(origCs, req.createOptions?.collation)
+  return charset.value.trim() !== origCs || collation.value.trim() !== origColl
 })
 
-const charsetOptions = computed(() =>
-  MYSQL_CHARSET_VALUES.map((v) => ({ value: v, label: v })),
-)
+const charsetOptions = computed(() => {
+  const cur = charset.value.trim()
+  const known = new Set<string>(MYSQL_CHARSET_VALUES)
+  const base = MYSQL_CHARSET_VALUES.map((v) => ({ value: v, label: v }))
+  if (cur && !known.has(cur)) {
+    return [{ value: cur, label: cur }, ...base]
+  }
+  return base
+})
 
-const collationOptions = computed(() =>
-  collationsForCharset(charset.value).map((v) => ({ value: v, label: v })),
-)
+const collationOptions = computed(() => {
+  const known = collationsForCharset(charset.value)
+  const cur = collation.value.trim()
+  const base = known.map((v) => ({ value: v, label: v }))
+  if (cur && !known.includes(cur)) {
+    return [{ value: cur, label: cur }, ...base]
+  }
+  return base
+})
 
 watch(
   () => pending.value,
   (req) => {
-    if (req?.kind === 'create_database') {
+    if (req?.kind === 'create_database' || req?.kind === 'alter_database') {
       dbName.value = req.name || ''
       charset.value = normalizeMysqlCharset(req.createOptions?.charset, 'utf8mb4')
       collation.value = normalizeMysqlCollation(charset.value, req.createOptions?.collation)
@@ -52,9 +76,19 @@ watch(charset, (cs) => {
 
 async function onConfirm(): Promise<void> {
   const req = pending.value
-  if (!req || req.kind !== 'create_database' || !canConfirm.value) return
+  if (!req || !canConfirm.value) return
+  if (req.kind === 'create_database') {
+    await exec({
+      newName: dbName.value.trim(),
+      createOptions: {
+        charset: charset.value,
+        collation: collation.value,
+      },
+    })
+    return
+  }
+  if (req.kind !== 'alter_database') return
   await exec({
-    newName: dbName.value.trim(),
     createOptions: {
       charset: charset.value,
       collation: collation.value,
@@ -78,10 +112,10 @@ async function onConfirm(): Promise<void> {
     <template #body>
       <form class="nm-mysql-ddl-dialog__form" autocomplete="off" @submit.prevent="onConfirm">
         <div class="nm-mysql-ddl-dialog__field nm-mysql-ddl-dialog__field--full">
-          <RsLabel required>{{ t('modules.mysql.ddl.dbName') }}</RsLabel>
+          <RsLabel :required="!isAlter">{{ t('modules.mysql.ddl.dbName') }}</RsLabel>
           <RsInput
             v-model="dbName"
-            :disabled="busy"
+            :disabled="busy || isAlter"
             :placeholder="t('modules.mysql.ddl.dbNamePh')"
             @keydown.enter="onConfirm"
           />
@@ -122,7 +156,7 @@ async function onConfirm(): Promise<void> {
         :disabled="!canConfirm"
         @click="onConfirm"
       >
-        {{ t('modules.mysql.ddl.confirmCreate') }}
+        {{ confirmText }}
       </RsButton>
     </template>
   </RsDialog>

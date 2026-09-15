@@ -28,7 +28,7 @@ const leftText = computed(() =>
   bridgeStore.connected ? t('shell.statusReady') : t('shell.statusOffline'),
 )
 
-const transferLabel = computed(() => {
+const transferAria = computed(() => {
   const count = transferHub.activeCount
   if (count <= 0) {
     return t('shell.bottomDock.transfers')
@@ -92,9 +92,13 @@ function onDataTasksClick(): void {
           'nm-statusbar__chip--open':
             shellStore.bottomDockOpen && shellStore.bottomDockTab === 'transfers',
         }"
+        :aria-label="transferAria"
         @click="onTransferClick"
       >
-        {{ transferLabel }}
+        {{ t('shell.bottomDock.transfers') }}
+        <span v-if="transferHub.activeCount > 0" class="nm-statusbar__badge">
+          {{ transferHub.activeCount }}
+        </span>
       </button>
       <button
         v-if="dataTaskHub.hasTasks"
@@ -120,6 +124,9 @@ function onDataTasksClick(): void {
 }
 
 .nm-statusbar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   padding: 0 0.5rem;
   border: none;
   border-radius: var(--rs-radius-xs);
@@ -145,5 +152,19 @@ function onDataTasksClick(): void {
 .nm-statusbar__chip--open {
   background: color-mix(in srgb, var(--rs-primary) 12%, transparent);
   color: var(--rs-text);
+}
+
+.nm-statusbar__badge {
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.3rem;
+  border-radius: var(--rs-radius-full);
+  background: var(--rs-primary);
+  color: var(--rs-primary-foreground);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.125rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 </style>

@@ -16,6 +16,7 @@ import {
   optimizeTableSql,
   repairTableSql,
   selectAllSql,
+  selectDatabaseCharsetSql,
   showCreateDatabaseSql,
   updateTemplateSql,
   type ScriptColumn,
@@ -51,7 +52,8 @@ function openFeature(
     | 'monitor'
     | 'design'
     | 'tools'
-    | 'call',
+    | 'call'
+    | 'catalog',
   initialSql?: string,
   options?: {
     autoRun?: boolean
@@ -355,6 +357,43 @@ function requestCreateDatabase(conn: ConnItem): void {
   })
 }
 
+function cellText(v: unknown): string {
+  if (typeof v === 'string') return v.trim()
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') {
+    return String(v).trim()
+  }
+  return ''
+}
+
+async function requestAlterDatabase(conn: ConnItem, path: ConnResourcePath): Promise<void> {
+  const name = lastSegment(path)?.name
+  if (!name || isProtectedDatabase(name)) return
+
+  try {
+    const { execMysqlSql } = await import('@/modules/mysql/composables/useMysqlSessionSql')
+    const result = await execMysqlSql(conn.profileId, selectDatabaseCharsetSql(name))
+    const row = result.rows?.[0]
+    const charset = Array.isArray(row) ? cellText(row[0]) : ''
+    const collation = Array.isArray(row) ? cellText(row[1]) : ''
+    if (!charset) {
+      toast.error(t('modules.mysql.ddl.loadError'))
+      return
+    }
+    useMysqlDdlActionStore().request({
+      conn,
+      action: 'alter_database',
+      profileId: conn.profileId,
+      name,
+      title: t('modules.mysql.tree.editDatabase'),
+      description: t('modules.mysql.ddl.editDatabaseDesc', { name }),
+      kind: 'alter_database',
+      createOptions: { charset, collation },
+    })
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.mysql.ddl.loadError'))
+  }
+}
+
 export function activate(conn: ConnItem, path: ConnResourcePath): void {
   const database = segmentName(path, 'database')
   const table = segmentName(path, 'table')
@@ -369,6 +408,10 @@ export function activate(conn: ConnItem, path: ConnResourcePath): void {
     const cat: MysqlObjectCategory =
       category === 'functions' ? 'functions' : 'procedures'
     openObjectScript(conn, database, cat, routine, 'alter')
+    return
+  }
+  if (database) {
+    openFeature(conn, path, 'catalog')
     return
   }
   openQuery(conn, path)
@@ -406,6 +449,13 @@ export async function onResourceMenuSelect(
   const isView = category === 'views'
   const isFunction = category === 'functions'
 
+  if (key === 'editDatabase') {
+    if (last.kind === 'database') {
+      await requestAlterDatabase(conn, path)
+    }
+    return
+  }
+
   switch (key) {
     case 'query':
       openQuery(conn, path)
@@ -413,6 +463,12 @@ export async function onResourceMenuSelect(
     case 'open':
       if (database && table) {
         openFeature(conn, path, 'browse')
+      } else if (database && routine) {
+        const cat: MysqlObjectCategory =
+          category === 'functions' ? 'functions' : 'procedures'
+        openObjectScript(conn, database, cat, routine, 'alter')
+      } else if (database) {
+        openFeature(conn, path, 'catalog')
       } else {
         openQuery(conn, path)
       }

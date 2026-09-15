@@ -33,10 +33,36 @@ func parseScope(args map[string]any) scopeArgs {
 	s.Table = strings.TrimSpace(s.Table)
 	s.SQL = strings.TrimSpace(s.SQL)
 	s.ModuleID = strings.TrimSpace(s.ModuleID)
-	if s.Schema == "" {
-		s.Schema = "public"
-	}
 	return s
+}
+
+// normalizeSQLScope 按引擎补齐 catalog 作用域。
+// MySQL/ClickHouse 无独立 schema：空或误传的 public 改用当前 database，禁止落到 PostgreSQL 默认库。
+func normalizeSQLScope(s *scopeArgs, ns string) {
+	if s == nil {
+		return
+	}
+	switch ns {
+	case "mysql", "clickhouse":
+		if s.Database != "" && (s.Schema == "" || (strings.EqualFold(s.Schema, "public") && !strings.EqualFold(s.Database, "public"))) {
+			s.Schema = s.Database
+		}
+		if s.Database == "" && s.Schema != "" {
+			s.Database = s.Schema
+		}
+	case "sqlite":
+		if s.Schema == "" {
+			s.Schema = "main"
+		}
+	case "sqlserver":
+		if s.Schema == "" {
+			s.Schema = "dbo"
+		}
+	default:
+		if s.Schema == "" {
+			s.Schema = "public"
+		}
+	}
 }
 
 func (s scopeArgs) requireIdentity() error {
@@ -91,6 +117,11 @@ func CallSQL(ctx context.Context, rt Runtime, name string, args map[string]any) 
 		args = map[string]any{}
 	}
 	s := parseScope(args)
+	ns, err := resolveNS(ctx, rt, s)
+	if err != nil {
+		return "", err
+	}
+	normalizeSQLScope(&s, ns)
 	switch name {
 	case ToolListSchemas:
 		return listSchemas(ctx, rt, s)
@@ -99,7 +130,9 @@ func CallSQL(ctx context.Context, rt Runtime, name string, args map[string]any) 
 	case ToolDescribeTable:
 		return describeTable(ctx, rt, s)
 	case ToolRunReadonly:
-		return runReadonlySQL(ctx, rt, s)
+		return runSQL(ctx, rt, s, true)
+	case ToolExec:
+		return runSQL(ctx, rt, s, false)
 	default:
 		return "", fmt.Errorf("unknown host tool: %s", name)
 	}
@@ -199,12 +232,16 @@ func describeTable(ctx context.Context, rt Runtime, s scopeArgs) (string, error)
 	})
 }
 
-func runReadonlySQL(ctx context.Context, rt Runtime, s scopeArgs) (string, error) {
+func runSQL(ctx context.Context, rt Runtime, s scopeArgs, readonly bool) (string, error) {
 	if err := s.requireIdentity(); err != nil {
 		return "", err
 	}
-	if err := AssertReadonlySQL(s.SQL); err != nil {
-		return "", err
+	if readonly {
+		if err := AssertReadonlySQL(s.SQL); err != nil {
+			return "", err
+		}
+	} else if s.SQL == "" {
+		return "", fmt.Errorf("sql required")
 	}
 	ns, err := resolveNS(ctx, rt, s)
 	if err != nil {
@@ -265,6 +302,7 @@ func runReadonlySQL(ctx context.Context, rt Runtime, s scopeArgs) (string, error
 		"hasMore":    result.HasMore,
 		"durationMs": result.DurationMS,
 		"ephemeral":  ephemeral,
+		"confirmed":  !readonly,
 	})
 }
 

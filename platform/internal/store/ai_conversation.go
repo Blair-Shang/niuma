@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -354,4 +355,72 @@ WHERE invocation_id = ?`,
 		return fmt.Errorf("store: update tool invocation: %w", err)
 	}
 	return nil
+}
+
+// UpdateToolInvocationIfOpen 仅当调用仍为 running/pending 时写入终态，避免覆盖已取消记录。
+func (s *AIConversationStore) UpdateToolInvocationIfOpen(ctx context.Context, invocationID, status, resultSummary, errorMessage string) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx, `UPDATE nm_ai_tool_invocation SET
+  invoke_status = ?, result_summary = ?, error_message = ?, updated_at = ?
+WHERE invocation_id = ? AND invoke_status IN ('running', 'pending')`,
+		status, nullIfEmpty(resultSummary), nullIfEmpty(errorMessage), now, invocationID)
+	if err != nil {
+		return false, fmt.Errorf("store: update open tool invocation: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// CancelOpenInvocations 将某 run 下仍在进行的工具调用标为取消，并返回被改写的记录。
+func (s *AIConversationStore) CancelOpenInvocations(ctx context.Context, runID, errMsg string) ([]AIToolInvocation, error) {
+	if strings.TrimSpace(runID) == "" {
+		return nil, nil
+	}
+	if errMsg == "" {
+		errMsg = "cancelled"
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT
+  invocation_id, conversation_id, run_id, COALESCE(message_id, ''), COALESCE(server_id, ''), tool_name,
+  arguments_json, risk_level, invoke_status, COALESCE(result_summary, ''), COALESCE(error_message, ''),
+  created_at, updated_at
+FROM nm_ai_tool_invocation
+WHERE run_id = ? AND invoke_status IN ('running', 'pending')
+ORDER BY created_at ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list open tool invocations: %w", err)
+	}
+	defer rows.Close()
+
+	var open []AIToolInvocation
+	for rows.Next() {
+		var inv AIToolInvocation
+		if scanErr := rows.Scan(
+			&inv.InvocationID, &inv.ConversationID, &inv.RunID, &inv.MessageID, &inv.ServerID, &inv.ToolName,
+			&inv.ArgumentsJSON, &inv.RiskLevel, &inv.InvokeStatus, &inv.ResultSummary, &inv.ErrorMessage,
+			&inv.CreatedAt, &inv.UpdatedAt,
+		); scanErr != nil {
+			return nil, fmt.Errorf("store: scan open tool invocation: %w", scanErr)
+		}
+		open = append(open, inv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list open tool invocations rows: %w", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	out := make([]AIToolInvocation, 0, len(open))
+	for _, inv := range open {
+		_, err := s.db.ExecContext(ctx, `UPDATE nm_ai_tool_invocation SET
+  invoke_status = ?, error_message = ?, updated_at = ?
+WHERE invocation_id = ? AND invoke_status IN ('running', 'pending')`,
+			"cancelled", errMsg, now, inv.InvocationID)
+		if err != nil {
+			return out, fmt.Errorf("store: cancel tool invocation: %w", err)
+		}
+		inv.InvokeStatus = "cancelled"
+		inv.ErrorMessage = errMsg
+		inv.UpdatedAt = now
+		out = append(out, inv)
+	}
+	return out, nil
 }
