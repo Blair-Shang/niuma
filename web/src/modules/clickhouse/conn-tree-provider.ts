@@ -3,7 +3,8 @@
  * connection → database → {Tables|Views|MaterializedViews|Dictionaries} → object
  *
  * 右键菜单对齐同仓库 MySQL/达梦：分隔分组 + 数据 IO 子菜单 + 表维护子菜单。
- * 库节点「新建」子菜单；视图/MV/字典统一走对象脚本（不再并列 DDL）。
+ * 连接「新建数据库」；库节点编辑注释 / 重命名 / 删除；「新建」子菜单建表与对象。
+ * 视图/MV/字典统一走对象脚本（不再并列 DDL）。
  */
 import type { RsContextMenuItem } from '@niuma/ui'
 import { clickhouseApi } from '@/api/clickhouse'
@@ -201,12 +202,12 @@ function databaseMenus(database: string | undefined): RsContextMenuItem[] {
     sep('sep-io'),
     { key: 'dumpSql', label: label('dumpSql'), icon: 'file-down' },
     { key: 'execSqlFile', label: label('execSqlFile'), icon: 'file-up' },
-    sep('sep-clipboard'),
-    { key: 'copyName', label: label('copyName'), icon: 'copy' },
   ]
   if (database && !PROTECTED_DATABASES.has(database)) {
     items.push(
       sep('sep-mutate'),
+      { key: 'editDatabase', label: label('editDatabase'), icon: 'settings-2' },
+      { key: 'renameDatabase', label: label('renameDatabase'), icon: 'pencil' },
       {
         key: 'drop',
         label: label('dropDatabase'),
@@ -215,6 +216,11 @@ function databaseMenus(database: string | undefined): RsContextMenuItem[] {
       },
     )
   }
+  items.push(
+    sep('sep-clipboard'),
+    { key: 'copyName', label: label('copyName'), icon: 'copy' },
+    { key: 'copyCreateDdl', label: label('copyCreateDdl'), icon: 'clipboard' },
+  )
   return items
 }
 

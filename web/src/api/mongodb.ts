@@ -69,6 +69,11 @@ import type {
   MongoSessionOpenResult,
   MongoSessionTestParams,
   MongoSessionTestResult,
+  MongoCatalogCreateDatabaseParams,
+  MongoCatalogCreateDatabaseResult,
+  MongoCatalogRenameCollectionParams,
+  MongoCatalogRenameDatabaseParams,
+  MongoCatalogRenameResult,
   MongoTreeCollectionsParams,
   MongoTreeCollectionsResult,
   MongoTreeDatabasesParams,
@@ -95,6 +100,18 @@ export const mongodbApi = {
 
   treeCollections(params: MongoTreeCollectionsParams): Promise<MongoTreeCollectionsResult> {
     return bridgeInvoke<MongoTreeCollectionsResult>('mongodb.tree.collections', params)
+  },
+
+  catalogCreateDatabase(params: MongoCatalogCreateDatabaseParams): Promise<MongoCatalogCreateDatabaseResult> {
+    return bridgeInvoke<MongoCatalogCreateDatabaseResult>('mongodb.catalog.createDatabase', params)
+  },
+
+  catalogRenameCollection(params: MongoCatalogRenameCollectionParams): Promise<MongoCatalogRenameResult> {
+    return bridgeInvoke<MongoCatalogRenameResult>('mongodb.catalog.renameCollection', params)
+  },
+
+  catalogRenameDatabase(params: MongoCatalogRenameDatabaseParams): Promise<MongoCatalogRenameResult> {
+    return bridgeInvoke<MongoCatalogRenameResult>('mongodb.catalog.renameDatabase', params)
   },
 
   documentFind(params: MongoDocumentFindParams): Promise<MongoDocumentFindResult> {

@@ -11,6 +11,9 @@ session:
     - session.test
     - tree.databases
     - tree.collections
+    - catalog.createDatabase
+    - catalog.renameCollection
+    - catalog.renameDatabase
 runtime:
   executable: bin/niuma-mongodb-service.exe
   executable_windows: bin/niuma-mongodb-service.exe

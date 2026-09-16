@@ -29,7 +29,12 @@ const showCluster = computed(() => {
 watch(
   () => pending.value,
   (req) => {
-    if (!req || req.kind === 'rename' || req.kind === 'create_database') {
+    if (
+      !req ||
+      req.kind === 'rename' ||
+      req.kind === 'create_database' ||
+      req.kind === 'alter_database'
+    ) {
       resetClusters()
       return
     }
@@ -47,7 +52,14 @@ watch(
 
 async function onConfirm(): Promise<void> {
   const req = pending.value
-  if (!req || req.kind === 'rename' || req.kind === 'create_database') return
+  if (
+    !req ||
+    req.kind === 'rename' ||
+    req.kind === 'create_database' ||
+    req.kind === 'alter_database'
+  ) {
+    return
+  }
   if (req.action === 'reload_dictionary') {
     await exec()
     return

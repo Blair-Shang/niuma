@@ -7,10 +7,12 @@ import {
 import type { ConnItem } from '@/modules/ops/types'
 import type { ConnResourcePath } from '@/modules/ops/conn-tree/types'
 
-export type ClickHouseDdlDialogKind = 'danger' | 'rename' | 'create_database'
+export type ClickHouseDdlDialogKind = 'danger' | 'rename' | 'create_database' | 'alter_database'
 
 export type ClickHouseDdlAction =
   | 'create_database'
+  | 'alter_database'
+  | 'rename_database'
   | 'drop_database'
   | 'drop_table'
   | 'drop_view'
@@ -19,10 +21,14 @@ export type ClickHouseDdlAction =
   | 'rename_table'
   | 'reload_dictionary'
 
-/** DDL 确认框共用的集群选项（建库 / 删库 / 删表 / 重命名等）。 */
+/** DDL 确认框共用选项（建库 / 改库注释 / 删库 / 删表 / 重命名等）。 */
 export interface ClickHouseDatabaseCreateOptions {
   /** 可选 ON CLUSTER 集群名（可从连接配置预填，对话框内可改）。 */
   onCluster?: string
+  /** 建库引擎；改库时只读展示。 */
+  engine?: string
+  /** 库注释。 */
+  comment?: string
 }
 
 export interface ClickHousePendingDdlAction {

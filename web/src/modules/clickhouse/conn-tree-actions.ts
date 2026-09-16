@@ -24,6 +24,8 @@ import {
   insertTemplateSql,
   optimizeTableSql,
   selectAllSql,
+  selectDatabaseMetaSql,
+  showCreateDatabaseSql,
   type ScriptColumn,
 } from '@/modules/clickhouse/utils/script-templates'
 import {
@@ -31,7 +33,10 @@ import {
   type ClickHouseIoTaskKind,
   type ClickHouseIoTaskContext,
 } from '@/modules/clickhouse/data-tasks'
-import { withClickHouseSession } from '@/modules/clickhouse/composables/useClickHouseSessionSql'
+import {
+  execClickHouseSql,
+  withClickHouseSession,
+} from '@/modules/clickhouse/composables/useClickHouseSessionSql'
 import {
   useClickHouseDdlActionStore,
   type ClickHouseDdlAction,
@@ -373,8 +378,90 @@ function requestCreateDatabase(conn: ConnItem): void {
     title: t('modules.clickhouse.tree.createDatabase'),
     description: t('modules.clickhouse.ddl.createDatabaseDesc'),
     kind: 'create_database',
+    createOptions: { engine: 'Atomic', ...(onCluster ? { onCluster } : {}) },
+  })
+}
+
+function cellText(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') {
+    return String(v)
+  }
+  return ''
+}
+
+async function requestAlterDatabase(conn: ConnItem, path: ConnResourcePath): Promise<void> {
+  const name = segmentName(path, 'database')
+  if (!name || isProtectedDatabase(name)) return
+
+  try {
+    const result = await execClickHouseSql(conn.profileId, selectDatabaseMetaSql(name))
+    const row = result.rows?.[0]
+    if (!Array.isArray(row)) {
+      toast.error(t('modules.clickhouse.ddl.loadError'))
+      return
+    }
+    const engine = cellText(row[1])
+    const comment = cellText(row[2])
+    const onCluster = connectionDefaultCluster(conn) || undefined
+    useClickHouseDdlActionStore().request({
+      conn,
+      action: 'alter_database',
+      profileId: conn.profileId,
+      name,
+      title: t('modules.clickhouse.tree.editDatabase'),
+      description: t('modules.clickhouse.ddl.editDatabaseDesc', { name }),
+      kind: 'alter_database',
+      createOptions: {
+        engine,
+        comment,
+        ...(onCluster ? { onCluster } : {}),
+      },
+    })
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.clickhouse.ddl.loadError'))
+  }
+}
+
+function requestRenameDatabase(conn: ConnItem, path: ConnResourcePath): void {
+  const database = segmentName(path, 'database')
+  if (!database || isProtectedDatabase(database)) return
+
+  const onCluster = connectionDefaultCluster(conn) || undefined
+  useClickHouseDdlActionStore().request({
+    conn,
+    action: 'rename_database',
+    profileId: conn.profileId,
+    name: database,
+    newName: database,
+    title: t('modules.clickhouse.tree.renameDatabase'),
+    description: t('modules.clickhouse.ddl.renameDatabaseDesc', { name: database }),
+    kind: 'rename',
+    refreshPath: undefined,
+    refreshDeep: false,
+    prunePaths: [path],
     createOptions: onCluster ? { onCluster } : undefined,
   })
+}
+
+async function fetchCreateDatabaseDdl(conn: ConnItem, database: string): Promise<string | null> {
+  try {
+    const result = await execClickHouseSql(conn.profileId, showCreateDatabaseSql(database))
+    const row = result.rows?.[0]
+    if (!Array.isArray(row)) {
+      toast.error(t('modules.clickhouse.tree.ddlEmpty'))
+      return null
+    }
+    for (const cell of row) {
+      const text = cellText(cell)
+      if (text) return text
+    }
+    toast.error(t('modules.clickhouse.tree.ddlEmpty'))
+    return null
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t('modules.clickhouse.tree.ddlFailed'))
+    return null
+  }
 }
 
 function requestDatabaseDrop(conn: ConnItem, path: ConnResourcePath): void {
@@ -489,6 +576,25 @@ export async function onResourceMenuSelect(
       if (database && table) {
         const ddl = await fetchMetaDdl(conn, database, table)
         if (ddl) void copyText(ddl)
+        return true
+      }
+      return false
+    case 'copyCreateDdl':
+      if (database && !table) {
+        const ddl = await fetchCreateDatabaseDdl(conn, database)
+        if (ddl) void copyText(ddl)
+        return true
+      }
+      return false
+    case 'editDatabase':
+      if (database && !table && path.segments.at(-1)?.kind === 'database') {
+        await requestAlterDatabase(conn, path)
+        return true
+      }
+      return false
+    case 'renameDatabase':
+      if (database && !table && path.segments.at(-1)?.kind === 'database') {
+        requestRenameDatabase(conn, path)
         return true
       }
       return false

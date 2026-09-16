@@ -2,7 +2,7 @@
  * ClickHouse 对象脚本 / 树菜单模板（视图 / MV / 表 DDL / 生成脚本）。
  */
 import { onClusterSqlSuffix } from '@/modules/clickhouse/utils/cluster'
-import { quoteIdent, qualifiedName } from '@/modules/clickhouse/sql-seed'
+import { quoteIdent, qualifiedName, quoteString } from '@/modules/clickhouse/sql-seed'
 import type { ClickHouseObjectCategory } from '@/modules/clickhouse/types/object-script'
 import { CLICKHOUSE_CREATE_OBJECT_PLACEHOLDERS } from '@/modules/clickhouse/types/object-script'
 
@@ -12,6 +12,15 @@ export interface ScriptColumn {
 }
 
 export type ScriptClusterOptions = { onCluster?: string }
+
+/** 建库 / 改库注释共用选项。 */
+export type DatabaseScriptOptions = ScriptClusterOptions & {
+  engine?: string
+  comment?: string
+}
+
+/** 建库常用引擎；可手写带参数的引擎（如 PostgreSQL(...)）。 */
+export const CLICKHOUSE_DATABASE_ENGINES = ['Atomic', 'Memory', 'Lazy', 'Ordinary'] as const
 
 export function createObjectTemplate(
   database: string,
@@ -78,8 +87,39 @@ export function insertTemplateSql(
   return `INSERT INTO ${qn} (\n${names}\n) VALUES (\n${values}\n);`
 }
 
-export function createDatabaseSql(name: string, options?: ScriptClusterOptions): string {
-  return `CREATE DATABASE IF NOT EXISTS ${quoteIdent(name)}${onClusterSqlSuffix(options?.onCluster)};`
+export function createDatabaseSql(name: string, options?: DatabaseScriptOptions): string {
+  const engine = options?.engine?.trim()
+  const comment = options?.comment?.trim()
+  let sql = `CREATE DATABASE IF NOT EXISTS ${quoteIdent(name)}${onClusterSqlSuffix(options?.onCluster)}`
+  if (engine) {
+    sql += ` ENGINE = ${engine}`
+  }
+  if (comment) {
+    sql += ` COMMENT ${quoteString(comment)}`
+  }
+  return `${sql};`
+}
+
+/** 修改库注释（ClickHouse 不能 ALTER 改库名或引擎）。 */
+export function alterDatabaseSql(name: string, options?: DatabaseScriptOptions): string {
+  const comment = options?.comment ?? ''
+  return `ALTER DATABASE ${quoteIdent(name)}${onClusterSqlSuffix(options?.onCluster)} MODIFY COMMENT ${quoteString(comment)};`
+}
+
+export function renameDatabaseSql(
+  from: string,
+  to: string,
+  options?: ScriptClusterOptions,
+): string {
+  return `RENAME DATABASE ${quoteIdent(from)} TO ${quoteIdent(to)}${onClusterSqlSuffix(options?.onCluster)};`
+}
+
+export function selectDatabaseMetaSql(name: string): string {
+  return `SELECT name, engine, comment FROM system.databases WHERE name = ${quoteString(name)}`
+}
+
+export function showCreateDatabaseSql(name: string): string {
+  return `SHOW CREATE DATABASE ${quoteIdent(name)}`
 }
 
 export function dropDatabaseSql(name: string, options?: ScriptClusterOptions): string {

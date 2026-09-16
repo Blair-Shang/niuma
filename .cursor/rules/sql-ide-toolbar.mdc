@@ -1,0 +1,48 @@
+---
+description: IDE 顶栏必须走共享 SqlIdeToolbar，禁止按页面私有按钮/样式
+globs: "{web/src/modules/database/**,web/src/modules/**/components/**Pane.vue,web/src/modules/**/components/**Shell.vue,web/src/modules/**/components/**Toolbar*.vue}"
+alwaysApply: false
+---
+
+# IDE 顶栏全局复用
+
+SQL / Mongo / SQLite / ClickHouse 等 IDE 页共用 `SqlIdeToolbar`（高度 `var(--nm-tabbar-h)`，与 Shell header 同为 34px）。业务页只声明 `items` 并处理 `@action` / `@mode` / `@filter`（JSON 等需显式应用时再听 `@filter-submit`）。库名用 `identity`。
+
+## 必须
+
+- 新能力加到 `types/sql-ide-toolbar.ts` 的通用 `kind`（action / sep / modes / filter）。库/集合等只读身份用 `identity` 或 `identityParts`（多段图标+文案，中间点号），不要做成输入框。
+- 样式只进 `sql-ide-toolbar.css`；槽位只留给 Popover 触发器等 items 表达不了的控件
+- 文本输入一律 `RsInput` `size="sm"`；图标按钮一律 `RsButton`（`v-bind="sqlIdeToolbarIconButton"`）。颜色用 `tone`（执行 `success`、停止 `danger`），禁止再包一层按钮组件，禁止原生 `button` / `input`
+- Mongo 页直接 import `SqlIdeToolbar.vue` + types，不要经 `@/modules/database` barrel（HMR）
+
+## 禁止
+
+```vue
+<!-- 页面私有顶栏按钮 / 私有 toolbar CSS -->
+<header class="nm-mongodbpane__toolbar">
+  <button class="nm-mongodbpane__btn">查询</button>
+</header>
+
+<SqlIdeToolbar>
+  <template #trail>
+    <RsInput v-model="q" class="nm-dbpane__filter" />
+  </template>
+</SqlIdeToolbar>
+```
+
+```ts
+// 为某一页在共享工具条上加专用 prop / 专用 slot / 专用 class
+defineProps<{ mongoShell?: boolean }>()
+```
+
+## 正确
+
+```ts
+const items = computed((): SqlIdeToolbarItem[] => [
+  { key: 'run', icon: 'play', tone: 'success', title: t('run'), label: t('run') },
+  { key: 'filter', kind: 'filter', align: 'trail', value: q.value, placeholder: t('filter') },
+  { key: 'refresh', icon: 'refresh-cw', title: t('refresh'), align: 'trail' },
+])
+```
+
+缺通用 `kind` 时先扩类型再给各页用；不要给 MongoDatabasePane / MongoQueryPane / MongoCollectionsPane / MongoIndexesPane 单独开一套顶栏。

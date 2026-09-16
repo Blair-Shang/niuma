@@ -38,6 +38,8 @@ export interface MongoPaneContext extends MongoPaneScope {
   portNumber?: number
   /** 从数据库概览打开某集合的功能 Tab（经 L3 连接导航新建/聚焦） */
   openCollection: (database: string, collection: string, feature: string) => void
+  /** 从数据库概览顶栏打开库级功能 Tab（查询 / 监控，不带集合） */
+  openDatabaseFeature: (database: string, feature: string) => void
 }
 
 /** MongoPaneDescriptor 描述单个面板的组件加载与 props 映射。 */
@@ -85,6 +87,8 @@ export const mongoPaneRegistry: Record<MongoSessionTab, MongoFeatureDef> = {
               active: true,
               onOpenCollection: (collection: string, feature: string) =>
                 ctx.openCollection(ctx.database!, collection, feature),
+              onOpenFeature: (feature: string) =>
+                ctx.openDatabaseFeature(ctx.database!, feature),
             }),
           }
         : {

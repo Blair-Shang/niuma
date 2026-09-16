@@ -14,6 +14,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mongodbApi } from '@/api'
 import type { MongoIndexInfo } from '@/api/types/mongodb'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type {
+  SqlIdeToolbarIdentityPart,
+  SqlIdeToolbarItem,
+} from '@/modules/database/types/sql-ide-toolbar'
 
 const props = defineProps<{
   sessionId: string | null
@@ -95,6 +100,49 @@ function formatKeys(keys: Record<string, unknown>): string {
 
 function hasCollection(): boolean {
   return !!(props.sessionId && props.database && props.collection)
+}
+
+const identityParts = computed((): SqlIdeToolbarIdentityPart[] => {
+  const parts: SqlIdeToolbarIdentityPart[] = []
+  const db = props.database?.trim() ?? ''
+  const coll = props.collection?.trim() ?? ''
+  if (db) {
+    parts.push({
+      text: db,
+      icon: 'database',
+      title: t('modules.mongodb.query.database'),
+    })
+  }
+  if (coll) {
+    parts.push({
+      text: coll,
+      icon: 'table-2',
+      title: t('modules.mongodb.query.collection'),
+    })
+  }
+  return parts
+})
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => [
+  {
+    key: 'create',
+    icon: 'plus',
+    title: t('modules.mongodb.indexes.create'),
+    label: t('modules.mongodb.indexes.create'),
+    disabled: !hasCollection() || loading.value,
+  },
+  {
+    key: 'refresh',
+    icon: 'refresh-cw',
+    title: t('modules.mongodb.indexes.refresh'),
+    disabled: !hasCollection() || loading.value,
+    align: 'trail',
+  },
+])
+
+function onToolbarAction(key: string): void {
+  if (key === 'create') openCreate()
+  else if (key === 'refresh') void loadIndexes()
 }
 
 async function loadIndexes(): Promise<void> {
@@ -224,35 +272,13 @@ watch(
     />
 
     <template v-else>
-      <!-- 工具栏 -->
-      <header class="nm-mongo-idx__toolbar">
-        <div class="nm-mongo-idx__breadcrumb">
-          <RsIcon name="database" :size="13" class="nm-mongo-idx__bc-icon" />
-          <span class="nm-mongo-idx__bc-seg">{{ database }}</span>
-          <RsIcon name="chevron-right" :size="12" class="nm-mongo-idx__bc-sep" />
-          <RsIcon name="table-2" :size="13" class="nm-mongo-idx__bc-icon" />
-          <span class="nm-mongo-idx__bc-seg nm-mongo-idx__bc-seg--active">{{ collection }}</span>
-          <span v-if="indexes.length > 0" class="nm-mongo-idx__count">
-            {{ t('modules.mongodb.indexes.total', { count: indexes.length }) }}
-          </span>
-        </div>
-
-        <div class="nm-mongo-idx__actions">
-          <RsButton
-            size="sm"
-            variant="ghost"
-            :disabled="loading"
-            :title="t('modules.mongodb.indexes.refresh')"
-            @click="loadIndexes"
-          >
-            <RsIcon name="refresh-cw" :size="13" />
-          </RsButton>
-          <RsButton size="sm" variant="primary" @click="openCreate">
-            <RsIcon name="plus" :size="13" />
-            {{ t('modules.mongodb.indexes.create') }}
-          </RsButton>
-        </div>
-      </header>
+      <SqlIdeToolbar
+        :label="t('modules.mongodb.indexes.toolbarAria')"
+        :identity-parts="identityParts"
+        identity-grow
+        :items="toolbarItems"
+        @action="onToolbarAction"
+      />
 
       <!-- 列表：滚动 / loading / 斑马纹走 RsTable 公共能力 -->
       <RsEmpty
@@ -411,69 +437,6 @@ watch(
 .nm-mongo-idx__dialog-mount :deep(.rs-dialog__content),
 .nm-mongo-idx__dialog-mount :deep(.rs-confirm-dialog__content) {
   pointer-events: auto;
-}
-
-/* ── 工具栏 ── */
-.nm-mongo-idx__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-md);
-  padding: 0 var(--rs-space-md);
-  height: 44px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--rs-border-subtle);
-  min-width: 0;
-}
-
-.nm-mongo-idx__breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  font-size: var(--rs-font-size-sm);
-}
-
-.nm-mongo-idx__bc-icon {
-  color: var(--rs-muted);
-  flex-shrink: 0;
-}
-
-.nm-mongo-idx__bc-sep {
-  color: var(--rs-border);
-  flex-shrink: 0;
-}
-
-.nm-mongo-idx__bc-seg {
-  color: var(--rs-muted);
-  font-weight: 500;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-mongo-idx__bc-seg--active {
-  color: var(--rs-foreground);
-  font-weight: 600;
-}
-
-.nm-mongo-idx__count {
-  margin-left: 4px;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
-  font-variant-numeric: tabular-nums;
-  background: var(--rs-surface-subtle);
-  padding: 1px 7px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-
-.nm-mongo-idx__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
 }
 
 /* 表格区域：flex 容器，滚动由 RsTable fill 模式内置处理 */

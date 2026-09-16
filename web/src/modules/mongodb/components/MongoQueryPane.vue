@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RsButton, RsEmpty, RsIcon, RsLoading, RsMonacoEditor, RsSplitPane, MONACO_MONGODB_SHELL_LANGUAGE } from '@niuma/ui'
+import { RsEmpty, RsIcon, RsLoading, RsMonacoEditor, RsSplitPane, MONACO_MONGODB_SHELL_LANGUAGE } from '@niuma/ui'
 import type { RsMonacoEditorExpose, RsSplitPaneItem } from '@niuma/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -17,6 +17,11 @@ import {
   publishEditorSelection,
 } from '@/shell/panels/ai/workspace-context'
 import { useTabStore } from '@/stores/tab'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type {
+  SqlIdeToolbarIdentityPart,
+  SqlIdeToolbarItem,
+} from '@/modules/database/types/sql-ide-toolbar'
 
 type QueryMode = 'shell' | 'pipeline'
 
@@ -63,6 +68,13 @@ const resultEngine = ref<string | null>(null)
 const toolPaths = ref<Record<string, string>>({})
 
 const showResult = computed(() => resultExecuted.value)
+
+const resultLanguage = computed(() => {
+  const trimmed = resultRaw.value.trim()
+  if (!trimmed) return 'json'
+  const first = trimmed[0]
+  return first === '{' || first === '[' ? 'json' : 'plaintext'
+})
 
 const splitPanes: RsSplitPaneItem[] = [
   { key: 'editor', size: 44, min: 20, resizerHandle: true },
@@ -328,81 +340,84 @@ onUnmounted(() => {
   selectionDisposable = null
   clearEditorSelection(useTabStore().activeTabId || undefined)
 })
+
+const identityParts = computed((): SqlIdeToolbarIdentityPart[] => {
+  const parts: SqlIdeToolbarIdentityPart[] = []
+  const db = database.value.trim()
+  const coll = collection.value.trim()
+  if (db) {
+    parts.push({
+      text: db,
+      icon: 'database',
+      title: t('modules.mongodb.query.database'),
+    })
+  }
+  if (coll) {
+    parts.push({
+      text: coll,
+      icon: 'table-2',
+      title: t('modules.mongodb.query.collection'),
+    })
+  }
+  return parts
+})
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => [
+  {
+    key: 'run',
+    icon: 'play',
+    tone: 'success',
+    title: t('modules.mongodb.query.run'),
+    disabled: loading.value || !hasTarget.value,
+  },
+  {
+    key: 'explain',
+    icon: 'list-tree',
+    title: t('modules.mongodb.query.explain'),
+    disabled: loading.value || !hasTarget.value,
+  },
+  {
+    key: 'format',
+    icon: 'align-left',
+    title: t('modules.mongodb.query.format'),
+    disabled: loading.value,
+  },
+  {
+    key: 'mode',
+    kind: 'modes',
+    align: 'trail',
+    label: t('modules.mongodb.query.modeLabel'),
+    value: queryMode.value,
+    options: [
+      { key: 'shell', label: t('modules.mongodb.query.modeShell') },
+      { key: 'pipeline', label: t('modules.mongodb.query.modePipeline') },
+    ],
+  },
+])
+
+function onToolbarAction(key: string): void {
+  if (key === 'run') void run(false)
+  else if (key === 'explain') void run(true)
+  else if (key === 'format') formatQuery()
+}
+
+function onToolbarMode(_itemKey: string, value: string): void {
+  if (value === 'shell' || value === 'pipeline') {
+    setQueryMode(value)
+  }
+}
 </script>
 
 <template>
   <div class="nm-query">
-    <!-- ── Top toolbar ── -->
-    <header class="nm-query__toolbar">
-      <div class="nm-query__breadcrumb">
-        <RsIcon name="database" :size="13" class="nm-query__bc-icon" />
-        <input
-          v-model="database"
-          class="nm-query__seg-input"
-          :placeholder="t('modules.mongodb.query.database')"
-          spellcheck="false"
-          :aria-label="t('modules.mongodb.query.database')"
-        />
-        <span class="nm-query__bc-dot">.</span>
-        <RsIcon name="table-2" :size="13" class="nm-query__bc-icon" />
-        <input
-          v-model="collection"
-          class="nm-query__seg-input nm-query__seg-input--coll"
-          :placeholder="t('modules.mongodb.query.collection')"
-          spellcheck="false"
-          :aria-label="t('modules.mongodb.query.collection')"
-        />
-      </div>
-
-      <div class="nm-query__mode-switch" role="tablist" :aria-label="t('modules.mongodb.query.modeLabel')">
-        <button
-          type="button"
-          class="nm-query__mode-btn"
-          :class="{ 'nm-query__mode-btn--active': queryMode === 'shell' }"
-          role="tab"
-          :aria-selected="queryMode === 'shell'"
-          @click="setQueryMode('shell')"
-        >
-          {{ t('modules.mongodb.query.modeShell') }}
-        </button>
-        <button
-          type="button"
-          class="nm-query__mode-btn"
-          :class="{ 'nm-query__mode-btn--active': queryMode === 'pipeline' }"
-          role="tab"
-          :aria-selected="queryMode === 'pipeline'"
-          @click="setQueryMode('pipeline')"
-        >
-          {{ t('modules.mongodb.query.modePipeline') }}
-        </button>
-      </div>
-
-      <div class="nm-query__toolbar-right">
-        <RsButton size="sm" variant="ghost" :disabled="loading" @click="formatQuery">
-          <RsIcon name="braces" :size="13" />
-          {{ t('modules.mongodb.query.format') }}
-        </RsButton>
-        <RsButton
-          size="sm"
-          variant="ghost"
-          :loading="loading"
-          :disabled="!hasTarget"
-          @click="run(true)"
-        >
-          {{ t('modules.mongodb.query.explain') }}
-        </RsButton>
-        <RsButton
-          size="sm"
-          variant="primary"
-          :loading="loading"
-          :disabled="!hasTarget"
-          @click="run(false)"
-        >
-          <RsIcon name="play" :size="13" />
-          {{ t('modules.mongodb.query.run') }}
-        </RsButton>
-      </div>
-    </header>
+    <SqlIdeToolbar
+      :label="t('modules.mongodb.query.toolbarAria')"
+      :identity-parts="identityParts"
+      identity-grow
+      :items="toolbarItems"
+      @action="onToolbarAction"
+      @mode="onToolbarMode"
+    />
 
     <RsSplitPane :panes="splitPanes" orientation="vertical" class="nm-query__split" with-handle>
       <template #editor>
@@ -468,7 +483,7 @@ onUnmounted(() => {
           </div>
 
           <div class="nm-query__result-body">
-            <RsLoading v-if="loading" class="nm-query__loading" />
+            <RsLoading v-if="loading" block class="nm-query__loading" />
 
             <RsEmpty
               v-else-if="!showResult"
@@ -482,7 +497,7 @@ onUnmounted(() => {
               v-else
               :key="resultRevision"
               v-model="resultRaw"
-              language="plaintext"
+              :language="resultLanguage"
               height="100%"
               :readonly="true"
               class="nm-query__result-editor"
@@ -501,103 +516,6 @@ onUnmounted(() => {
   height: 100%;
   min-height: 0;
   background: var(--rs-surface);
-}
-
-.nm-query__toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  padding: 0 var(--rs-space-md);
-  height: 44px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--rs-border-subtle);
-}
-
-.nm-query__breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.nm-query__mode-switch {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border-radius: var(--rs-radius-xs);
-  background: var(--rs-surface-subtle);
-  border: 1px solid var(--rs-border-subtle);
-  flex-shrink: 0;
-}
-
-.nm-query__mode-btn {
-  border: none;
-  background: transparent;
-  color: var(--rs-muted);
-  font-size: var(--rs-font-size-xs);
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: calc(var(--rs-radius-xs) - 1px);
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-}
-
-.nm-query__mode-btn:hover {
-  color: var(--rs-foreground);
-}
-
-.nm-query__mode-btn--active {
-  background: var(--rs-surface);
-  color: var(--rs-foreground);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
-.nm-query__bc-icon {
-  color: var(--rs-muted);
-  flex-shrink: 0;
-}
-
-.nm-query__bc-dot {
-  color: var(--rs-muted);
-  font-size: var(--rs-font-size-sm);
-  font-family: var(--rs-font-mono);
-}
-
-.nm-query__seg-input {
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: var(--rs-font-size-sm);
-  font-family: var(--rs-font-mono);
-  color: var(--rs-foreground);
-  font-weight: 500;
-  min-width: 60px;
-  max-width: 160px;
-  padding: 2px 4px;
-  border-radius: var(--rs-radius-xs);
-}
-
-.nm-query__seg-input:focus {
-  background: var(--rs-surface-subtle);
-  outline: 1px solid var(--rs-border);
-}
-
-.nm-query__seg-input::placeholder {
-  color: var(--rs-placeholder);
-  font-weight: 400;
-}
-
-.nm-query__seg-input--coll {
-  max-width: 200px;
-}
-
-.nm-query__toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
 }
 
 .nm-query__split {
@@ -714,7 +632,12 @@ onUnmounted(() => {
   color: var(--rs-foreground);
 }
 
-.nm-query__loading,
+.nm-query__loading {
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+}
+
 .nm-query__empty {
   flex: 1;
 }

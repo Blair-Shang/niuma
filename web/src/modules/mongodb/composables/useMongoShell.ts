@@ -49,9 +49,18 @@ export function useMongoShell() {
   async function openShell(params: OpenShellParams, onData: (event: MongoShellOutputEvent) => void): Promise<string> {
     ensureSubscribed(onData)
     state.value = 'opening'
-    const result = await mongodbApi.shellOpen(params)
-    shellId.value = result.shellId
-    return result.shellId
+    try {
+      const result = await mongodbApi.shellOpen(params)
+      shellId.value = result.shellId
+      // Open 返回时 PTY 已启动。connected 事件在 RPC 返回前发出，此时 shellId 仍为空会被丢弃。
+      if (state.value === 'opening') {
+        state.value = 'connected'
+      }
+      return result.shellId
+    } catch (err) {
+      state.value = 'closed'
+      throw err
+    }
   }
 
   async function input(data: string): Promise<void> {

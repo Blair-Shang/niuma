@@ -15,6 +15,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mongodbApi } from '@/api'
 import type { MongoDocument } from '@/api/types/mongodb'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type {
+  SqlIdeToolbarIdentityPart,
+  SqlIdeToolbarItem,
+} from '@/modules/database/types/sql-ide-toolbar'
 import { formatMongoId, formatMongoJson, parseMongoJson, previewMongoDocument } from '@/modules/mongodb/utils/format'
 
 const props = defineProps<{
@@ -115,6 +120,80 @@ const activeFilterPreview = computed(() => {
 
 function hasCollection(): boolean {
   return !!(props.sessionId && props.database && props.collection)
+}
+
+const identityParts = computed((): SqlIdeToolbarIdentityPart[] => {
+  const parts: SqlIdeToolbarIdentityPart[] = []
+  const db = props.database?.trim() ?? ''
+  const coll = props.collection?.trim() ?? ''
+  if (db) {
+    parts.push({
+      text: db,
+      icon: 'database',
+      title: db,
+    })
+  }
+  if (coll) {
+    parts.push({
+      text: coll,
+      icon: 'table-2',
+      title: coll,
+    })
+  }
+  return parts
+})
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => {
+  const items: SqlIdeToolbarItem[] = [
+    {
+      key: 'insert',
+      icon: 'plus',
+      title: t('modules.mongodb.collections.insert'),
+      disabled: !hasCollection(),
+    },
+    {
+      key: 'filter',
+      kind: 'filter',
+      icon: 'filter',
+      value: filterText.value,
+      placeholder: t('modules.mongodb.collections.filterPlaceholder'),
+      disabled: !hasCollection(),
+    },
+    {
+      key: 'apply',
+      icon: 'check',
+      title: t('modules.mongodb.collections.filterApply'),
+      disabled: !hasCollection() || loadingDocs.value,
+      align: 'trail',
+    },
+  ]
+  if (activeFilter.value) {
+    items.push({
+      key: 'reset',
+      icon: 'x',
+      title: t('modules.mongodb.collections.filterReset'),
+      align: 'trail',
+    })
+  }
+  items.push({
+    key: 'refresh',
+    icon: 'refresh-cw',
+    title: t('modules.mongodb.collections.refresh'),
+    disabled: !hasCollection() || loadingDocs.value,
+    align: 'trail',
+  })
+  return items
+})
+
+function onToolbarAction(key: string): void {
+  if (key === 'insert') openInsert()
+  else if (key === 'apply') applyFilter()
+  else if (key === 'reset') resetFilter()
+  else if (key === 'refresh') reloadDocuments()
+}
+
+function onToolbarFilter(_itemKey: string, value: string): void {
+  filterText.value = value
 }
 
 async function loadDocuments(): Promise<void> {
@@ -308,76 +387,26 @@ watch(
     />
 
     <template v-else>
-      <!-- 顶栏 -->
-      <header class="nm-mongo-docs__header">
-        <div class="nm-mongo-docs__header-top">
-          <div class="nm-mongo-docs__breadcrumb">
-            <RsIcon name="database" :size="14" class="nm-mongo-docs__bc-icon" />
-            <span class="nm-mongo-docs__bc-seg">{{ database }}</span>
-            <RsIcon name="chevron-right" :size="12" class="nm-mongo-docs__bc-sep" />
-            <RsIcon name="table-2" :size="14" class="nm-mongo-docs__bc-icon" />
-            <span class="nm-mongo-docs__bc-seg nm-mongo-docs__bc-seg--active">{{ collection }}</span>
-            <span v-if="total !== undefined" class="nm-mongo-docs__count">
-              {{ t('modules.mongodb.collections.total', { count: total.toLocaleString() }) }}
-            </span>
-          </div>
+      <SqlIdeToolbar
+        :label="t('modules.mongodb.collections.toolbarAria')"
+        :identity-parts="identityParts"
+        identity-grow
+        :items="toolbarItems"
+        @action="onToolbarAction"
+        @filter="onToolbarFilter"
+        @filter-submit="applyFilter"
+      />
 
-          <div class="nm-mongo-docs__actions">
-            <RsButton
-              size="sm"
-              variant="ghost"
-              :disabled="loadingDocs"
-              :title="t('modules.mongodb.collections.refresh')"
-              @click="reloadDocuments"
-            >
-              <RsIcon name="refresh-cw" :size="13" />
-            </RsButton>
-            <RsButton size="sm" variant="primary" @click="openInsert">
-              <RsIcon name="plus" :size="13" />
-              {{ t('modules.mongodb.collections.insert') }}
-            </RsButton>
-          </div>
-        </div>
+      <p v-if="filterError" class="nm-mongo-docs__filter-error">
+        <RsIcon name="alert-circle" :size="12" />
+        {{ filterError }}
+      </p>
 
-        <div class="nm-mongo-docs__header-filter">
-          <div class="nm-mongo-docs__filter-wrap" :class="{ 'nm-mongo-docs__filter-wrap--error': filterError }">
-            <RsIcon name="filter" :size="13" class="nm-mongo-docs__filter-icon" />
-            <input
-              v-model="filterText"
-              type="text"
-              class="nm-mongo-docs__filter-input"
-              :placeholder="t('modules.mongodb.collections.filterPlaceholder')"
-              :aria-label="t('modules.mongodb.collections.filterApply')"
-              spellcheck="false"
-              @keydown.enter="applyFilter"
-            />
-          </div>
-          <RsButton size="sm" variant="ghost" @click="applyFilter">
-            {{ t('modules.mongodb.collections.filterApply') }}
-          </RsButton>
-          <RsButton
-            v-if="activeFilter"
-            size="sm"
-            variant="ghost"
-            :title="t('modules.mongodb.collections.filterReset')"
-            @click="resetFilter"
-          >
-            <RsIcon name="x" :size="13" />
-            {{ t('modules.mongodb.collections.filterReset') }}
-          </RsButton>
-        </div>
-
-        <p v-if="filterError" class="nm-mongo-docs__filter-error">
-          <RsIcon name="alert-circle" :size="12" />
-          {{ filterError }}
-        </p>
-
-        <div v-else-if="activeFilter" class="nm-mongo-docs__filter-active">
-          <RsIcon name="filter" :size="12" />
-          <span class="nm-mongo-docs__filter-active-label">{{ t('modules.mongodb.collections.filterActive') }}</span>
-          <code class="nm-mongo-docs__filter-active-code">{{ activeFilterPreview }}</code>
-        </div>
-      </header>
+      <div v-else-if="activeFilter" class="nm-mongo-docs__filter-active">
+        <RsIcon name="filter" :size="12" />
+        <span class="nm-mongo-docs__filter-active-label">{{ t('modules.mongodb.collections.filterActive') }}</span>
+        <code class="nm-mongo-docs__filter-active-code">{{ activeFilterPreview }}</code>
+      </div>
 
       <!-- 文档列表：滚动 / loading / 斑马纹走 RsTable 公共能力 -->
       <div class="nm-mongo-docs__body">
@@ -533,136 +562,16 @@ watch(
   flex: 1;
 }
 
-/* ── 顶栏 ── */
-.nm-mongo-docs__header {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--rs-border-subtle);
-  background: color-mix(in srgb, var(--rs-surface-subtle) 55%, var(--rs-surface));
-}
-
-.nm-mongo-docs__header-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-md);
-  padding: var(--rs-space-sm) var(--rs-space-md) 0;
-  min-width: 0;
-}
-
-.nm-mongo-docs__header-filter {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  padding: var(--rs-space-sm) var(--rs-space-md);
-  min-width: 0;
-}
-
-/* 面包屑 */
-.nm-mongo-docs__breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  font-size: var(--rs-font-size-sm);
-}
-
-.nm-mongo-docs__bc-icon {
-  color: var(--rs-muted);
-  flex-shrink: 0;
-}
-
-.nm-mongo-docs__bc-sep {
-  color: var(--rs-border);
-  flex-shrink: 0;
-}
-
-.nm-mongo-docs__bc-seg {
-  color: var(--rs-muted);
-  font-weight: 500;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nm-mongo-docs__bc-seg--active {
-  color: var(--rs-foreground);
-  font-weight: 600;
-}
-
-.nm-mongo-docs__count {
-  margin-left: 4px;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
-  font-variant-numeric: tabular-nums;
-  background: var(--rs-surface);
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--rs-border-subtle);
-  flex-shrink: 0;
-}
-
-/* 过滤栏 */
-.nm-mongo-docs__filter-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  padding: 0 var(--rs-space-sm);
-  height: 32px;
-  border: 1px solid var(--rs-border);
-  border-radius: var(--rs-radius-sm);
-  background: var(--rs-surface);
-  min-width: 0;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.nm-mongo-docs__filter-wrap:focus-within {
-  border-color: var(--rs-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rs-accent) 18%, transparent);
-}
-
-.nm-mongo-docs__filter-wrap--error {
-  border-color: var(--rs-danger, #ef4444);
-}
-
-.nm-mongo-docs__filter-icon {
-  flex-shrink: 0;
-  color: var(--rs-muted);
-}
-
-.nm-mongo-docs__filter-input {
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: var(--rs-font-size-sm);
-  font-family: var(--rs-font-mono);
-  color: var(--rs-foreground);
-  min-width: 0;
-}
-
-.nm-mongo-docs__filter-input::placeholder {
-  color: var(--rs-placeholder);
-  font-family: var(--rs-font-sans, inherit);
-  font-style: italic;
-}
-
-.nm-mongo-docs__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  flex-shrink: 0;
-}
-
 .nm-mongo-docs__filter-error {
   display: flex;
   align-items: center;
   gap: 5px;
   margin: 0;
-  padding: 4px var(--rs-space-md) var(--rs-space-sm);
+  padding: 4px var(--rs-space-md);
+  flex-shrink: 0;
   font-size: var(--rs-font-size-xs);
   color: var(--rs-danger, #ef4444);
+  border-bottom: 1px solid var(--rs-border-subtle);
 }
 
 .nm-mongo-docs__filter-active {
@@ -670,10 +579,12 @@ watch(
   align-items: center;
   gap: 6px;
   margin: 0;
-  padding: 0 var(--rs-space-md) var(--rs-space-sm);
+  padding: 4px var(--rs-space-md);
+  flex-shrink: 0;
   font-size: var(--rs-font-size-xs);
   color: var(--rs-muted);
   min-width: 0;
+  border-bottom: 1px solid var(--rs-border-subtle);
 }
 
 .nm-mongo-docs__filter-active-label {

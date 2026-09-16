@@ -139,6 +139,36 @@ export interface MongoTreeCollectionsResult {
   collections: MongoCollectionInfo[]
 }
 
+export interface MongoCatalogCreateDatabaseParams {
+  profileId?: string
+  sessionId?: string
+  database: string
+  collection: string
+}
+
+export interface MongoCatalogCreateDatabaseResult {
+  created: boolean
+}
+
+export interface MongoCatalogRenameCollectionParams {
+  profileId?: string
+  sessionId?: string
+  database: string
+  from: string
+  to: string
+}
+
+export interface MongoCatalogRenameDatabaseParams {
+  profileId?: string
+  sessionId?: string
+  from: string
+  to: string
+}
+
+export interface MongoCatalogRenameResult {
+  renamed: boolean
+}
+
 /** Relaxed Extended JSON 文档（Bridge 层 JSON 对象） */
 export type MongoDocument = Record<string, unknown>
 

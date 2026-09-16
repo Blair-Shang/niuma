@@ -31,6 +31,8 @@ withDefaults(
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
   font-size: 12px;
   font-weight: 400;

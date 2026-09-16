@@ -53,15 +53,23 @@ const connItem = computed((): ConnItem | null => {
  * 若 database 不在 props 里（来自数据库视图），直接使用 database prop。
  */
 function openCollection(database: string, collection: string, feature: string): void {
+  openResource(database, feature, collection)
+}
+
+/** 从数据库概览顶栏打开库级功能（查询 / 监控），不带集合 scope。 */
+function openDatabaseFeature(database: string, feature: string): void {
+  openResource(database, feature)
+}
+
+function openResource(database: string, feature: string, collection?: string): void {
   const item = connItem.value
   if (!item) return
+  const segments = [{ kind: 'database', name: database }]
+  if (collection) {
+    segments.push({ kind: 'collection', name: collection })
+  }
   connect(item, {
-    resourcePath: {
-      segments: [
-        { kind: 'database', name: database },
-        { kind: 'collection', name: collection },
-      ],
-    },
+    resourcePath: { segments },
     initialTab: feature === 'collections' ? undefined : feature,
   })
 }
@@ -77,7 +85,7 @@ const pane = featureDef.resolvePane({
 
 function isChunkLoadError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
-  return /Failed to fetch dynamically imported module|Importing a module script failed/i.test(
+  return /Failed to fetch dynamically imported module|Importing a module script failed|does not provide an export named/i.test(
     message,
   )
 }
@@ -114,6 +122,7 @@ const paneProps = computed(() =>
     hostAddress: profile.value?.hostAddress,
     portNumber: profile.value?.portNumber,
     openCollection,
+    openDatabaseFeature,
   }),
 )
 

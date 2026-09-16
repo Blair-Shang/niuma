@@ -13,7 +13,9 @@ const dialogKind = computed(() => pending.value?.kind ?? 'danger')
 </script>
 
 <template>
-  <ClickHouseDatabaseCreateDialog v-if="dialogKind === 'create_database'" />
+  <ClickHouseDatabaseCreateDialog
+    v-if="dialogKind === 'create_database' || dialogKind === 'alter_database'"
+  />
   <ClickHouseDdlRenameDialog v-else-if="dialogKind === 'rename'" />
   <ClickHouseDdlDangerDialog v-else-if="pending" />
 </template>

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
+  RsButton,
   RsCheckbox,
   RsDropdown,
   RsIcon,
   RsPopover,
   type RsDropdownItems,
 } from '@niuma/ui'
+import { sqlIdeToolbarIconButton } from '../types/sql-ide-toolbar'
 import type { SqlQueryHistoryEntry, SqlQueryToolbarLabels } from '../types/sql-query-shell'
 
 const props = withDefaults(
@@ -118,26 +120,22 @@ function onExplainMain(): void {
 
       <slot name="toolbar-start" />
 
-      <button
-        type="button"
-        class="nm-sql-tb__btn nm-sql-tb__btn--run"
+      <RsButton
+        v-bind="sqlIdeToolbarIconButton"
+        icon="play"
+        tone="success"
         :disabled="running || !canRun"
-        :aria-label="labels.run"
-        :title="runTooltip"
+        :tooltip="runTooltip"
         @click="emit('run')"
-      >
-          <RsIcon name="play" size="md" :stroke-width="2.25" />
-      </button>
-      <button
-        type="button"
-        class="nm-sql-tb__btn nm-sql-tb__btn--stop"
+      />
+      <RsButton
+        v-bind="sqlIdeToolbarIconButton"
+        icon="square"
+        tone="danger"
         :disabled="!running"
-        :aria-label="labels.cancel"
-        :title="labels.cancelTooltip"
+        :tooltip="labels.cancelTooltip"
         @click="emit('cancel')"
-      >
-          <RsIcon name="square" size="ssm" :stroke-width="2.5" />
-      </button>
+      />
 
       <span class="nm-sql-tb__sep" aria-hidden="true" />
 
@@ -151,43 +149,36 @@ function onExplainMain(): void {
         @select="onExplainMenu"
       >
         <template #trigger>
-          <button
+          <RsButton
             type="button"
-            class="nm-sql-tb__btn nm-sql-tb__btn--combo"
+            variant="text"
+            size="sm"
+            radius="sm"
+            icon="list-tree"
             :disabled="running || !canRun"
+            :tooltip="labels.explainTooltip"
             :aria-label="labels.explain"
-            :aria-haspopup="true"
-            :title="labels.explainTooltip"
           >
-            <RsIcon name="list-tree" size="md" />
-            <span class="nm-sql-tb__chev" aria-hidden="true">
-              <RsIcon name="chevron-down" size="ssm" />
-            </span>
-          </button>
+            <RsIcon name="chevron-down" :size="12" />
+          </RsButton>
         </template>
       </RsDropdown>
-      <button
+      <RsButton
         v-else-if="showExplain || showExplainAnalyze"
-        type="button"
-        class="nm-sql-tb__btn"
+        v-bind="sqlIdeToolbarIconButton"
+        icon="list-tree"
         :disabled="running || !canRun"
-        :aria-label="showExplain ? labels.explain : labels.explainAnalyze"
-        :title="showExplain ? labels.explainTooltip : labels.explainAnalyzeTooltip"
+        :tooltip="showExplain ? labels.explainTooltip : labels.explainAnalyzeTooltip"
         @click="onExplainMain"
-      >
-        <RsIcon name="list-tree" size="md" />
-      </button>
+      />
 
-      <button
-        type="button"
-        class="nm-sql-tb__btn"
+      <RsButton
+        v-bind="sqlIdeToolbarIconButton"
+        icon="align-left"
         :disabled="running"
-        :aria-label="labels.format"
-        :title="labels.formatTooltip"
+        :tooltip="labels.formatTooltip"
         @click="emit('format')"
-      >
-        <RsIcon name="align-left" size="md" />
-      </button>
+      />
 
       <template v-if="showTx">
         <span class="nm-sql-tb__sep" aria-hidden="true" />
@@ -206,28 +197,29 @@ function onExplainMain(): void {
           </RsCheckbox>
         </div>
         <template v-if="!autoCommit">
-          <button
+          <RsButton
             type="button"
-            class="nm-sql-tb__text"
-            :class="{ 'is-on': inTransaction }"
+            variant="text"
+            size="sm"
+            radius="sm"
             :disabled="sessionLocked || !inTransaction"
-            :aria-label="labels.commit"
-            :title="labels.commitTooltip || labels.commit"
+            :tooltip="labels.commitTooltip || labels.commit"
             @click="emit('commit')"
           >
             {{ labels.commit }}
-          </button>
-          <button
+          </RsButton>
+          <RsButton
             type="button"
-            class="nm-sql-tb__text nm-sql-tb__text--danger"
-            :class="{ 'is-on': inTransaction }"
+            variant="text"
+            size="sm"
+            radius="sm"
+            tone="danger"
             :disabled="sessionLocked || !inTransaction"
-            :aria-label="labels.rollback"
-            :title="labels.rollbackTooltip || labels.rollback"
+            :tooltip="labels.rollbackTooltip || labels.rollback"
             @click="emit('rollback')"
           >
             {{ labels.rollback }}
-          </button>
+          </RsButton>
           <span
             v-if="inTransaction"
             class="nm-sql-tb__in-tx"
@@ -244,14 +236,11 @@ function onExplainMain(): void {
         align="end"
         width="lg"
       >
-        <button
-          type="button"
-          class="nm-sql-tb__btn"
-          :aria-label="labels.history"
-          :title="labels.history"
-        >
-          <RsIcon name="history" size="md" />
-        </button>
+        <RsButton
+          v-bind="sqlIdeToolbarIconButton"
+          icon="history"
+          :tooltip="labels.history"
+        />
         <template #content>
           <div class="nm-sql-tb__history">
             <p class="nm-sql-tb__history-title">{{ labels.history }}</p>
@@ -291,68 +280,10 @@ function onExplainMain(): void {
 
 <style scoped src="./sql-ide-toolbar.css"></style>
 <style scoped>
-.nm-sql-tb__btn--stop:not(:disabled) {
-  color: var(--rs-danger, #ef4444);
-}
-
-.nm-sql-tb__btn--stop:hover:not(:disabled) {
-  color: var(--rs-danger, #ef4444);
-  background: color-mix(in srgb, var(--rs-danger, #ef4444) 14%, transparent);
-}
-
-.nm-sql-tb__btn--combo {
-  width: auto;
-  padding: 0 2px 0 4px;
-  gap: 0;
-}
-
-.nm-sql-tb__chev {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 24px;
-}
-
 .nm-sql-tb__autocommit {
   display: inline-flex;
   align-items: center;
-  height: 24px;
   padding: 0 6px 0 4px;
-  border-radius: 4px;
-}
-
-.nm-sql-tb__text {
-  height: 24px;
-  margin: 0;
-  padding: 0 7px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--rs-muted);
-  font-size: 11px;
-  line-height: 24px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.nm-sql-tb__text:hover:not(:disabled) {
-  background: var(--rs-item-hover);
-  color: var(--rs-text);
-}
-
-.nm-sql-tb__text.is-on {
-  background: var(--rs-item-hover);
-  color: var(--rs-text);
-}
-
-.nm-sql-tb__text--danger:not(:disabled) {
-  color: var(--rs-danger, #ef4444);
-}
-
-.nm-sql-tb__text:disabled {
-  opacity: 0.38;
-  cursor: default;
 }
 
 .nm-sql-tb__in-tx {

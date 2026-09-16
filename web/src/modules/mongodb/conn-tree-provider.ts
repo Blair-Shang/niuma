@@ -5,6 +5,21 @@ import { mongodbApi } from '@/api'
 import { i18n } from '@/locale'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
 import type { ConnItem } from '@/modules/ops/types'
+import {
+  isProtectedDatabase,
+  isSystemCollection,
+} from '@/modules/mongodb/utils/catalog-names'
+
+type ActionsModule = typeof import('@/modules/mongodb/conn-tree-actions')
+
+let actionsPromise: Promise<ActionsModule> | null = null
+
+function loadActions(): Promise<ActionsModule> {
+  actionsPromise ??= import('@/modules/mongodb/conn-tree-actions')
+  return actionsPromise
+}
+
+const CONN_MENU_KEYS = new Set(['console', 'createDatabase'])
 
 function t(key: string): string {
   return i18n.global.t(key)
@@ -75,12 +90,19 @@ export const mongoConnTreeProvider: ConnTreeChildProvider = {
   },
 
   connMenuItems(): RsContextMenuItem[] {
-    return [{ key: 'console', label: t('modules.mongodb.tree.connConsole'), icon: 'terminal' }]
+    return [
+      { key: 'createDatabase', label: t('modules.mongodb.tree.createDatabase'), icon: 'database' },
+      { key: 'console', label: t('modules.mongodb.tree.connConsole'), icon: 'terminal' },
+    ]
   },
 
   onConnMenuSelect(conn: ConnItem, key: string): boolean {
-    if (key !== 'console') {
+    if (!CONN_MENU_KEYS.has(key)) {
       return false
+    }
+    if (key === 'createDatabase') {
+      void loadActions().then((m) => m.onConnMenuSelect(conn, key))
+      return true
     }
     useConnectionNavigation().connect(conn, { initialTab: 'console' })
     return true
@@ -91,17 +113,24 @@ export const mongoConnTreeProvider: ConnTreeChildProvider = {
     const isCollection = path.segments.length === 2 && path.segments[1].kind === 'collection'
 
     if (isDatabase) {
-      return [
+      const items: RsContextMenuItem[] = [
         { key: 'open', label: t('modules.mongodb.tree.dbOpen'), icon: 'database' },
         { key: 'sep-query', label: '', separator: true },
         { key: 'query', label: t('modules.mongodb.tree.collQuery'), icon: 'code-2' },
         { key: 'sep-server', label: '', separator: true },
         { key: 'monitor', label: t('modules.mongodb.tree.dbMonitor'), icon: 'activity' },
       ]
+      if (!isProtectedDatabase(path.segments[0]?.name)) {
+        items.push(
+          { key: 'sep-mutate', label: '', separator: true },
+          { key: 'rename', label: t('modules.mongodb.tree.dbRename'), icon: 'pencil' },
+        )
+      }
+      return items
     }
 
     if (isCollection) {
-      return [
+      const items: RsContextMenuItem[] = [
         { key: 'open', label: t('modules.mongodb.tree.collOpen'), icon: 'table-2' },
         { key: 'sep-query', label: '', separator: true },
         { key: 'query', label: t('modules.mongodb.tree.collQuery'), icon: 'code-2' },
@@ -111,12 +140,25 @@ export const mongoConnTreeProvider: ConnTreeChildProvider = {
         { key: 'live', label: t('modules.mongodb.tree.collLive'), icon: 'radio' },
         { key: 'tools', label: t('modules.mongodb.tree.collTools'), icon: 'wrench' },
       ]
+      const collection = path.segments[1]?.name
+      if (!isSystemCollection(collection)) {
+        items.push(
+          { key: 'sep-mutate', label: '', separator: true },
+          { key: 'rename', label: t('modules.mongodb.tree.collRename'), icon: 'pencil' },
+        )
+      }
+      return items
     }
 
     return []
   },
 
   onResourceMenuSelect(conn: ConnItem, path: ConnResourcePath, key: string): void {
+    if (key === 'rename') {
+      void loadActions().then((m) => m.onResourceMenuSelect(conn, path, key))
+      return
+    }
+
     const nav = useConnectionNavigation()
 
     switch (key) {

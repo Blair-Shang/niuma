@@ -87,7 +87,7 @@ function buildMongoTabSpec(item: ConnItem, ctx?: ConnOpenContext): ConnectionNav
 
 /**
  * Tab 去重匹配：profileId + database + collection + feature 四元组一致才聚焦已有 Tab。
- * 同一集合的"文档浏览"和"聚合查询"是两个不同 Tab。
+ * 同一集合的「文档浏览」和「查询」是两个不同 Tab。
  */
 function mongoTabsMatch(
   tab: WorkspaceTab,

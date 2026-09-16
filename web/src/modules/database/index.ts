@@ -114,7 +114,23 @@ export { default as DataTransferCheck } from './components/DataTransferCheck.vue
 export { default as TableDesignShell } from './components/TableDesignShell.vue'
 export { default as TableDesignPreviewPopover } from './components/TableDesignPreviewPopover.vue'
 export { default as ObjectScriptShell } from './components/ObjectScriptShell.vue'
-export { default as SqlIdeToolbarButton } from './components/SqlIdeToolbarButton.vue'
+export { default as SqlIdeToolbar } from './components/SqlIdeToolbar.vue'
+export type {
+  SqlIdeToolbarAction,
+  SqlIdeToolbarFilter,
+  SqlIdeToolbarIdentityPart,
+  SqlIdeToolbarItem,
+  SqlIdeToolbarModeOption,
+  SqlIdeToolbarModes,
+  SqlIdeToolbarSep,
+} from './types/sql-ide-toolbar'
+export {
+  isSqlIdeToolbarAction,
+  isSqlIdeToolbarFilter,
+  isSqlIdeToolbarModes,
+  isSqlIdeToolbarSep,
+  sqlIdeToolbarIconButton,
+} from './types/sql-ide-toolbar'
 export { default as DebugShell } from './components/DebugShell.vue'
 export { default as DebugParamsGrid } from './components/DebugParamsGrid.vue'
 export { default as DebugResultPanel } from './components/DebugResultPanel.vue'

@@ -5,12 +5,13 @@
  */
 import { computed } from 'vue'
 import {
+  RsButton,
   RsContextMenu,
   RsEmpty,
-  RsIcon,
   type RsContextMenuItem,
 } from '@niuma/ui'
 import SqlQueryIdentity from './SqlQueryIdentity.vue'
+import { sqlIdeToolbarIconButton } from '../types/sql-ide-toolbar'
 import type {
   ObjectScriptMessageTone,
   ObjectScriptMode,
@@ -100,55 +101,44 @@ const showReload = computed(() => props.showRefresh && props.mode !== 'create')
 
         <span class="nm-sql-tb__sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          class="nm-sql-tb__btn nm-sql-tb__btn--run"
+        <RsButton
+          v-bind="sqlIdeToolbarIconButton"
+          icon="play"
+          tone="success"
           :disabled="!canApply || busy"
-          :aria-label="applyLabel"
-          :title="applyLabel"
+          :tooltip="applyLabel"
           @click="emit('apply')"
-        >
-          <RsIcon name="play" size="md" :stroke-width="2.25" />
-        </button>
+        />
 
         <span class="nm-sql-tb__sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          class="nm-sql-tb__btn"
+        <RsButton
+          v-bind="sqlIdeToolbarIconButton"
+          icon="align-left"
           :disabled="!canFormat || busy"
-          :aria-label="labels.format"
-          :title="labels.formatTooltip"
+          :tooltip="labels.formatTooltip"
           @click="emit('format')"
-        >
-          <RsIcon name="align-left" size="md" />
-        </button>
-        <button
-          type="button"
-          class="nm-sql-tb__btn"
+        />
+        <RsButton
+          v-bind="sqlIdeToolbarIconButton"
+          icon="copy"
           :disabled="!canCopy || busy"
-          :aria-label="labels.copy"
-          :title="labels.copy"
+          :tooltip="labels.copy"
           @click="emit('copy')"
-        >
-          <RsIcon name="copy" size="md" />
-        </button>
+        />
 
         <slot name="toolbar-start" />
       </div>
 
       <div class="nm-sql-tb__trail">
-        <button
+        <RsButton
           v-if="showReload"
-          type="button"
-          class="nm-sql-tb__btn"
+          v-bind="sqlIdeToolbarIconButton"
+          icon="refresh-cw"
           :disabled="busy"
-          :aria-label="labels.refresh"
-          :title="labels.refresh"
+          :tooltip="labels.refresh"
           @click="emit('refresh')"
-        >
-          <RsIcon name="refresh-cw" size="md" />
-        </button>
+        />
         <slot name="toolbar-end" />
       </div>
     </header>

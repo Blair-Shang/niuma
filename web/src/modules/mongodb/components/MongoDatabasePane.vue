@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { RsButton, RsEmpty, RsIcon, RsTable, RsTooltip, useRsToast } from '@niuma/ui'
+import { RsEmpty, RsIcon, RsTable, useRsToast } from '@niuma/ui'
 import type { RsContextMenuItem, RsTableColumn } from '@niuma/ui'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mongodbApi } from '@/api'
 import type { MongoCollectionInfo } from '@/api/types/mongodb'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type { SqlIdeToolbarItem } from '@/modules/database/types/sql-ide-toolbar'
 
 const props = defineProps<{
   sessionId: string | null
@@ -14,6 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'open-collection': [collection: string, feature: string]
+  'open-feature': [feature: string]
 }>()
 
 interface CollRow extends Record<string, unknown> {
@@ -21,27 +24,77 @@ interface CollRow extends Record<string, unknown> {
   type: string
   typeLabel: string
   count: string
+  countValue?: number
   storageSize: string
+  storageValue?: number
   avgObjSize: string
+  avgValue?: number
   indexCount: string
+  indexCountValue?: number
   indexSize: string
+  indexSizeValue?: number
 }
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const toast = useRsToast()
 
 const collections = shallowRef<MongoCollectionInfo[]>([])
 const loading = ref(false)
-const rows = shallowRef<CollRow[]>([])
+const filterText = ref('')
+
+/** 缺省排在升序末尾，避免视图/无统计项把有数值的行顶走。 */
+function compareOptionalNumber(left?: number, right?: number): number {
+  const leftOk = left !== undefined && left >= 0
+  const rightOk = right !== undefined && right >= 0
+  if (leftOk && rightOk) return left - right
+  if (leftOk) return -1
+  if (rightOk) return 1
+  return 0
+}
 
 const columns = computed((): RsTableColumn<CollRow>[] => [
-  { key: 'name', title: t('modules.mongodb.database.colName'), minWidth: 180, ellipsis: true },
-  { key: 'typeLabel', title: t('modules.mongodb.database.colType'), minWidth: 72 },
-  { key: 'count', title: t('modules.mongodb.database.colCount'), minWidth: 88, align: 'right' },
-  { key: 'storageSize', title: t('modules.mongodb.database.colStorage'), minWidth: 88, align: 'right' },
-  { key: 'avgObjSize', title: t('modules.mongodb.database.colAvgSize'), minWidth: 96, align: 'right' },
-  { key: 'indexCount', title: t('modules.mongodb.database.colIndexCount'), minWidth: 80, align: 'right' },
-  { key: 'indexSize', title: t('modules.mongodb.database.colIndexSize'), minWidth: 96, align: 'right' },
+  { key: 'name', title: t('modules.mongodb.database.colName'), minWidth: 180, ellipsis: true, sortable: true },
+  { key: 'typeLabel', title: t('modules.mongodb.database.colType'), minWidth: 72, sortable: true },
+  {
+    key: 'count',
+    title: t('modules.mongodb.database.colCount'),
+    minWidth: 88,
+    align: 'right',
+    sortable: true,
+    sorter: (a, b) => compareOptionalNumber(a.countValue, b.countValue),
+  },
+  {
+    key: 'storageSize',
+    title: t('modules.mongodb.database.colStorage'),
+    minWidth: 88,
+    align: 'right',
+    sortable: true,
+    sorter: (a, b) => compareOptionalNumber(a.storageValue, b.storageValue),
+  },
+  {
+    key: 'avgObjSize',
+    title: t('modules.mongodb.database.colAvgSize'),
+    minWidth: 96,
+    align: 'right',
+    sortable: true,
+    sorter: (a, b) => compareOptionalNumber(a.avgValue, b.avgValue),
+  },
+  {
+    key: 'indexCount',
+    title: t('modules.mongodb.database.colIndexCount'),
+    minWidth: 80,
+    align: 'right',
+    sortable: true,
+    sorter: (a, b) => compareOptionalNumber(a.indexCountValue, b.indexCountValue),
+  },
+  {
+    key: 'indexSize',
+    title: t('modules.mongodb.database.colIndexSize'),
+    minWidth: 96,
+    align: 'right',
+    sortable: true,
+    sorter: (a, b) => compareOptionalNumber(a.indexSizeValue, b.indexSizeValue),
+  },
 ])
 
 /** 字节数格式化为人类可读单位；缺省或负值显示占位符 */
@@ -63,18 +116,38 @@ function mapCollectionsToRows(items: readonly MongoCollectionInfo[]): CollRow[] 
         ? t('modules.mongodb.database.typeView')
         : t('modules.mongodb.database.typeCollection'),
     count: c.count !== undefined ? c.count.toLocaleString() : '—',
+    countValue: c.count,
     storageSize: c.type === 'view' ? '—' : formatBytes(c.storageSize),
+    storageValue: c.type === 'view' ? undefined : c.storageSize,
     avgObjSize: c.type === 'view' ? '—' : formatBytes(c.avgObjSize),
+    avgValue: c.type === 'view' ? undefined : c.avgObjSize,
     indexCount: c.indexCount !== undefined ? c.indexCount.toLocaleString() : '—',
+    indexCountValue: c.indexCount,
     indexSize: c.type === 'view' ? '—' : formatBytes(c.indexSize),
+    indexSizeValue: c.type === 'view' ? undefined : c.indexSize,
   }))
 }
 
-function syncRows(): void {
-  rows.value = mapCollectionsToRows(collections.value)
-}
+const allRows = computed(() => mapCollectionsToRows(collections.value))
 
-watch(locale, syncRows)
+const filterQuery = computed(() => filterText.value.trim().toLowerCase())
+
+const visibleRows = computed(() => {
+  const q = filterQuery.value
+  if (!q) return allRows.value
+  return allRows.value.filter(
+    (row) => row.name.toLowerCase().includes(q) || row.typeLabel.toLowerCase().includes(q),
+  )
+})
+
+const summaryText = computed(() => {
+  const total = collections.value.length
+  const shown = visibleRows.value.length
+  if (filterQuery.value && shown !== total) {
+    return t('modules.mongodb.database.summaryFiltered', { shown, total })
+  }
+  return t('modules.mongodb.database.summaryCount', { count: total })
+})
 
 async function loadCollections(): Promise<void> {
   if (!props.sessionId || !props.database) return
@@ -85,7 +158,6 @@ async function loadCollections(): Promise<void> {
       database: props.database,
     })
     collections.value = result.collections
-    syncRows()
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t('modules.mongodb.database.loadError'))
   } finally {
@@ -117,11 +189,61 @@ function onContextMenuSelect(key: string, row: CollRow | null): void {
   if (key === 'browse') emit('open-collection', row.name, 'collections')
   else if (key === 'query') emit('open-collection', row.name, 'query')
 }
+
+const toolbarReady = computed(() => Boolean(props.sessionId))
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => [
+  {
+    key: 'query',
+    icon: 'code-2',
+    title: t('modules.mongodb.tree.collQuery'),
+    disabled: !toolbarReady.value,
+  },
+  {
+    key: 'monitor',
+    icon: 'activity',
+    title: t('modules.mongodb.tree.dbMonitor'),
+    disabled: !toolbarReady.value,
+  },
+  {
+    key: 'filter',
+    kind: 'filter',
+    align: 'trail',
+    value: filterText.value,
+    placeholder: t('modules.mongodb.database.filterPlaceholder'),
+    disabled: !toolbarReady.value || loading.value,
+  },
+  {
+    key: 'refresh',
+    icon: 'refresh-cw',
+    title: t('modules.mongodb.database.refresh'),
+    disabled: !toolbarReady.value || loading.value,
+    align: 'trail',
+  },
+])
+
+function onToolbarAction(key: string): void {
+  if (key === 'query') emit('open-feature', 'query')
+  else if (key === 'monitor') emit('open-feature', 'monitor')
+  else if (key === 'refresh') void loadCollections()
+}
+
+function onToolbarFilter(_itemKey: string, value: string): void {
+  filterText.value = value
+}
 </script>
 
 <template>
   <div class="nm-dbpane">
-    <!-- 空状态 -->
+    <SqlIdeToolbar
+      :label="t('modules.mongodb.database.toolbarAria')"
+      identity-icon="database"
+      :identity="database"
+      :items="toolbarItems"
+      @action="onToolbarAction"
+      @filter="onToolbarFilter"
+    />
+
     <RsEmpty
       v-if="!loading && collections.length === 0"
       fill
@@ -130,13 +252,21 @@ function onContextMenuSelect(key: string, row: CollRow | null): void {
       :description="t('modules.mongodb.database.noCollections')"
     />
 
-    <!-- 集合列表（直接铺满，无独立 toolbar） -->
+    <RsEmpty
+      v-else-if="!loading && visibleRows.length === 0"
+      fill
+      class="nm-dbpane__empty"
+      icon="table-2"
+      :description="t('modules.mongodb.database.emptyFilter')"
+    />
+
     <div v-else class="nm-dbpane__table-wrap">
       <RsTable
         :columns="columns"
-        :data="rows"
+        :data="visibleRows"
         row-key="name"
         :loading="loading"
+        :default-sort="{ key: 'name', order: 'asc' }"
         size="sm"
         striped
         resizable
@@ -147,7 +277,6 @@ function onContextMenuSelect(key: string, row: CollRow | null): void {
         :context-menu-items="buildContextMenuItems"
         @context-menu-select="onContextMenuSelect"
       >
-        <!-- 集合名：列宽不足时省略，原生 title 展示全名（避免每行挂载 Tooltip 组件） -->
         <template #name="{ row }">
           <button
             type="button"
@@ -164,7 +293,6 @@ function onContextMenuSelect(key: string, row: CollRow | null): void {
           </button>
         </template>
 
-        <!-- 类型徽标 -->
         <template #typeLabel="{ row }">
           <span
             class="nm-dbpane__type-badge"
@@ -177,18 +305,12 @@ function onContextMenuSelect(key: string, row: CollRow | null): void {
           </span>
         </template>
 
-        <!-- 汇总行：数量 + 刷新（sticky 固定在底部） -->
         <template #summary>
           <div class="nm-dbpane__summary">
             <span class="nm-dbpane__summary-count">
               <RsIcon name="layers" :size="12" />
-              {{ t('modules.mongodb.database.summaryCount', { count: collections.length }) }}
+              {{ summaryText }}
             </span>
-            <RsTooltip :content="t('modules.mongodb.database.refresh')" side="top">
-              <RsButton size="sm" variant="ghost" :loading="loading" @click="loadCollections">
-                <RsIcon name="refresh-cw" :size="12" />
-              </RsButton>
-            </RsTooltip>
           </div>
         </template>
       </RsTable>
@@ -197,7 +319,6 @@ function onContextMenuSelect(key: string, row: CollRow | null): void {
 </template>
 
 <style scoped>
-/* ── 容器：不用 height:100%，依赖父级 flex:1 + min-height:0 ── */
 .nm-dbpane {
   display: flex;
   flex-direction: column;
@@ -284,8 +405,6 @@ function onContextMenuSelect(key: string, row: CollRow | null): void {
 .nm-dbpane__summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-sm);
 }
 
 .nm-dbpane__summary-count {

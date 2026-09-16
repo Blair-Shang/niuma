@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RsLoading, RsMonacoEditor } from '@niuma/ui'
+import { RsButton, RsLoading, RsMonacoEditor } from '@niuma/ui'
 import {
   ObjectScriptShell,
-  SqlIdeToolbarButton,
+  sqlIdeToolbarIconButton,
   TableDesignPreviewPopover,
   type ObjectScriptShellLabels,
 } from '@/modules/database'
@@ -113,10 +113,11 @@ const hasObject = computed(() => Boolean(objectName.value || modeCreate.value))
         :empty-label="t('modules.sqlite.objectScript.previewEmpty')"
         @update:open="onPreviewOpenChange"
       >
-        <SqlIdeToolbarButton
+        <RsButton
+          v-bind="sqlIdeToolbarIconButton"
           icon="eye"
           :disabled="!sessionId || !sqlText.trim() || saving || loading || previewLoading"
-          :title="t('modules.sqlite.objectScript.preview')"
+          :tooltip="t('modules.sqlite.objectScript.preview')"
         />
       </TableDesignPreviewPopover>
     </template>
