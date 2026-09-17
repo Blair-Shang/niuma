@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { isBridgeAvailable } from '@/api/client'
 import { CloudApiError } from '@/api/cloud/client'
 import {
@@ -135,6 +135,9 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
 
   /** Windows / Linux / macOS 均走应用内下载 + 拉起安装包。 */
   const inAppInstallSupported = computed(() => isBridgeAvailable())
+
+  /** 用于安装中文案：windows 显示进度并自动拉起；linux 同样会再启动；macos 需手动打开。 */
+  const updatePlatform = computed(() => mapPlatform(useBridgeStore().shellInfo?.platform))
 
   function platformArch() {
     const bridge = useBridgeStore()
@@ -462,8 +465,10 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     error.value = ''
     try {
       const path = await ensureDownloaded()
-      await useAccountStore().flushPersist()
+      dialogOpen.value = true
       phase.value = 'applying'
+      await nextTick()
+      await useAccountStore().flushPersist()
       await shellUpdateApply({ path })
       clearReadyPack()
     } catch (e) {
@@ -529,6 +534,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
     total,
     progressPercent,
     inAppInstallSupported,
+    updatePlatform,
     openDialog,
     closeDialog,
     openAbout,

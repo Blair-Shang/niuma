@@ -21,6 +21,9 @@ const updateChip = computed(() => {
   if (appUpdate.phase === 'ready') {
     return t('appUpdate.statusReady')
   }
+  if (appUpdate.phase === 'applying') {
+    return t('appUpdate.statusApplying')
+  }
   return ''
 })
 
@@ -79,7 +82,10 @@ function onDataTasksClick(): void {
         v-if="updateChip"
         type="button"
         class="nm-statusbar__chip"
-        :class="{ 'nm-statusbar__chip--active': appUpdate.phase === 'ready' }"
+        :class="{
+          'nm-statusbar__chip--active':
+            appUpdate.phase === 'ready' || appUpdate.phase === 'applying',
+        }"
         @click="appUpdate.openDialog()"
       >
         {{ updateChip }}

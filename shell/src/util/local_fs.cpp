@@ -508,6 +508,31 @@ bool IsAllowedInstallerName(const std::string& path) {
          EndsWithIgnoreCase(path, ".run");
 }
 
+#if !defined(OS_WIN)
+// 新会话拉起安装包，避免随后 CefQuit / 父进程退出把安装程序一并带走。
+bool SpawnDetached(const char* file, char* const argv[], bool search_path,
+                   std::string& error) {
+  posix_spawnattr_t attr;
+  if (posix_spawnattr_init(&attr) != 0) {
+    error = "launch installer failed";
+    return false;
+  }
+#ifdef POSIX_SPAWN_SETSID
+  (void)posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
+#endif
+  pid_t pid = 0;
+  const int rc = search_path
+                     ? posix_spawnp(&pid, file, nullptr, &attr, argv, environ)
+                     : posix_spawn(&pid, file, nullptr, &attr, argv, environ);
+  posix_spawnattr_destroy(&attr);
+  if (rc != 0) {
+    error = "launch installer failed";
+    return false;
+  }
+  return true;
+}
+#endif
+
 }  // namespace
 
 bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
@@ -532,10 +557,16 @@ bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
     error = "invalid path encoding";
     return false;
   }
-  // 覆盖升级：静默安装，沿用上次目录/权限；不弹向导。数据在用户目录，不在 {app}。
-  const wchar_t* silent_args = L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-";
+  // Inno 与 MSI 参数不同；其它后缀只打开，不把 Inno 开关套上去。
+  const wchar_t* silent_args = L"";
+  if (EndsWithIgnoreCase(path, ".exe")) {
+    silent_args =
+        L"/SILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOCANCEL /FORCECLOSEAPPLICATIONS";
+  } else if (EndsWithIgnoreCase(path, ".msi")) {
+    silent_args = L"/qn /norestart";
+  }
   const HINSTANCE result =
-      ShellExecuteW(nullptr, L"open", wide.c_str(), silent_args, nullptr, SW_HIDE);
+      ShellExecuteW(nullptr, L"open", wide.c_str(), silent_args, nullptr, SW_SHOWNORMAL);
   if (reinterpret_cast<intptr_t>(result) <= 32) {
     error = "launch installer failed";
     return false;
@@ -546,35 +577,23 @@ bool LocalFs::LaunchInstaller(const std::string& path, std::string& error) {
   path_arg.push_back('\0');
   const char* opener = "open";
   char* argv[] = {const_cast<char*>(opener), path_arg.data(), nullptr};
-  pid_t pid = 0;
-  if (posix_spawnp(&pid, opener, nullptr, nullptr, argv, environ) != 0) {
-    error = "launch installer failed";
-    return false;
-  }
-  return true;
+  return SpawnDetached(opener, argv, true, error);
 #else
   std::vector<char> path_arg(path.begin(), path.end());
   path_arg.push_back('\0');
-  pid_t pid = 0;
   if (EndsWithIgnoreCase(path, ".run")) {
     if (chmod(path.c_str(), 0755) != 0) {
       error = "chmod installer failed";
       return false;
     }
-    char* argv[] = {path_arg.data(), nullptr};
-    if (posix_spawn(&pid, path.c_str(), nullptr, nullptr, argv, environ) != 0) {
-      error = "launch installer failed";
-      return false;
-    }
-    return true;
+    // 覆盖升级：跳过 zenity 向导。无 TTY 时交互模式会卡在 read 或直接失败。
+    char unattended[] = "--unattended";
+    char* argv[] = {path_arg.data(), unattended, nullptr};
+    return SpawnDetached(path.c_str(), argv, false, error);
   }
   const char* opener = "xdg-open";
   char* argv[] = {const_cast<char*>(opener), path_arg.data(), nullptr};
-  if (posix_spawnp(&pid, opener, nullptr, nullptr, argv, environ) != 0) {
-    error = "launch installer failed";
-    return false;
-  }
-  return true;
+  return SpawnDetached(opener, argv, true, error);
 #endif
 }
 

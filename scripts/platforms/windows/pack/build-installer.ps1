@@ -185,8 +185,10 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=$archAllowed
 ArchitecturesInstallIn64BitMode=$archInstallMode
 DisableProgramGroupPage=yes
-; 覆盖升级时关闭占用安装目录的进程，减少「文件正在使用」失败
-CloseApplications=yes
+; force：覆盖升级不等 Restart Manager 优雅退出（CEF 多进程关得慢）。
+; 只盯 exe，避免对 libcef.dll 再走一轮占用探测。
+CloseApplications=force
+CloseApplicationsFilter=*.exe
 RestartApplications=no
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -250,7 +252,7 @@ $metaObj = [ordered]@{
     fileName     = (Split-Path -Leaf $setupExe)
     fileSize     = $fileSize
     sha256       = $sha256
-    silentArgs   = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'
+    silentArgs   = '/SILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOCANCEL /FORCECLOSEAPPLICATIONS'
     downloadHint = "上传 Setup 后把 HTTPS URL 写入 Admin；桌面默认允许 *.niuma007.com"
 }
 $utf8 = New-Object System.Text.UTF8Encoding $false

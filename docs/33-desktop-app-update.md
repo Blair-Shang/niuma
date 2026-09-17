@@ -316,14 +316,17 @@ Cloud 客户端：复用 `web/src/api/cloud/client.ts`（`VITE_CLOUD_API_BASE`�
 
 请求：`{ "path": "…" }`  
 
-Windows P0：
+各平台：`path` 必须位于更新临时目录内。拉起成功后停 Platform 子进程并退出当前 NiuMa，避免占用安装目录。拉起失败才由 Web 回落 `openExternal(downloadUrl)`（错误码 `apply_unsupported_platform` 仅作兼容）。
 
-1. `path` 必须位于更新临时目录内（防任意路径执行）。
-2. `ShellExecute` 启动 Setup，带 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`（覆盖升级不弹向导）。
-3. 启动成功后退出当前 NiuMa 进程（先停 Platform 子进程）；Inno `[Run]` 装完拉起新版本。
-4. 非 Windows：Shell 返回 `apply_unsupported_platform`；Web 改为 `openExternal(downloadUrl)`。
+| 平台 | 拉起 | 退出后谁再打开 |
+|------|------|----------------|
+| Windows `.exe` | Inno `/SILENT … /FORCECLOSEAPPLICATIONS`，`SW_SHOWNORMAL` | Setup `[Run]` |
+| Windows `.msi` | `/qn /norestart` | 系统安装器（无自动拉起） |
+| Linux `.run` | 独立会话 + `--unattended`（跳过 zenity，仍可能 polkit） | 向导结束启动 `niuma` |
+| Linux `.deb` / `.rpm` | `xdg-open` | 软件中心，需用户手动打开 |
+| macOS `.pkg` / `.dmg` | `open`（LaunchServices，已独立） | 用户从启动台打开 |
 
-当前 iss：固定 `AppId`、`PrivilegesRequired=lowest`（默认当前用户、不弹 UAC）、`CloseApplications=yes`、`RestartApplications=no`。
+当前 iss：固定 `AppId`、`PrivilegesRequired=lowest`（默认当前用户、不弹 UAC）、`CloseApplications=force`、`CloseApplicationsFilter=*.exe`、`RestartApplications=no`。
 
 #### `shell.update.cancel`
 
@@ -391,7 +394,7 @@ Windows P0：
 
 ### 10.4 Inno 与升级体验
 
-- [x] `CloseApplications=yes` + `RestartApplications=no`
+- [x] `CloseApplications=force` + `CloseApplicationsFilter=*.exe` + `RestartApplications=no`
 - [x] 固定 **AppId**（禁止改）
 - [x] 签名：`scripts/shared/sign/sign-windows.ps1`（有证书时）
 
@@ -467,3 +470,4 @@ Windows P0：
 | v0.2 | 2026-08-05 | P0 实现：releases 表/公开 API/Admin；Platform 受限下载；Shell apply；Web 检查弹窗 |
 | v0.3 | 2026-08-06 | Inno CloseApplications；发版 meta json；生产白名单示例；非 Windows 打开下载链 |
 | v0.4 | 2026-08-06 | 官网去 SQLite：计次 JSON；下载页读 cloud updates |
+| v0.5 | 2026-09-17 | 应用内更新：Windows /SILENT 显示进度并强关占用进程；Linux `.run --unattended` 装完拉起；macOS 文案不承诺自动打开；文案对齐企业微信/飞书 |

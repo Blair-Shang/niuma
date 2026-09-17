@@ -421,10 +421,11 @@ bool DispatchShellUtilityMethod(const BridgeRequest& req, BridgeCallback callbac
     const std::string path = JsonGetString(req.params, "path");
     RunOnUiThread([req, callback, path]() {
       std::string error;
+      // 各平台：先独立拉起安装包，再停子进程并退出，避免占用安装目录。
+      // Windows Inno 装完 [Run] 拉起；Linux .run --unattended 装完自行启动。
       const bool ok = LocalFs::LaunchInstaller(path, error);
       Respond(callback, req, ok, ok ? R"({"applied":true})" : "{}", error);
       if (ok) {
-        // 安装程序已拉起：停止本机服务并退出消息循环，避免占用安装目录文件。
         ServiceManager::Instance().ShutdownAll();
         CefQuitMessageLoop();
       }

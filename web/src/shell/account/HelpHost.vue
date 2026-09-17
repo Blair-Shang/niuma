@@ -147,6 +147,7 @@ function formatReleaseDate(iso?: string): string {
         <RsButton
           v-if="store.changelogHasUpdate"
           variant="primary"
+          :disabled="store.phase === 'applying'"
           @click="
             store.phase === 'ready'
               ? (store.closeChangelog(), store.restartToUpdate())
@@ -154,7 +155,11 @@ function formatReleaseDate(iso?: string): string {
           "
         >
           {{
-            store.phase === 'ready' ? t('appUpdate.restartToUpdate') : t('appUpdate.updateNow')
+            store.phase === 'applying'
+              ? t('appUpdate.statusApplying')
+              : store.phase === 'ready'
+                ? t('appUpdate.restartToUpdate')
+                : t('appUpdate.updateNow')
           }}
         </RsButton>
       </template>

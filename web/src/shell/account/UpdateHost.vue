@@ -10,6 +10,9 @@ const store = useAppUpdateStore()
 const bridge = useBridgeStore()
 
 const title = computed(() => {
+  if (store.phase === 'applying') {
+    return t('appUpdate.titleApplying')
+  }
   if (store.phase === 'idle' && store.dialogOpen && !store.latest) {
     return t('appUpdate.titleLatest')
   }
@@ -30,7 +33,19 @@ const errorText = computed(() => {
   return code
 })
 
-const canDismiss = computed(() => !store.forceUpdate)
+const canDismiss = computed(() => !store.forceUpdate && store.phase !== 'applying')
+
+const applyingText = computed(() => {
+  if (store.updatePlatform === 'linux') return t('appUpdate.applyingLinux')
+  if (store.updatePlatform === 'macos') return t('appUpdate.applyingMacos')
+  return t('appUpdate.applying')
+})
+
+const applyingHintText = computed(() => {
+  if (store.updatePlatform === 'linux') return t('appUpdate.applyingLinuxHint')
+  if (store.updatePlatform === 'macos') return t('appUpdate.applyingMacosHint')
+  return t('appUpdate.applyingHint')
+})
 
 function onOpenChange(open: boolean) {
   if (!open) {
@@ -85,9 +100,15 @@ function onOpenChange(open: boolean) {
             <p v-if="store.phase === 'ready'" class="nm-update__meta">
               {{ t('appUpdate.readyHint') }}
             </p>
-            <p v-else-if="store.phase === 'applying'" class="nm-update__meta">
-              {{ t('appUpdate.applying') }}
-            </p>
+            <div v-else-if="store.phase === 'applying'" class="nm-update__apply">
+              <p class="nm-update__meta">{{ applyingText }}</p>
+              <div class="nm-update__prog" aria-live="polite">
+                <div class="nm-update__bar">
+                  <div class="nm-update__bar-fill nm-update__bar-fill--indet" />
+                </div>
+              </div>
+              <p class="nm-update__meta">{{ applyingHintText }}</p>
+            </div>
             <div
               v-if="store.phase === 'downloading' || store.phase === 'verifying'"
               class="nm-update__prog"
@@ -123,7 +144,14 @@ function onOpenChange(open: boolean) {
           {{ store.phase === 'ready' ? t('appUpdate.close') : t('appUpdate.snooze') }}
         </RsButton>
         <RsButton
-          v-if="store.phase === 'ready'"
+          v-if="store.phase === 'applying'"
+          variant="primary"
+          disabled
+        >
+          {{ t('appUpdate.statusApplying') }}
+        </RsButton>
+        <RsButton
+          v-else-if="store.phase === 'ready'"
           variant="primary"
           @click="store.restartToUpdate()"
         >
@@ -179,10 +207,26 @@ function onOpenChange(open: boolean) {
   background: rgba(0, 0, 0, 0.08);
   overflow: hidden;
 }
+.nm-update__apply {
+  display: grid;
+  gap: 0.5rem;
+}
 .nm-update__bar-fill {
   height: 100%;
   background: var(--rs-primary, #2563eb);
   transition: width 0.2s ease;
+}
+.nm-update__bar-fill--indet {
+  width: 36%;
+  animation: nm-update-indet 1.15s ease-in-out infinite;
+}
+@keyframes nm-update-indet {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
 }
 .nm-update__err {
   margin: 0;

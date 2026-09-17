@@ -33,7 +33,7 @@ tail -n +\$ARCHIVE_LINE "\$0" | tar -xz -C "\$TMPDIR"
 export NIUMMA_APP_NAME='$APP_NAME'
 export NIUMMA_APP_VERSION='$APP_VERSION'
 chmod +x "\$TMPDIR/$ENTRY_SCRIPT"
-exec "\$TMPDIR/$ENTRY_SCRIPT"
+exec "\$TMPDIR/$ENTRY_SCRIPT" "\$@"
 EOF
 
 chmod +x "$HEADER"

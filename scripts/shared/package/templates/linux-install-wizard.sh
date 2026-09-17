@@ -65,17 +65,26 @@ agree_eula() {
   question_gui "Agree to the EULA?"
 }
 
+UNATTENDED=0
+for arg in "$@"; do
+  case "$arg" in
+    --unattended|--silent) UNATTENDED=1 ;;
+  esac
+done
+
 [[ -f "$DEB_FILE" ]] || die_gui "Internal error: package.deb not found."
 
-if have_gui; then
-  zenity --info --title="$APP_NAME Setup" --text="Welcome to the $APP_NAME $APP_VERSION installer.\n\nThis wizard will install $APP_NAME on your system." --width=460
-else
-  printf '==> %s %s installer\n' "$APP_NAME" "$APP_VERSION"
+if [[ "$UNATTENDED" -eq 0 ]]; then
+  if have_gui; then
+    zenity --info --title="$APP_NAME Setup" --text="Welcome to the $APP_NAME $APP_VERSION installer.\n\nThis wizard will install $APP_NAME on your system." --width=460
+  else
+    printf '==> %s %s installer\n' "$APP_NAME" "$APP_VERSION"
+  fi
+
+  agree_eula || exit 0
+
+  question_gui "Install $APP_NAME $APP_VERSION now?\n\nAdministrator privileges are required." || exit 0
 fi
-
-agree_eula || exit 0
-
-question_gui "Install $APP_NAME $APP_VERSION now?\n\nAdministrator privileges are required." || exit 0
 
 if ! command -v dpkg >/dev/null 2>&1; then
   die_gui "dpkg is required but not found. This installer supports Debian/Ubuntu/Kylin derivatives."
@@ -111,4 +120,25 @@ if command -v apt-get >/dev/null 2>&1; then
   fi
 fi
 
-info_gui "$APP_NAME $APP_VERSION has been installed.\n\nYou can launch it from the application menu."
+start_niuma() {
+  if command -v gtk-launch >/dev/null 2>&1 && [[ -f /usr/share/applications/niuma.desktop ]]; then
+    nohup gtk-launch niuma >/dev/null 2>&1 &
+    return 0
+  fi
+  if command -v niuma >/dev/null 2>&1; then
+    nohup niuma >/dev/null 2>&1 &
+    return 0
+  fi
+  if [[ -x /opt/niuma/niuma ]]; then
+    nohup /opt/niuma/niuma >/dev/null 2>&1 &
+    return 0
+  fi
+  return 1
+}
+
+if [[ "$UNATTENDED" -eq 1 ]]; then
+  start_niuma || true
+else
+  info_gui "$APP_NAME $APP_VERSION has been installed.\n\nYou can launch it from the application menu."
+  start_niuma || true
+fi
