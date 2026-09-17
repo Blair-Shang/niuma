@@ -140,7 +140,7 @@
 |------|------|------|
 | `workspace` | 当前 Tab / `profileId` / `sessionId` | 限定工具作用域；与 [21](./21-session-registry.md) 对齐 |
 | `selection` | 编辑器选中 SQL / 文档片段 | 解释、改写、优化 |
-| `schema_hint` | 树焦点 / 最近打开对象 | 定向查库，避免盲扫 |
+| `schema_hint` | 树焦点 / 最近打开对象（通用 path，catalog 仅派生） | 定向对象，避免盲扫 |
 | `diagnostics` | 报错、Explain、慢查询摘要 | 诊断问答 |
 | `attachments` | 用户显式 `@` 附加 | 可多选；有体积上限 |
 | `skills` | 匹配的 Skill 模板 | 运维剧本 |
@@ -336,7 +336,7 @@ SettingsView 左导航（规划）
 - [x] **结构化 `context` 入 `chat.stream`**（不再仅依赖 prompt 附录）  
 - [x] Orchestrator：`NormalizeContext` 截断与脱敏（长度上限、剥离密钥样式字段）  
 - [x] Assemble：system + context 摘要 + user 正文分轨（用户消息库表仍存可见正文）  
-- [x] 诊断槽位浅接入（查询 lastError）+ schema_hint（Tab props）+ 编辑器「询问 AI」命令  
+- [x] 诊断槽位浅接入（查询 lastError）+ schema_hint（连接树焦点优先，其次 Tab props）+ 编辑器「询问 AI」命令  
 
 **验收**：选中一段 SQL → `@` 附加 → 回复明确引用该片段；刷新后用户消息不丢 chip；后端日志可见截断生效。
 
@@ -473,10 +473,10 @@ StartStream
 | 项 | 约定 |
 |----|------|
 | 位置 | `platform/internal/ai/host/`（与 Loop 同进程）；**不**进 L1，**不**按引擎再开 MCP 进程 |
-| 工具名 | `sql_list_schemas` / `sql_list_tables` / `sql_describe_table` / `sql_run_readonly` |
-| 路由 | `moduleId` 或连接 `kind` → namespace（`vastbase` / `postgres` / `mysql` / …）→ `{ns}.catalog.*` / `{ns}.query.exec` |
+| 工具名 | `sql_*` · `ssh_*` · `redis_*` · `mongo_list_databases` / `mongo_list_collections` / `mongo_find` / `mongo_schema_sample` / `mongo_run_readonly` / `mongo_exec` |
+| 路由 | `moduleId` 或连接 `kind` → namespace（`vastbase` / `postgres` / `mysql` / `ssh` / `redis` / …）→ 已有 `{ns}.*` Bridge |
 | 鉴权 | 与 Web 相同：`sessionId` 优先，否则 `profileId` + platform 注入凭据 |
-| 风险 | 全部 `read`；`sql_run_readonly` 另加 SELECT/WITH 白名单（第一道滤网，硬闸在会话/账号） |
+| 风险 | 只读自动执行；`sql_run_readonly` / `redis_run_readonly` / `mongo_run_readonly` 另加白名单（第一道滤网）；`sql_exec` / `redis_exec` / `mongo_exec` / `ssh_exec` 需确认 |
 
 禁止：在 `vastbase-service` 增加 `ai.*`；在 Loop 里写 SQL；为 MySQL/PG 再做 `mcp-*-readonly`。
 

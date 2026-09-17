@@ -54,6 +54,20 @@ func TestMergeWorkspaceArgsMySQLSchemaFromDatabase(t *testing.T) {
 	}
 }
 
+func TestMergeWorkspaceArgsInjectsCollection(t *testing.T) {
+	n := NormalizeContext(&ContextDraft{
+		Workspace: &ContextWorkspace{ProfileID: "p1", SessionID: "s1", Collection: "users"},
+	})
+	raw := mergeWorkspaceArgs(`{}`, n)
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatal(err)
+	}
+	if obj["collection"] != "users" {
+		t.Fatalf("%v", obj)
+	}
+}
+
 func TestMergeWorkspaceArgsInjectsCwd(t *testing.T) {
 	n := NormalizeContext(&ContextDraft{
 		Workspace: &ContextWorkspace{ProfileID: "p1", SessionID: "s1", Cwd: "/var/log"},
@@ -92,6 +106,36 @@ func TestBuildEnabledToolDefsIncludesHostSQL(t *testing.T) {
 	b, ok := bound[host.ToolListTables]
 	if !ok || b.HostName != host.ToolListTables {
 		t.Fatalf("missing host tool: %+v", bound)
+	}
+}
+
+func TestBuildEnabledToolDefsIncludesHostRedis(t *testing.T) {
+	s := New(Deps{Host: stubHostRuntime{}})
+	defs, bound, err := s.buildEnabledToolDefs(context.Background(), "redis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 6 {
+		t.Fatalf("defs=%d", len(defs))
+	}
+	b, ok := bound[host.ToolRedisScanKeys]
+	if !ok || b.HostName != host.ToolRedisScanKeys || b.Server.ServerID != host.ServerIDRedis {
+		t.Fatalf("missing redis host tool: %+v", bound)
+	}
+}
+
+func TestBuildEnabledToolDefsIncludesHostMongo(t *testing.T) {
+	s := New(Deps{Host: stubHostRuntime{}})
+	defs, bound, err := s.buildEnabledToolDefs(context.Background(), "mongodb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 6 {
+		t.Fatalf("defs=%d", len(defs))
+	}
+	b, ok := bound[host.ToolMongoFind]
+	if !ok || b.HostName != host.ToolMongoFind || b.Server.ServerID != host.ServerIDMongo {
+		t.Fatalf("missing mongo host tool: %+v", bound)
 	}
 }
 

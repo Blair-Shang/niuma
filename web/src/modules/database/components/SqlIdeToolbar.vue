@@ -1,22 +1,24 @@
 <script setup lang="ts">
 /**
- * IDE 图标工具条：identity 只读展示库/对象名；items 声明图标按钮、分段切换、过滤输入。
+ * IDE 图标工具条：identity 只读展示库/对象名；items 声明图标按钮、分段、过滤、下拉。
  * 过滤框回车发出 filterSubmit。槽位只留给 Popover 触发器等无法用 items 表达的控件。
  */
 import { computed, useSlots } from 'vue'
-import { RsIcon, RsInput } from '@niuma/ui'
+import { RsIcon, RsInput, RsSelect } from '@niuma/ui'
 import SqlIdeToolbarItems from './SqlIdeToolbarItems.vue'
 import SqlQueryIdentity from './SqlQueryIdentity.vue'
 import {
   isSqlIdeToolbarAction,
   isSqlIdeToolbarFilter,
   isSqlIdeToolbarModes,
+  isSqlIdeToolbarSelect,
   isSqlIdeToolbarSep,
   type SqlIdeToolbarAction,
   type SqlIdeToolbarFilter,
   type SqlIdeToolbarIdentityPart,
   type SqlIdeToolbarItem,
   type SqlIdeToolbarModes,
+  type SqlIdeToolbarSelect,
   type SqlIdeToolbarSep,
 } from '../types/sql-ide-toolbar'
 
@@ -47,6 +49,7 @@ const emit = defineEmits<{
   filter: [itemKey: string, value: string]
   /** 过滤框回车，供需要显式应用条件的页面使用 */
   filterSubmit: [itemKey: string]
+  select: [itemKey: string, value: string]
 }>()
 
 const slots = useSlots()
@@ -57,6 +60,10 @@ const modeItems = computed((): SqlIdeToolbarModes[] =>
 
 const filterItems = computed((): SqlIdeToolbarFilter[] =>
   props.items.filter(isSqlIdeToolbarFilter),
+)
+
+const selectItems = computed((): SqlIdeToolbarSelect[] =>
+  props.items.filter(isSqlIdeToolbarSelect),
 )
 
 const buttonItems = computed((): Array<SqlIdeToolbarAction | SqlIdeToolbarSep> =>
@@ -90,6 +97,14 @@ const trailFilters = computed(() =>
   filterItems.value.filter((item) => (item.align ?? 'trail') === 'trail'),
 )
 
+const leadSelects = computed(() =>
+  selectItems.value.filter((item) => (item.align ?? 'lead') === 'lead'),
+)
+
+const trailSelects = computed(() =>
+  selectItems.value.filter((item) => item.align === 'trail'),
+)
+
 const resolvedIdentityParts = computed((): SqlIdeToolbarIdentityPart[] => {
   const parts = props.identityParts.filter((part) => part.text.trim().length > 0)
   if (parts.length > 0) return parts
@@ -113,6 +128,7 @@ const showLeadSep = computed(
     (leadItems.value.length > 0 ||
       leadModes.value.length > 0 ||
       leadFilters.value.length > 0 ||
+      leadSelects.value.length > 0 ||
       Boolean(slots['lead-start']) ||
       Boolean(slots['lead-end'])),
 )
@@ -122,6 +138,7 @@ const showTrail = computed(
     trailItems.value.length > 0 ||
     trailModes.value.length > 0 ||
     trailFilters.value.length > 0 ||
+    trailSelects.value.length > 0 ||
     Boolean(slots.trail),
 )
 </script>
@@ -146,6 +163,24 @@ const showTrail = computed(
       </div>
       <span v-if="showLeadSep" class="nm-sql-tb__sep" aria-hidden="true" />
       <slot name="lead-start" />
+      <template v-for="item in leadSelects" :key="item.key">
+        <span
+          class="nm-sql-tb__select"
+          :class="{ 'nm-sql-tb__select--wide': item.wide }"
+        >
+          <RsSelect
+            size="sm"
+            :model-value="item.value"
+            :options="item.options"
+            :placeholder="item.placeholder"
+            :disabled="item.disabled"
+            :clearable="item.clearable"
+            :title="item.title"
+            :aria-label="item.title || item.placeholder || item.key"
+            @update:model-value="emit('select', item.key, String($event ?? ''))"
+          />
+        </span>
+      </template>
       <SqlIdeToolbarItems :items="leadItems" @action="emit('action', $event)" />
       <template v-for="group in leadModes" :key="group.key">
         <div class="nm-sql-tb__modes" role="tablist" :aria-label="group.label">
@@ -218,6 +253,24 @@ const showTrail = computed(
             <RsIcon :name="item.icon || 'search'" :size="13" />
           </template>
         </RsInput>
+      </template>
+      <template v-for="item in trailSelects" :key="item.key">
+        <span
+          class="nm-sql-tb__select"
+          :class="{ 'nm-sql-tb__select--wide': item.wide }"
+        >
+          <RsSelect
+            size="sm"
+            :model-value="item.value"
+            :options="item.options"
+            :placeholder="item.placeholder"
+            :disabled="item.disabled"
+            :clearable="item.clearable"
+            :title="item.title"
+            :aria-label="item.title || item.placeholder || item.key"
+            @update:model-value="emit('select', item.key, String($event ?? ''))"
+          />
+        </span>
       </template>
       <SqlIdeToolbarItems :items="trailItems" @action="emit('action', $event)" />
     </div>

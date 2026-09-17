@@ -122,12 +122,15 @@ export type {
   SqlIdeToolbarItem,
   SqlIdeToolbarModeOption,
   SqlIdeToolbarModes,
+  SqlIdeToolbarSelect,
+  SqlIdeToolbarSelectOption,
   SqlIdeToolbarSep,
 } from './types/sql-ide-toolbar'
 export {
   isSqlIdeToolbarAction,
   isSqlIdeToolbarFilter,
   isSqlIdeToolbarModes,
+  isSqlIdeToolbarSelect,
   isSqlIdeToolbarSep,
   sqlIdeToolbarIconButton,
 } from './types/sql-ide-toolbar'

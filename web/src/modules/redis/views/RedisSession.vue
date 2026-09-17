@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { RsButton, RsIcon, RsLoading, RsSelect, useRsToast } from '@niuma/ui'
-import type { RsSelectOptions } from '@niuma/ui'
+import { RsLoading, useRsToast } from '@niuma/ui'
 import { computed, onActivated, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { connectionApi } from '@/api'
@@ -17,6 +16,11 @@ import {
   readRedisDatabaseFromOptions,
   redisDatabaseKey,
 } from '@/modules/redis/composables/useRedisDatabase'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type {
+  SqlIdeToolbarIdentityPart,
+  SqlIdeToolbarItem,
+} from '@/modules/database/types/sql-ide-toolbar'
 import { useSessionActionStore } from '@/stores/session-actions'
 import { useConnTreeSyncStore } from '@/stores/conn-tree-sync'
 import { useTabStore } from '@/stores/tab'
@@ -61,24 +65,93 @@ const { sessionId, acquireSession, reconnectSession } = useSessionLease({
 const redisDb = createRedisDatabaseState(() => sessionId.value, scopeDatabase.value, 'standalone')
 provide(redisDatabaseKey, redisDb)
 
-const dbOptions = computed((): RsSelectOptions =>
+const dbOptions = computed(() =>
   Array.from({ length: 16 }, (_, i) => ({ value: String(i), label: `DB ${i}` })),
 )
 
-const currentDbModel = computed({
-  get: () => String(redisDb.currentDb.value),
-  set: (val: string) => {
-    void switchDatabase(Number.parseInt(val, 10))
-  },
+const paneDefs: Array<{
+  key: RedisSessionTab
+  icon: string
+  labelKey: string
+  hintKey: string
+}> = [
+  { key: 'console', icon: 'terminal', labelKey: 'tabConsole', hintKey: 'tabConsoleHint' },
+  { key: 'keyspace', icon: 'key-round', labelKey: 'tabKeyspace', hintKey: 'tabKeyspaceHint' },
+  { key: 'monitor', icon: 'activity', labelKey: 'tabMonitor', hintKey: 'tabMonitorHint' },
+  { key: 'slowlog', icon: 'timer', labelKey: 'tabSlowlog', hintKey: 'tabSlowlogHint' },
+  { key: 'live', icon: 'radio', labelKey: 'tabLive', hintKey: 'tabLiveHint' },
+]
+
+const identityParts = computed((): SqlIdeToolbarIdentityPart[] => {
+  const name = sessionLabel()
+  const p = profile.value
+  const endpoint = p ? `${p.hostAddress}:${p.portNumber}` : ''
+  const parts: SqlIdeToolbarIdentityPart[] = [
+    { icon: 'redis', text: name, title: endpoint ? `${name} · ${endpoint}` : name },
+  ]
+  if (!redisDb.canSwitchDb.value) {
+    parts.push({
+      icon: 'database',
+      text: t('modules.redis.session.currentDb', { db: redisDb.currentDb.value }),
+      title: t('modules.redis.session.currentDbHint'),
+    })
+  }
+  return parts
 })
 
-const tabs = computed((): Array<{ value: RedisSessionTab; label: string; icon: string }> => [
-  { value: 'console', label: t('modules.redis.session.tabConsole'), icon: 'terminal' },
-  { value: 'keyspace', label: t('modules.redis.session.tabKeyspace'), icon: 'key-round' },
-  { value: 'monitor', label: t('modules.redis.session.tabMonitor'), icon: 'activity' },
-  { value: 'slowlog', label: t('modules.redis.session.tabSlowlog'), icon: 'hourglass' },
-  { value: 'live', label: t('modules.redis.session.tabLive'), icon: 'radio' },
-])
+const toolbarItems = computed((): SqlIdeToolbarItem[] => {
+  const items: SqlIdeToolbarItem[] = []
+  if (redisDb.canSwitchDb.value) {
+    items.push({
+      key: 'db',
+      kind: 'select',
+      value: String(redisDb.currentDb.value),
+      options: dbOptions.value,
+      disabled: !sessionId.value || connecting.value || switchingDb.value,
+      title: t('modules.redis.session.currentDbHint'),
+    })
+    items.push({ key: 'sep-panes', sep: true })
+  }
+  for (const pane of paneDefs) {
+    items.push({
+      key: pane.key,
+      icon: pane.icon,
+      label: t(`modules.redis.session.${pane.labelKey}`),
+      title: t(`modules.redis.session.${pane.hintKey}`),
+      active: activeTab.value === pane.key,
+    })
+  }
+  items.push({
+    key: 'reconnect',
+    icon: 'refresh-cw',
+    title: t('modules.redis.session.reconnect'),
+    disabled: connecting.value,
+    loading: connecting.value && Boolean(sessionId.value),
+    align: 'trail',
+  })
+  return items
+})
+
+function isRedisSessionTab(key: string): key is RedisSessionTab {
+  return paneDefs.some((pane) => pane.key === key)
+}
+
+function onToolbarAction(key: string): void {
+  if (key === 'reconnect') {
+    void reconnect()
+    return
+  }
+  if (isRedisSessionTab(key)) {
+    activeTab.value = key
+  }
+}
+
+function onToolbarSelect(itemKey: string, value: string): void {
+  if (itemKey === 'db') {
+    const db = Number.parseInt(value, 10)
+    if (Number.isFinite(db)) void switchDatabase(db)
+  }
+}
 
 function sessionLabel(): string {
   const p = profile.value
@@ -195,60 +268,14 @@ watch(
 
 <template>
   <div class="nm-redis-session">
-    <header class="nm-redis-session__header">
-      <div class="nm-redis-session__title">
-        <RsIcon name="redis" :size="16" />
-        <span class="nm-redis-session__name">{{ sessionLabel() }}</span>
-        <span v-if="profile" class="nm-redis-session__addr">{{ profile.hostAddress }}:{{ profile.portNumber }}</span>
-        <RsSelect
-          v-if="redisDb.canSwitchDb.value"
-          v-model="currentDbModel"
-          class="nm-redis-session__db-select"
-          size="sm"
-          :options="dbOptions"
-          :disabled="!sessionId || connecting || switchingDb"
-          :title="t('modules.redis.session.currentDbHint')"
-        />
-        <span
-          v-else
-          class="nm-redis-session__db"
-          :title="t('modules.redis.session.currentDbHint')"
-        >
-          {{ t('modules.redis.session.currentDb', { db: redisDb.currentDb.value }) }}
-        </span>
-        <span
-          class="nm-redis-session__status"
-          :class="{
-            'nm-redis-session__status--ok': sessionId && !connecting,
-            'nm-redis-session__status--busy': connecting,
-          }"
-        >
-          {{ connecting ? t('modules.redis.session.connecting') : t('modules.redis.session.connected') }}
-        </span>
-      </div>
-
-      <nav class="nm-redis-session__tabs" role="tablist">
-        <button
-          v-for="tab in tabs"
-          :key="tab.value"
-          type="button"
-          role="tab"
-          class="nm-redis-session__tab"
-          :class="{ 'nm-redis-session__tab--active': activeTab === tab.value }"
-          :aria-selected="activeTab === tab.value"
-          @click="activeTab = tab.value"
-        >
-          <RsIcon :name="tab.icon" :size="14" class="nm-redis-session__tab-icon" />
-          <span class="nm-redis-session__tab-label">{{ tab.label }}</span>
-        </button>
-      </nav>
-
-      <div class="nm-redis-session__actions">
-        <RsButton size="sm" variant="ghost" :loading="connecting" @click="reconnect">
-          {{ t('modules.redis.session.reconnect') }}
-        </RsButton>
-      </div>
-    </header>
+    <SqlIdeToolbar
+      :label="t('modules.redis.session.toolbarAria')"
+      identity-icon="redis"
+      :identity-parts="identityParts"
+      :items="toolbarItems"
+      @action="onToolbarAction"
+      @select="onToolbarSelect"
+    />
 
     <p v-if="error" class="nm-redis-session__error" role="alert">{{ error }}</p>
 
@@ -263,6 +290,7 @@ watch(
       <RedisConsolePane
         v-show="activeTab === 'console'"
         :session-id="sessionId"
+        :tab-id="tabId"
         :host-address="profile?.hostAddress"
         :port-number="profile?.portNumber"
       />
@@ -280,145 +308,6 @@ watch(
   flex-direction: column;
   height: 100%;
   min-height: 0;
-}
-
-.nm-redis-session__header {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-md);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  padding-block: var(--rs-space-xs);
-  border-bottom: 1px solid var(--rs-border-subtle);
-}
-
-.nm-redis-session__title {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  font-weight: 600;
-  min-width: 0;
-}
-
-.nm-redis-session__name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nm-redis-session__addr {
-  font-weight: 400;
-  color: var(--rs-muted);
-  font-size: var(--rs-font-size-sm);
-  white-space: nowrap;
-}
-
-.nm-redis-session__db {
-  font-size: var(--rs-font-size-xs);
-  font-weight: 600;
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
-  padding: 0.05rem 0.45rem;
-  border-radius: var(--rs-radius-sm);
-  background: color-mix(in srgb, var(--rs-primary) 12%, transparent);
-  color: var(--rs-primary);
-  white-space: nowrap;
-}
-
-.nm-redis-session__db-select {
-  width: 5.5rem;
-  flex-shrink: 0;
-}
-
-.nm-redis-session__db-select :deep(.rs-field) {
-  margin: 0;
-}
-
-.nm-redis-session__status {
-  font-size: var(--rs-font-size-xs);
-  font-weight: 500;
-  padding: 0.05rem 0.5rem;
-  border-radius: 999px;
-  background: var(--rs-surface-subtle);
-  color: var(--rs-muted);
-  white-space: nowrap;
-}
-
-.nm-redis-session__status--ok {
-  background: color-mix(in srgb, var(--rs-success) 16%, transparent);
-  color: var(--rs-success);
-}
-
-.nm-redis-session__status--busy {
-  background: color-mix(in srgb, var(--rs-warning) 16%, transparent);
-  color: var(--rs-warning);
-}
-
-.nm-redis-session__tabs {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-xs);
-  margin-left: auto;
-  flex-wrap: wrap;
-}
-
-.nm-redis-session__tab {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  margin: 0;
-  height: 1.875rem;
-  padding: 0 0.65rem;
-  border: 1px solid transparent;
-  border-radius: var(--rs-radius-sm);
-  background: transparent;
-  box-sizing: border-box;
-  font-family: inherit;
-  font-size: var(--rs-font-size-sm);
-  font-weight: 400;
-  line-height: 1;
-  color: var(--rs-muted);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.nm-redis-session__tab-icon {
-  flex-shrink: 0;
-}
-
-.nm-redis-session__tab :deep(.rs-icon) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.875rem;
-  height: 0.875rem;
-  line-height: 0;
-}
-
-.nm-redis-session__tab :deep(.rs-icon svg) {
-  display: block;
-}
-
-.nm-redis-session__tab-label {
-  display: inline-flex;
-  align-items: center;
-  line-height: 1;
-}
-
-.nm-redis-session__tab:hover {
-  color: var(--rs-text);
-  background: var(--rs-surface-subtle);
-}
-
-.nm-redis-session__tab--active {
-  color: var(--rs-text);
-  background: var(--rs-surface-elevated);
-  border-color: var(--rs-border-subtle);
-}
-
-.nm-redis-session__actions {
-  flex-shrink: 0;
 }
 
 .nm-redis-session__error {

@@ -7,12 +7,68 @@ import { useMongoCommandSuggest } from '@/modules/mongodb/composables/useMongoCo
 import { useMongoShell } from '@/modules/mongodb/composables/useMongoShell'
 import { formatMongoJson } from '@/modules/mongodb/utils/format'
 import { loadMongoToolPaths } from '@/modules/mongodb/utils/tool-paths'
+import {
+  clearEditorSelection,
+  publishEditorSelection,
+} from '@/shell/panels/ai/workspace-context'
+import { useTabStore } from '@/stores/tab'
 
 const props = defineProps<{
   sessionId: string | null
   hostAddress?: string | null
   portNumber?: number | null
 }>()
+
+const tabStore = useTabStore()
+let lastNonEmptySelection = ''
+let clearSelectionTimer = 0
+
+function resolveTabId(): string | undefined {
+  return tabStore.activeTabId || undefined
+}
+
+function cancelScheduledSelectionClear(): void {
+  if (clearSelectionTimer) {
+    window.clearTimeout(clearSelectionTimer)
+    clearSelectionTimer = 0
+  }
+}
+
+function publishTerminalSelection(text: string): void {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  lastNonEmptySelection = trimmed
+  publishEditorSelection({
+    tabId: resolveTabId(),
+    text: trimmed,
+    language: 'javascript',
+    source: 'terminal',
+  })
+}
+
+function onSelectionChange(raw: string): void {
+  const text = raw.trim()
+  const tabId = resolveTabId()
+  cancelScheduledSelectionClear()
+  if (!text) {
+    clearSelectionTimer = window.setTimeout(() => {
+      clearSelectionTimer = 0
+      clearEditorSelection(tabId)
+    }, 400)
+    return
+  }
+  publishTerminalSelection(text)
+}
+
+async function askAiAboutSelection(textFromMenu = ''): Promise<void> {
+  const live = (terminalRef.value?.getSelection() ?? '').trim()
+  const text = (textFromMenu || live || lastNonEmptySelection).trim()
+  if (text) {
+    publishTerminalSelection(text)
+  }
+  const { executeCommand } = await import('@/extensions/contributions/command-registry')
+  await executeCommand('workbench.ai.askSelection')
+}
 
 const LOCAL_CLEAR_COMMANDS = new Set(['clear', 'cls'])
 const MAX_HISTORY_ENTRIES = 500
@@ -611,6 +667,7 @@ watch(
 onBeforeUnmount(() => {
   pendingOutput = ''
   flushScheduled = false
+  cancelScheduledSelectionClear()
   clearSuggest()
   pty.close().catch(() => undefined)
 })
@@ -623,8 +680,11 @@ onBeforeUnmount(() => {
       class="nm-mongo-console__terminal"
       :overlay="overlayText"
       :convert-eol="false"
+      show-ask-ai
       @data="onData"
       @ready="onReady"
+      @selection-change="onSelectionChange"
+      @ask-ai="(text) => void askAiAboutSelection(text)"
     />
     <p class="nm-mongo-console__hint">
       {{

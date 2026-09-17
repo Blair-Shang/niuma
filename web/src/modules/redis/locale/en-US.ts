@@ -29,10 +29,16 @@ export default {
         currentDbHint: 'Logical database for this session; switch from the dropdown or run SELECT in the console',
         selectDbError: 'Failed to switch logical database',
         tabConsole: 'Console',
-        tabKeyspace: 'Keyspace',
-        tabMonitor: 'Monitor',
+        tabConsoleHint: 'Redis CLI',
+        tabKeyspace: 'Browser',
+        tabKeyspaceHint: 'Browse keys (SCAN)',
+        tabMonitor: 'INFO',
+        tabMonitorHint: 'Server metrics (INFO)',
         tabSlowlog: 'Slow log',
-        tabLive: 'Live monitor',
+        tabSlowlogHint: 'Slow query log (SLOWLOG)',
+        tabLive: 'MONITOR',
+        tabLiveHint: 'Live command stream (MONITOR)',
+        toolbarAria: 'Redis session',
       },
       console: {
         empty: 'Type a command and press Enter, e.g. GET foo. Type clear to clear the screen',
@@ -44,6 +50,7 @@ export default {
       keyspace: {
         typeAll: 'All types',
         patternPlaceholder: 'Match pattern, e.g. user:*',
+        toolbarAria: 'Key browser',
         scan: 'Scan',
         scanning: 'Scanning keyspace…',
         count: '{count} keys',
@@ -66,6 +73,7 @@ export default {
         },
       },
       monitor: {
+        toolbarAria: 'INFO',
         refresh: 'Refresh',
         autoOff: 'Off',
         updatedAt: 'Updated at {time}',
@@ -145,6 +153,7 @@ export default {
       },
       slowlog: {
         title: 'Slow log',
+        toolbarAria: 'Slow log',
         refresh: 'Refresh',
         countLabel: 'Count',
         entryCount: '{count} entries',
@@ -166,6 +175,7 @@ export default {
       },
       live: {
         title: 'Live command stream',
+        toolbarAria: 'Live command stream',
         start: 'Start monitor',
         stop: 'Stop monitor',
         pause: 'Pause',

@@ -85,6 +85,73 @@ func TestNormalizeContext_sshWorkspace(t *testing.T) {
 	}
 }
 
+func TestNormalizeContext_redisWorkspace(t *testing.T) {
+	draft := &ContextDraft{
+		Workspace: &ContextWorkspace{
+			ModuleID:  "redis",
+			ProfileID: "p-redis",
+			SessionID: "s-redis",
+			Title:     "cache",
+			Database:  "2",
+		},
+	}
+	n := NormalizeContext(draft)
+	if n.Workspace == nil || n.Workspace.Database != "2" {
+		t.Fatalf("db: %+v", n.Workspace)
+	}
+	if !strings.Contains(n.PromptBlock, "db=2") {
+		t.Fatalf("missing db: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "[Workspace · Redis]") {
+		t.Fatalf("missing redis workspace rules: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "redis_*") {
+		t.Fatalf("missing redis tool hint: %q", n.PromptBlock)
+	}
+}
+
+func TestNormalizeContext_mongoWorkspace(t *testing.T) {
+	draft := &ContextDraft{
+		Workspace: &ContextWorkspace{
+			ModuleID:   "mongodb",
+			ProfileID:  "p-mongo",
+			SessionID:  "s-mongo",
+			Title:      "app",
+			Database:   "shop",
+			Collection: "users",
+		},
+		Attachments: []ContextAttachment{{
+			ID:    "schema:tree:res:p-mongo:database:shop:collection:users",
+			Kind:  "schema",
+			Label: "shop.users",
+			Payload: map[string]any{
+				"database":   "shop",
+				"collection": "users",
+				"path": []any{
+					map[string]any{"kind": "database", "name": "shop"},
+					map[string]any{"kind": "collection", "name": "users"},
+				},
+			},
+		}},
+	}
+	n := NormalizeContext(draft)
+	if n.Workspace == nil || n.Workspace.Collection != "users" {
+		t.Fatalf("collection: %+v", n.Workspace)
+	}
+	if !strings.Contains(n.PromptBlock, "collection=users") {
+		t.Fatalf("missing collection: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "path=database:shop/collection:users") {
+		t.Fatalf("missing path: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "[Workspace · MongoDB]") {
+		t.Fatalf("missing mongo workspace rules: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "mongo_*") {
+		t.Fatalf("missing mongo tool hint: %q", n.PromptBlock)
+	}
+}
+
 func TestNormalizeContext_stripsSecrets(t *testing.T) {
 	draft := &ContextDraft{
 		Attachments: []ContextAttachment{{

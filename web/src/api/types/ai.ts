@@ -286,6 +286,8 @@ export interface AiContextDraft {
     title?: string
     database?: string
     schema?: string
+    /** MongoDB 当前集合（不要塞进 table） */
+    collection?: string
     /** SSH/SFTP 当前远程目录 */
     cwd?: string
     dialectFamily?: string

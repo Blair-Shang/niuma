@@ -31,7 +31,7 @@ type boundTool struct {
 }
 
 // buildEnabledToolDefs 读取官方 host + 已启用 MCP 工具并生成 OpenAI tools + 名称映射。
-// moduleID 用于按当前页签挑选 sql_* / ssh_*，避免 SSH 会话误暴露查库工具。
+// moduleID 用于按当前页签挑选 sql_* / ssh_* / redis_*，避免跨族误暴露工具。
 func (s *Service) buildEnabledToolDefs(ctx context.Context, moduleID string) ([]ToolDef, map[string]boundTool, error) {
 	if s == nil {
 		return nil, nil, nil
@@ -417,6 +417,9 @@ func mergeWorkspaceArgs(rawArgs string, normalized NormalizedContext) json.RawMe
 		}
 		if _, ok := obj["database"]; !ok && normalized.Workspace.Database != "" {
 			obj["database"] = normalized.Workspace.Database
+		}
+		if _, ok := obj["collection"]; !ok && normalized.Workspace.Collection != "" {
+			obj["collection"] = normalized.Workspace.Collection
 		}
 		if _, ok := obj["schema"]; !ok {
 			if normalized.Workspace.Schema != "" {

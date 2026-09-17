@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { RsButton, RsCard, RsEmpty, RsIcon, RsLoading, RsTooltip, RsTooltipProvider } from '@niuma/ui'
+import { RsCard, RsEmpty, RsIcon, RsLoading, RsTooltip, RsTooltipProvider } from '@niuma/ui'
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { RedisMonitorMetricsResult } from '@/api/types/redis'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type { SqlIdeToolbarItem } from '@/modules/database/types/sql-ide-toolbar'
 import { useRedisMonitor } from '@/modules/redis/composables/useRedisMonitor'
 import { formatBytes, formatUptime } from '@/modules/redis/utils/format'
 
@@ -35,6 +37,35 @@ const { metrics, loading, error, collectedAt, autoInterval, refresh, setAutoInte
 const autoOptions = [0, 2, 5, 10, 30] as const
 
 const collectedAtLabel = computed(() => (collectedAt.value ? collectedAt.value.toLocaleTimeString() : '--'))
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => [
+  {
+    key: 'refresh',
+    icon: 'refresh-cw',
+    title: t('modules.redis.monitor.refresh'),
+    loading: loading.value,
+    disabled: !props.sessionId,
+  },
+  {
+    key: 'auto',
+    kind: 'modes',
+    align: 'trail',
+    label: t('modules.redis.monitor.toolbarAria'),
+    value: String(autoInterval.value),
+    options: autoOptions.map((opt) => ({
+      key: String(opt),
+      label: opt === 0 ? t('modules.redis.monitor.autoOff') : `${opt}s`,
+    })),
+  },
+])
+
+function onToolbarAction(key: string): void {
+  if (key === 'refresh') void refresh()
+}
+
+function onToolbarMode(itemKey: string, value: string): void {
+  if (itemKey === 'auto') setAutoInterval(Number.parseInt(value, 10) || 0)
+}
 
 function tip(key: string): string {
   return t(`modules.redis.monitor.tooltips.${key}`)
@@ -165,32 +196,17 @@ watch(
 
 <template>
   <div class="nm-redis-monitor">
-    <RsTooltipProvider>
-      <div class="nm-redis-monitor__toolbar">
-        <RsTooltip :content="t('modules.redis.monitor.tooltips.source')">
-          <RsButton size="sm" variant="ghost" :loading="loading" @click="refresh">
-            <RsIcon name="refresh-cw" :size="14" />
-            {{ t('modules.redis.monitor.refresh') }}
-          </RsButton>
-        </RsTooltip>
-        <div class="nm-redis-monitor__seg">
-          <button
-            v-for="opt in autoOptions"
-            :key="opt"
-            type="button"
-            class="nm-redis-monitor__seg-btn"
-            :class="{ 'nm-redis-monitor__seg-btn--active': autoInterval === opt }"
-            @click="setAutoInterval(opt)"
-          >
-            {{ opt === 0 ? t('modules.redis.monitor.autoOff') : `${opt}s` }}
-          </button>
-        </div>
-        <span class="nm-redis-monitor__updated">
-          <span v-if="autoInterval > 0" class="nm-redis-monitor__live-dot" aria-hidden="true" />
-          {{ t('modules.redis.monitor.updatedAt', { time: collectedAtLabel }) }}
-        </span>
-      </div>
-
+    <SqlIdeToolbar
+      :label="t('modules.redis.monitor.toolbarAria')"
+      identity-icon="activity"
+      :identity="t('modules.redis.session.tabMonitor')"
+      :identity-title="t('modules.redis.monitor.updatedAt', { time: collectedAtLabel })"
+      :items="toolbarItems"
+      @action="onToolbarAction"
+      @mode="onToolbarMode"
+    />
+    <RsTooltipProvider class="nm-redis-monitor__main">
+      <div class="nm-redis-monitor__body">
       <p v-if="error" class="nm-redis-monitor__error" role="alert">{{ error }}</p>
 
       <RsLoading v-if="loading && !metrics" class="nm-redis-monitor__placeholder" show-label :label="t('modules.redis.monitor.loading')" />
@@ -204,7 +220,7 @@ watch(
             class="nm-redis-monitor__card-wrap"
             :class="`nm-redis-monitor__card-wrap--${card.accent}`"
           >
-            <RsCard variant="plain" :padding="false" class="nm-redis-monitor__card">
+            <RsCard variant="plain" :padding="false" radius="md" class="nm-redis-monitor__card">
               <template #header>
                 <div class="nm-redis-monitor__card-head">
                   <span class="nm-redis-monitor__card-icon" aria-hidden="true">
@@ -234,7 +250,7 @@ watch(
         </div>
 
         <div class="nm-redis-monitor__card-wrap nm-redis-monitor__card-wrap--keyspace">
-          <RsCard variant="plain" :padding="false">
+          <RsCard variant="plain" :padding="false" radius="md" class="nm-redis-monitor__card">
             <template #header>
               <div class="nm-redis-monitor__card-head">
                 <span class="nm-redis-monitor__card-icon" aria-hidden="true">
@@ -267,6 +283,7 @@ watch(
           </RsCard>
         </div>
       </div>
+      </div>
     </RsTooltipProvider>
   </div>
 </template>
@@ -277,84 +294,20 @@ watch(
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: var(--rs-space-sm);
+}
+
+.nm-redis-monitor__main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nm-redis-monitor__body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: var(--rs-space-sm) var(--rs-space-md);
-}
-
-.nm-redis-monitor__toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  padding: var(--rs-space-sm) var(--rs-space-md);
-  border-radius: var(--rs-radius-md);
-  border: 1px solid color-mix(in srgb, var(--rs-primary) 22%, var(--rs-border-subtle));
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--rs-primary) 10%, var(--rs-surface-elevated)),
-    color-mix(in srgb, var(--rs-info) 8%, var(--rs-surface-elevated))
-  );
-}
-
-.nm-redis-monitor__seg {
-  display: flex;
-  border-radius: var(--rs-radius-sm);
-  border: 1px solid var(--rs-border-subtle);
-  overflow: hidden;
-}
-
-.nm-redis-monitor__seg-btn {
-  appearance: none;
-  margin: 0;
-  padding: 0.25rem 0.55rem;
-  border: none;
-  background: transparent;
-  font: inherit;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
-  cursor: pointer;
-}
-
-.nm-redis-monitor__seg-btn:hover {
-  color: var(--rs-text);
-}
-
-.nm-redis-monitor__seg-btn--active {
-  background: var(--rs-primary);
-  color: var(--rs-primary-foreground, #fff);
-}
-
-.nm-redis-monitor__updated {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-left: auto;
-  font-size: var(--rs-font-size-xs);
-  color: var(--rs-muted);
-  white-space: nowrap;
-}
-
-.nm-redis-monitor__live-dot {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: var(--rs-radius-full);
-  background: var(--rs-success);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rs-success) 28%, transparent);
-  animation: nm-redis-monitor-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes nm-redis-monitor-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.88);
-  }
+  padding: var(--rs-space-sm);
 }
 
 .nm-redis-monitor__error {
@@ -390,17 +343,18 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-radius: var(--rs-radius-lg);
+  border: 1px solid color-mix(in srgb, var(--nm-monitor-accent) 20%, var(--rs-border-subtle));
+  border-radius: var(--rs-radius);
   overflow: hidden;
   background: color-mix(in srgb, var(--nm-monitor-accent) 7%, var(--rs-surface-elevated));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--nm-monitor-accent) 20%, var(--rs-border-subtle)),
-    0 4px 14px color-mix(in srgb, var(--nm-monitor-accent) 10%, transparent);
 }
 
 .nm-redis-monitor__card {
   flex: 1;
   min-height: 100%;
+  border: none;
+  box-shadow: none;
+  background: transparent;
 }
 
 .nm-redis-monitor__card-wrap::before {
@@ -408,7 +362,7 @@ watch(
   position: absolute;
   inset: 0 auto auto 0;
   width: 100%;
-  height: 3px;
+  height: 1px;
   background: linear-gradient(
     90deg,
     var(--nm-monitor-accent),

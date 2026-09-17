@@ -6,14 +6,15 @@ alwaysApply: false
 
 # IDE 顶栏全局复用
 
-SQL / Mongo / SQLite / ClickHouse 等 IDE 页共用 `SqlIdeToolbar`（高度 `var(--nm-tabbar-h)`，与 Shell header 同为 34px）。业务页只声明 `items` 并处理 `@action` / `@mode` / `@filter`（JSON 等需显式应用时再听 `@filter-submit`）。库名用 `identity`。
+SQL / Mongo / SQLite / ClickHouse 等 IDE 页共用 `SqlIdeToolbar`（高度 `var(--nm-tabbar-h)`，与 Shell header 同为 34px）。业务页只声明 `items` 并处理 `@action` / `@mode` / `@filter` / `@select`（JSON 等需显式应用时再听 `@filter-submit`）。库名用 `identity`。
 
 ## 必须
 
-- 新能力加到 `types/sql-ide-toolbar.ts` 的通用 `kind`（action / sep / modes / filter）。库/集合等只读身份用 `identity` 或 `identityParts`（多段图标+文案，中间点号），不要做成输入框。
+- 新能力加到 `types/sql-ide-toolbar.ts` 的通用 `kind`（action / sep / modes / filter / select）。库/集合等只读身份用 `identity` 或 `identityParts`（多段图标+文案，中间点号），不要做成输入框。
+- 整页工作面切换用带 `label` + `active` 的独立 action，不要用 `modes` 冒充 Tab；`modes` 只给同一面板内的互斥档位（如自动刷新间隔）。
 - 样式只进 `sql-ide-toolbar.css`；槽位只留给 Popover 触发器等 items 表达不了的控件
 - 文本输入一律 `RsInput` `size="sm"`；图标按钮一律 `RsButton`（`v-bind="sqlIdeToolbarIconButton"`）。颜色用 `tone`（执行 `success`、停止 `danger`），禁止再包一层按钮组件，禁止原生 `button` / `input`
-- Mongo 页直接 import `SqlIdeToolbar.vue` + types，不要经 `@/modules/database` barrel（HMR）
+- Mongo / Redis 页直接 import `SqlIdeToolbar.vue` + types，不要经 `@/modules/database` barrel（HMR）
 
 ## 禁止
 

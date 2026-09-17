@@ -30,6 +30,8 @@ export interface SqlIdeToolbarAction {
   tone?: RsButtonTone
   /** 默认 lead（身份右侧）；trail 靠右 */
   align?: 'lead' | 'trail'
+  /** 当前选中（整页视图切换等），对应 aria-pressed */
+  active?: boolean
 }
 
 /** SqlIdeToolbar 分隔线。 */
@@ -66,11 +68,33 @@ export interface SqlIdeToolbarFilter {
   align?: 'lead' | 'trail'
 }
 
+/** SqlIdeToolbar 下拉选项。 */
+export interface SqlIdeToolbarSelectOption {
+  value: string
+  label: string
+}
+
+/** SqlIdeToolbar 下拉选择（逻辑库、类型过滤等）。 */
+export interface SqlIdeToolbarSelect {
+  key: string
+  kind: 'select'
+  value: string
+  options: SqlIdeToolbarSelectOption[]
+  placeholder?: string
+  disabled?: boolean
+  clearable?: boolean
+  title?: string
+  /** 更宽，给类型名等稍长选项 */
+  wide?: boolean
+  align?: 'lead' | 'trail'
+}
+
 export type SqlIdeToolbarItem =
   | SqlIdeToolbarAction
   | SqlIdeToolbarSep
   | SqlIdeToolbarModes
   | SqlIdeToolbarFilter
+  | SqlIdeToolbarSelect
 
 /** 是否为工具条分隔项。 */
 export function isSqlIdeToolbarSep(item: SqlIdeToolbarItem): item is SqlIdeToolbarSep {
@@ -87,11 +111,17 @@ export function isSqlIdeToolbarFilter(item: SqlIdeToolbarItem): item is SqlIdeTo
   return 'kind' in item && item.kind === 'filter'
 }
 
+/** 是否为下拉选择项。 */
+export function isSqlIdeToolbarSelect(item: SqlIdeToolbarItem): item is SqlIdeToolbarSelect {
+  return 'kind' in item && item.kind === 'select'
+}
+
 /** 是否为图标按钮。 */
 export function isSqlIdeToolbarAction(item: SqlIdeToolbarItem): item is SqlIdeToolbarAction {
   return (
     !isSqlIdeToolbarSep(item) &&
     !isSqlIdeToolbarModes(item) &&
-    !isSqlIdeToolbarFilter(item)
+    !isSqlIdeToolbarFilter(item) &&
+    !isSqlIdeToolbarSelect(item)
   )
 }

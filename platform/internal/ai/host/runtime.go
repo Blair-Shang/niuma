@@ -19,6 +19,10 @@ const (
 	ServerIDSQL = "host_sql"
 	// ServerIDSSH 是官方 ssh_* 工具的 invocation server_id。
 	ServerIDSSH = "host_ssh"
+	// ServerIDRedis 是官方 redis_* 工具的 invocation server_id。
+	ServerIDRedis = "host_redis"
+	// ServerIDMongo 是官方 mongo_* 工具的 invocation server_id。
+	ServerIDMongo = "host_mongo"
 )
 
 // 官方 SQL 只读工具名（须符合 ^[a-zA-Z0-9_-]+$）。
@@ -38,6 +42,26 @@ const (
 	ToolSSHHostMetrics    = "ssh_host_metrics"
 	ToolSSHInspectProcess = "ssh_inspect_process"
 	ToolSSHExec           = "ssh_exec"
+)
+
+// 官方 Redis 工具名（须符合 ^[a-zA-Z0-9_-]+$）。
+const (
+	ToolRedisListDatabases = "redis_list_databases"
+	ToolRedisScanKeys      = "redis_scan_keys"
+	ToolRedisInfo          = "redis_info"
+	ToolRedisSlowlog       = "redis_slowlog"
+	ToolRedisRunReadonly   = "redis_run_readonly"
+	ToolRedisExec          = "redis_exec"
+)
+
+// 官方 MongoDB 工具名（须符合 ^[a-zA-Z0-9_-]+$）。
+const (
+	ToolMongoListDatabases   = "mongo_list_databases"
+	ToolMongoListCollections = "mongo_list_collections"
+	ToolMongoFind            = "mongo_find"
+	ToolMongoSchemaSample    = "mongo_schema_sample"
+	ToolMongoRunReadonly     = "mongo_run_readonly"
+	ToolMongoExec            = "mongo_exec"
 )
 
 // Runtime 由 handler 注入：走与 Web 相同的 Capability Dispatch。
@@ -78,9 +102,29 @@ func IsSSHTool(name string) bool {
 	}
 }
 
+// IsRedisTool 判断名称是否为官方 redis_*。
+func IsRedisTool(name string) bool {
+	switch name {
+	case ToolRedisListDatabases, ToolRedisScanKeys, ToolRedisInfo, ToolRedisSlowlog, ToolRedisRunReadonly, ToolRedisExec:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsMongoTool 判断名称是否为官方 mongo_*。
+func IsMongoTool(name string) bool {
+	switch name {
+	case ToolMongoListDatabases, ToolMongoListCollections, ToolMongoFind, ToolMongoSchemaSample, ToolMongoRunReadonly, ToolMongoExec:
+		return true
+	default:
+		return false
+	}
+}
+
 // IsHostTool 判断名称是否为任一官方 host 工具。
 func IsHostTool(name string) bool {
-	return IsSQLTool(name) || IsSSHTool(name)
+	return IsSQLTool(name) || IsSSHTool(name) || IsRedisTool(name) || IsMongoTool(name)
 }
 
 // Call 执行官方 host 工具，结果为给模型看的 JSON 文本。
@@ -90,6 +134,10 @@ func Call(ctx context.Context, rt Runtime, name string, args map[string]any) (st
 		return CallSQL(ctx, rt, name, args)
 	case IsSSHTool(name):
 		return CallSSH(ctx, rt, name, args)
+	case IsRedisTool(name):
+		return CallRedis(ctx, rt, name, args)
+	case IsMongoTool(name):
+		return CallMongo(ctx, rt, name, args)
 	default:
 		return "", fmt.Errorf("unknown host tool: %s", name)
 	}

@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import {
-  RsButton,
   RsCard,
   RsEmpty,
   RsIcon,
-  RsInput,
   RsTooltip,
   RsTooltipProvider,
   RsVirtualList,
@@ -13,6 +11,8 @@ import {
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { RedisMonitorLineEvent } from '@/api/types/redis'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type { SqlIdeToolbarItem } from '@/modules/database/types/sql-ide-toolbar'
 import { useRedisMonitorStream } from '@/modules/redis/composables/useRedisMonitorStream'
 
 const props = defineProps<{
@@ -59,6 +59,46 @@ const filteredLines = computed(() => {
 })
 
 const lineCountLabel = computed(() => t('modules.redis.live.lineCount', { count: lines.value.length }))
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => [
+  {
+    key: 'toggle',
+    icon: running.value ? 'square' : 'play',
+    tone: running.value ? 'danger' : 'success',
+    title: running.value ? t('modules.redis.live.tooltips.stop') : t('modules.redis.live.tooltips.start'),
+    label: running.value ? t('modules.redis.live.stop') : t('modules.redis.live.start'),
+    disabled: !props.sessionId && !running.value,
+  },
+  {
+    key: 'pause',
+    icon: paused.value ? 'play' : 'pause',
+    title: paused.value ? t('modules.redis.live.tooltips.resume') : t('modules.redis.live.tooltips.pause'),
+    disabled: !running.value,
+  },
+  {
+    key: 'filter',
+    kind: 'filter',
+    value: filterText.value,
+    placeholder: t('modules.redis.live.filterPlaceholder'),
+  },
+  {
+    key: 'clear',
+    icon: 'eraser',
+    title: t('modules.redis.live.tooltips.clear'),
+    disabled: lines.value.length === 0,
+    align: 'trail',
+  },
+])
+
+function onToolbarAction(key: string): void {
+  if (key === 'toggle') void toggle()
+  else if (key === 'pause') paused.value = !paused.value
+  else if (key === 'clear') clearLines()
+}
+
+function onToolbarFilter(itemKey: string, value: string): void {
+  if (itemKey === 'filter') filterText.value = value
+}
 
 /** 跟随最新一行；用户向下滚动查看历史时暂停 */
 const followLatest = ref(true)
@@ -186,51 +226,21 @@ watch(
 
 <template>
   <div class="nm-redis-live">
-    <RsTooltipProvider>
-      <section class="nm-redis-live__toolbar">
-        <div class="nm-redis-live__actions">
-          <RsTooltip :content="running ? t('modules.redis.live.tooltips.stop') : t('modules.redis.live.tooltips.start')" side="bottom">
-            <RsButton size="sm" :variant="running ? 'danger' : 'primary'" @click="toggle">
-              <RsIcon :name="running ? 'square' : 'play'" :size="14" />
-              {{ running ? t('modules.redis.live.stop') : t('modules.redis.live.start') }}
-            </RsButton>
-          </RsTooltip>
-          <RsTooltip :content="paused ? t('modules.redis.live.tooltips.resume') : t('modules.redis.live.tooltips.pause')" side="bottom">
-            <RsButton size="sm" variant="ghost" :disabled="!running" @click="paused = !paused">
-              <RsIcon :name="paused ? 'play' : 'pause'" :size="14" />
-              {{ paused ? t('modules.redis.live.resume') : t('modules.redis.live.pause') }}
-            </RsButton>
-          </RsTooltip>
-          <RsInput
-            v-model="filterText"
-            class="nm-redis-live__filter"
-            size="sm"
-            autocomplete="off"
-            :placeholder="t('modules.redis.live.filterPlaceholder')"
-          >
-            <template #prefix>
-              <RsIcon name="search" :size="14" />
-            </template>
-          </RsInput>
-          <RsTooltip :content="t('modules.redis.live.tooltips.clear')" side="bottom">
-            <RsButton size="sm" variant="ghost" :disabled="lines.length === 0" @click="clearLines">
-              <RsIcon name="eraser" :size="14" />
-            </RsButton>
-          </RsTooltip>
-        </div>
-        <div class="nm-redis-live__meta">
-          <span v-if="lines.length > 0" class="nm-redis-live__line-badge">{{ lineCountLabel }}</span>
-          <span class="nm-redis-live__status" :class="`nm-redis-live__status--${state}`">
-            <span v-if="state === 'ready'" class="nm-redis-live__live-dot" aria-hidden="true" />
-            {{ t(`modules.redis.live.state.${state}`) }}
-          </span>
-        </div>
-      </section>
+    <SqlIdeToolbar
+      :label="t('modules.redis.live.toolbarAria')"
+      identity-icon="radio"
+      :identity="t('modules.redis.live.title')"
+      :identity-title="`${t(`modules.redis.live.state.${state}`)}${lines.length > 0 ? ` · ${lineCountLabel}` : ''}`"
+      :items="toolbarItems"
+      @action="onToolbarAction"
+      @filter="onToolbarFilter"
+    />
+    <RsTooltipProvider class="nm-redis-live__main">
 
       <p v-if="message && state === 'lost'" class="nm-redis-live__error" role="alert">{{ message }}</p>
 
       <div class="nm-redis-live__card-wrap">
-        <RsCard variant="plain" :padding="false" class="nm-redis-live__card">
+        <RsCard variant="plain" :padding="false" radius="none" class="nm-redis-live__card">
           <template #header>
             <div class="nm-redis-live__card-head">
               <span class="nm-redis-live__card-icon" aria-hidden="true">
@@ -281,111 +291,22 @@ watch(
 
 <style scoped>
 .nm-redis-live {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: var(--rs-space-sm);
-  padding: var(--rs-space-sm) var(--rs-space-md);
 }
 
-.nm-redis-live__toolbar {
+.nm-redis-live__main {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-md);
-  flex-wrap: wrap;
-  padding: var(--rs-space-sm) var(--rs-space-md);
-  border-radius: var(--rs-radius-md);
-  border: 1px solid color-mix(in srgb, var(--rs-success) 28%, var(--rs-border-subtle));
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--rs-success) 12%, var(--rs-surface-elevated)),
-    color-mix(in srgb, var(--rs-primary) 8%, var(--rs-surface-elevated))
-  );
-}
-
-.nm-redis-live__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  flex-wrap: wrap;
-}
-
-.nm-redis-live__filter {
-  width: 14rem;
-}
-
-.nm-redis-live__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  margin-left: auto;
-}
-
-.nm-redis-live__line-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  font-size: var(--rs-font-size-xs);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  background: color-mix(in srgb, var(--rs-success) 16%, transparent);
-  color: var(--rs-success);
-}
-
-.nm-redis-live__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: var(--rs-font-size-xs);
-  font-weight: 500;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  background: var(--rs-surface-subtle);
-  color: var(--rs-muted);
-  white-space: nowrap;
-}
-
-.nm-redis-live__status--ready {
-  background: color-mix(in srgb, var(--rs-success) 16%, transparent);
-  color: var(--rs-success);
-}
-
-.nm-redis-live__status--starting {
-  background: color-mix(in srgb, var(--rs-warning) 16%, transparent);
-  color: var(--rs-warning);
-}
-
-.nm-redis-live__status--lost {
-  background: color-mix(in srgb, var(--rs-danger) 16%, transparent);
-  color: var(--rs-danger);
-}
-
-.nm-redis-live__live-dot {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: var(--rs-radius-full);
-  background: currentColor;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rs-success) 28%, transparent);
-  animation: nm-redis-live-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes nm-redis-live-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.88);
-  }
+  flex-direction: column;
 }
 
 .nm-redis-live__error {
   margin: 0;
+  padding: 0 var(--rs-space-sm);
   color: var(--rs-danger);
   font-size: var(--rs-font-size-sm);
 }
@@ -394,29 +315,14 @@ watch(
   --nm-live-accent: var(--rs-success);
   --nm-live-accent-bg: color-mix(in srgb, var(--nm-live-accent) 14%, transparent);
   position: relative;
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-radius: var(--rs-radius-lg);
+  border: none;
+  border-radius: 0;
   overflow: hidden;
   background: color-mix(in srgb, var(--nm-live-accent) 6%, var(--rs-surface-subtle));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--nm-live-accent) 22%, var(--rs-border-subtle)),
-    0 4px 14px color-mix(in srgb, var(--nm-live-accent) 10%, transparent);
-}
-
-.nm-redis-live__card-wrap::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 100%;
-  height: 3px;
-  background: linear-gradient(
-    90deg,
-    var(--nm-live-accent),
-    color-mix(in srgb, var(--rs-primary) 70%, var(--nm-live-accent))
-  );
-  pointer-events: none;
 }
 
 .nm-redis-live__card {
@@ -424,6 +330,10 @@ watch(
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
 }
 
 .nm-redis-live__card :deep(.rs-card__body) {

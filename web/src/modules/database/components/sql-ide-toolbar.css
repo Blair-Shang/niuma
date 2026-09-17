@@ -93,6 +93,18 @@
   flex: 1 1 6rem;
 }
 
+.nm-sql-tb__select {
+  display: inline-flex;
+  width: 5.75rem;
+  min-width: 4.75rem;
+  margin: 0 4px 0 0;
+  flex-shrink: 0;
+}
+
+.nm-sql-tb__select--wide {
+  width: 8.5rem;
+}
+
 .nm-sql-tb__sep {
   width: 1px;
   height: 16px;

@@ -33,6 +33,8 @@ type ContextWorkspace struct {
 	Title     string `json:"title,omitempty"`
 	Database  string `json:"database,omitempty"`
 	Schema    string `json:"schema,omitempty"`
+	// Collection 是 MongoDB 当前集合（不要塞进 table）。
+	Collection string `json:"collection,omitempty"`
 	// Cwd 是 SSH/SFTP 当前远程目录（由页签 props.remotePath 注入）。
 	Cwd string `json:"cwd,omitempty"`
 	// DialectFamily / Capabilities：前端会话探测结果（DBeaver/Navicat 能力模型）。
@@ -74,6 +76,7 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 		ws.Title = truncateUTF8(strings.TrimSpace(ws.Title), 200)
 		ws.Database = strings.TrimSpace(ws.Database)
 		ws.Schema = strings.TrimSpace(ws.Schema)
+		ws.Collection = strings.TrimSpace(ws.Collection)
 		ws.Cwd = strings.TrimSpace(ws.Cwd)
 		ws.DialectFamily = strings.TrimSpace(ws.DialectFamily)
 		ws.DialectRules = strings.TrimSpace(ws.DialectRules)
@@ -86,7 +89,7 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 			}
 			ws.Capabilities = cleaned
 		}
-		if ws.TabID != "" || ws.ModuleID != "" || ws.ProfileID != "" || ws.SessionID != "" || ws.Title != "" || ws.Database != "" || ws.Schema != "" || ws.Cwd != "" || ws.DialectFamily != "" || len(ws.Capabilities) > 0 || ws.DialectRules != "" {
+		if ws.TabID != "" || ws.ModuleID != "" || ws.ProfileID != "" || ws.SessionID != "" || ws.Title != "" || ws.Database != "" || ws.Schema != "" || ws.Collection != "" || ws.Cwd != "" || ws.DialectFamily != "" || len(ws.Capabilities) > 0 || ws.DialectRules != "" {
 			fillSQLCatalogScope(&ws)
 			out.Workspace = &ws
 		}
@@ -129,6 +132,11 @@ func NormalizeContext(draft *ContextDraft) NormalizedContext {
 			if out.Workspace.Schema == "" {
 				if sch, ok := a.Payload["schema"].(string); ok {
 					out.Workspace.Schema = strings.TrimSpace(sch)
+				}
+			}
+			if out.Workspace.Collection == "" {
+				if coll, ok := a.Payload["collection"].(string); ok {
+					out.Workspace.Collection = strings.TrimSpace(coll)
 				}
 			}
 		}
@@ -212,8 +220,8 @@ func formatContextPrompt(ws *ContextWorkspace, attachments []ContextAttachment) 
 	b.WriteString("[Context Pack]\n")
 	if ws != nil {
 		b.WriteString(fmt.Sprintf(
-			"workspace: module=%s profile=%s session=%s tab=%s cwd=%s\n",
-			dash(ws.ModuleID), dash(ws.ProfileID), dash(ws.SessionID), dash(ws.Title), dash(ws.Cwd),
+			"workspace: module=%s profile=%s session=%s db=%s collection=%s tab=%s cwd=%s\n",
+			dash(ws.ModuleID), dash(ws.ProfileID), dash(ws.SessionID), dash(ws.Database), dash(ws.Collection), dash(ws.Title), dash(ws.Cwd),
 		))
 		if rules := strings.TrimSpace(ws.DialectRules); rules != "" {
 			b.WriteString(rules)
@@ -247,6 +255,12 @@ func formatContextPrompt(ws *ContextWorkspace, attachments []ContextAttachment) 
 		}
 		if tbl, ok := a.Payload["table"].(string); ok && strings.TrimSpace(tbl) != "" {
 			b.WriteString(fmt.Sprintf("  table=%s\n", strings.TrimSpace(tbl)))
+		}
+		if coll, ok := a.Payload["collection"].(string); ok && strings.TrimSpace(coll) != "" {
+			b.WriteString(fmt.Sprintf("  collection=%s\n", strings.TrimSpace(coll)))
+		}
+		if p := formatPayloadPath(a.Payload); p != "" {
+			b.WriteString(fmt.Sprintf("  path=%s\n", p))
 		}
 	}
 	raw := b.String()
@@ -293,9 +307,47 @@ func moduleDialectPrompt(moduleID, family string, caps []string) string {
 		return dialectVastbasePrompt
 	case "ssh":
 		return workspaceSSHPrompt
+	case "redis":
+		return workspaceRedisPrompt
+	case "mongodb":
+		return workspaceMongoPrompt
 	default:
 		return ""
 	}
+}
+
+func formatPayloadPath(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	raw, ok := payload["path"]
+	if !ok {
+		return ""
+	}
+	arr, ok := raw.([]any)
+	if !ok || len(arr) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(arr))
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := m["kind"].(string)
+		name, _ := m["name"].(string)
+		kind = strings.TrimSpace(kind)
+		name = strings.TrimSpace(name)
+		if kind == "" && name == "" {
+			continue
+		}
+		if kind == "" {
+			parts = append(parts, name)
+			continue
+		}
+		parts = append(parts, kind+":"+name)
+	}
+	return strings.Join(parts, "/")
 }
 
 func formatCapabilitiesDialect(family string, caps []string) string {

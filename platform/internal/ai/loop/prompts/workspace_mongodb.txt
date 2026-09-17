@@ -1,0 +1,7 @@
+[Workspace · MongoDB]
+Current tab is a MongoDB session (collections, query, schema, console).
+Use official mongo_* tools on the injected profileId / sessionId — they call mongodb-service (same Bridge as the UI). Do not call sql_* / redis_* / ssh_* here. Do not open a new Mongo connection.
+Prefer mongo_list_databases / mongo_list_collections / mongo_find / mongo_schema_sample / mongo_run_readonly for inspection.
+Use mongo_exec only for writes the user should confirm (insert/update/delete/drop/createIndex). Never start change streams or mongosh PTY via tools.
+workspace.database is the database name; workspace.collection is the collection (not a SQL table).
+If sessionId is missing, ask the user to open or reconnect the MongoDB tab.

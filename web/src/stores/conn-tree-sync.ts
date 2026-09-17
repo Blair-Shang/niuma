@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { ConnTreeAiFocus } from '@/modules/ops/conn-tree/ai-focus'
 import type { ConnItem, ConnKind } from '@/modules/ops/types'
 
 /**
@@ -19,6 +20,8 @@ export const useConnTreeSyncStore = defineStore('conn-tree-sync', () => {
   const createTick = ref(0)
   const importTick = ref(0)
   const profiles = ref<ConnItem[]>([])
+  /** 侧栏树当前对象，供 Context Pack schema_hint；不驱动高亮。 */
+  const aiFocus = ref<ConnTreeAiFocus | null>(null)
 
   function requestFocus(resourceKey: string): void {
     focusKey.value = resourceKey
@@ -27,6 +30,14 @@ export const useConnTreeSyncStore = defineStore('conn-tree-sync', () => {
 
   function clearFocus(): void {
     focusKey.value = null
+  }
+
+  function publishAiFocus(focus: ConnTreeAiFocus): void {
+    aiFocus.value = focus
+  }
+
+  function clearAiFocus(): void {
+    aiFocus.value = null
   }
 
   function requestCreate(kind: ConnKind): void {
@@ -49,8 +60,11 @@ export const useConnTreeSyncStore = defineStore('conn-tree-sync', () => {
     createTick,
     importTick,
     profiles,
+    aiFocus,
     requestFocus,
     clearFocus,
+    publishAiFocus,
+    clearAiFocus,
     requestCreate,
     requestImport,
     setProfiles,

@@ -19,6 +19,8 @@ var (
 	skillSectionTemplate  string
 	dialectVastbasePrompt string
 	workspaceSSHPrompt    string
+	workspaceRedisPrompt  string
+	workspaceMongoPrompt  string
 	currentTurnPrompt     string
 )
 
@@ -29,6 +31,8 @@ func init() {
 	skillSectionTemplate = mustPrompt("prompts/skill_section.txt")
 	dialectVastbasePrompt = mustPrompt("prompts/dialect_vastbase.txt")
 	workspaceSSHPrompt = mustPrompt("prompts/workspace_ssh.txt")
+	workspaceRedisPrompt = mustPrompt("prompts/workspace_redis.txt")
+	workspaceMongoPrompt = mustPrompt("prompts/workspace_mongodb.txt")
 	currentTurnPrompt = mustPrompt("prompts/current_turn.txt")
 }
 

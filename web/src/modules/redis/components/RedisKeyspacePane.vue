@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { RsButton, RsConfirmDialog, RsDialog, RsEmpty, RsIcon, RsInput, RsLoading, RsSelect, RsTable, useRsToast } from '@niuma/ui'
-import type { RsSelectOptions, RsTableColumn } from '@niuma/ui'
+import { RsButton, RsConfirmDialog, RsDialog, RsEmpty, RsIcon, RsLoading, RsTable, useRsToast } from '@niuma/ui'
+import type { RsTableColumn } from '@niuma/ui'
 import { computed, inject, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { redisApi } from '@/api'
 import type { RedisKeyDescriptor } from '@/api/types/redis'
 import { formatBytes, formatRedisReply, formatTtl } from '@/modules/redis/utils/format'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type { SqlIdeToolbarItem } from '@/modules/database/types/sql-ide-toolbar'
 import { redisDatabaseKey } from '@/modules/redis/composables/useRedisDatabase'
 
 const props = defineProps<{
@@ -40,7 +42,7 @@ const viewContent = ref('')
 const deleteTarget = ref<RedisKeyDescriptor | null>(null)
 const deleting = ref(false)
 
-const typeOptions = computed<RsSelectOptions>(() => [
+const typeOptions = computed(() => [
   { value: 'string', label: 'string' },
   { value: 'hash', label: 'hash' },
   { value: 'list', label: 'list' },
@@ -48,6 +50,51 @@ const typeOptions = computed<RsSelectOptions>(() => [
   { value: 'zset', label: 'zset' },
   { value: 'stream', label: 'stream' },
 ])
+
+const toolbarReady = computed(() => Boolean(props.sessionId))
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => [
+  {
+    key: 'scan',
+    icon: 'scan-search',
+    tone: 'success',
+    title: t('modules.redis.keyspace.scan'),
+    label: t('modules.redis.keyspace.scan'),
+    disabled: !toolbarReady.value,
+    loading: loading.value && rows.value.length === 0,
+  },
+  {
+    key: 'pattern',
+    kind: 'filter',
+    value: pattern.value,
+    placeholder: t('modules.redis.keyspace.patternPlaceholder'),
+    disabled: !toolbarReady.value || loading.value,
+  },
+  {
+    key: 'type',
+    kind: 'select',
+    align: 'trail',
+    wide: true,
+    value: typeFilter.value,
+    options: typeOptions.value,
+    placeholder: t('modules.redis.keyspace.typeAll'),
+    clearable: true,
+    disabled: !toolbarReady.value,
+    title: t('modules.redis.keyspace.typeAll'),
+  },
+])
+
+function onToolbarAction(key: string): void {
+  if (key === 'scan') restart()
+}
+
+function onToolbarFilter(itemKey: string, value: string): void {
+  if (itemKey === 'pattern') pattern.value = value
+}
+
+function onToolbarSelect(itemKey: string, value: string): void {
+  if (itemKey === 'type') typeFilter.value = value
+}
 
 const columns = computed((): RsTableColumn<KeyRow>[] => [
   { key: 'key', title: t('modules.redis.keyspace.columns.key'), ellipsis: true, minWidth: 220 },
@@ -195,46 +242,19 @@ watch(
 
 <template>
   <div class="nm-redis-keyspace">
-    <section class="nm-redis-keyspace__toolbar">
-      <div class="nm-redis-keyspace__filters">
-        <div class="nm-redis-keyspace__pattern-wrap">
-          <RsInput
-            v-model="pattern"
-            size="sm"
-            autocomplete="off"
-            :placeholder="t('modules.redis.keyspace.patternPlaceholder')"
-            @keydown.enter="restart"
-          >
-            <template #prefix>
-              <RsIcon name="search" :size="14" />
-            </template>
-          </RsInput>
-        </div>
-        <div class="nm-redis-keyspace__type-wrap">
-          <RsSelect
-            v-model="typeFilter"
-            size="sm"
-            :options="typeOptions"
-            clearable
-            :placeholder="t('modules.redis.keyspace.typeAll')"
-          />
-        </div>
-        <RsButton
-          class="nm-redis-keyspace__scan-btn"
-          size="sm"
-          variant="primary"
-          :loading="loading && rows.length === 0"
-          @click="restart"
-        >
-          <RsIcon name="scan-search" :size="14" />
-          {{ t('modules.redis.keyspace.scan') }}
-        </RsButton>
-      </div>
-      <span class="nm-redis-keyspace__count">
-        {{ t('modules.redis.keyspace.count', { count: rows.length }) }}
-        <span v-if="redisDb" class="nm-redis-keyspace__db">· {{ t('modules.redis.session.currentDb', { db: redisDb.currentDb.value }) }}</span>
-      </span>
-    </section>
+    <SqlIdeToolbar
+      :label="t('modules.redis.keyspace.toolbarAria')"
+      identity-icon="database"
+      :identity="
+        t('modules.redis.session.currentDb', { db: redisDb?.currentDb.value ?? 0 })
+      "
+      :identity-title="t('modules.redis.keyspace.count', { count: rows.length })"
+      :items="toolbarItems"
+      @action="onToolbarAction"
+      @filter="onToolbarFilter"
+      @filter-submit="restart"
+      @select="onToolbarSelect"
+    />
 
     <div class="nm-redis-keyspace__body">
       <RsLoading v-if="loading && rows.length === 0" class="nm-redis-keyspace__loading" show-label :label="t('modules.redis.keyspace.scanning')" />
@@ -298,76 +318,12 @@ watch(
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: var(--rs-space-sm);
-}
-
-.nm-redis-keyspace__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-md);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  padding: var(--rs-space-sm) var(--rs-space-md);
-  border-radius: var(--rs-radius-md);
-  border: 1px solid var(--rs-border-subtle);
-  background: var(--rs-surface-elevated);
-}
-
-.nm-redis-keyspace__filters {
-  display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  flex: 1;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.nm-redis-keyspace__pattern-wrap {
-  flex: 1 1 14rem;
-  min-width: 12rem;
-  max-width: 24rem;
-}
-
-.nm-redis-keyspace__type-wrap {
-  flex: 0 0 9rem;
-  min-width: 8rem;
-}
-
-.nm-redis-keyspace__pattern-wrap :deep(.rs-field),
-.nm-redis-keyspace__type-wrap :deep(.rs-field) {
-  width: 100%;
-  margin: 0;
-}
-
-.nm-redis-keyspace__scan-btn {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.nm-redis-keyspace__count {
-  flex-shrink: 0;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  background: var(--rs-surface-subtle);
-  color: var(--rs-muted);
-  font-size: var(--rs-font-size-xs);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.nm-redis-keyspace__db {
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
-  font-weight: 600;
-  color: var(--rs-primary);
 }
 
 .nm-redis-keyspace__body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border-radius: var(--rs-radius-md);
-  border: 1px solid var(--rs-border-subtle);
   background: var(--rs-surface);
 }
 

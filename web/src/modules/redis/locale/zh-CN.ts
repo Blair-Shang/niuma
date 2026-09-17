@@ -29,10 +29,16 @@ export default {
         currentDbHint: '当前会话操作的逻辑库；可在下拉框切换，或在控制台执行 SELECT',
         selectDbError: '切换逻辑库失败',
         tabConsole: '控制台',
-        tabKeyspace: '键空间',
-        tabMonitor: '监控',
-        tabSlowlog: '慢日志',
-        tabLive: '实时监控',
+        tabConsoleHint: '命令控制台',
+        tabKeyspace: '浏览',
+        tabKeyspaceHint: '浏览键（SCAN）',
+        tabMonitor: 'INFO',
+        tabMonitorHint: '服务器指标（INFO）',
+        tabSlowlog: '慢查询',
+        tabSlowlogHint: '慢查询日志（SLOWLOG）',
+        tabLive: 'MONITOR',
+        tabLiveHint: '实时命令流（MONITOR）',
+        toolbarAria: 'Redis 会话',
       },
       console: {
         empty: '输入命令并回车执行，例如：GET foo；输入 clear 可清空屏幕',
@@ -44,6 +50,7 @@ export default {
       keyspace: {
         typeAll: '全部类型',
         patternPlaceholder: '匹配模式，例如：user:*',
+        toolbarAria: '浏览键',
         scan: '扫描',
         scanning: '正在扫描键空间…',
         count: '共 {count} 个 key',
@@ -66,6 +73,7 @@ export default {
         },
       },
       monitor: {
+        toolbarAria: 'INFO',
         refresh: '刷新',
         autoOff: '关闭',
         updatedAt: '更新于 {time}',
@@ -145,6 +153,7 @@ export default {
       },
       slowlog: {
         title: '慢查询日志',
+        toolbarAria: '慢查询日志',
         refresh: '刷新',
         countLabel: '条数',
         entryCount: '{count} 条记录',
@@ -166,6 +175,7 @@ export default {
       },
       live: {
         title: '实时命令流',
+        toolbarAria: '实时命令流',
         start: '开始监控',
         stop: '停止监控',
         pause: '暂停',

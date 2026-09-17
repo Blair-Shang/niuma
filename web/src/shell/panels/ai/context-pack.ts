@@ -3,6 +3,13 @@
  */
 import { useTabStore, type WorkspaceTab } from '@/stores/tab'
 import { useSessionRegistry } from '@/stores/session-registry'
+import { useConnTreeSyncStore } from '@/stores/conn-tree-sync'
+import {
+  catalogFromPath,
+  hasObjectHint,
+  type ConnTreeAiFocus,
+  type ConnTreePathSeg,
+} from '@/modules/ops/conn-tree/ai-focus'
 import {
   buildAiDialectRules,
   defaultProfileForFamily,
@@ -12,6 +19,9 @@ import {
   getEditorSelection,
   listDiagnostics,
 } from './workspace-context'
+import { mergeTreeSchemaHint } from './merge-tree-schema'
+
+export { mergeTreeSchemaHint } from './merge-tree-schema'
 
 /** 有 SQL 方言默认 Profile 的模块（无 lease 时回退用） */
 const SQL_DIALECT_MODULES = new Set<string>([
@@ -45,6 +55,7 @@ export interface AiContextPack {
     title?: string
     database?: string
     schema?: string
+    collection?: string
     cwd?: string
     dialectFamily?: string
     capabilities?: string[]
@@ -80,6 +91,18 @@ function usesDatabaseAsSchema(moduleId: string | undefined): boolean {
   return moduleId === 'mysql' || moduleId === 'mariadb' || moduleId === 'clickhouse'
 }
 
+/** 页签 database：SQL 为库名；Redis 为逻辑库编号（number）。 */
+function tabDatabaseText(raw: unknown): string | undefined {
+  if (typeof raw === 'string') {
+    const text = raw.trim()
+    return text || undefined
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return String(raw)
+  }
+  return undefined
+}
+
 /** 从工作区页签构造 @ 引用（拖入 AI / @ 列表共用）。 */
 export function attachmentFromTab(tab: WorkspaceTab): AiContextAttachment {
   const sessionRegistry = useSessionRegistry()
@@ -96,8 +119,9 @@ export function attachmentFromTab(tab: WorkspaceTab): AiContextAttachment {
       moduleId: tab.moduleId,
       profileId,
       sessionId,
-      database: tab.props.database,
+      database: tabDatabaseText(tab.props.database),
       schema: catalogSchemaOf(tab.moduleId, tab.props.database, tab.props.schema),
+      collection: tabCollectionText(tab),
       path: tab.moduleId === 'ssh' && cwd ? cwd : undefined,
     },
   }
@@ -166,11 +190,103 @@ export function selectionAttachmentFromWorkspace(): AiContextAttachment | null {
   }
 }
 
+function tabCollectionText(tab: WorkspaceTab | null | undefined): string | undefined {
+  if (tab?.moduleId !== 'mongodb') {
+    return undefined
+  }
+  const raw = tab.props.collection
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined
+}
+
+function formatObjectPath(path: readonly ConnTreePathSeg[] | undefined): string {
+  if (!path?.length) {
+    return ''
+  }
+  return path.map((s) => `${s.kind}:${s.name}`).join('/')
+}
+
+function schemaHintFromTreeFocus(focus: ConnTreeAiFocus | null | undefined): AiContextAttachment | null {
+  if (!hasObjectHint(focus) || !focus) {
+    return null
+  }
+  const catalog = catalogFromPath(focus.moduleId, focus.path)
+  let detail = 'object'
+  if (focus.moduleId === 'redis') {
+    detail = 'redis'
+  } else if (focus.moduleId === 'mongodb') {
+    detail = 'mongodb'
+  } else if (catalog.table || catalog.schema || catalog.database) {
+    detail = 'schema'
+  }
+  return {
+    id: `schema:tree:${focus.key}`,
+    kind: 'schema',
+    label: focus.label,
+    detail,
+    payload: {
+      moduleId: focus.moduleId,
+      profileId: focus.profileId,
+      path: focus.path,
+      database: catalog.database,
+      schema: catalog.schema,
+      table: catalog.table,
+      collection: catalog.collection,
+      source: 'tree',
+    },
+  }
+}
+
 function schemaHintFromTab(tab: WorkspaceTab | null | undefined): AiContextAttachment | null {
   if (!tab) {
     return null
   }
-  const database = typeof tab.props.database === 'string' ? tab.props.database : undefined
+  const database = tabDatabaseText(tab.props.database)
+  if (tab.moduleId === 'redis') {
+    if (!database) {
+      return null
+    }
+    return {
+      id: `schema:${tab.tabId}:db${database}`,
+      kind: 'schema',
+      label: `DB ${database}`,
+      detail: 'redis',
+      payload: {
+        tabId: tab.tabId,
+        moduleId: tab.moduleId,
+        profileId: tab.props.profileId,
+        database,
+        path: [{ kind: 'db', name: database }],
+      },
+    }
+  }
+  if (tab.moduleId === 'mongodb') {
+    const collection = tabCollectionText(tab)
+    const parts = [database, collection].filter(Boolean) as string[]
+    if (!parts.length) {
+      return null
+    }
+    const path: ConnTreePathSeg[] = []
+    if (database) {
+      path.push({ kind: 'database', name: database })
+    }
+    if (collection) {
+      path.push({ kind: 'collection', name: collection })
+    }
+    return {
+      id: `schema:${tab.tabId}:${parts.join('.')}`,
+      kind: 'schema',
+      label: parts.join('.'),
+      detail: 'mongodb',
+      payload: {
+        tabId: tab.tabId,
+        moduleId: tab.moduleId,
+        profileId: tab.props.profileId,
+        database,
+        collection,
+        path,
+      },
+    }
+  }
   const schema = catalogSchemaOf(tab.moduleId, tab.props.database, tab.props.schema)
   const table =
     typeof tab.props.table === 'string'
@@ -195,6 +311,11 @@ function schemaHintFromTab(tab: WorkspaceTab | null | undefined): AiContextAttac
       database,
       schema,
       table,
+      path: [
+        ...(database ? [{ kind: 'database', name: database }] : []),
+        ...(schema && schema !== database ? [{ kind: 'schema', name: schema }] : []),
+        ...(table ? [{ kind: 'table', name: table }] : []),
+      ],
     },
   }
 }
@@ -216,8 +337,22 @@ export function listMentionCandidates(): AiContextAttachment[] {
         payload: { profileId, moduleId: active.moduleId },
       })
     }
+    const treeHint = schemaHintFromTreeFocus(useConnTreeSyncStore().aiFocus)
+    if (treeHint) {
+      out.push(treeHint)
+    }
     const schemaHint = schemaHintFromTab(active)
-    if (schemaHint) {
+    if (
+      schemaHint &&
+      !(
+        treeHint &&
+        treeHint.payload.profileId === schemaHint.payload.profileId &&
+        treeHint.payload.database === schemaHint.payload.database &&
+        treeHint.payload.schema === schemaHint.payload.schema &&
+        treeHint.payload.table === schemaHint.payload.table &&
+        treeHint.payload.collection === schemaHint.payload.collection
+      )
+    ) {
       out.push(schemaHint)
     }
     const remotePath =
@@ -274,6 +409,10 @@ function hashId(s: string): string {
 export function buildContextPack(attachments: AiContextAttachment[]): AiContextPack {
   const tabStore = useTabStore()
   const sessionRegistry = useSessionRegistry()
+  const mergedAttachments = mergeTreeSchemaHint(
+    attachments,
+    schemaHintFromTreeFocus(useConnTreeSyncStore().aiFocus),
+  )
   const active = tabStore.activeTab
   const sessionId = active ? sessionRegistry.getSessionIdForTab(active.tabId) ?? undefined : undefined
   // 优先会话探测结果；无 lease 时按当前模块方言回退（非永久禁令）
@@ -292,12 +431,13 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
     profileId: typeof active?.props.profileId === 'string' ? active.props.profileId : undefined,
     sessionId,
     title: active ? tabLabel(active) : undefined,
-    database: typeof active?.props.database === 'string' ? active.props.database : undefined,
+    database: tabDatabaseText(active?.props.database),
     schema: catalogSchemaOf(
       active?.moduleId,
       active?.props.database,
       active?.props.schema,
     ),
+    collection: tabCollectionText(active),
     cwd: typeof active?.props.remotePath === 'string' ? active.props.remotePath : undefined,
     dialectFamily: dialect?.family,
     capabilities: dialect?.capabilities,
@@ -307,10 +447,10 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
   const lines: string[] = []
   if (workspace.moduleId || workspace.profileId || workspace.sessionId) {
     lines.push(
-      `[workspace] module=${workspace.moduleId ?? '-'} profile=${workspace.profileId ?? '-'} session=${workspace.sessionId ?? '-'} db=${workspace.database ?? '-'} schema=${workspace.schema ?? '-'} cwd=${workspace.cwd ?? '-'} tab=${workspace.title ?? '-'}`,
+      `[workspace] module=${workspace.moduleId ?? '-'} profile=${workspace.profileId ?? '-'} session=${workspace.sessionId ?? '-'} db=${workspace.database ?? '-'} collection=${workspace.collection ?? '-'} schema=${workspace.schema ?? '-'} cwd=${workspace.cwd ?? '-'} tab=${workspace.title ?? '-'}`,
     )
   }
-  for (const a of attachments) {
+  for (const a of mergedAttachments) {
     if (a.kind === 'selection' && typeof a.payload.text === 'string') {
       const lang =
         typeof a.payload.language === 'string' && a.payload.language.trim()
@@ -334,7 +474,9 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
       const db = typeof a.payload.database === 'string' ? a.payload.database : '-'
       const sch = typeof a.payload.schema === 'string' ? a.payload.schema : '-'
       const tbl = typeof a.payload.table === 'string' ? a.payload.table : '-'
-      lines.push(`[schema_hint] ${a.label} db=${db} schema=${sch} table=${tbl}`)
+      const coll = typeof a.payload.collection === 'string' ? a.payload.collection : '-'
+      const pathText = formatObjectPath(a.payload.path as ConnTreePathSeg[] | undefined) || '-'
+      lines.push(`[object_hint] ${a.label} path=${pathText} db=${db} schema=${sch} table=${tbl} collection=${coll}`)
       continue
     }
     lines.push(`[${a.kind}] ${a.label}${a.detail ? ` (${a.detail})` : ''}`)
@@ -342,7 +484,7 @@ export function buildContextPack(attachments: AiContextAttachment[]): AiContextP
 
   return {
     workspace,
-    attachments,
+    attachments: mergedAttachments,
     promptAppendix: lines.length ? `\n\n---\nContext:\n${lines.join('\n')}` : '',
   }
 }

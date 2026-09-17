@@ -23,6 +23,7 @@ import {
   useConnTreeActionHosts,
   useConnTreeRegistryEpoch,
 } from '@/modules/ops/conn-tree/registry'
+import { snapshotFromTreeKey, snapshotFromTreeNode } from '@/modules/ops/conn-tree/ai-focus'
 import { getConnTreeTabSync } from '@/modules/ops/conn-tree/tab-sync'
 import type { ConnOpenContext } from '@/modules/ops/conn-tree/types'
 import { useConnectionNavigation } from '@/modules/ops/composables/useConnectionNavigation'
@@ -264,6 +265,21 @@ async function syncTreeToActiveTab(): Promise<void> {
   const key = strategy.resolveFocusKey(tab, { profiles: allProfiles.value })
   if (key) {
     void applyTreeFocus(key)
+    publishTreeAiFocusFromKey(key)
+  }
+}
+
+function publishTreeAiFocusFromKey(key: string): void {
+  const snap = snapshotFromTreeKey(key, allProfiles.value)
+  if (snap) {
+    connTreeSync.publishAiFocus(snap)
+  }
+}
+
+function onTreeNodeClick(node: RsTreeNode): void {
+  const snap = snapshotFromTreeNode(node as ConnTreeNode)
+  if (snap) {
+    connTreeSync.publishAiFocus(snap)
   }
 }
 
@@ -281,6 +297,7 @@ watch(
     const key = connTreeSync.focusKey
     if (key) {
       void applyTreeFocus(key)
+      publishTreeAiFocusFromKey(key)
     }
   },
 )
@@ -830,6 +847,7 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
           class="nm-ops-conn__tree"
           @node-drop="onNodeDrop"
           @node-dblclick="onNodeDblclick"
+          @node-click="onTreeNodeClick"
         >
           <template #title="{ node }">
             <!-- 文件夹节点 -->

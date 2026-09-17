@@ -25,12 +25,14 @@ const emit = defineEmits<{
     <RsButton
       v-else
       v-bind="sqlIdeToolbarIconButton"
+      :variant="item.active ? 'default' : sqlIdeToolbarIconButton.variant"
       :icon="item.icon"
       :icon-only="!item.label"
       :tone="item.tone"
       :disabled="item.disabled"
       :loading="item.loading"
       :tooltip="item.title"
+      :aria-pressed="item.active || undefined"
       @click="emit('action', item.key)"
     >
       {{ item.label }}

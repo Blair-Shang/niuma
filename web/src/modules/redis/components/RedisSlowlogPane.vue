@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { RsButton, RsCard, RsEmpty, RsIcon, RsInput, RsLoading, RsTable, RsTooltip, RsTooltipProvider, useRsToast } from '@niuma/ui'
+import { RsCard, RsEmpty, RsIcon, RsLoading, RsTable, useRsToast } from '@niuma/ui'
 import type { RsTableColumn } from '@niuma/ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { redisApi } from '@/api'
+import SqlIdeToolbar from '@/modules/database/components/SqlIdeToolbar.vue'
+import type { SqlIdeToolbarItem } from '@/modules/database/types/sql-ide-toolbar'
 
 const props = defineProps<{
   sessionId: string | null
@@ -38,6 +40,43 @@ const columns = computed((): RsTableColumn<SlowlogRow>[] => [
 ])
 
 const entryCountLabel = computed(() => t('modules.redis.slowlog.entryCount', { count: rows.value.length }))
+
+const countOptions = [
+  { value: '10', label: '10' },
+  { value: '20', label: '20' },
+  { value: '50', label: '50' },
+  { value: '100', label: '100' },
+]
+
+const toolbarItems = computed((): SqlIdeToolbarItem[] => [
+  {
+    key: 'count',
+    kind: 'select',
+    value: count.value,
+    options: countOptions,
+    title: t('modules.redis.slowlog.tooltips.count'),
+    disabled: !props.sessionId,
+  },
+  {
+    key: 'refresh',
+    icon: 'refresh-cw',
+    title: t('modules.redis.slowlog.refresh'),
+    loading: loading.value,
+    disabled: !props.sessionId,
+    align: 'trail',
+  },
+])
+
+function onToolbarAction(key: string): void {
+  if (key === 'refresh') void load()
+}
+
+function onToolbarSelect(itemKey: string, value: string): void {
+  if (itemKey === 'count' && value) {
+    count.value = value
+    void load()
+  }
+}
 
 function formatTime(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString()
@@ -100,41 +139,18 @@ watch(
 
 <template>
   <div class="nm-redis-slowlog">
-    <RsTooltipProvider>
-      <section class="nm-redis-slowlog__toolbar">
-        <div class="nm-redis-slowlog__filters">
-          <div class="nm-redis-slowlog__field">
-            <span class="nm-redis-slowlog__field-label">{{ t('modules.redis.slowlog.countLabel') }}</span>
-            <RsTooltip :content="t('modules.redis.slowlog.tooltips.count')" side="top" align="start">
-              <RsInput
-                v-model="count"
-                class="nm-redis-slowlog__count"
-                size="sm"
-                autocomplete="off"
-                placeholder="20"
-                @keydown.enter="load"
-              />
-            </RsTooltip>
-          </div>
-          <RsTooltip :content="t('modules.redis.slowlog.tooltips.refresh')" side="top">
-            <RsButton size="sm" variant="primary" :loading="loading" @click="load">
-              <RsIcon name="refresh-cw" :size="14" />
-              {{ t('modules.redis.slowlog.refresh') }}
-            </RsButton>
-          </RsTooltip>
-        </div>
-        <div class="nm-redis-slowlog__meta">
-          <RsTooltip :content="t('modules.redis.slowlog.tooltips.hint')" side="bottom" align="end">
-            <button type="button" class="nm-redis-slowlog__info-btn" :aria-label="t('modules.redis.slowlog.tooltips.hint')">
-              <RsIcon name="info" :size="14" />
-            </button>
-          </RsTooltip>
-          <span v-if="loaded" class="nm-redis-slowlog__entry-badge">{{ entryCountLabel }}</span>
-        </div>
-      </section>
-
+    <SqlIdeToolbar
+      :label="t('modules.redis.slowlog.toolbarAria')"
+      identity-icon="hourglass"
+      :identity="t('modules.redis.slowlog.title')"
+      :identity-title="loaded ? entryCountLabel : t('modules.redis.slowlog.tooltips.hint')"
+      :items="toolbarItems"
+      @action="onToolbarAction"
+      @select="onToolbarSelect"
+    />
+    <div class="nm-redis-slowlog__main">
       <div class="nm-redis-slowlog__card-wrap">
-        <RsCard variant="plain" :padding="false" class="nm-redis-slowlog__card">
+        <RsCard variant="plain" :padding="false" radius="none" class="nm-redis-slowlog__card">
           <template #header>
             <div class="nm-redis-slowlog__card-head">
               <span class="nm-redis-slowlog__card-icon" aria-hidden="true">
@@ -182,126 +198,37 @@ watch(
           </div>
         </RsCard>
       </div>
-    </RsTooltipProvider>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .nm-redis-slowlog {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-  gap: var(--rs-space-sm);
-  padding: var(--rs-space-sm) var(--rs-space-md);
-}
-
-.nm-redis-slowlog__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--rs-space-md);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  padding: var(--rs-space-sm) var(--rs-space-md);
-  border-radius: var(--rs-radius-md);
-  border: 1px solid color-mix(in srgb, var(--rs-warning) 28%, var(--rs-border-subtle));
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--rs-warning) 12%, var(--rs-surface-elevated)),
-    color-mix(in srgb, var(--rs-danger) 8%, var(--rs-surface-elevated))
-  );
-}
-
-.nm-redis-slowlog__filters {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--rs-space-sm);
-  flex-wrap: wrap;
-}
-
-.nm-redis-slowlog__field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  height: 100%;
+  min-height: 0;
 }
 
-.nm-redis-slowlog__field-label {
-  font-size: var(--rs-font-size-xs);
-  font-weight: 500;
-  color: color-mix(in srgb, var(--rs-warning) 70%, var(--rs-muted));
-}
-
-.nm-redis-slowlog__count {
-  width: 6rem;
-}
-
-.nm-redis-slowlog__meta {
+.nm-redis-slowlog__main {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  gap: var(--rs-space-sm);
-  margin-left: auto;
-}
-
-.nm-redis-slowlog__info-btn {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  margin: 0;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--rs-warning) 30%, var(--rs-border-subtle));
-  border-radius: var(--rs-radius-full);
-  background: color-mix(in srgb, var(--rs-warning) 12%, transparent);
-  color: var(--rs-warning);
-  cursor: help;
-}
-
-.nm-redis-slowlog__info-btn:hover {
-  background: color-mix(in srgb, var(--rs-warning) 20%, transparent);
-}
-
-.nm-redis-slowlog__entry-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  font-size: var(--rs-font-size-xs);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  background: color-mix(in srgb, var(--rs-warning) 16%, transparent);
-  color: color-mix(in srgb, var(--rs-warning) 85%, #000 15%);
+  flex-direction: column;
 }
 
 .nm-redis-slowlog__card-wrap {
   --nm-slowlog-accent: var(--rs-warning);
   --nm-slowlog-accent-bg: color-mix(in srgb, var(--nm-slowlog-accent) 14%, transparent);
   position: relative;
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-radius: var(--rs-radius-lg);
+  border: none;
+  border-radius: 0;
   overflow: hidden;
   background: color-mix(in srgb, var(--nm-slowlog-accent) 7%, var(--rs-surface-elevated));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--nm-slowlog-accent) 22%, var(--rs-border-subtle)),
-    0 4px 14px color-mix(in srgb, var(--nm-slowlog-accent) 10%, transparent);
-}
-
-.nm-redis-slowlog__card-wrap::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 100%;
-  height: 3px;
-  background: linear-gradient(
-    90deg,
-    var(--nm-slowlog-accent),
-    color-mix(in srgb, var(--rs-danger) 70%, var(--nm-slowlog-accent))
-  );
-  pointer-events: none;
 }
 
 .nm-redis-slowlog__card {
@@ -309,6 +236,10 @@ watch(
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
 }
 
 .nm-redis-slowlog__card-head {

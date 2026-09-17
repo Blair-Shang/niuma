@@ -23,9 +23,18 @@ import type { RedisCommandSuggestion } from '@/api/types/redis'
 import { useRedisSuggest } from '@/modules/redis/composables/useRedisSuggest'
 import { parseSelectDatabase, redisDatabaseKey } from '@/modules/redis/composables/useRedisDatabase'
 import { formatRedisReply, splitCommandLine } from '@/modules/redis/utils/format'
+import {
+  clearDiagnostic,
+  clearEditorSelection,
+  publishDiagnostic,
+  publishEditorSelection,
+} from '@/shell/panels/ai/workspace-context'
+import { useTabStore } from '@/stores/tab'
 
 const props = defineProps<{
   sessionId: string | null
+  /** 所属工作区 Tab，供 AI 选区 / 诊断绑定 */
+  tabId?: string
   /** 用于拼出 `host:port>` 提示符，贴近原生 `redis-cli`；未提供时退化为通用 `>` 提示符。 */
   hostAddress?: string | null
   portNumber?: number | null
@@ -43,6 +52,11 @@ const ANSI_CYAN = '\x1b[36m'
 const ANSI_PROMPT = '\x1b[1;32m'
 
 const { t } = useI18n()
+const tabStore = useTabStore()
+
+function resolveTabId(): string | undefined {
+  return props.tabId || tabStore.activeTabId || undefined
+}
 
 const redisDb = inject(redisDatabaseKey, null)
 
@@ -406,6 +420,12 @@ async function submitLine(): Promise<void> {
   }
 
   running = true
+  publishEditorSelection({
+    tabId: resolveTabId(),
+    text: raw,
+    language: 'redis',
+    source: 'terminal',
+  })
   try {
     const result = await redisApi.commandExec({ sessionId: props.sessionId, args })
     const selectDb = parseSelectDatabase(args)
@@ -414,9 +434,22 @@ async function submitLine(): Promise<void> {
     }
     const text = formatRedisReply(result.reply)
     term.write(`${toTerminalEol(text)}\r\n${ANSI_DIM}(${result.elapsedMs.toFixed(1)} ms)${ANSI_RESET}\r\n`)
+    if (props.sessionId) {
+      clearDiagnostic(`redis-cli:${props.sessionId}`)
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : t('modules.redis.console.execError')
     term.write(`${ANSI_RED}(error) ${message}${ANSI_RESET}\r\n`)
+    if (props.sessionId) {
+      publishDiagnostic({
+        id: `redis-cli:${props.sessionId}`,
+        label: t('modules.redis.session.tabConsole'),
+        detail: raw,
+        text: `${raw}\n${message}`,
+        kind: 'redis',
+        tabId: resolveTabId(),
+      })
+    }
   } finally {
     running = false
     redraw()
@@ -512,7 +545,54 @@ function onTerminalReady(): void {
   }
 }
 
+let lastNonEmptySelection = ''
+let clearSelectionTimer = 0
+
+function cancelScheduledSelectionClear(): void {
+  if (clearSelectionTimer) {
+    window.clearTimeout(clearSelectionTimer)
+    clearSelectionTimer = 0
+  }
+}
+
+function publishTerminalSelection(text: string): void {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  lastNonEmptySelection = trimmed
+  publishEditorSelection({
+    tabId: resolveTabId(),
+    text: trimmed,
+    language: 'redis',
+    source: 'terminal',
+  })
+}
+
+function onSelectionChange(raw: string): void {
+  const text = raw.trim()
+  const tabId = resolveTabId()
+  cancelScheduledSelectionClear()
+  if (!text) {
+    clearSelectionTimer = window.setTimeout(() => {
+      clearSelectionTimer = 0
+      clearEditorSelection(tabId)
+    }, 400)
+    return
+  }
+  publishTerminalSelection(text)
+}
+
+async function askAiAboutSelection(textFromMenu = ''): Promise<void> {
+  const live = (terminalRef.value?.getSelection() ?? '').trim()
+  const text = (textFromMenu || live || lastNonEmptySelection).trim()
+  if (text) {
+    publishTerminalSelection(text)
+  }
+  const { executeCommand } = await import('@/extensions/contributions/command-registry')
+  await executeCommand('workbench.ai.askSelection')
+}
+
 onBeforeUnmount(() => {
+  cancelScheduledSelectionClear()
   clearSuggest()
 })
 </script>
@@ -522,9 +602,12 @@ onBeforeUnmount(() => {
     <RsTerminal
       ref="terminalRef"
       :overlay="overlayText"
+      show-ask-ai
       wheel-scroll-modifier="shift"
       @ready="onTerminalReady"
       @data="handleData"
+      @selection-change="onSelectionChange"
+      @ask-ai="(text) => void askAiAboutSelection(text)"
     />
   </section>
 </template>
