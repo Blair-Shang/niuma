@@ -211,6 +211,68 @@ func TestAIProviderEnsureSystemAndProtect(t *testing.T) {
 	}
 }
 
+func TestAIProviderEnsureSystemReplacesModels(t *testing.T) {
+	t.Parallel()
+	d := newTestAIDispatcher(t, nil)
+	ctx := context.Background()
+
+	ensure := func(id string, models []map[string]any, defaultCode string) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{
+			"method": handler.MethodAIProviderEnsureSystem,
+			"id":     id,
+			"params": map[string]any{
+				"enabled":          true,
+				"baseUrl":          "https://www.niuma007.com/niuma/cloud/api/v1/ai/v1",
+				"providerName":     "NiuMa",
+				"defaultModelCode": defaultCode,
+				"models":           models,
+			},
+		})
+		resp := decodeAITestResponse(t, d.HandleFrame(ctx, raw))
+		if !resp.OK {
+			t.Fatalf("ensure %s: %s", id, resp.Error)
+		}
+	}
+
+	ensure("s1", []map[string]any{
+		{"code": "old-a", "label": "Old A"},
+		{"code": "old-b", "label": "Old B"},
+	}, "old-a")
+	ensure("s2", []map[string]any{
+		{"code": "new-a", "label": "New A"},
+	}, "new-a")
+
+	listRaw, _ := json.Marshal(map[string]any{
+		"method": handler.MethodAIProviderList,
+		"id":     "list",
+		"params": map[string]any{"includeModels": true},
+	})
+	listResp := decodeAITestResponse(t, d.HandleFrame(ctx, listRaw))
+	if !listResp.OK {
+		t.Fatalf("list: %s", listResp.Error)
+	}
+	var listResult struct {
+		Providers []struct {
+			ProviderID string `json:"providerId"`
+			Models     []struct {
+				ModelCode    string `json:"modelCode"`
+				RecordStatus string `json:"recordStatus"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal([]byte(listResp.Result), &listResult); err != nil {
+		t.Fatalf("parse list: %v body=%s", err, listResp.Result)
+	}
+	if len(listResult.Providers) != 1 || listResult.Providers[0].ProviderID != "niuma-system" {
+		t.Fatalf("unexpected providers: %+v", listResult.Providers)
+	}
+	got := listResult.Providers[0].Models
+	if len(got) != 1 || got[0].ModelCode != "new-a" {
+		t.Fatalf("expected only new-a after catalog replace, got %+v", got)
+	}
+}
+
 type aiTestResponse struct {
 	OK     bool   `json:"ok"`
 	Error  string `json:"error"`

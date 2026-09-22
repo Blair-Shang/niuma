@@ -191,11 +191,19 @@ PRIMARY KEY (parent_id, child_id)
 
 ### 5.5 API 测试
 
-集合、文件夹、请求定义与环境仍是一份文档，存在 `nm_app_setting.setting_key = 'api.workspace'`，不拆关系表。
+**对齐 Postman 能力，不对齐 Postman 存储。** 集合树仍单文档；环境/变量走关系表。
 
-| 表名 | 说明 | 主键 | 迁移 |
-|------|------|------|------|
-| `nm_api_history` | 发送历史（请求/响应快照，导入导出不含） | `history_id` | 000011 |
+| 键 / 表 | 说明 | 版本 / 迁移 |
+|---------|------|-------------|
+| `api.workspace` | 工作区 JSON v3：folders + envId + runProfiles + mockServers | **v3**（见 [37 §5](./37-api-workbench.md)） |
+| `nm_api_environment` | 环境定义（名称、baseUrl） | `environment_id` · 000014 |
+| `nm_api_variable` | 变量行：scope（global/environment/folder）+ kind + value | `variable_id` · 000014 |
+| `api.run.reports.{runId}` | 压测报告（P4 可选，大对象单独 key） | 预留（见 [38 §3](./38-api-run.md)） |
+| `nm_api_history` | 发送历史（请求/响应快照，导入导出不含） | `history_id` · 000011 |
+
+Platform 方法：`platform.api.environment.{list,create,update,delete}` · `platform.api.variable.{list,upsert,delete,replaceScope}`。
+
+完整字段与 Postman/Apifox 对照见 **[37 — API 调试工作台](./37-api-workbench.md)**。
 
 ### 5.6 任务与审计
 
@@ -437,6 +445,46 @@ CREATE INDEX idx_nm_api_hist_request ON nm_api_history (request_id, created_at);
 
 超限（每工作区 200 条）由 Platform 物理删除最旧行。删集合请求不删历史（`request_id` 可空）。
 
+### 6.y nm_api_environment / nm_api_variable
+
+```sql
+-- 环境与变量：关系型存储（000014）。集合仍在 api.workspace v3 JSON。
+CREATE TABLE nm_api_environment (
+    environment_id   TEXT NOT NULL PRIMARY KEY,
+    workspace_id     TEXT NOT NULL,
+    environment_name TEXT NOT NULL,
+    base_url         TEXT NOT NULL DEFAULT '',
+    row_version      INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX uk_nm_api_env_name ON nm_api_environment (workspace_id, environment_name);
+
+CREATE TABLE nm_api_variable (
+    variable_id      TEXT NOT NULL PRIMARY KEY,
+    workspace_id     TEXT NOT NULL,
+    variable_scope   TEXT NOT NULL,              -- global | environment | folder
+    scope_ref_id     TEXT NOT NULL DEFAULT '',   -- environment_id / folder_id
+    variable_name    TEXT NOT NULL,
+    variable_kind    TEXT NOT NULL DEFAULT 'string', -- string|secret|number|boolean|json|uuid|counter|datetime|file_ref
+    initial_value    TEXT NOT NULL DEFAULT '',
+    current_value    TEXT NOT NULL DEFAULT '',
+    meta_json        TEXT NOT NULL DEFAULT '{}',
+    sort_order       INTEGER NOT NULL DEFAULT 0,
+    row_version      INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX uk_nm_api_var_scope
+    ON nm_api_variable (workspace_id, variable_scope, scope_ref_id, variable_name);
+CREATE INDEX idx_nm_api_var_scope
+    ON nm_api_variable (workspace_id, variable_scope, scope_ref_id);
+```
+
+删环境时 Platform 级联删 `variable_scope=environment AND scope_ref_id=environment_id` 行。
+
 ---
 
 ## 7. 物理删除与级联约定
@@ -451,6 +499,8 @@ CREATE INDEX idx_nm_api_hist_request ON nm_api_history (request_id, created_at);
 | `nm_mcp_server` | 删其下 `nm_mcp_tool` 缓存；清 `credential_id` 指向的凭据（密文行） |
 | `nm_ai_conversation` | 删 `nm_ai_message`、`nm_ai_tool_invocation` |
 | `nm_api_history` | 无父级联；清空历史为 `DELETE` 本表。删集合请求不删历史 |
+| `nm_api_environment` | 删环境时级联删其 `nm_api_variable`（environment scope） |
+| `nm_api_variable` | 删文件夹时应用层删 folder scope 行（无物理 FK） |
 | `nm_credential_ref` | 删 `nm_profile_credential` 关联；密文随行删除（主密钥仍留在 Keychain）；**无软删恢复** |
 
 ```sql

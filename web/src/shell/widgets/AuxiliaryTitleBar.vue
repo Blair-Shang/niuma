@@ -19,7 +19,7 @@ async function onTitleBarDoubleClick(event: MouseEvent) {
 </script>
 
 <template>
-  <header class="nm-aux-titlebar nm-topbar shrink-0" @dblclick="onTitleBarDoubleClick">
+  <header class="nm-aux-titlebar nm-topbar" @dblclick="onTitleBarDoubleClick">
     <div class="nm-aux-titlebar__title nm-drag-region" :title="title">
       {{ title }}
     </div>

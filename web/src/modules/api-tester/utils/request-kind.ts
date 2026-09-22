@@ -1,4 +1,4 @@
-/** TCP/UDP 地址栏拆合。协议切换默认值在 apiPaneRegistry / panes/*。 */
+/** TCP/UDP 地址栏拆合。协议切换默认值在 pane-catalog / 各协议 defaults。 */
 import { isListenHost, parseTarget } from './target'
 
 export const DEFAULT_SOCKET_URL = '127.0.0.1:9000'

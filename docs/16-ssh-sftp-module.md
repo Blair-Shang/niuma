@@ -192,6 +192,7 @@ SSH 连接配置复用现有三张表：
 | method | 入参 | 结果对象 |
 |--------|------|----------|
 | `ssh.exec.run` | `{ sessionId, command }` | `{ stdout, stderr, exitCode }` |
+| `ssh.terminal.cwd` | `{ terminalId }` | `{ path }` |
 
 MVP 先返回一次性结果；后续可升级为流式事件：
 

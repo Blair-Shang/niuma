@@ -33,6 +33,8 @@ export default {
         monitor: '监控',
         expandSftp: '展开 SFTP',
         collapseSftp: '收起 SFTP',
+        sftpToCwd: '切换 SFTP 到当前路径',
+        sftpToCwdFailed: '无法获取终端当前路径',
       },
       monitor: {
         refresh: '刷新',

@@ -1,3 +1,4 @@
+import { isRsBrandIconName } from '@niuma/ui'
 import type { ConnectionProfile } from '@/api/types/connection'
 
 /** 运维侧栏支持的连接类型（新增类型只改 CONN_KIND_DEFS） */
@@ -45,6 +46,11 @@ export interface ConnItem extends ConnectionProfile {
 
 export function kindIcon(kind: ConnKind): string {
   return CONN_KIND_DEFS.find((k) => k.kind === kind)?.icon ?? 'monitor'
+}
+
+/** 品牌 mark 保留 niuma-ui 的 --rs-icon-*-accent；线标才用连接标签色。 */
+export function connIconColor(name: string, accent: string): string | undefined {
+  return isRsBrandIconName(name) ? undefined : accent
 }
 
 export function defaultPortForKind(kind: ConnKind): number {

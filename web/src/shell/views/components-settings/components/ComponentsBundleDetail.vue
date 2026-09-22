@@ -87,14 +87,14 @@ function formatBytes(n: number): string {
       <RsCard variant="plain" :padding="false" class="nm-components__detail-card">
         <template #header>
           <div class="nm-components__detail-head">
-            <div class="nm-components__detail-info min-w-0">
+            <div class="nm-components__detail-info">
               <div class="nm-components__detail-title-row">
                 <span class="nm-components__detail-icon" aria-hidden="true">
                   <RsIcon :name="bundleIcon(bundle)" :size="20" />
                 </span>
-                <div class="min-w-0">
+                <div class="nm-components__detail-copy">
                   <h2 class="nm-components__detail-title">{{ bundleDisplayName(t, te, bundle) }}</h2>
-                  <p class="nm-components__bundle-id truncate">{{ bundle.bundleId }}</p>
+                  <p class="nm-components__bundle-id">{{ bundle.bundleId }}</p>
                 </div>
               </div>
               <div class="nm-components__detail-meta">
@@ -192,10 +192,18 @@ function formatBytes(n: number): string {
   width: 100%;
 }
 
+.nm-components__detail-info {
+  min-width: 0;
+}
+
 .nm-components__detail-title-row {
   display: flex;
   align-items: center;
   gap: var(--rs-space-sm);
+}
+
+.nm-components__detail-copy {
+  min-width: 0;
 }
 
 .nm-components__detail-icon {
@@ -210,8 +218,8 @@ function formatBytes(n: number): string {
 }
 
 .nm-components__detail-title {
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-size: var(--rs-font-size-lg);
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-text);
 }
 
@@ -225,8 +233,11 @@ function formatBytes(n: number): string {
 
 .nm-components__bundle-id {
   margin: 0.125rem 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--nm-font-caption);
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
+  font-family: var(--rs-font-mono);
   color: var(--rs-muted);
 }
 

@@ -685,7 +685,7 @@ onBeforeUnmount(() => clearTimer())
 
 <template>
   <div class="nm-oracle-monitor">
-    <div ref="dialogHostEl" class="nm-oracle-monitor__dialog-mount" aria-hidden="true" />
+    <div ref="dialogHostEl" class="nm-oracle-monitor__dialog-mount" />
 
     <header class="nm-oracle-monitor__header">
       <div class="nm-oracle-monitor__tabs">

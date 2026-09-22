@@ -165,6 +165,16 @@ export interface SshTerminalCloseParams {
   terminalId: string
 }
 
+/** `ssh.terminal.cwd` 入参 */
+export interface SshTerminalCwdParams {
+  terminalId: string
+}
+
+/** `ssh.terminal.cwd` 返回 */
+export interface SshTerminalCwdResult {
+  path: string
+}
+
 /** 终端生命周期状态 */
 export type SshTerminalState = 'opening' | 'ready' | 'closed' | 'lost' | 'error'
 

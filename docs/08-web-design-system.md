@@ -35,20 +35,20 @@
 
 | 使用 | 禁止 |
 |------|------|
-| `@niuma/ui` 的 `Rs*` 组件 | Element Plus、Ant Design Vue |
+| `@niuma/ui` 的 `Rs*` 组件 | Element Plus、Ant Design Vue、Tailwind |
 | `var(--rs-*)` design token | 硬编码 `#hex`、`rgb()` |
-| Tailwind v4 工具类（语义化组合） | 超长内联 class 字符串 |
+| BEM（`.nm-*`）+ `--rs-*` | 超长工具类字符串、`:deep(.rs-*)` 改高度/圆角 |
 | `lucide-vue-next` 图标 | Element 图标集 |
 | `vue-sonner`（经 `RsToaster`） | `ElMessage` |
-| Reka UI（**仅** `packages/ui` 内部） | 业务层 `import 'reka-ui'` |
+| Reka UI（**仅** niuma-ui 内部） | 业务层 `import 'reka-ui'` |
 
 ### 组件封装原则
 
 ```
 Reka UI（无障碍/键盘/焦点）
-    ↓ 仅在 packages/ui 内
-Rs* 组件（样式 100% token 驱动）
-    ↓ 业务只 import @niuma/ui
+    ↓ 仅在 niuma-ui 内
+Rs* 组件（样式 100% --rs-* token 驱动）
+    ↓ 业务只从 @niuma/ui 包根具名导入
 web/、modules/
 ```
 
@@ -56,7 +56,7 @@ web/、modules/
 
 ## 3. 颜色与 Token
 
-**权威来源**：`packages/ui/src/styles.css` 中的 `[data-rs-theme]`。
+**权威来源**：`niuma-ui` 的 `styles.css`（`[data-rs-theme]` + `--rs-*`）。宿主只 `import '@niuma/ui/styles.css'`，再用 `tokens.css` / `brand.css` 覆盖同名变量。接入约定见 niuma-ui `docs/consumers.md` 与文档站。
 
 禁止在业务代码硬编码颜色；只读 CSS 变量：
 
@@ -64,7 +64,9 @@ web/、modules/
 |------|------------|
 | 品牌 | `--rs-primary` `--rs-primary-hover` |
 | 背景 | `--rs-bg` `--rs-surface` `--rs-surface-elevated` |
-| 文字 | `--rs-text` `--rs-muted` `--rs-placeholder` |
+| 文字 | `--rs-text` `--rs-muted` `--rs-placeholder`（亦作 `--rs-text-primary` / `secondary` / `tertiary`） |
+| 排版 | `--rs-font-size-*` `--rs-font-weight-*` `--rs-font-sans\|mono\|serif` |
+| 间距 / 圆角 | `--rs-space-*` `--rs-radius-*` `--rs-control-height-*` |
 | 描边 | `--rs-border` `--rs-border-subtle` |
 | 功能 | `--rs-success` `--rs-warning` `--rs-danger` `--rs-info` |
 | 容器 | `--rs-primary-container` `--rs-on-primary-container` |
@@ -74,18 +76,18 @@ web/、modules/
 
 - JS **只切换** `data-rs-theme="light|dark"`，不改 token 定义
 - 使用 `RsConfigProvider` 或 `applyTheme()` / `setTheme()`
-- NiuMa 品牌覆盖：`web/src/styles/brand.css` 覆盖 `--rs-primary*`（在 `styles.css` **之后** import）
+- NiuMa 品牌覆盖：`web/src/styles/brand.css` 覆盖同名 `--rs-*`（在 `niuma-ui/styles.css` **之后** import）。禁止新开 `--el-*` / `--niuma-*` 色板。
 
 ### 亮色 / 暗色基准（macOS system）
 
 | Token | 亮色 | 暗色 |
 |-------|------|------|
 | `primary` | `#007AFF`（systemBlue） | `#0A84FF` |
-| `bg` | `#F5F5F7` | `#1C1C1E` |
-| `surface` | `#FFFFFF` | `#2C2C2E` |
-| `surface-elevated` | `#FFFFFF` | `#3A3A3C` |
-| `text` | `#1D1D1F` | 98% white |
-| `muted` | `rgb(60 60 67 / 0.6)` | `rgb(235 235 245 / 0.6)` |
+| `bg` | `#F5F5F7` | `#181818` |
+| `surface` | `#FFFFFF` | `#1F1F1F` |
+| `surface-elevated` | `#FFFFFF` | `#262626` |
+| `text` | `#1D1D1F` | `#CCCCCC` |
+| `muted` | `#6E6E73` | `#9D9D9D` |
 | `danger` / `success` | `#FF3B30` / `#34C759` | `#FF453A` / `#30D158` |
 
 ---
@@ -94,15 +96,15 @@ web/、modules/
 
 | Token | 值 | 用途 |
 |-------|-----|------|
-| 控件高度 sm/md/lg | 24 / 32 / 40px | 工具栏 sm，表单 md |
-| 字号 xs~lg | 12 / 14 / 16 / 18px | 辅助 ~ 页标题 |
+| 控件高度 ssm/sm/md/lg | `--rs-control-height-*`（20 / 24 / 32 / 40px） | 工具栏 sm，表单跟 `RsConfigProvider control-size` |
+| 字号 xs~3xl | `--rs-font-size-*` | 辅助 ~ 页标题 |
 | 间距 | 4px 网格 | 区块间优先 `--rs-space-xl` |
 | 圆角 | `--rs-radius-sm` ~ `--rs-radius` | 8–12px；主按钮可 pill |
 
 **字体栈**
 
-- 界面：`Inter, "SF Pro Text", -apple-system, "Segoe UI", "PingFang SC", sans-serif`
-- 代码/终端/ID：`ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace`
+- 界面：`--rs-font-sans`
+- 代码/终端/ID：`--rs-font-mono`
 
 字重：标题 600 · 正文 400 · 标签 500 + `muted`
 
@@ -112,11 +114,15 @@ web/、modules/
 
 ### 5.1 按钮
 
+形态 `variant` 与色相 `tone` 正交，禁止一个 prop 同时改形状和颜色。
+
 | variant | 场景 |
 |---------|------|
 | `primary` | 主 CTA（连接、保存、执行） |
-| `default` | 次要操作 |
+| `default`（`secondary` 别名） | 次要操作 |
 | `ghost` | 工具栏、表格行内 |
+
+危险操作用 `tone="danger"`（或历史别名 `variant="danger"`），不要用 variant 表达语义色。
 
 ### 5.2 表单
 
@@ -149,7 +155,7 @@ web/、modules/
 - **暗色**：靠 `surface` 分层 + 1px 发丝描边，阴影极轻
 - **玻璃面板**（Popover、Dropdown）：`backdrop-filter: blur(12px)` + `border-subtle`
 - **动效**：`150–200ms` `cubic-bezier(0.4, 0, 0.2, 1)`；尊重 `prefers-reduced-motion`
-- **Z-index**：`--rs-z-tooltip:10` · `dropdown:50` · `modal:100` · `toast:200`
+- **Z-index**：只使用 `--rs-z-tooltip`（10）· `dropdown`（50）· `panel`（80）· `modal`（100）· `loading-bar`（190）· `toast`（200）
 
 ---
 
@@ -194,8 +200,8 @@ web/、modules/
 
 可插拔模块（`web/src/modules/*`）必须：
 
-1. **只使用** `@niuma/ui` 组件与 `--rs-*` token
-2. **禁止**自带 Element/Ant 或第二套 CSS 框架
+1. **只使用** `@niuma/ui` 组件与 `--rs-*` token（从包根具名导入）
+2. **禁止**自带 Element/Ant、Tailwind 或第二套 CSS 框架
 3. **禁止** `import 'reka-ui'`
 4. 模块 UI 由 Shell 的工作区挂载，不改变全局 token 定义
 
@@ -215,8 +221,8 @@ web/、modules/
 
 ## 11. 检查清单
 
-1. 是否只 import `@niuma/ui`，未引入 Element/Ant？
-2. 颜色是否全部 `var(--rs-*)`？
+1. 是否只 import `@niuma/ui`，未引入 Element/Ant/Tailwind？
+2. 颜色 / 字号 / 间距是否全部 `var(--rs-*)`？
 3. 双主题（light/dark）目测是否像 Linear/Vercel 工具风？
 4. 危险操作是否有 `RsConfirmDialog`？
 5. `Rs*` 新增文案是否双语？

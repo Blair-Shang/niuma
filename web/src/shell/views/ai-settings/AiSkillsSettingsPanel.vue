@@ -391,9 +391,9 @@ onMounted(() => {
               <span class="nm-ai-skills__nav-icon" aria-hidden="true">
                 <RsIcon name="sparkles" :size="16" />
               </span>
-              <span class="nm-ai-skills__nav-text min-w-0">
-                <span class="nm-ai-skills__nav-name truncate">{{ s.skillName }}</span>
-                <span class="nm-ai-skills__nav-meta truncate">
+              <span class="nm-ai-skills__nav-text">
+                <span class="nm-ai-skills__nav-name">{{ s.skillName }}</span>
+                <span class="nm-ai-skills__nav-meta">
                   {{ s.skillCode }}
                   <template v-if="skillIsPack(s)"> · pack</template>
                   <template v-else-if="s.skillScope"> · {{ s.skillScope }}</template>
@@ -434,9 +434,9 @@ onMounted(() => {
 
           <div v-else class="nm-ai-skills__detail-inner">
             <header class="nm-ai-skills__detail-head">
-              <div class="min-w-0">
-                <h2 class="nm-ai-skills__detail-title truncate">{{ detailTitle }}</h2>
-                <p v-if="detailSubtitle" class="nm-caption truncate">{{ detailSubtitle }}</p>
+              <div class="nm-ai-skills__detail-copy">
+                <h2 class="nm-ai-skills__detail-title">{{ detailTitle }}</h2>
+                <p v-if="detailSubtitle" class="nm-caption nm-truncate">{{ detailSubtitle }}</p>
               </div>
               <div v-if="!creating" class="nm-ai-skills__badges">
                 <RsBadge :variant="formStatus === 'active' ? 'success' : 'default'">
@@ -707,6 +707,13 @@ onMounted(() => {
   min-width: 0;
 }
 
+.nm-ai-skills__nav-name,
+.nm-ai-skills__nav-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nm-ai-skills__nav-name {
   font-size: var(--nm-font-body);
   font-weight: 500;
@@ -725,7 +732,7 @@ onMounted(() => {
 }
 
 .nm-ai-skills__status-dot--ok {
-  background: var(--rs-success, #22c55e);
+  background: var(--rs-success);
 }
 
 .nm-ai-skills__status-dot--off {
@@ -759,10 +766,17 @@ onMounted(() => {
   gap: var(--rs-space-md);
 }
 
+.nm-ai-skills__detail-copy {
+  min-width: 0;
+}
+
 .nm-ai-skills__detail-title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--rs-font-size-lg);
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-text);
 }
 

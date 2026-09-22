@@ -300,7 +300,7 @@ onMounted(() => {
             </p>
             <p class="nm-setting-row__desc">{{ t('account.sectionDesc') }}</p>
           </div>
-          <div class="flex gap-2">
+          <div class="nm-setting-row__actions">
             <RsButton
               v-if="!accountStore.isLoggedIn"
               variant="primary"
@@ -340,7 +340,7 @@ onMounted(() => {
             <p v-if="profileError" class="nm-caption" style="color: var(--rs-danger)">
               {{ profileError }}
             </p>
-            <p v-else-if="profileOk" class="nm-caption" style="color: var(--rs-success, #22c55e)">
+            <p v-else-if="profileOk" class="nm-caption" style="color: var(--rs-success)">
               {{ t('account.displayNameSaved') }}
             </p>
           </div>
@@ -350,7 +350,7 @@ onMounted(() => {
       <!-- 插件 -->
       <section v-else-if="activeSection === 'plugins'" class="nm-settings__panel">
         <header class="nm-settings__panel-head">
-          <div class="flex items-center justify-between gap-2">
+          <div class="nm-settings__panel-head-row">
             <h1 class="nm-section-title">{{ t('settings.plugins') }}</h1>
             <RsButton variant="ghost" size="sm" :disabled="pluginsLoading" @click="loadPlugins">
               {{ t('settings.pluginsRefresh') }}
@@ -370,9 +370,9 @@ onMounted(() => {
             :key="pluginIdOf(record)"
             class="nm-setting-row"
           >
-            <div class="nm-setting-row__info min-w-0">
+            <div class="nm-setting-row__info">
               <p class="nm-setting-row__label">{{ manifestName(record) }}</p>
-              <p class="nm-setting-row__desc truncate font-mono">{{ pluginIdOf(record) }}</p>
+              <p class="nm-setting-row__desc nm-mono nm-truncate">{{ pluginIdOf(record) }}</p>
             </div>
             <RsButton
               variant="secondary"
@@ -412,7 +412,7 @@ onMounted(() => {
               <div class="nm-about-card__mark">
                 <AppBrandIcon :size="28" variant="app" />
               </div>
-              <div class="min-w-0">
+              <div class="nm-about-card__copy">
                 <p class="nm-about-card__name">{{ t('app.title') }}</p>
                 <p class="nm-about-card__tag">{{ t('app.subtitle') }}</p>
               </div>
@@ -521,6 +521,18 @@ onMounted(() => {
   margin-bottom: var(--rs-space-lg);
 }
 
+.nm-settings__panel-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rs-space-sm);
+}
+
+.nm-setting-row__actions {
+  display: flex;
+  gap: var(--rs-space-sm);
+}
+
 .nm-settings__panel-head .nm-section-desc {
   margin-top: 0.25rem;
 }
@@ -555,6 +567,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
+  min-width: 0;
 }
 
 .nm-setting-row__label {
@@ -655,6 +668,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.85rem;
+  min-width: 0;
+}
+
+.nm-about-card__copy {
   min-width: 0;
 }
 

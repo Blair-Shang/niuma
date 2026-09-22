@@ -36,8 +36,8 @@ const { t, te } = useI18n()
         <span class="nm-components__bundle-icon" aria-hidden="true">
           <RsIcon :name="bundleIcon(bundle)" :size="16" />
         </span>
-        <span class="nm-components__bundle-text min-w-0">
-          <span class="nm-components__bundle-name truncate">{{ bundleDisplayName(t, te, bundle) }}</span>
+        <span class="nm-components__bundle-text">
+          <span class="nm-components__bundle-name">{{ bundleDisplayName(t, te, bundle) }}</span>
           <span class="nm-components__bundle-meta">
             {{ t('settings.componentsToolCount', { count: bundle.tools.length }) }}
             ·
@@ -141,8 +141,11 @@ const { t, te } = useI18n()
 }
 
 .nm-components__bundle-name {
-  font-weight: 500;
-  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--rs-font-weight-medium);
+  line-height: var(--rs-line-height-tight);
 }
 
 .nm-components__bundle-meta {

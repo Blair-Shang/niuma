@@ -482,7 +482,7 @@ onBeforeUnmount(() => clearTimer())
 
 <template>
   <div class="nm-dameng-monitor">
-    <div ref="dialogHostEl" class="nm-dameng-monitor__dialog-mount" aria-hidden="true" />
+    <div ref="dialogHostEl" class="nm-dameng-monitor__dialog-mount" />
 
     <header class="nm-dameng-monitor__header">
       <div class="nm-dameng-monitor__tabs">

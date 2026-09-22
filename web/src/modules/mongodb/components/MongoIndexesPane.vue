@@ -261,7 +261,7 @@ watch(
 
 <template>
   <div class="nm-mongo-idx">
-    <div ref="dialogHostEl" class="nm-mongo-idx__dialog-mount" aria-hidden="true" />
+    <div ref="dialogHostEl" class="nm-mongo-idx__dialog-mount" />
 
     <RsEmpty
       v-if="!database || !collection"
@@ -403,8 +403,8 @@ watch(
         v-model:open="dropConfirm"
         :title="t('modules.mongodb.indexes.dropTitle')"
         :description="t('modules.mongodb.indexes.dropDesc', { name: dropTarget ?? '' })"
-        variant="danger"
-        :loading="dropping"
+        confirm-variant="danger"
+        :confirm-loading="dropping"
         :teleport-to="dialogHostEl ?? undefined"
         @confirm="onDrop"
       />

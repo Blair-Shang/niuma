@@ -39,6 +39,7 @@ import { useSshTerminalSync } from '@/modules/ssh/composables/useSshTerminalSync
 import { createId } from '@/utils/id'
 import { parseHostKeyRejected } from '@/modules/ssh/hostkey'
 import { resolveSshTextEncoding } from '@/modules/ssh/terminal-data'
+import { joinHomeRelative } from '@/modules/ssh/terminal-cwd'
 
 const props = defineProps<{
   profileId: string
@@ -571,6 +572,30 @@ function navigateRemote(path: string): void {
   void refreshRemote()
 }
 
+async function onTerminalSftpToCwd(path: string): Promise<void> {
+  let target = path.trim()
+  if (!target) {
+    return
+  }
+  if (target.startsWith('~') && sessionId.value) {
+    try {
+      const home = await sshApi.sftpDirList({
+        sessionId: sessionId.value,
+        path: '.',
+      })
+      target = joinHomeRelative(home.path || '', target)
+    } catch {
+      // 家目录解析失败时仍用原路径，由列表请求报错
+    }
+  }
+  sftpActiveTab.value = 'files'
+  if (sftpUiCollapsed.value) {
+    toggleSftpCollapse()
+  }
+  filesListed.value = true
+  navigateRemote(target)
+}
+
 function goRemoteUp(): void {
   navigateRemote(parentRemotePath(remotePath.value))
 }
@@ -929,6 +954,7 @@ watch(
           :encoding="sshTextEncoding"
           @broadcastInput="onTerminalBroadcastInput"
           @reconnect="void reconnect()"
+          @sftpToCwd="(path) => void onTerminalSftpToCwd(path)"
         />
       </template>
 

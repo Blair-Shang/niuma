@@ -375,7 +375,7 @@ watch(
 <template>
   <div class="nm-mongo-docs">
     <!-- 对话框挂载点（页面内 Portal，非 modal 以免挡住 Tab 分屏/更多） -->
-    <div ref="dialogHostEl" class="nm-mongo-docs__dialog-mount" aria-hidden="true" />
+    <div ref="dialogHostEl" class="nm-mongo-docs__dialog-mount" />
 
     <!-- 无集合时的引导状态 -->
     <RsEmpty
@@ -510,8 +510,8 @@ watch(
         v-model:open="deleteConfirm"
         :title="t('modules.mongodb.document.deleteTitle')"
         :description="t('modules.mongodb.document.deleteDesc')"
-        variant="danger"
-        :loading="deleting"
+        confirm-variant="danger"
+        :confirm-loading="deleting"
         :teleport-to="dialogHostEl ?? undefined"
         @confirm="onViewerDelete"
       />

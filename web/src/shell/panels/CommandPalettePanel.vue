@@ -102,7 +102,15 @@ onMounted(async () => {
 .nm-cmdk {
   display: flex;
   flex-direction: column;
-  width: min(34rem, 92vw);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.nm-cmdk__input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .nm-cmdk__list {
@@ -146,7 +154,12 @@ onMounted(async () => {
 
 .nm-cmdk__item-id {
   margin-left: auto;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: ui-monospace, monospace;
   font-size: var(--rs-font-size-xs);
   color: var(--rs-muted);

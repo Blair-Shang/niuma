@@ -65,11 +65,11 @@ function formatReleaseDate(iso?: string): string {
           </div>
           <dl class="nm-about__facts">
             <dt>{{ t('settings.appVersion') }}</dt>
-            <dd class="font-mono">{{ bridge.shellVersion || '—' }}</dd>
+            <dd class="nm-mono">{{ bridge.shellVersion || '—' }}</dd>
             <dt>{{ t('settings.buildId') }}</dt>
-            <dd class="font-mono">{{ bridge.shellBuildId || '—' }}</dd>
+            <dd class="nm-mono">{{ bridge.shellBuildId || '—' }}</dd>
             <dt>{{ t('shell.help.platform') }}</dt>
-            <dd class="font-mono">
+            <dd class="nm-mono">
               {{ bridge.shellInfo?.platform || '—' }}
               <template v-if="bridge.shellInfo?.arch"> / {{ bridge.shellInfo.arch }}</template>
             </dd>
@@ -122,7 +122,7 @@ function formatReleaseDate(iso?: string): string {
               class="nm-changelog__ver"
             >
               <p class="nm-changelog__meta">
-                <span class="font-mono">{{ rel.version }}</span>
+                <span class="nm-mono">{{ rel.version }}</span>
                 <span v-if="formatReleaseDate(rel.publishedAt)">
                   · {{ formatReleaseDate(rel.publishedAt) }}
                 </span>

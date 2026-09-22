@@ -5,6 +5,7 @@ setupMonacoWorkers()
 import { createApp, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import '@niuma/ui/styles.css'
+import '@niuma/ui/brand-icons.css'
 import '@/styles/tokens.css'
 import '@/styles/brand.css'
 
@@ -12,6 +13,7 @@ import App from './App.vue'
 import { bootstrapExtensions } from '@/extensions/bootstrap/bootstrap-extensions'
 import { registerBuiltinFileProviders } from '@/modules/file-editor'
 import { registerBuiltinCommands } from '@/extensions/contributions/builtin-commands'
+import { registerBuiltinApiPaneLoaders } from '@/modules/api-tester/layout/register-builtin-panes'
 import { registerBuiltinConnKindLoaders } from '@/modules/ops/register-builtin-conn-kinds'
 import { getModuleById } from '@/extensions/registry/extension-registry'
 import { useTabStore } from '@/stores/tab'
@@ -93,8 +95,9 @@ async function main() {
   // 注册文件工作台内置 Provider（local / ftp）
   registerBuiltinFileProviders()
 
-  // 登记内置连接协议懒加载入口（首次打开表单/展开树时再拉取各协议模块）
+  // 登记内置连接协议 / API 协议懒加载入口（首次打开再拉取模块）
   registerBuiltinConnKindLoaders()
+  registerBuiltinApiPaneLoaders()
 
   const workbenchEntry = isFileWorkbenchEntry()
 

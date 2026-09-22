@@ -1,10 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsButton, RsTerminal, containsEscapeSequence, type RsTerminalExpose } from '@niuma/ui'
+import {
+  RsButton,
+  RsTerminal,
+  containsEscapeSequence,
+  useRsToast,
+  type RsContextMenuItem,
+  type RsTerminalExpose,
+} from '@niuma/ui'
+import { sshApi } from '@/api'
 import type { SshRemoteEncoding } from '@/api/types/ssh'
 import { useSshTerminal } from '@/modules/ssh/composables/useSshTerminal'
 import { decodeSshTerminalData } from '@/modules/ssh/terminal-data'
+import {
+  extractPromptPathFromTerminal,
+  normalizeRemoteCwd,
+  parseItermCurrentDir,
+  parseOsc7Payload,
+  type TerminalCwdBufferHost,
+} from '@/modules/ssh/terminal-cwd'
 import {
   clearDiagnostic,
   clearEditorSelection,
@@ -22,6 +37,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const toast = useRsToast()
 
 const terminalRef = ref<RsTerminalExpose | null>(null)
 const terminalReady = ref(false)
@@ -35,7 +51,82 @@ const textEncoding = computed<SshRemoteEncoding>(() => props.encoding ?? 'utf-8'
 const emit = defineEmits<{
   (e: 'broadcastInput', data: string): void
   (e: 'reconnect'): void
+  (e: 'sftpToCwd', path: string): void
 }>()
+
+const pane = useSshTerminal()
+
+const extraContextMenuItems = computed<RsContextMenuItem[]>(() => [
+  {
+    key: 'sftpToCwd',
+    label: t('modules.ssh.session.sftpToCwd'),
+    icon: 'folder-open',
+    disabled: !props.sessionId || pane.state.value !== 'ready' || !pane.terminalId.value,
+  },
+])
+
+let lastOscCwd = ''
+let oscHandlerAttached = false
+
+function attachOscCwdHandlers(): void {
+  const term = terminalRef.value?.getTerminal() as
+    | (TerminalCwdBufferHost & {
+        parser?: {
+          registerOscHandler?: (id: number, handler: (data: string) => boolean) => void
+        }
+      })
+    | null
+  if (!term?.parser?.registerOscHandler || oscHandlerAttached) {
+    return
+  }
+  oscHandlerAttached = true
+  term.parser.registerOscHandler(7, (data) => {
+    const path = parseOsc7Payload(data)
+    if (path) {
+      lastOscCwd = path
+    }
+    return false
+  })
+  term.parser.registerOscHandler(1337, (data) => {
+    const path = parseItermCurrentDir(data)
+    if (path) {
+      lastOscCwd = path
+    }
+    return false
+  })
+}
+
+async function resolveTerminalCwd(): Promise<string | null> {
+  const fromOsc = normalizeRemoteCwd(lastOscCwd)
+  if (fromOsc) {
+    return fromOsc
+  }
+  const fromPrompt = extractPromptPathFromTerminal(
+    (terminalRef.value?.getTerminal() ?? null) as TerminalCwdBufferHost | null,
+  )
+  if (fromPrompt) {
+    return fromPrompt
+  }
+  const terminalId = pane.terminalId.value
+  if (!terminalId) {
+    return null
+  }
+  try {
+    const result = await sshApi.terminalCwd({ terminalId })
+    return normalizeRemoteCwd(result.path)
+  } catch {
+    return null
+  }
+}
+
+async function onSftpToCwd(): Promise<void> {
+  const path = await resolveTerminalCwd()
+  if (!path) {
+    toast.error(t('modules.ssh.session.sftpToCwdFailed'))
+    return
+  }
+  emit('sftpToCwd', path)
+}
 
 const canReconnect = computed(() => {
   if (startupError.value) {
@@ -44,7 +135,6 @@ const canReconnect = computed(() => {
   return pane.state.value === 'error' || pane.state.value === 'lost'
 })
 
-const pane = useSshTerminal()
 let openingForSessionId = ''
 /** 切走后 activeTabId 已是新页签；卸载时按本终端所属 tab 清选区。 */
 const ownerTabId = useTabStore().activeTabId || undefined
@@ -126,6 +216,7 @@ async function openForSession(sessionId: string): Promise<void> {
   }
   openingForSessionId = sessionId
   startupError.value = ''
+  lastOscCwd = ''
   pendingOutput = ''
   cancelScheduledFlush()
   terminalRef.value.clear()
@@ -152,6 +243,7 @@ async function openForSession(sessionId: string): Promise<void> {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     })
     await syncPtySize()
+    attachOscCwdHandlers()
   } catch (e) {
     startupError.value = e instanceof Error ? e.message : t('modules.ssh.session.terminalError')
     publishDiagnostic({
@@ -296,8 +388,10 @@ defineExpose({
     :scrollback="TERMINAL_SCROLLBACK"
     :right-click-selects-word="false"
     wheel-scroll-modifier="shift"
+    :extra-context-menu-items="extraContextMenuItems"
     @ready="async () => {
       terminalReady = true
+      attachOscCwdHandlers()
       if (props.sessionId) {
         await openForSession(props.sessionId)
       }
@@ -306,6 +400,7 @@ defineExpose({
     @resize="() => void refreshSize()"
     @selection-change="onSelectionChange"
     @ask-ai="(text) => void askAiAboutSelection(text)"
+    @extra-select="(key) => { if (key === 'sftpToCwd') void onSftpToCwd() }"
   >
     <template v-if="canReconnect" #overlayAction>
       <RsButton size="sm" variant="primary" @click="emit('reconnect')">

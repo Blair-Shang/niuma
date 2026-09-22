@@ -528,7 +528,7 @@ watch(
             <div class="nm-clickhouse-tools__status-icon" aria-hidden="true">
               <RsIcon name="cpu" :size="14" />
             </div>
-            <div class="nm-clickhouse-tools__status-meta min-w-0">
+            <div class="nm-clickhouse-tools__status-meta">
               <span class="nm-clickhouse-tools__status-name">
                 {{ t('modules.clickhouse.tools.engineBuiltinShort') }}
               </span>
@@ -546,14 +546,14 @@ watch(
             <div class="nm-clickhouse-tools__status-icon" aria-hidden="true">
               <RsIcon name="terminal" :size="14" />
             </div>
-            <div class="nm-clickhouse-tools__status-meta min-w-0">
+            <div class="nm-clickhouse-tools__status-meta">
               <span class="nm-clickhouse-tools__status-name">clickhouse-client</span>
               <RsTooltip
                 v-if="clientOk && detect?.clickhouseClient?.path"
                 :content="detect.clickhouseClient.path"
                 side="bottom"
               >
-                <span class="nm-clickhouse-tools__status-path truncate">
+                <span class="nm-clickhouse-tools__status-path">
                   {{ detect.clickhouseClient.path }}
                   <template v-if="detect.clickhouseClient.version">
                     · {{ detect.clickhouseClient.version }}
@@ -1108,9 +1108,12 @@ watch(
 }
 
 .nm-clickhouse-tools__status-path {
-  font-size: 0.6875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--rs-font-size-xs);
   color: var(--rs-muted);
-  line-height: 1.3;
+  line-height: var(--rs-line-height-tight);
 }
 
 .nm-clickhouse-tools__status-path.is-missing {

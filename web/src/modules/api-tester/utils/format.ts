@@ -1,28 +1,15 @@
+/**
+ * 展示层格式化：curl、字节、hex、状态色。
+ * 插值与拼包走 request-resolve，这里不再自己合并变量表。
+ */
+import { createId } from '@/utils/id'
 import type { ApiEnvironment, ApiKvRow, ApiRequest } from '../types'
-
-const ENV_TOKEN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
-
-/** 把 {{baseUrl}} 等占位符换成当前环境值。 */
-export function interpolateEnv(text: string, env: ApiEnvironment | undefined): string {
-  if (!text) return ''
-  const values: Record<string, string> = {
-    baseUrl: env?.baseUrl ?? '',
-  }
-  return text.replace(ENV_TOKEN, (_all, name: string) => values[name] ?? '')
-}
+import { titleHttpHeader } from '../http/http-wire'
+import { resolveRequest } from '../http/request-resolve'
+import type { ApiVariableScope } from './folder-tree'
 
 export function enabledRows(rows: ApiKvRow[]): ApiKvRow[] {
   return rows.filter((row) => row.enabled && row.key.trim())
-}
-
-/** 拼接 URL 与启用的 query。已有 ? 时用 &。 */
-export function resolveRequestUrl(req: ApiRequest, env: ApiEnvironment | undefined): string {
-  const base = interpolateEnv(req.url.trim(), env)
-  const query = enabledRows(req.params)
-    .map((row) => `${encodeURIComponent(row.key)}=${encodeURIComponent(interpolateEnv(row.value, env))}`)
-    .join('&')
-  if (!query) return base
-  return `${base}${base.includes('?') ? '&' : '?'}${query}`
 }
 
 export function formatBytes(size: number): string {
@@ -80,19 +67,31 @@ export function prettyJson(text: string): string {
 }
 
 /** 生成可粘贴的 curl（仅演示，不含 cookie 文件）。 */
-export function buildCurl(req: ApiRequest, env: ApiEnvironment | undefined): string {
-  const url = resolveRequestUrl(req, env)
+export function buildCurl(
+  req: ApiRequest,
+  env: ApiEnvironment | undefined,
+  scope?: ApiVariableScope,
+): string {
+  const resolved = resolveRequest(req, env, scope)
   const parts = ['curl']
   if (req.method !== 'GET' && req.method !== 'TCP' && req.method !== 'UDP' && req.method !== 'WS') {
     parts.push('-X', req.method)
   }
-  parts.push(shellQuote(url))
-  for (const row of enabledRows(req.headers)) {
-    const value = interpolateEnv(row.value, env)
-    parts.push('-H', shellQuote(`${row.key}: ${value}`))
+  parts.push(shellQuote(resolved.url))
+
+  for (const [key, value] of resolved.headers) {
+    parts.push('-H', shellQuote(`${titleHttpHeader(key)}: ${value}`))
   }
-  if (req.body.trim() && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'TCP') {
-    parts.push('--data-raw', shellQuote(interpolateEnv(req.body, env)))
+
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'TCP') {
+    return parts.join(' ')
+  }
+  if (req.bodyMode === 'urlencoded' && resolved.body) {
+    parts.push('--data-urlencode', shellQuote(resolved.body))
+    return parts.join(' ')
+  }
+  if (resolved.body) {
+    parts.push('--data-raw', shellQuote(resolved.body))
   }
   return parts.join(' ')
 }
@@ -103,7 +102,7 @@ function shellQuote(value: string): string {
 
 export function newKvRow(key = '', value = '', enabled = true): ApiKvRow {
   return {
-    id: `kv-${Math.random().toString(36).slice(2, 10)}`,
+    id: createId('kv'),
     enabled,
     key,
     value,

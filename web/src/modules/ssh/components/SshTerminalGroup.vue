@@ -8,6 +8,7 @@ const emit = defineEmits<{
   /** 当开启 syncInput 时，由任意分屏捕获到用户输入并上报父组件 */
   (e: 'broadcastInput', data: string): void
   (e: 'reconnect'): void
+  (e: 'sftpToCwd', path: string): void
 }>()
 
 const props = defineProps<{
@@ -111,6 +112,7 @@ defineExpose({
         :sync-broadcast="syncInput"
         @broadcastInput="onBroadcastInput"
         @reconnect="emit('reconnect')"
+        @sftpToCwd="emit('sftpToCwd', $event)"
       />
     </div>
   </section>

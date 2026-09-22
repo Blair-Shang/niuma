@@ -1,20 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import type { ApiRequest } from '../types'
+import { minimalRequest } from './collection-io'
 import { newKvRow } from './format'
-import { applyPaneMethod } from '../pane-registry'
+import { applyPaneMethod } from '../layout/pane-registry'
 import { joinSocketUrl, looksLikeHttpUrl, splitSocketUrl } from './request-kind'
 
-function sample(partial: Partial<ApiRequest> = {}): ApiRequest {
-  return {
+function sample(partial: Parameters<typeof minimalRequest>[0] = {}) {
+  return minimalRequest({
     id: 'req-1',
     name: 'Untitled',
     method: 'GET',
     url: '{{baseUrl}}/api/items',
     params: [newKvRow('q', '1')],
     headers: [newKvRow('Accept', 'application/json')],
-    body: '',
     ...partial,
-  }
+  })
 }
 
 describe('applyPaneMethod', () => {

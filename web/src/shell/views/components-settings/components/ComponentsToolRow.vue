@@ -70,16 +70,16 @@ const browseLabel = computed(() =>
     }"
   >
     <div class="nm-components__tool-top">
-      <div class="nm-components__tool-identity min-w-0">
+      <div class="nm-components__tool-identity">
         <div class="nm-components__tool-title-line">
-          <h3 class="nm-components__tool-name truncate">
+          <h3 class="nm-components__tool-name">
             {{ toolDisplayName(t, te, bundle, tool) }}
           </h3>
           <RsBadge :variant="statusBadgeVariant(tool.status)">
             {{ statusLabel(t, tool.status) }}
           </RsBadge>
         </div>
-        <p v-if="tool.version" class="nm-components__tool-version truncate" :title="tool.version">
+        <p v-if="tool.version" class="nm-components__tool-version" :title="tool.version">
           {{ tool.version }}
         </p>
       </div>
@@ -149,7 +149,7 @@ const browseLabel = computed(() =>
       <span class="nm-components__path-icon" aria-hidden="true">
         <RsIcon :name="hasPath ? 'file-code' : 'folder'" :size="14" />
       </span>
-      <code class="nm-components__path-text truncate">{{ pathText }}</code>
+      <code class="nm-components__path-text">{{ pathText }}</code>
     </div>
   </div>
 </template>
@@ -195,19 +195,25 @@ const browseLabel = computed(() =>
 
 .nm-components__tool-name {
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--nm-font-body);
-  font-weight: 600;
-  line-height: 1.35;
+  font-weight: var(--rs-font-weight-semibold);
+  line-height: var(--rs-line-height-tight);
   color: var(--rs-text);
 }
 
 .nm-components__tool-version {
   margin: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--nm-font-caption);
-  line-height: 1.4;
+  line-height: var(--rs-line-height-normal);
   color: var(--rs-muted);
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
+  font-family: var(--rs-font-mono);
 }
 
 .nm-components__tool-tip {
@@ -254,10 +260,13 @@ const browseLabel = computed(() =>
 .nm-components__path-text {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--nm-font-caption);
-  line-height: 1.4;
+  line-height: var(--rs-line-height-normal);
   color: var(--rs-text);
-  font-family: var(--rs-font-mono, ui-monospace, monospace);
+  font-family: var(--rs-font-mono);
 }
 
 .nm-components__path-bar--empty .nm-components__path-text {

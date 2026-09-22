@@ -23,8 +23,8 @@ Web 层是 NiuMa 桌面 App 的 **UI 渲染进程**，运行在 CEF Chromium 内
 | 使用 | 禁止 |
 |------|------|
 | **Vue 3** + **TypeScript** + **Vite** | Element Plus、Ant Design Vue |
-| **Tailwind CSS v4**、`web/src/styles/tokens.css` | 内联混乱 class、随意硬编码色值 |
-| **Reka UI**（`reka-ui`，仅 `packages/ui` 内） | 业务层自建 Dialog/Menu 焦点陷阱 |
+| **`@niuma/ui` `--rs-*` token**、`web/src/styles/tokens.css` | Tailwind、内联混乱 class、硬编码色值 |
+| **Reka UI**（`reka-ui`，仅 niuma-ui 内） | 业务层自建 Dialog/Menu 焦点陷阱 |
 | **lucide-vue-next**、**vue-sonner** | `ElMessage`、Ant `message` |
 | **Pinia** | 无规范的全局 `ref` 散落 |
 | **vue-i18n** | 组件内硬编码中英文 |
@@ -68,8 +68,8 @@ NiuMa/
 │       ├── locale/              # vue-i18n 业务文案
 │       ├── router/
 │       └── styles/
-│           ├── tokens.css       # Tailwind v4 + 业务扩展 token
-│           └── brand.css        # NiuMa 品牌色覆盖
+│           ├── tokens.css       # Shell 尺度 + --nm-* 映射到 --rs-*
+│           └── brand.css        # 可选 --rs-* 品牌覆盖
 └── ...
 ```
 
@@ -122,21 +122,21 @@ import '@/styles/brand.css'
 </script>
 
 <template>
-  <RsConfigProvider theme="dark" locale="zh-CN">
+  <RsConfigProvider theme="dark" locale="zh-CN" control-size="md">
     <AppShell />
   </RsConfigProvider>
 </template>
 ```
 
 ```css
-/* web/src/styles/brand.css — 在 styles.css 之后 */
+/* web/src/styles/brand.css — 在 niuma-ui/styles.css 之后，只覆盖同名 --rs-* */
 [data-rs-theme='light'] {
-  --rs-primary: #4f46e5;
-  --rs-primary-hover: #4338ca;
+  --rs-primary: #007aff;
+  --rs-primary-hover: #0071eb;
 }
 [data-rs-theme='dark'] {
-  --rs-primary: #818cf8;
-  --rs-primary-hover: #a5b4fc;
+  --rs-primary: #0a84ff;
+  --rs-primary-hover: #409cff;
 }
 ```
 

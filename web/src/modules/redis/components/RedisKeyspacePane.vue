@@ -305,7 +305,7 @@ watch(
       :open="deleteTarget !== null"
       :title="t('modules.redis.keyspace.deleteConfirmTitle')"
       :description="deleteTarget ? t('modules.redis.keyspace.deleteConfirmDesc', { key: deleteTarget.key }) : ''"
-      :loading="deleting"
+      :confirm-loading="deleting"
       @update:open="(val: boolean) => { if (!val) deleteTarget = null }"
       @confirm="doDelete"
     />

@@ -584,7 +584,7 @@ onBeforeUnmount(() => clearTimer())
 
 <template>
   <div class="nm-mysql-monitor">
-    <div ref="dialogHostEl" class="nm-mysql-monitor__dialog-mount" aria-hidden="true" />
+    <div ref="dialogHostEl" class="nm-mysql-monitor__dialog-mount" />
 
     <header class="nm-mysql-monitor__header">
       <div class="nm-mysql-monitor__tabs">

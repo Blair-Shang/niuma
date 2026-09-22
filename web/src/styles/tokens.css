@@ -14,10 +14,10 @@ body,
   --nm-sidebar-w: 13.5rem;
   --nm-ai-panel-w: 26rem;
   --nm-tabbar-h: 2.125rem;
-  /* Shell 区域背景 — 与设计系统暗色灰阶对齐（frame<内容<悬浮层） */
-  --nm-frame-bg: #181818;
-  --nm-editor-bg: #1f1f1f;
-  --nm-elevated-bg: #262626;
+  /* Shell 区域背景 — 跟随 niuma-ui --rs-* 分层（frame < 内容 < 悬浮层） */
+  --nm-frame-bg: var(--rs-bg);
+  --nm-editor-bg: var(--rs-surface);
+  --nm-elevated-bg: var(--rs-surface-elevated);
   --nm-activitybar-bg: var(--nm-frame-bg);
   --nm-sidebar-bg: var(--nm-frame-bg);
   --nm-topbar-bg: color-mix(in srgb, var(--nm-frame-bg) 80%, transparent);
@@ -39,20 +39,17 @@ body,
   --nm-font-brand: var(--rs-font-size-sm);
 }
 
-/* 亮色：内容白、框架浅灰，沿用设计系统 rs token */
-[data-rs-theme='light'] {
-  --nm-frame-bg: var(--rs-bg);
-  --nm-editor-bg: var(--rs-surface);
-  --nm-elevated-bg: var(--rs-surface);
-}
-
 .nm-app {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   background: var(--nm-frame-bg);
   color: var(--rs-text);
   font-size: var(--nm-font-body);
   line-height: var(--rs-line-height-normal);
+  font-family: var(--rs-font-sans);
   font-feature-settings: 'kern' 1, 'liga' 1;
   letter-spacing: -0.011em;
 }
@@ -62,22 +59,6 @@ body,
   background: color-mix(in srgb, var(--rs-surface) 72%, transparent);
   backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
-}
-
-/*
- * 右键菜单必须实底。半透明 + backdrop-filter 在 CEF GPU 崩溃后失效，
- * 生产包走 app:// 时会透出连接树。覆盖 niuma-ui 旧 tag 的毛玻璃样式。
- */
-.rs-context-menu__content,
-.rs-context-menu__sub-content {
-  background: #f5f5f7;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
-[data-rs-theme='dark'] .rs-context-menu__content,
-[data-rs-theme='dark'] .rs-context-menu__sub-content {
-  background: #2c2c2e;
 }
 
 [data-rs-theme='dark'] .nm-glass {
@@ -97,6 +78,7 @@ body,
 .nm-topbar {
   position: relative;
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   height: var(--nm-topbar-h);
   isolation: isolate;
@@ -189,6 +171,7 @@ body,
 
 .nm-statusbar {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   height: var(--nm-statusbar-h);
@@ -407,6 +390,16 @@ body,
   font-size: var(--nm-font-caption);
   color: var(--rs-muted);
   line-height: var(--rs-line-height-normal);
+}
+
+.nm-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nm-mono {
+  font-family: var(--rs-font-mono);
 }
 
 .nm-toolbar-menu .rs-dropdown {

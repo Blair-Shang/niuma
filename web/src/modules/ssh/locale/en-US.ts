@@ -33,6 +33,8 @@ export default {
         monitor: 'Monitor',
         expandSftp: 'Expand SFTP',
         collapseSftp: 'Collapse SFTP',
+        sftpToCwd: 'Open SFTP at current path',
+        sftpToCwdFailed: 'Could not determine the terminal current path',
       },
       monitor: {
         refresh: 'Refresh',

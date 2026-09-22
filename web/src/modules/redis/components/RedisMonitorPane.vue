@@ -205,7 +205,8 @@ watch(
       @action="onToolbarAction"
       @mode="onToolbarMode"
     />
-    <RsTooltipProvider class="nm-redis-monitor__main">
+    <div class="nm-redis-monitor__main">
+    <RsTooltipProvider>
       <div class="nm-redis-monitor__body">
       <p v-if="error" class="nm-redis-monitor__error" role="alert">{{ error }}</p>
 
@@ -285,6 +286,7 @@ watch(
       </div>
       </div>
     </RsTooltipProvider>
+    </div>
   </div>
 </template>
 

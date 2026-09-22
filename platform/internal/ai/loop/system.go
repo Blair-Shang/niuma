@@ -171,13 +171,10 @@ func (s *Service) syncSystemModels(ctx context.Context, models []SystemModelSpec
 			return err
 		}
 	}
+	// 云端目录是唯一真相：本机多出来的旧模型直接删除，避免面板新旧并存。
 	for _, leftover := range byCode {
-		if leftover.RecordStatus == "disabled" {
-			continue
-		}
-		leftover.RecordStatus = "disabled"
-		if _, _, updErr := s.Providers.UpdateModel(ctx, leftover, leftover.RowVersion); updErr != nil {
-			return updErr
+		if err := s.Providers.DeleteModel(ctx, leftover.ModelID); err != nil {
+			return err
 		}
 	}
 	return nil

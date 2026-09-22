@@ -13,6 +13,9 @@ import type { AsyncComponentLoader } from 'vue'
 /** 设置视图的 Tab moduleId（内部命名空间，避免与真实模块 id 冲突） */
 export const SETTINGS_VIEW_ID = 'workbench.view.settings'
 
+/** API 环境配置视图：全局单例 Tab，不进 Activity Bar */
+export const API_ENV_VIEW_ID = 'workbench.view.api-environments'
+
 /** 内置视图定义（元数据 + 组件懒加载器） */
 export interface InternalView {
   id: string
@@ -30,6 +33,12 @@ const INTERNAL_VIEWS: Record<string, InternalView> = {
     titleKey: 'nav.settings',
     icon: 'settings',
     load: () => import('@/shell/views/SettingsView.vue'),
+  },
+  [API_ENV_VIEW_ID]: {
+    id: API_ENV_VIEW_ID,
+    titleKey: 'modules.api.sideEnvironment',
+    icon: 'globe',
+    load: () => import('@/modules/api-tester/layout/ApiEnvironmentView.vue'),
   },
 }
 

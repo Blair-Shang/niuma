@@ -96,7 +96,7 @@ onMounted(() => {
 
 <template>
   <!-- 全宽顶栏：品牌 | 拖拽 | 搜索 | 窗口控制 — 全部垂直居中 -->
-  <header class="nm-topbar shrink-0" @dblclick="onTopBarDoubleClick">
+  <header class="nm-topbar" @dblclick="onTopBarDoubleClick">
     <div class="nm-topbar__brand nm-drag-region">
       <span class="nm-brand-icon" :title="t('app.title')">
         <AppBrandIcon :size="14" variant="mark" />
@@ -111,7 +111,7 @@ onMounted(() => {
         side="bottom"
         align="start"
         :side-offset="8"
-        width="auto"
+        width="lg"
       >
         <div class="nm-topbar__search" :title="t('commandPalette.shortcutHint')">
           <RsInput class="pointer-events-none" :placeholder="t('shell.searchPlaceholder')" readonly>

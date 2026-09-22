@@ -11,8 +11,8 @@ import OpsConnectionPanel from '@/modules/ops/components/OpsConnectionPanel.vue'
 import type { ModuleCategory } from '@/extensions/types/module'
 import { useShellStore } from '@/stores/shell'
 
-const ApiCollectionPanel = defineAsyncComponent(
-  () => import('@/modules/api-tester/components/ApiCollectionPanel.vue'),
+const ApiSideNav = defineAsyncComponent(
+  () => import('@/modules/api-tester/layout/ApiSideNav.vue'),
 )
 
 const shellStore = useShellStore()
@@ -43,7 +43,7 @@ watch(
       <OpsConnectionPanel :category="opsCategory" />
     </div>
     <div v-if="apiSeen" v-show="isApi" class="nm-sidenav__layer">
-      <ApiCollectionPanel />
+      <ApiSideNav />
     </div>
   </div>
 </template>

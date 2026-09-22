@@ -83,11 +83,7 @@ watch(
 )
 
 const modelSelectOptions = computed((): RsSelectOptions =>
-  buildModelSelectOptions(
-    aiStore.providers,
-    aiStore.selectedProviderId,
-    aiStore.selectedModelCode,
-  ),
+  buildModelSelectOptions(aiStore.providers),
 )
 
 const selectedModelKey = computed({

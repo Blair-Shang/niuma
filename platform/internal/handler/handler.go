@@ -181,6 +181,7 @@ type Deps struct {
 	AppUpdate    *appupdate.Manager
 	AI           *ai.Service
 	APIHistory   *store.APIHistoryStore
+	APICatalog   *store.APICatalogStore
 	Events       EventPublisher
 }
 
@@ -198,6 +199,7 @@ type Dispatcher struct {
 	appUpdate    *appupdate.Manager
 	ai           *ai.Service
 	apiHistory   *store.APIHistoryStore
+	apiCatalog   *store.APICatalogStore
 	events       EventPublisher
 }
 
@@ -216,6 +218,7 @@ func New(deps Deps) *Dispatcher {
 		appUpdate:    deps.AppUpdate,
 		ai:           deps.AI,
 		apiHistory:   deps.APIHistory,
+		apiCatalog:   deps.APICatalog,
 		events:       deps.Events,
 	}
 }
@@ -368,6 +371,22 @@ func (d *Dispatcher) dispatchMethod(ctx context.Context, req Request) Response {
 		return d.apiHistoryDelete(ctx, req)
 	case MethodAPIHistoryClear:
 		return d.apiHistoryClear(ctx, req)
+	case MethodAPIEnvironmentList:
+		return d.apiEnvironmentList(ctx, req)
+	case MethodAPIEnvironmentCreate:
+		return d.apiEnvironmentCreate(ctx, req)
+	case MethodAPIEnvironmentUpdate:
+		return d.apiEnvironmentUpdate(ctx, req)
+	case MethodAPIEnvironmentDelete:
+		return d.apiEnvironmentDelete(ctx, req)
+	case MethodAPIVariableList:
+		return d.apiVariableList(ctx, req)
+	case MethodAPIVariableUpsert:
+		return d.apiVariableUpsert(ctx, req)
+	case MethodAPIVariableDelete:
+		return d.apiVariableDelete(ctx, req)
+	case MethodAPIVariableReplaceScope:
+		return d.apiVariableReplaceScope(ctx, req)
 	default:
 		if d.fileEditor != nil {
 			if resp, handled := d.fileEditor.Dispatch(ctx, req); handled {

@@ -130,15 +130,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="nm-app flex h-full min-h-0 flex-col overflow-hidden">
+  <div class="nm-app">
     <FramelessResizeEdges v-if="windowChrome.frameless" />
     <TopBar />
-    <div class="nm-app__body flex min-h-0 flex-1">
+    <div class="nm-app__body">
       <ActivityBar />
       <RsSplitPane
         ref="splitRef"
-        class="nm-body-split flex-1 min-w-0"
+        class="nm-body-split"
         :panes="splitPanes"
+        fill
         with-handle
         @collapse="onSplitCollapse"
         @expand="onSplitExpand"
@@ -147,7 +148,7 @@ onUnmounted(() => {
           <SideNav />
         </template>
         <template #editor>
-          <div class="nm-editor h-full flex flex-col min-w-0 min-h-0">
+          <div class="nm-editor">
             <ModuleWorkspace />
             <BottomDock />
           </div>
@@ -166,19 +167,27 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.nm-app__body {
-  min-height: 0;
-}
-
 .nm-app {
   position: relative;
 }
 
+.nm-app__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .nm-body-split {
+  flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
 .nm-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
   min-height: 0;
   background: var(--nm-editor-bg);
 }

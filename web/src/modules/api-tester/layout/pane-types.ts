@@ -1,7 +1,8 @@
 import type { Component } from 'vue'
-import type { ApiMethod, ApiRequest } from './types'
+import type { ApiMethod, ApiRequest } from '../types'
 
-export type ApiPaneKind = 'http' | 'socket'
+/** 协议 kind。与目录 http/ tcp/ udp/ websocket 对齐；启动只登记 loader。 */
+export type ApiPaneKind = 'http' | 'tcp' | 'udp' | 'websocket'
 
 export interface ApiPaneCreateOpts {
   listen?: boolean
@@ -36,11 +37,19 @@ export interface ApiPaneDescriptor {
   buildProps: (ctx: ApiPaneContext) => Record<string, unknown>
 }
 
-export interface ApiFeatureDef {
+/** 启动即可读的协议元数据，对齐 CONN_KIND_DEFS；不含 Vue。 */
+export interface ApiPaneKindDef {
+  kind: ApiPaneKind
   icon: string
   labelKey: string
   methods: readonly ApiMethod[]
   creates?: readonly ApiPaneCreateAction[]
   applyDefaults: (req: ApiRequest, opts?: ApiPaneCreateOpts) => void
+}
+
+/** register() 写入的运行时：只负责解析工作台。 */
+export interface ApiPaneRuntime {
   resolvePane: (scope: ApiPaneScope) => ApiPaneDescriptor
 }
+
+export interface ApiFeatureDef extends ApiPaneKindDef, ApiPaneRuntime {}

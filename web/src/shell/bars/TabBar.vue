@@ -364,13 +364,13 @@ function onDragEnd(): void {
 <template>
   <div
     v-if="tabs.length"
-    class="nm-tabbar flex shrink-0 items-center border-b"
+    class="nm-tabbar"
     :class="{ 'nm-tabbar--active': isActiveGroup && hasSplit }"
     style="height: var(--nm-tabbar-h); border-color: var(--rs-border-subtle); background: var(--nm-frame-bg)"
     @dragover.prevent
     @drop.prevent="onDropStrip"
   >
-    <div class="nm-tabbar__nav flex min-w-0 flex-1 items-center">
+    <div class="nm-tabbar__nav">
       <button
         v-if="canScrollPrev"
         type="button"
@@ -384,7 +384,7 @@ function onDragEnd(): void {
 
       <div
         ref="listRef"
-        class="nm-tabbar__list flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+        class="nm-tabbar__list"
         @scroll="updateScrollState"
         @wheel="onListWheel"
       >
@@ -494,7 +494,7 @@ function onDragEnd(): void {
       </RsPopover>
     </div>
 
-    <div class="nm-tabbar__actions flex shrink-0 items-center gap-0.5 px-1">
+    <div class="nm-tabbar__actions">
       <button
         type="button"
         class="nm-tabbar__btn"
@@ -552,8 +552,12 @@ function onDragEnd(): void {
 
 .nm-tabbar {
   position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
   width: 100%;
   min-width: 0;
+  border-bottom: 1px solid var(--rs-border-subtle);
 }
 
 /* 激活组：Tab 栏顶部一条高亮线，指示焦点所在分屏 */
@@ -568,11 +572,28 @@ function onDragEnd(): void {
 }
 
 .nm-tabbar__nav {
+  display: flex;
+  flex: 1;
+  align-items: center;
   min-width: 0;
 }
 
 .nm-tabbar__list {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  gap: 0.125rem;
+  overflow-x: auto;
   scrollbar-width: none;
+}
+
+.nm-tabbar__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.125rem;
+  padding-inline: var(--rs-space-xs);
 }
 
 .nm-tabbar__list::-webkit-scrollbar {
@@ -630,10 +651,13 @@ function onDragEnd(): void {
 
 .nm-tab__icon {
   flex-shrink: 0;
+}
+
+.nm-tab__icon:not(.rs-icon--brand) {
   color: var(--rs-muted);
 }
 
-.nm-tab--active .nm-tab__icon {
+.nm-tab--active .nm-tab__icon:not(.rs-icon--brand) {
   color: var(--rs-primary);
 }
 
@@ -809,10 +833,13 @@ function onDragEnd(): void {
 
 .nm-tabbar__overflow-item-icon {
   flex-shrink: 0;
+}
+
+.nm-tabbar__overflow-item-icon:not(.rs-icon--brand) {
   color: var(--rs-muted);
 }
 
-.nm-tabbar__overflow-item--active .nm-tabbar__overflow-item-icon {
+.nm-tabbar__overflow-item--active .nm-tabbar__overflow-item-icon:not(.rs-icon--brand) {
   color: var(--rs-primary);
 }
 </style>

@@ -19,7 +19,7 @@ alwaysApply: false
 | 使用 | 禁止 |
 |------|------|
 | Vue 3 + TS + Vite | Element Plus、Ant Design |
-| Tailwind v4、`web/src/styles/tokens.css` | 混乱内联 class |
+| `@niuma/ui` `--rs-*`、`web/src/styles/tokens.css` | Tailwind、混乱内联 class |
 | `@niuma/ui`（Rs*） | 业务层 `import 'reka-ui'` |
 | lucide-vue-next、vue-sonner | ElMessage |
 | Pinia、vue-i18n | — |

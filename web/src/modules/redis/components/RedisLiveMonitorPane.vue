@@ -235,7 +235,8 @@ watch(
       @action="onToolbarAction"
       @filter="onToolbarFilter"
     />
-    <RsTooltipProvider class="nm-redis-live__main">
+    <div class="nm-redis-live__main">
+    <RsTooltipProvider>
 
       <p v-if="message && state === 'lost'" class="nm-redis-live__error" role="alert">{{ message }}</p>
 
@@ -286,6 +287,7 @@ watch(
         </RsCard>
       </div>
     </RsTooltipProvider>
+    </div>
   </div>
 </template>
 

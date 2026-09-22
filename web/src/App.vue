@@ -87,7 +87,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <RsConfigProvider :theme="appStore.theme" :locale="appStore.locale" class="nm-root">
+  <RsConfigProvider
+    :theme="appStore.theme"
+    :locale="appStore.locale"
+    control-size="md"
+    class="nm-root"
+  >
     <RsTooltipProvider>
       <RsToaster />
       <router-view class="nm-root__view" />

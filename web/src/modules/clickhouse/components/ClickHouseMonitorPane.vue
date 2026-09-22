@@ -1864,7 +1864,7 @@ function statTone(
       :title="t('modules.clickhouse.monitor.killQueryTitle')"
       :description="killDesc"
       :confirm-text="t('modules.clickhouse.monitor.killConfirm')"
-      :loading="killBusy"
+      :confirm-loading="killBusy"
       :teleport-to="dialogHostEl!"
       @confirm="confirmKill"
     />

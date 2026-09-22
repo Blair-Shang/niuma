@@ -30,34 +30,32 @@ export function formatModelOptionLabel(providerName: string, modelCode: string):
   return model || name
 }
 
-/** 某 Provider 下可选模型（含 defaultModelCode 兜底）。 */
+/** 某 Provider 下可选模型（跳过已下架；无启用条目时才用 defaultModelCode 兜底）。 */
 export function modelsForProvider(p: AiProvider): Array<{ modelCode: string }> {
   const seen = new Set<string>()
   const list: Array<{ modelCode: string }> = []
   for (const m of p.models ?? []) {
     const code = m.modelCode?.trim()
-    if (!code || seen.has(code)) {
+    if (!code || seen.has(code) || m.recordStatus === 'disabled') {
       continue
     }
     seen.add(code)
     list.push({ modelCode: code })
   }
-  const fallback = p.defaultModelCode?.trim()
-  if (fallback && !seen.has(fallback)) {
-    list.unshift({ modelCode: fallback })
+  if (!list.length) {
+    const fallback = p.defaultModelCode?.trim()
+    if (fallback) {
+      list.push({ modelCode: fallback })
+    }
   }
   return list
 }
 
 /**
  * 统一模型选项：value = `providerId::modelCode`，
- * 文案为「名称 · 模型」。
+ * 文案为「名称 · 模型」。只列启用中的目录，不把已下架的当前选中项补回去。
  */
-export function buildModelSelectOptions(
-  providers: AiProvider[],
-  selectedProviderId: string,
-  selectedModelCode: string,
-): RsSelectOptions {
+export function buildModelSelectOptions(providers: AiProvider[]): RsSelectOptions {
   if (!providers.length) {
     return []
   }
@@ -70,19 +68,6 @@ export function buildModelSelectOptions(
         label: formatModelOptionLabel(p.providerName, m.modelCode),
       })
     }
-  }
-
-  const currentKey =
-    selectedProviderId && selectedModelCode
-      ? encodeModelKey(selectedProviderId, selectedModelCode)
-      : ''
-  if (currentKey && !options.some((o) => o.value === currentKey)) {
-    const providerName =
-      providers.find((p) => p.providerId === selectedProviderId)?.providerName ?? ''
-    options.push({
-      value: currentKey,
-      label: formatModelOptionLabel(providerName, selectedModelCode),
-    })
   }
 
   return options

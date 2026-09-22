@@ -350,9 +350,9 @@ onMounted(() => {
               <span class="nm-ai-mcp__nav-icon" aria-hidden="true">
                 <RsIcon :name="transportIcon(s.transportKind)" :size="16" />
               </span>
-              <span class="nm-ai-mcp__nav-text min-w-0">
-                <span class="nm-ai-mcp__nav-name truncate">{{ s.serverName }}</span>
-                <span class="nm-ai-mcp__nav-meta truncate">
+              <span class="nm-ai-mcp__nav-text">
+                <span class="nm-ai-mcp__nav-name">{{ s.serverName }}</span>
+                <span class="nm-ai-mcp__nav-meta">
                   {{ transportLabel(s.transportKind) }}
                   · {{ t('settings.aiMcpToolCount', { n: s.tools?.length ?? 0 }) }}
                 </span>
@@ -392,8 +392,8 @@ onMounted(() => {
 
           <div v-else class="nm-ai-mcp__detail-inner">
             <header class="nm-ai-mcp__detail-head">
-              <div class="min-w-0">
-                <h2 class="nm-ai-mcp__detail-title truncate">{{ detailTitle }}</h2>
+              <div class="nm-ai-mcp__detail-copy">
+                <h2 class="nm-ai-mcp__detail-title">{{ detailTitle }}</h2>
                 <p class="nm-caption">
                   {{ creating ? t('settings.aiMcpNewHint') : transportLabel(form.transportKind) }}
                 </p>
@@ -556,7 +556,7 @@ onMounted(() => {
                       @update:model-value="toggleTool(tool.toolId, $event)"
                     />
                   </div>
-                  <div class="nm-ai-mcp__tool-main min-w-0">
+                  <div class="nm-ai-mcp__tool-main">
                     <div class="nm-ai-mcp__tool-name-row">
                       <code class="nm-ai-mcp__tool-name">{{ tool.toolName }}</code>
                       <RsBadge
@@ -755,6 +755,13 @@ onMounted(() => {
   min-width: 0;
 }
 
+.nm-ai-mcp__nav-name,
+.nm-ai-mcp__nav-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nm-ai-mcp__nav-name {
   font-size: var(--nm-font-body);
   font-weight: 500;
@@ -773,7 +780,7 @@ onMounted(() => {
 }
 
 .nm-ai-mcp__status-dot--ok {
-  background: var(--rs-success, #22c55e);
+  background: var(--rs-success);
 }
 
 .nm-ai-mcp__status-dot--off {
@@ -807,10 +814,17 @@ onMounted(() => {
   gap: var(--rs-space-md);
 }
 
+.nm-ai-mcp__detail-copy {
+  min-width: 0;
+}
+
 .nm-ai-mcp__detail-title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--rs-font-size-lg);
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-text);
 }
 
@@ -964,7 +978,8 @@ onMounted(() => {
 .nm-ai-mcp__tool-main {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--rs-space-xs);
+  min-width: 0;
 }
 
 .nm-ai-mcp__tool-name-row {

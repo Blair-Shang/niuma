@@ -68,8 +68,8 @@ function onDataTasksClick(): void {
 </script>
 
 <template>
-  <footer class="nm-statusbar shrink-0">
-    <span class="flex items-center gap-2">
+  <footer class="nm-statusbar">
+    <span class="nm-statusbar__left">
       <span
         class="nm-status-dot"
         :class="bridgeStore.connected ? 'nm-status-dot--online' : 'nm-status-dot--offline'"
@@ -77,7 +77,7 @@ function onDataTasksClick(): void {
       {{ leftText }}
     </span>
 
-    <span class="nm-statusbar__right flex items-center gap-3">
+    <span class="nm-statusbar__right">
       <button
         v-if="updateChip"
         type="button"
@@ -119,14 +119,30 @@ function onDataTasksClick(): void {
       >
         {{ dataTasksLabel }}
       </button>
-      <span class="tabular-nums opacity-80">NiuMa {{ bridgeStore.shellVersion || '—' }}</span>
+      <span class="nm-statusbar__ver">NiuMa {{ bridgeStore.shellVersion || '—' }}</span>
     </span>
   </footer>
 </template>
 
 <style scoped>
+.nm-statusbar__left,
 .nm-statusbar__right {
+  display: flex;
+  align-items: center;
   min-width: 0;
+}
+
+.nm-statusbar__left {
+  gap: var(--rs-space-sm);
+}
+
+.nm-statusbar__right {
+  gap: var(--rs-space-md);
+}
+
+.nm-statusbar__ver {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
 }
 
 .nm-statusbar__chip {

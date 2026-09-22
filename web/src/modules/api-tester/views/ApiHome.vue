@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * API 请求页签壳：按 method 查 apiPaneRegistry，懒加载当前协议工作台。
- * 对齐 VastSession / MysqlSession：壳不拼面板回调，新协议只改注册表。
+ * API 请求页签壳：按 method 查 paneKind，ensureApiPane 后懒加载工作台。
+ * 对齐 VastSession：壳不拼面板回调，新协议只加 catalog + {kind}/register。
  */
 import { RsButton, RsEmpty } from '@niuma/ui'
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabStore } from '@/stores/tab'
-import { apiPaneComponent, apiPaneRegistry, paneKindOf } from '../pane-registry'
+import { apiPaneComponent, paneKindOf } from '../layout/pane-registry'
 import { useApiTesterStore } from '../stores/api-tester'
 import { splitSocketUrl } from '../utils/request-kind'
 
@@ -27,18 +27,17 @@ const paneScope = computed(() => ({
   method: request.value?.method,
   listen: request.value ? splitSocketUrl(request.value.url).listen : false,
 }))
-const featureDef = computed(() => apiPaneRegistry[paneKind.value])
 const paneKey = computed(() => `${paneKind.value}:${paneScope.value.listen ? 'listen' : 'dial'}`)
 const PaneView = computed(() => apiPaneComponent(paneKind.value, paneScope.value))
 
 const paneProps = computed(() => {
   const req = request.value
   if (!req) return {}
-  return featureDef.value.resolvePane(paneScope.value).buildProps({
+  return {
     request: req,
     requestId: props.requestId,
     tabId: props.tabId,
-  })
+  }
 })
 
 watch(

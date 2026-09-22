@@ -3,43 +3,48 @@ import {
   buildCurl,
   formatBytes,
   formatHexDump,
-  interpolateEnv,
   newKvRow,
   prettyJson,
-  resolveRequestUrl,
   statusTone,
 } from './format'
+import { interpolateVariables, resolveRequest } from '../http/request-resolve'
+import { defaultAuth, minimalRequest } from './collection-io'
 import type { ApiEnvironment, ApiRequest } from '../types'
 
-const env: ApiEnvironment = { id: 'prod', name: 'Production', baseUrl: 'https://api.demo.local' }
+const env: ApiEnvironment = {
+  id: 'prod',
+  name: 'Production',
+  baseUrl: 'https://api.demo.local',
+  vars: { baseUrl: 'https://api.demo.local' },
+}
 
 function sample(partial: Partial<ApiRequest> = {}): ApiRequest {
-  return {
+  return minimalRequest({
     id: '1',
     name: 'List',
     method: 'GET',
     url: '{{baseUrl}}/api/products',
     params: [newKvRow('limit', '20')],
     headers: [newKvRow('Accept', 'application/json')],
-    body: '',
     ...partial,
-  }
+  })
 }
 
 describe('api tester format', () => {
   it('interpolates baseUrl and builds query', () => {
-    expect(interpolateEnv('{{baseUrl}}/x', env)).toBe('https://api.demo.local/x')
-    expect(resolveRequestUrl(sample(), env)).toBe('https://api.demo.local/api/products?limit=20')
+    expect(interpolateVariables('{{baseUrl}}/x', env.vars)).toBe('https://api.demo.local/x')
+    expect(resolveRequest(sample(), env).url).toBe('https://api.demo.local/api/products?limit=20')
   })
 
   it('skips disabled query rows', () => {
     const req = sample({ params: [newKvRow('limit', '20', false), newKvRow('q', 'probe')] })
-    expect(resolveRequestUrl(req, env)).toBe('https://api.demo.local/api/products?q=probe')
+    expect(resolveRequest(req, env).url).toBe('https://api.demo.local/api/products?q=probe')
   })
 
   it('builds curl and pretty json', () => {
     const req = sample({
       method: 'POST',
+      bodyMode: 'json',
       body: '{"a":1}',
       headers: [newKvRow('Content-Type', 'application/json')],
     })

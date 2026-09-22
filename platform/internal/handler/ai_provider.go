@@ -130,14 +130,26 @@ func toAIModelView(m store.AIModel) aiModelView {
 	}
 }
 
+// toActiveModelViews 只回传启用中的模型，避免云端目录更新后本机已下架条目仍出现在面板。
+func toActiveModelViews(ms []store.AIModel) []aiModelView {
+	views := make([]aiModelView, 0, len(ms))
+	for _, m := range ms {
+		if m.RecordStatus != "" && m.RecordStatus != "active" {
+			continue
+		}
+		views = append(views, toAIModelView(m))
+	}
+	return views
+}
+
 // aiProviderList 处理 platform.ai.provider.list。
 func (d *Dispatcher) aiProviderList(ctx context.Context, req Request) Response {
 	if d.ai == nil || d.ai.Providers == nil {
 		return errorResponse(req.ID, "ai provider store unavailable")
 	}
 	var params struct {
-		Status          string `json:"status"`
-		IncludeModels   bool   `json:"includeModels"`
+		Status        string `json:"status"`
+		IncludeModels bool   `json:"includeModels"`
 	}
 	if len(req.Params) > 0 {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -158,10 +170,7 @@ func (d *Dispatcher) aiProviderList(ctx context.Context, req Request) Response {
 			if listErr != nil {
 				return errorResponse(req.ID, listErr.Error())
 			}
-			models = make([]aiModelView, 0, len(ms))
-			for _, m := range ms {
-				models = append(models, toAIModelView(m))
-			}
+			models = toActiveModelViews(ms)
 		}
 		views = append(views, toAIProviderView(p, models))
 	}
@@ -194,11 +203,7 @@ func (d *Dispatcher) aiProviderGet(ctx context.Context, req Request) Response {
 	if err != nil {
 		return errorResponse(req.ID, err.Error())
 	}
-	models := make([]aiModelView, 0, len(ms))
-	for _, m := range ms {
-		models = append(models, toAIModelView(m))
-	}
-	return okResponse(req.ID, map[string]any{"provider": toAIProviderView(*p, models)})
+	return okResponse(req.ID, map[string]any{"provider": toAIProviderView(*p, toActiveModelViews(ms))})
 }
 
 // aiProviderUpsert 处理 platform.ai.provider.upsert：providerId 空则新建。
@@ -493,11 +498,7 @@ func (d *Dispatcher) aiModelList(ctx context.Context, req Request) Response {
 	if err != nil {
 		return errorResponse(req.ID, err.Error())
 	}
-	views := make([]aiModelView, 0, len(ms))
-	for _, m := range ms {
-		views = append(views, toAIModelView(m))
-	}
-	return okResponse(req.ID, map[string]any{"models": views})
+	return okResponse(req.ID, map[string]any{"models": toActiveModelViews(ms)})
 }
 
 // aiModelUpsert 处理 platform.ai.model.upsert：modelId 空则新建。

@@ -173,6 +173,7 @@ func run() error {
 		AppUpdate:    appUpdateMgr,
 		AI:           aiService,
 		APIHistory:   store.NewAPIHistoryStore(db),
+		APICatalog:   store.NewAPICatalogStore(db),
 		Events:       eventHub,
 	})
 	aiService.BindHost(dispatcher.HostRuntime())

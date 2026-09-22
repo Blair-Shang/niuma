@@ -65,6 +65,12 @@ struct TerminalCloseParams {
     terminal_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct TerminalCwdParams {
+    #[serde(rename = "terminalId")]
+    terminal_id: String,
+}
+
 fn default_term_type() -> String {
     "xterm-256color".to_string()
 }
@@ -478,6 +484,24 @@ pub fn hostkey_remember(id: &str, params: Value) -> Response {
                 "algorithm": remembered.algorithm,
             }),
         ),
+        Err(e) => Response::err(id, e),
+    }
+}
+
+pub async fn terminal_cwd(
+    sessions: &SessionManager,
+    id: &str,
+    params: Value,
+) -> Response {
+    let params: TerminalCwdParams = match serde_json::from_value(params) {
+        Ok(v) => v,
+        Err(e) => return Response::err(id, format!("invalid params: {e}")),
+    };
+    if params.terminal_id.is_empty() {
+        return Response::err(id, "terminalId required");
+    }
+    match crate::session::cwd::terminal_cwd(sessions, &params.terminal_id).await {
+        Ok(result) => Response::ok(id, &result),
         Err(e) => Response::err(id, e),
     }
 }

@@ -10,8 +10,10 @@ import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref, watch } from 'vue'
 import { aiApi } from '@/api/ai'
 import type { AiProvider, AiProviderKind } from '@/api/types/ai'
+import { useAccountStore } from '@/stores/account'
+import { useAiStore } from '@/stores/ai'
 import { useBridgeStore } from '@/stores/bridge'
-import { isSystemAiProvider } from '@/shell/panels/ai/system-provider'
+import { ensureSystemAiProvider, isSystemAiProvider } from '@/shell/panels/ai/system-provider'
 import {
   AI_PROVIDER_PRESET_CUSTOM,
   AI_PROVIDER_PRESETS,
@@ -20,6 +22,8 @@ import {
 } from './provider-presets'
 
 const { t } = useI18n()
+const accountStore = useAccountStore()
+const aiStore = useAiStore()
 const bridgeStore = useBridgeStore()
 
 const loading = ref(false)
@@ -100,6 +104,10 @@ const selected = computed(() =>
 )
 
 const systemSelected = computed(() => Boolean(selected.value && isSystemAiProvider(selected.value)))
+
+const selectedActiveModelCount = computed(
+  () => (selected.value?.models ?? []).filter((m) => m.recordStatus !== 'disabled').length,
+)
 
 const showDetail = computed(() => creating.value || selected.value != null)
 
@@ -204,9 +212,16 @@ function fillForm(p: AiProvider | null): void {
     providerKind: p.providerKind,
     providerName: p.providerName,
   })
-  const saved = (p.models ?? []).map((m) => m.modelCode).filter(Boolean)
-  // 若 default 不在 models 表里，仍并入已选，避免丢配置。
-  if (p.defaultModelCode && !saved.includes(p.defaultModelCode)) {
+  const saved = (p.models ?? [])
+    .filter((m) => m.recordStatus !== 'disabled')
+    .map((m) => m.modelCode)
+    .filter(Boolean)
+  // 若 default 不在启用模型里，仍并入已选，避免丢配置（已下架的 default 不再补回）。
+  if (
+    p.defaultModelCode &&
+    !saved.includes(p.defaultModelCode) &&
+    !(p.models ?? []).some((m) => m.modelCode === p.defaultModelCode && m.recordStatus === 'disabled')
+  ) {
     saved.unshift(p.defaultModelCode)
   }
   formSelectedModels.value = saved
@@ -227,6 +242,32 @@ async function loadApiKeyForEdit(providerId: string, seq: number): Promise<void>
     }
   } catch {
     // 回填失败静默：用户仍可手动输入或留空保留原密钥
+  }
+}
+
+async function syncSystemFromCloud(): Promise<void> {
+  if (!accountStore.isLoggedIn) {
+    return
+  }
+  try {
+    const token = await accountStore.ensureAccess()
+    await ensureSystemAiProvider(token)
+  } catch {
+    // 离线或云端未开通时继续展示本机已同步目录
+  }
+}
+
+async function reloadProviders(opts?: { syncCloud?: boolean }): Promise<void> {
+  loading.value = true
+  try {
+    if (opts?.syncCloud) {
+      await syncSystemFromCloud()
+      // 对话框的模型列表在另一份内存里，同步后必须重读，否则仍显示下架前的型号。
+      await aiStore.refreshProviders()
+    }
+    await loadProviders()
+  } finally {
+    loading.value = false
   }
 }
 
@@ -408,7 +449,7 @@ watch(selected, (p) => {
 })
 
 onMounted(() => {
-  bridgeStore.bootstrap().then(() => loadProviders())
+  bridgeStore.bootstrap().then(() => reloadProviders({ syncCloud: true }))
 })
 </script>
 
@@ -436,7 +477,7 @@ onMounted(() => {
       </div>
       <div class="nm-ai-providers__toolbar-actions">
         <RsTooltip :content="t('settings.aiProvidersRefresh')" side="top">
-          <RsButton variant="ghost" size="sm" :disabled="loading" @click="loadProviders">
+          <RsButton variant="ghost" size="sm" :disabled="loading" @click="reloadProviders({ syncCloud: true })">
             {{ t('settings.aiProvidersRefresh') }}
           </RsButton>
         </RsTooltip>
@@ -486,9 +527,9 @@ onMounted(() => {
               <span class="nm-ai-providers__nav-icon" aria-hidden="true">
                 <RsIcon name="bot" :size="16" />
               </span>
-              <span class="nm-ai-providers__nav-text min-w-0">
-                <span class="nm-ai-providers__nav-name truncate">{{ p.providerName }}</span>
-                <span class="nm-ai-providers__nav-meta truncate">
+              <span class="nm-ai-providers__nav-text">
+                <span class="nm-ai-providers__nav-name">{{ p.providerName }}</span>
+                <span class="nm-ai-providers__nav-meta">
                   {{ isSystemAiProvider(p) ? t('settings.aiProvidersSystem') : p.providerKind }}
                   <template v-if="p.defaultModelCode"> · {{ p.defaultModelCode }}</template>
                 </span>
@@ -524,8 +565,8 @@ onMounted(() => {
 
           <div v-else class="nm-ai-providers__detail-inner">
             <header class="nm-ai-providers__detail-head">
-              <div class="min-w-0">
-                <h2 class="nm-ai-providers__detail-title truncate">
+              <div class="nm-ai-providers__detail-copy">
+                <h2 class="nm-ai-providers__detail-title">
                   {{ creating ? t('settings.aiProvidersAdd') : formName || t('settings.aiProvidersEdit') }}
                 </h2>
                 <p class="nm-caption">{{ kindLabel }}</p>
@@ -541,8 +582,8 @@ onMounted(() => {
                 >
                   {{ selected?.hasApiKey ? t('settings.aiProvidersHasKey') : t('settings.aiProvidersNoKey') }}
                 </span>
-                <span v-if="selected?.models?.length" class="nm-ai-providers__badge">
-                  {{ t('settings.aiProvidersModelCount', { n: selected.models.length }) }}
+                <span v-if="selectedActiveModelCount" class="nm-ai-providers__badge">
+                  {{ t('settings.aiProvidersModelCount', { n: selectedActiveModelCount }) }}
                 </span>
               </div>
             </header>
@@ -868,6 +909,13 @@ onMounted(() => {
   min-width: 0;
 }
 
+.nm-ai-providers__nav-name,
+.nm-ai-providers__nav-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nm-ai-providers__nav-name {
   font-size: var(--nm-font-body);
   font-weight: 500;
@@ -886,7 +934,7 @@ onMounted(() => {
 }
 
 .nm-ai-providers__key-dot--ok {
-  background: var(--rs-success, #22c55e);
+  background: var(--rs-success);
 }
 
 .nm-ai-providers__key-dot--miss {
@@ -925,10 +973,17 @@ onMounted(() => {
   gap: var(--rs-space-md);
 }
 
+.nm-ai-providers__detail-copy {
+  min-width: 0;
+}
+
 .nm-ai-providers__detail-title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--rs-font-size-lg);
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-text);
 }
 

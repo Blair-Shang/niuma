@@ -1,20 +1,14 @@
 /**
- * API 协议面板注册表
- * ──────────────────────────────────────────────────────────────────────────
- * 对齐库模块 pane-registry（Vast / MySQL / Mongo）：
- *
- * - 集合树右键决定「能新建什么」→ creates 产出 method
- * - 请求 Tab 的 method 决定「打开的是哪个」→ paneKindOf
- * - ApiHome 只是页签壳，按 kind 查本表懒加载唯一面板
- *
- * 新协议：panes/{kind}.ts 导出 feature，并在 apiPaneRegistry 加一行。
- * 不要改 ApiHome，也不要再 register() 副作用。
+ * API 协议门面。
+ * - 元数据 / 新建菜单：pane-catalog（同步，无 Vue）
+ * - 工作台：ensureApiPane → 各目录 register()（对齐 ops ensureConnKind）
  */
 import { defineAsyncComponent, type Component } from 'vue'
-import type { ApiMethod, ApiRequest } from './types'
-import { httpFeature } from './panes/http'
-import { socketFeature } from './panes/socket'
-import type { ApiFeatureDef, ApiPaneCreateAction, ApiPaneCreateOpts, ApiPaneDescriptor, ApiPaneKind, ApiPaneScope } from './pane-types'
+import { API_PANE_KIND_DEFS, apiPaneKindDef } from './pane-catalog'
+import { ensureApiPane, getApiPaneRuntime } from './pane-kind-loaders'
+import { registerBuiltinApiPaneLoaders } from './register-builtin-panes'
+import type { ApiMethod, ApiRequest } from '../types'
+import type { ApiPaneCreateAction, ApiPaneCreateOpts, ApiPaneDescriptor, ApiPaneKind, ApiPaneScope } from './pane-types'
 
 export type {
   ApiFeatureDef,
@@ -23,25 +17,26 @@ export type {
   ApiPaneCreateOpts,
   ApiPaneDescriptor,
   ApiPaneKind,
+  ApiPaneKindDef,
   ApiPaneScope,
 } from './pane-types'
 
-/** apiPaneRegistry 按协议 kind 索引全部面板（ApiHome 的唯一分发依据）。 */
-export const apiPaneRegistry: Record<ApiPaneKind, ApiFeatureDef> = {
-  http: httpFeature,
-  socket: socketFeature,
-}
+export { API_PANE_KIND_DEFS, apiPaneKindDef } from './pane-catalog'
 
-const FEATURE_SET = new Set<string>(Object.keys(apiPaneRegistry))
+const FEATURE_SET = new Set<string>(API_PANE_KIND_DEFS.map((def) => def.kind))
 
 const methodKind = new Map<ApiMethod, ApiPaneKind>()
-for (const kind of Object.keys(apiPaneRegistry) as ApiPaneKind[]) {
-  for (const method of apiPaneRegistry[kind].methods) {
-    methodKind.set(method, kind)
+for (const def of API_PANE_KIND_DEFS) {
+  for (const method of def.methods) {
+    methodKind.set(method, def.kind)
   }
 }
 
 const componentCache = new Map<string, Component>()
+
+function ensureLoaders(): void {
+  registerBuiltinApiPaneLoaders()
+}
 
 export function isApiPaneKind(value: string | undefined): value is ApiPaneKind {
   return !!value && FEATURE_SET.has(value)
@@ -56,15 +51,19 @@ export function paneKindOf(method: ApiMethod): ApiPaneKind {
 }
 
 export function resolveApiPane(kind: ApiPaneKind, scope: ApiPaneScope = {}): ApiPaneDescriptor {
-  return apiPaneRegistry[normalizeApiPaneKind(kind)].resolvePane(scope)
+  return getApiPaneRuntime(normalizeApiPaneKind(kind)).resolvePane(scope)
 }
 
 export function apiPaneComponent(kind: ApiPaneKind, scope: ApiPaneScope = {}): Component {
+  ensureLoaders()
   const resolved = normalizeApiPaneKind(kind)
   const cacheKey = `${resolved}:${scope.listen ? 'listen' : 'dial'}`
   const cached = componentCache.get(cacheKey)
   if (cached) return cached
-  const comp = defineAsyncComponent(resolveApiPane(resolved, scope).loader)
+  const comp = defineAsyncComponent(async () => {
+    await ensureApiPane(resolved)
+    return resolveApiPane(resolved, scope).loader()
+  })
   componentCache.set(cacheKey, comp)
   return comp
 }
@@ -75,17 +74,17 @@ export function applyPaneMethod(req: ApiRequest, method: ApiMethod): void {
   const next = paneKindOf(method)
   req.method = method
   if (prev !== next) {
-    apiPaneRegistry[next].applyDefaults(req)
+    apiPaneKindDef(next).applyDefaults(req)
   }
 }
 
 export function applyPaneDefaults(req: ApiRequest, opts?: ApiPaneCreateOpts): void {
-  apiPaneRegistry[paneKindOf(req.method)].applyDefaults(req, opts)
+  apiPaneKindDef(paneKindOf(req.method)).applyDefaults(req, opts)
 }
 
 export function listApiPaneCreates(): ApiPaneCreateAction[] {
   const items: ApiPaneCreateAction[] = []
-  for (const def of Object.values(apiPaneRegistry)) {
+  for (const def of API_PANE_KIND_DEFS) {
     if (def.creates) items.push(...def.creates)
   }
   return items

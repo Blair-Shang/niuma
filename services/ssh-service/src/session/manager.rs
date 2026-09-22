@@ -284,6 +284,15 @@ impl SessionManager {
         self.send_terminal_command(terminal_id, TerminalCommand::Close).await
     }
 
+    /// Returns the SSH session that owns this PTY terminal.
+    pub async fn session_id_for_terminal(&self, terminal_id: &str) -> Result<String, String> {
+        let terminals = self.terminals.lock().await;
+        terminals
+            .get(terminal_id)
+            .map(|entry| entry.session_id.clone())
+            .ok_or_else(|| format!("terminal not found: {terminal_id}"))
+    }
+
     pub async fn sftp_dir_list(&self, session_id: &str, path: &str) -> Result<Value, String> {
         let sftp = self.ensure_sftp(session_id).await?;
         let list_result = {

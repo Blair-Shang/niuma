@@ -26,6 +26,8 @@ import type {
   SshSftpFileWriteParams,
   SshSftpFileWriteResult,
   SshTerminalCloseParams,
+  SshTerminalCwdParams,
+  SshTerminalCwdResult,
   SshTerminalInputParams,
   SshTerminalOpenParams,
   SshTerminalOpenResult,
@@ -80,6 +82,11 @@ export const sshApi = {
 
   terminalClose(params: SshTerminalCloseParams): Promise<{ closed: boolean }> {
     return bridgeInvoke<{ closed: boolean }>('ssh.terminal.close', params)
+  },
+
+  /** 查询交互终端当前工作目录（优先远端 PTY shell cwd）。 */
+  terminalCwd(params: SshTerminalCwdParams): Promise<SshTerminalCwdResult> {
+    return bridgeInvoke<SshTerminalCwdResult>('ssh.terminal.cwd', params)
   },
 
   sftpDirList(params: SshSftpDirListParams): Promise<SshSftpDirListResult> {

@@ -615,7 +615,7 @@ onBeforeUnmount(() => clearRefreshTimer())
 
 <template>
   <div class="nm-vast-monitor">
-    <div ref="dialogHostEl" class="nm-vast-monitor__dialog-mount" aria-hidden="true" />
+    <div ref="dialogHostEl" class="nm-vast-monitor__dialog-mount" />
 
     <RsToolbar size="sm" compact border="bottom" :label="t('modules.vastbase.session.tabMonitor')">
       <template #left>

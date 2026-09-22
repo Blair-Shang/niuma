@@ -251,7 +251,7 @@ function close(): void {
     :description="profile ? t('opsNav.deleteConfirm', { name: profile.profileName }) : ''"
     :confirm-text="t('opsNav.deleteConn')"
     :cancel-text="t('modules.ftp.form.cancel')"
-    :loading="deleting"
+    :confirm-loading="deleting"
     @confirm="emit('delete')"
   />
 </template>

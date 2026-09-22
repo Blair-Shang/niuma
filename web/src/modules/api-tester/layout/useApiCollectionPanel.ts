@@ -1,22 +1,30 @@
+/**
+ * 集合侧栏交互：树 / 右键 / 导入导出。
+ * 环境打开 Shell Tab；历史切到 ApiSideNav 分区。
+ */
 import {
   useRsToast,
   type RsContextMenuItem,
+  type RsTreeDropPosition,
 } from '@niuma/ui'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabStore } from '@/stores/tab'
 import {
   downloadJson,
+  emptyVars,
   fileSlug,
   parseCollection,
   pickJsonFile,
   serializeCollection,
 } from '../utils/collection-io'
-import { findPaneCreate, listApiPaneCreates, paneCreateKey } from '../pane-registry'
-import type { ApiPaneCreateAction } from '../pane-types'
+import { folderTreeKey, handleApiTreeDrop, type ApiTreeCtx } from '../utils/collection-tree'
+import { canAddChildFolder } from '../utils/folder-tree'
+import { findPaneCreate, listApiPaneCreates, paneCreateKey } from './pane-registry'
+import type { ApiPaneCreateAction } from './pane-types'
+import { useApiSideNav } from './useApiSideNav'
 import { useApiTesterStore } from '../stores/api-tester'
-import type { ApiFolder, ApiMethod, ApiSideView } from '../types'
-import type { ApiTreeCtx } from '../components/ApiCollectionTree.vue'
+import type { ApiFolder, ApiMethod } from '../types'
 
 export type ApiPanelCtx = ApiTreeCtx | { kind: 'history'; historyId: string }
 
@@ -27,18 +35,25 @@ type RequestCreateDraft = {
   listen?: boolean
 }
 
-/** 集合侧栏：树/历史切换、右键菜单、重命名删除、导入导出。 */
+/** 新建文件夹弹窗确认前暂存的父级 id。 */
+type FolderCreateDraft = {
+  parentId?: string | null
+}
+
+/** 集合侧栏：右键菜单、重命名删除、导入导出；环境走 Tab，历史走侧栏分区。 */
 export function useApiCollectionPanel() {
   const { t } = useI18n()
   const toast = useRsToast()
   const api = useApiTesterStore()
   const tabStore = useTabStore()
+  const sideNav = useApiSideNav()
 
   const selectedId = computed(() => {
     const id = tabStore.activeTab?.props.requestId
     return typeof id === 'string' ? id : ''
   })
 
+  const expandedKeys = ref<string[]>([])
   const ctxTarget = ref<ApiPanelCtx | null>(null)
   const ctxMenuOpen = ref(false)
 
@@ -59,6 +74,7 @@ export function useApiCollectionPanel() {
   const nameDlgError = ref('')
   const nameForm = ref<HTMLFormElement | null>(null)
   const requestDraft = ref<RequestCreateDraft>({})
+  const folderDraft = ref<FolderCreateDraft>({})
 
   const confirmOpen = ref(false)
   const confirmKind = ref<'folder' | 'request' | 'history' | 'history-all'>('folder')
@@ -86,8 +102,12 @@ export function useApiCollectionPanel() {
     return t('modules.api.deleteHistoryConfirm', { name: confirmName.value })
   })
 
-  function setSideView(view: ApiSideView): void {
-    api.sideView = view
+  function expandFolder(folderId: string | null | undefined): void {
+    if (!folderId) return
+    const key = folderTreeKey(folderId)
+    if (!expandedKeys.value.includes(key)) {
+      expandedKeys.value = [...expandedKeys.value, key]
+    }
   }
 
   function moveFolderItems(requestId: string): RsContextMenuItem[] {
@@ -100,10 +120,6 @@ export function useApiCollectionPanel() {
         icon: 'folder',
       }))
   }
-
-  const historyRootCtxItems = computed<RsContextMenuItem[]>(() => [
-    { key: 'clear-history', label: t('modules.api.clearHistory'), icon: 'trash-2', danger: true },
-  ])
 
   const historyRowCtxItems = computed<RsContextMenuItem[]>(() => [
     { key: 'open-history', label: t('modules.api.openHistory'), icon: 'send' },
@@ -128,20 +144,32 @@ export function useApiCollectionPanel() {
   const rootCtxItems = computed<RsContextMenuItem[]>(() => [
     ...createCtxItems(),
     { key: 'new-folder', label: t('modules.api.newFolder'), icon: 'folder-plus' },
+    { key: 'sep-view', label: '', separator: true },
+    { key: 'environments', label: t('modules.api.environments'), icon: 'globe' },
+    { key: 'history', label: t('modules.api.history'), icon: 'history' },
     { key: 'sep-io', label: '', separator: true },
     { key: 'import', label: t('modules.api.importCollection'), icon: 'upload' },
     { key: 'export', label: t('modules.api.exportCollection'), icon: 'download' },
   ])
 
-  const folderCtxItems = computed<RsContextMenuItem[]>(() => [
-    ...createCtxItems(),
-    { key: 'sep-io', label: '', separator: true },
-    { key: 'import', label: t('modules.api.importCollection'), icon: 'upload' },
-    { key: 'export', label: t('modules.api.exportFolder'), icon: 'download' },
-    { key: 'sep-manage', label: '', separator: true },
-    { key: 'rename', label: t('modules.api.renameFolder'), icon: 'pencil' },
-    { key: 'delete', label: t('modules.api.deleteFolder'), icon: 'trash-2', danger: true },
-  ])
+  const folderCtxItems = computed<RsContextMenuItem[]>(() => {
+    const folderId = ctxTarget.value?.kind === 'folder' ? ctxTarget.value.folderId : ''
+    const items: RsContextMenuItem[] = [
+      ...createCtxItems(),
+      { key: 'sep-io', label: '', separator: true },
+      { key: 'import', label: t('modules.api.importCollection'), icon: 'upload' },
+      { key: 'export', label: t('modules.api.exportFolder'), icon: 'download' },
+      { key: 'sep-manage', label: '', separator: true },
+    ]
+    if (folderId && canAddChildFolder(api.folders, folderId)) {
+      items.push({ key: 'new-subfolder', label: t('modules.api.newSubfolder'), icon: 'folder-plus' })
+    }
+    items.push(
+      { key: 'rename', label: t('modules.api.renameFolder'), icon: 'pencil' },
+      { key: 'delete', label: t('modules.api.deleteFolder'), icon: 'trash-2', danger: true },
+    )
+    return items
+  })
 
   const requestCtxItems = computed<RsContextMenuItem[]>(() => {
     const requestId = ctxTarget.value?.kind === 'request' ? ctxTarget.value.requestId : ''
@@ -168,12 +196,9 @@ export function useApiCollectionPanel() {
   })
 
   const activeCtxItems = computed<RsContextMenuItem[]>(() => {
-    if (api.sideView === 'history') {
-      if (ctxTarget.value?.kind === 'history') return historyRowCtxItems.value
-      return historyRootCtxItems.value
-    }
     const target = ctxTarget.value
-    if (!target || target.kind === 'history') return rootCtxItems.value
+    if (target?.kind === 'history') return historyRowCtxItems.value
+    if (!target) return rootCtxItems.value
     if (target.kind === 'folder') return folderCtxItems.value
     return requestCtxItems.value
   })
@@ -208,6 +233,7 @@ export function useApiCollectionPanel() {
     id = '',
     value = '',
     draft?: RequestCreateDraft,
+    folderParent?: FolderCreateDraft,
   ): void {
     nameDlgKind.value = kind
     nameDlgMode.value = mode
@@ -215,6 +241,7 @@ export function useApiCollectionPanel() {
     nameDlgValue.value = value
     nameDlgError.value = ''
     requestDraft.value = draft ?? {}
+    folderDraft.value = folderParent ?? {}
     nameDlgOpen.value = true
     void nextTick(() => {
       const input = nameForm.value?.querySelector('input')
@@ -231,19 +258,27 @@ export function useApiCollectionPanel() {
     }
     if (nameDlgKind.value === 'folder') {
       if (nameDlgMode.value === 'create') {
-        api.addFolder(name)
+        const created = api.addFolder(name, folderDraft.value.parentId ?? null)
+        if (!created) {
+          toast.error(t('modules.api.folderDepthLimit'))
+          return
+        }
+        expandFolder(created.parentId)
+        expandFolder(created.id)
         toast.success(t('modules.api.folderAdded'))
       } else if (api.renameFolder(nameDlgId.value, name)) {
         toast.success(t('modules.api.folderRenamed'))
       }
     } else if (nameDlgMode.value === 'create') {
-      api.addRequest({
+      const req = api.addRequest({
         folderId: requestDraft.value.folderId,
         draftsName: t('modules.api.drafts'),
         method: requestDraft.value.method,
         listen: requestDraft.value.listen,
         name,
       })
+      const folder = api.folders.find((item) => item.requests.some((row) => row.id === req.id))
+      expandFolder(folder?.id)
       toast.success(t('modules.api.requestAdded'))
     } else if (api.renameRequest(nameDlgId.value, name)) {
       toast.success(t('modules.api.requestRenamed'))
@@ -287,13 +322,30 @@ export function useApiCollectionPanel() {
       return
     }
     const result = api.mergeImported(parsed.folders, folderId)
+    if (folderId) expandFolder(folderId)
     toast.success(t('modules.api.importSuccess', { folders: result.folders, requests: result.requests }))
+  }
+
+  function openEnvironments(): void {
+    sideNav.openEnvironments()
+  }
+
+  function openHistoryPane(): void {
+    sideNav.revealHistory()
   }
 
   function onRootCtx(key: string): void {
     if (tryCreatePane(key)) return
     if (key === 'new-folder') {
       openNameDialog('folder', 'create', '', t('modules.api.newFolder'))
+      return
+    }
+    if (key === 'environments') {
+      openEnvironments()
+      return
+    }
+    if (key === 'history') {
+      openHistoryPane()
       return
     }
     if (key === 'import') {
@@ -317,6 +369,10 @@ export function useApiCollectionPanel() {
       exportFolders([folder], `niuma-api-${fileSlug(folder.name)}.json`)
       return
     }
+    if (key === 'new-subfolder') {
+      openNameDialog('folder', 'create', '', t('modules.api.newSubfolder'), undefined, { parentId: folderId })
+      return
+    }
     if (key === 'rename') {
       openNameDialog('folder', 'edit', folderId, folder.name)
       return
@@ -330,14 +386,16 @@ export function useApiCollectionPanel() {
     const req = api.requestById(requestId)
     if (!req) return
     if (key === 'duplicate') {
-      api.duplicateRequest(requestId)
+      const copy = api.duplicateRequest(requestId)
+      const folder = copy ? api.folders.find((item) => item.requests.some((row) => row.id === copy.id)) : undefined
+      expandFolder(folder?.id)
       toast.success(t('modules.api.requestDuplicated'))
       return
     }
     if (key === 'export') {
       const folder = api.folders.find((item) => item.requests.some((row) => row.id === requestId))
       exportFolders(
-        [{ id: folder?.id ?? requestId, name: req.name, requests: [{ ...req }] }],
+        [{ id: folder?.id ?? requestId, name: req.name, parentId: folder?.parentId ?? null, vars: { ...(folder?.vars ?? emptyVars()) }, requests: [{ ...req }] }],
         `niuma-api-${fileSlug(req.name)}.json`,
       )
       return
@@ -348,7 +406,10 @@ export function useApiCollectionPanel() {
     }
     if (key.startsWith('move-folder:')) {
       const folderId = key.slice('move-folder:'.length)
-      if (api.moveRequest(requestId, folderId)) toast.success(t('modules.api.requestMoved'))
+      if (api.moveRequest(requestId, folderId)) {
+        expandFolder(folderId)
+        toast.success(t('modules.api.requestMoved'))
+      }
       return
     }
     if (key === 'delete') {
@@ -357,13 +418,9 @@ export function useApiCollectionPanel() {
   }
 
   function onHistoryCtx(key: string, historyId?: string): void {
-    if (key === 'clear-history') {
-      openConfirm('history-all', '', '')
-      return
-    }
     if (!historyId) return
     if (key === 'open-history') {
-      api.openHistory(historyId)
+      void api.openHistory(historyId)
       return
     }
     if (key === 'delete-history') {
@@ -374,11 +431,11 @@ export function useApiCollectionPanel() {
 
   function onCtxSelect(key: string): void {
     const target = ctxTarget.value
-    if (api.sideView === 'history') {
-      onHistoryCtx(key, target?.kind === 'history' ? target.historyId : undefined)
+    if (target?.kind === 'history') {
+      onHistoryCtx(key, target.historyId)
       return
     }
-    if (!target || target.kind === 'history') {
+    if (!target) {
       onRootCtx(key)
       return
     }
@@ -389,9 +446,34 @@ export function useApiCollectionPanel() {
     onRequestCtx(key, target.requestId)
   }
 
+  function onTreeDrop(dragKey: string, dropKey: string, position: RsTreeDropPosition): void {
+    const ok = handleApiTreeDrop(
+      {
+        moveRequest: (requestId, folderId) => api.moveRequest(requestId, folderId),
+        reorderRequest: (dragId, dropId, pos) => api.reorderRequest(dragId, dropId, pos),
+        moveFolder: (folderId, parentId) => api.moveFolder(folderId, parentId),
+        reorderFolder: (dragId, dropId, pos) => api.reorderFolder(dragId, dropId, pos),
+      },
+      dragKey,
+      dropKey,
+      position,
+    )
+    if (!ok) {
+      toast.error(t('modules.api.folderDepthLimit'))
+      return
+    }
+    const drop = dropKey.startsWith('folder:') ? dropKey.slice('folder:'.length) : undefined
+    expandFolder(drop)
+  }
+
+  function onOpenHistory(historyId: string): void {
+    void api.openHistory(historyId)
+  }
+
   return {
     api,
     selectedId,
+    expandedKeys,
     ctxTarget,
     ctxMenuOpen,
     nameDlgOpen,
@@ -403,10 +485,11 @@ export function useApiCollectionPanel() {
     confirmTitle,
     confirmDesc,
     activeCtxItems,
-    setSideView,
     onSelect,
-    onNewRequest,
+    onTreeDrop,
+    onOpenHistory,
     openNameDialog,
+    openConfirm,
     onNameSave,
     onConfirmDelete,
     onCtxSelect,

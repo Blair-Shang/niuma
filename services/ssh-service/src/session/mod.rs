@@ -1,4 +1,5 @@
 pub mod connect;
+pub(crate) mod cwd;
 pub mod hostkey;
 pub mod manager;
 pub(crate) mod monitor;

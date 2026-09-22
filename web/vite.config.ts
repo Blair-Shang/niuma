@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import tailwindcss from '@tailwindcss/vite'
 import { monacoZhNlsPlugin } from '@niuma/ui/vite-plugins/monaco-zh-nls'
 import { niumaUiHost } from '@niuma/ui/vite-plugins/niuma-ui-host'
 import { silenceAntlrParseConsole } from '@niuma/ui/vite-plugins/silence-antlr-parse-console'
@@ -52,7 +51,6 @@ const prebundleEntries = [
 export default defineConfig({
   plugins: [
     vue(),
-    tailwindcss(),
     serveMonorepoPlugins(resolve(__dirname, '../plugins')),
     monacoZhNlsPlugin(),
     ...niumaUiHost(),

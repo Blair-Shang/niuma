@@ -1,4 +1,5 @@
 import type { ApiHistoryEntry, ApiHistorySummary } from '@/api/types/api'
+import { asAuth, defaultAuth, parseBodyMode } from '../utils/collection-io'
 import type { ApiExchange, ApiHistoryItem, ApiKvRow, ApiMethod, ApiRequest } from '../types'
 
 const METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'WS', 'TCP', 'UDP']
@@ -30,6 +31,7 @@ export function parseHistoryRequest(raw: unknown): ApiRequest | null {
   const item = raw as Record<string, unknown>
   const name = asText(item.name).trim()
   if (!name) return null
+  const body = asText(item.body)
   return {
     id: asText(item.id) || 'history-req',
     name,
@@ -37,7 +39,10 @@ export function parseHistoryRequest(raw: unknown): ApiRequest | null {
     url: asText(item.url),
     params: asKvRows(item.params),
     headers: asKvRows(item.headers),
-    body: asText(item.body),
+    auth: item.auth ? asAuth(item.auth) : defaultAuth(),
+    bodyMode: parseBodyMode(item.bodyMode) ?? (body.trim() ? 'json' : 'none'),
+    body,
+    bodyForm: asKvRows(item.bodyForm),
   }
 }
 

@@ -1,19 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@/locale'
-import type { ApiRequest } from '../types'
+import { minimalRequest } from '../utils/collection-io'
 import { tabTitle, tabTooltip } from './tab-chrome'
 
-function sample(partial: Partial<ApiRequest> = {}): ApiRequest {
-  return {
+function sample(partial: Parameters<typeof minimalRequest>[0] = {}) {
+  return minimalRequest({
     id: 'r1',
     name: 'demo',
     method: 'GET',
     url: '{{baseUrl}}',
-    params: [],
-    headers: [],
-    body: '',
     ...partial,
-  }
+  })
 }
 
 describe('tab chrome', () => {

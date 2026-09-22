@@ -1,4 +1,25 @@
 /*
- * NiuMa brand — 默认跟随 @niuma/ui 的 macOS system palette。
- * 若产品品牌色需偏离 systemBlue，仅在此覆盖 --rs-primary* 等 token。
+ * NiuMa 品牌覆盖 — 在 niuma-ui/styles.css 之后加载，只覆盖同名 --rs-*。
+ *
+ * 默认跟随组件库 macOS system 色板（--rs-primary / --rs-bg / --rs-text …）。
+ * 若产品品牌需偏离 systemBlue，在 [data-rs-theme] 下覆盖：
+ *   --rs-primary / --rs-primary-hover / --rs-*-container
+ *   --rs-text-primary / --rs-text-secondary / --rs-font-sans|mono
+ * 示例见 niuma-ui `src/theme/brand.example.css`。禁止新开 --el-* / --niuma-* 色板。
+ *
+ * 下面是业务里沿用的旧名，只做别名，值仍是组件库令牌。
+ * 不定义时，var() 的回退色是写死的亮色蓝/灰，暗色切不过去。
  */
+
+:root {
+  --rs-accent: var(--rs-primary);
+  --rs-fg: var(--rs-text-primary);
+  --rs-fg-muted: var(--rs-muted);
+  --rs-color-fg-muted: var(--rs-muted);
+  --rs-bg-muted: color-mix(in srgb, var(--rs-text-primary) 6%, var(--rs-surface));
+  --rs-bg-elevated: var(--rs-surface-elevated);
+  --rs-surface-muted: var(--rs-bg-muted);
+  --rs-surface-subtle: color-mix(in srgb, var(--rs-text-primary) 4%, var(--rs-surface));
+  --rs-accent-subtle: color-mix(in srgb, var(--rs-primary) 12%, transparent);
+  --rs-accent-border: color-mix(in srgb, var(--rs-primary) 28%, transparent);
+}

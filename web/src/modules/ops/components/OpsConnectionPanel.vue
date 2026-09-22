@@ -47,7 +47,7 @@ import { useConnImportExport, type ConnExportScope } from '@/modules/ops/composa
 import { useConnTreeSyncStore } from '@/stores/conn-tree-sync'
 import { useSessionRegistry } from '@/stores/session-registry'
 import { useTabStore } from '@/stores/tab'
-import { CONN_KIND_DEFS, DEFAULT_FOLDER_ACCENT, folderAccentColor, kindIcon, profileAccentColor, type ConnAccentColor, type ConnItem, type ConnKind } from '@/modules/ops/types'
+import { CONN_KIND_DEFS, DEFAULT_FOLDER_ACCENT, connIconColor, folderAccentColor, kindIcon, profileAccentColor, type ConnAccentColor, type ConnItem, type ConnKind } from '@/modules/ops/types'
 
 const props = withDefaults(
   defineProps<{
@@ -878,7 +878,7 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
                 :name="kindIcon(asLeafNode(node as ConnTreeNode)._conn.kind)"
                 :size="14"
                 class="nm-conn-row__icon"
-                :color="profileAccentColor(asLeafNode(node as ConnTreeNode)._conn.connectionOptions)"
+                :color="connIconColor(kindIcon(asLeafNode(node as ConnTreeNode)._conn.kind), profileAccentColor(asLeafNode(node as ConnTreeNode)._conn.connectionOptions))"
               />
               <span class="nm-conn-row__label">{{ node.label }}</span>
               <span
@@ -901,7 +901,7 @@ function asResourceNode(n: ConnTreeNode): ConnResourceNode { return n as ConnRes
                 :name="asResourceNode(node as ConnTreeNode)._icon ?? 'database'"
                 :size="14"
                 class="nm-conn-row__icon"
-                :color="profileAccentColor(asResourceNode(node as ConnTreeNode)._conn.connectionOptions)"
+                :color="connIconColor(asResourceNode(node as ConnTreeNode)._icon ?? 'database', profileAccentColor(asResourceNode(node as ConnTreeNode)._conn.connectionOptions))"
               />
               <span class="nm-conn-row__label">{{ node.label }}</span>
               <span

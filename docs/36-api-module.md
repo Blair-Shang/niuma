@@ -1,7 +1,21 @@
 # 36 — API 管理模块（Layer 1 能力服务）
 
-> 版本：v0.1 · 日期：2026-09-01
-> 状态：P0 已落地原始 TCP / UDP；HTTP / WebSocket / gRPC 后续再加
+> 版本：v0.2 · 日期：2026-09-17  
+> 状态：P0 已落地原始 TCP / UDP；HTTP / WebSocket / gRPC 后续再加  
+> 关联：[37 — Web 工作台（集合 / 环境 / Postman·Apifox 对照）](./37-api-workbench.md) · [38 — 压测 Runner 预留](./38-api-run.md)
+
+---
+
+## 0. 文档分工
+
+| 文档 | 层级 | 内容 |
+|------|------|------|
+| **本文 36** | L1 `api-service` | TCP/UDP 会话、`api.session.*` / `api.socket.*` |
+| [37](./37-api-workbench.md) | Web `api-tester` | 集合、环境、Auth、Body、导入、与 Postman/Apifox 对照 |
+| [38](./38-api-run.md) | Web + Platform 预留 | Collection Runner、压测 `platform.api.run.*` |
+| [39](./39-api-mock.md) | Web + L1 | 本机 HTTP Mock `platform.api.mock.*` |
+
+Web 侧明文 HTTP 当前在 Renderer 拼 HTTP/1.1，经本文 L1 的 TCP 发出；HTTPS / 原生 HTTP 见 §8。
 
 ---
 
@@ -113,4 +127,13 @@ Web 方法 = `api.` + 服务内方法。
 
 ## 8. 后续
 
-HTTPS / TLS、WebSocket、UDP 广播/组播、按分隔符分帧。工作台明文 HTTP 在前端拼 HTTP/1.1，经 `api.session.open` + `api.socket.send` 发出。
+| 项 | 说明 | 关联 |
+|----|------|------|
+| 原生 HTTP / HTTPS | L1 解析 TLS；Web 弃用 TCP 拼包 | [37 §7 P3](./37-api-workbench.md) |
+| WebSocket | L1 帧收发 | [37 §7 P3](./37-api-workbench.md) |
+| UDP 广播/组播 | 传输扩展 | — |
+| 按分隔符分帧 | 应用层分帧 | — |
+| 并发 Run / 压测 | `platform.api.run.*` | [38](./38-api-run.md) |
+| 本机 HTTP Mock | `platform.api.mock.*`（tcp-server + 路由表） | [39](./39-api-mock.md) |
+
+当前：工作台明文 HTTP 在前端拼 HTTP/1.1，经 `api.session.open` + `api.socket.send` 发出（仅 `http://`）。

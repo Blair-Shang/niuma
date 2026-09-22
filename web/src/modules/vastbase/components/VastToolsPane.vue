@@ -456,14 +456,14 @@ onMounted(() => {
           <div class="nm-vast-tools__status-icon" aria-hidden="true">
             <RsIcon :name="row.icon" :size="14" />
           </div>
-          <div class="nm-vast-tools__status-meta min-w-0">
+          <div class="nm-vast-tools__status-meta">
             <span class="nm-vast-tools__status-name">{{ row.label }}</span>
             <RsTooltip
               v-if="row.entry.available && row.entry.path"
               :content="row.entry.path"
               side="bottom"
             >
-              <span class="nm-vast-tools__status-path truncate">{{ row.entry.path }}</span>
+              <span class="nm-vast-tools__status-path">{{ row.entry.path }}</span>
             </RsTooltip>
             <span v-else-if="row.entry.available" class="nm-vast-tools__status-path">
               {{ t('modules.vastbase.tools.available') }}
@@ -1023,9 +1023,12 @@ onMounted(() => {
 }
 
 .nm-vast-tools__status-path {
-  font-size: 0.6875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--rs-font-size-xs);
   color: var(--rs-muted);
-  line-height: 1.3;
+  line-height: var(--rs-line-height-tight);
 }
 
 .nm-vast-tools__status-path.is-missing {

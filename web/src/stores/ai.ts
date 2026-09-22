@@ -19,6 +19,7 @@ import {
   extractAttachmentMarkers,
   type AiContextAttachment,
 } from '@/shell/panels/ai/context-pack'
+import { modelsForProvider } from '@/shell/panels/ai/model-options'
 import {
   ensureSystemAiProvider,
   isSystemAiProvider,
@@ -68,7 +69,7 @@ export const useAiStore = defineStore('ai', () => {
 
   const modelOptions = computed(() => {
     const p = providers.value.find((x) => x.providerId === selectedProviderId.value)
-    return p?.models ?? []
+    return p ? modelsForProvider(p) : []
   })
 
   /** 面板展示用：流式时以 live 为准，否则回放历史。 */
@@ -310,15 +311,40 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
+  function reconcileSelectedModel(): void {
+    const current = providers.value.find((p) => p.providerId === selectedProviderId.value)
+    if (!current) {
+      if (!providers.value.length) {
+        selectedProviderId.value = ''
+        selectedModelCode.value = ''
+        return
+      }
+      const system = providers.value.find(
+        (p) => p.providerId === SYSTEM_AI_PROVIDER_ID && p.recordStatus !== 'disabled',
+      )
+      const first = system ?? providers.value[0]
+      selectedProviderId.value = first.providerId
+      const codes = modelsForProvider(first).map((m) => m.modelCode)
+      selectedModelCode.value =
+        (first.defaultModelCode && codes.includes(first.defaultModelCode)
+          ? first.defaultModelCode
+          : codes[0]) ?? ''
+      return
+    }
+    const codes = modelsForProvider(current).map((m) => m.modelCode)
+    if (selectedModelCode.value && codes.includes(selectedModelCode.value)) {
+      return
+    }
+    selectedModelCode.value =
+      (current.defaultModelCode && codes.includes(current.defaultModelCode)
+        ? current.defaultModelCode
+        : codes[0]) ?? ''
+  }
+
   async function refreshProviders(): Promise<void> {
     const res = await aiApi.listProviders({ includeModels: true, status: 'active' })
     providers.value = res.providers ?? []
-    if (!selectedProviderId.value && providers.value.length) {
-      const system = providers.value.find((p) => p.providerId === SYSTEM_AI_PROVIDER_ID && p.recordStatus !== 'disabled')
-      const first = system ?? providers.value[0]
-      selectedProviderId.value = first.providerId
-      selectedModelCode.value = first.defaultModelCode || first.models?.[0]?.modelCode || ''
-    }
+    reconcileSelectedModel()
   }
 
   async function refreshSkills(): Promise<void> {
@@ -382,6 +408,7 @@ export const useAiStore = defineStore('ai', () => {
       if (res.conversation?.modelCode) {
         selectedModelCode.value = res.conversation.modelCode
       }
+      reconcileSelectedModel()
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     } finally {

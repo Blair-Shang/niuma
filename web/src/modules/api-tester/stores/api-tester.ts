@@ -1,31 +1,73 @@
+/**
+ * API 工作台共享状态（唯一 Pinia 门面）。
+ *
+ * 本文件只编排：持有 folders / env / sockets，对外暴露 CRUD 与发送。
+ * 不要再拆第二个 api-* Store（hydrate 与发送会抢同一份 reactive）。
+ * 协议 / 落盘已在外部；这里按块往下读即可：
+ *
+ *   1. 状态与索引
+ *   2. 持久化接线（workspace / catalog）
+ *   3. hydrate（读盘 + v2 迁 catalog）
+ *   4. Tab
+ *   5. 环境 / 变量
+ *   6. 集合 CRUD
+ *   7. 发送与套接字会话
+ *   8. 历史
+ *
+ * 外部实现：
+ * - utils/workspace-persist：workspace JSON（结构立即 / 字段防抖）
+ * - utils/catalog-persist：环境与变量关系表（按 scope 排队）
+ * - http/request-resolve：变量 + Auth + URL/Body
+ * - http/send：HTTP 执行；tcp/send：套接字会话
+ * - composables/useApiRequestPersist：当前请求字段编辑标脏
+ *
+ * 运行时 exchanges / sockets / sending 不进 workspace。
+ */
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
-import { apiHistoryApi, isBridgeAvailable, isPlatformUnavailable, settingsApi, withPlatformRetry } from '@/api'
+import { apiCatalogApi, apiHistoryApi, isBridgeAvailable, isPlatformUnavailable, settingsApi, withPlatformRetry } from '@/api'
+import type { ApiVariableScope as CatalogVariableScope } from '@/api/types/api-catalog'
 import { i18n } from '@/locale'
 import type { ApiSocketDataEvent, ApiSocketEncoding } from '@/api/types/api-socket'
-import { useApiSend } from '../composables/useApiSend'
-import { watchSocketSession } from '../composables/useApiSocketHub'
-import { cloneRequest, defaultEnvironments, defaultFolders, newId, parseWorkspace, serializeWorkspace, uniqueName } from '../utils/collection-io'
-import { applyPaneDefaults } from '../pane-registry'
-import { buildCurl, interpolateEnv, resolveRequestUrl } from '../utils/format'
+import { watchSocketSession } from '../utils/socket-hub'
+import {
+  SendError,
+  executeRequest,
+  failExchange,
+  localizeSendError,
+  protocolOf,
+  resolveSend,
+} from '../http/send'
+import {
+  appendSocketFrame,
+  buildLiveExchange,
+  closeSocketSession,
+  openSocketSession,
+  patchLiveExchangeFromFrame,
+  sendSocketFrame,
+} from '../tcp/send'
+import { createId } from '@/utils/id'
+import { cloneRequest, defaultAuth, defaultEnvironments, defaultFolders, emptyKinds, emptyVars, mergeWorkspaceFolders, parseLegacyWorkspaceV2, parseWorkspace, serializeWorkspace, uniqueName, type ApiLegacyWorkspaceV2 } from '../utils/collection-io'
+import { applyFolderVariables, catalogEnvironmentToRuntime, catalogToTypedRecord, recordToVariableInputs } from '../utils/catalog-sync'
+import { createCatalogPersister } from '../utils/catalog-persist'
+import { createWorkspacePersister } from '../utils/workspace-persist'
+import { applyPaneDefaults } from '../layout/pane-registry'
+import { buildCurl } from '../utils/format'
+import { resolveRequest } from '../http/request-resolve'
+import { canAddChildFolder, canNestFolder, collectDescendantFolderIds, scopeForRequest, type ApiVariableScope } from '../utils/folder-tree'
 import { toHistoryItem, toHistorySummary } from '../utils/history-map'
 import { tabTitle, tabTooltip } from '../utils/tab-chrome'
 import { isSocketMethod, type SocketTarget } from '../utils/target'
-import type { ApiEnvironment, ApiExchange, ApiFolder, ApiHistoryItem, ApiLiveSocket, ApiMethod, ApiRequest, ApiSideView } from '../types'
+import type { ApiEnvironment, ApiExchange, ApiFolder, ApiHistoryItem, ApiLiveSocket, ApiMethod, ApiMockServer, ApiRequest, ApiRunProfile, ApiSendOptions, ApiVariableBag, ApiVariableKind } from '../types'
 import { useTabStore } from '@/stores/tab'
 
 const SETTING_KEY = 'api.workspace'
-const PERSIST_MS = 300
 
 function replaceList<T>(target: T[], next: readonly T[]): void {
   target.splice(0, target.length, ...next)
 }
 
-function findRequestIn(folders: ApiFolder[], id: string | null | undefined): ApiRequest | undefined {
-  return locateRequest(folders, id)?.request
-}
-
-function locateRequest(
+function scanLocateRequest(
   folders: ApiFolder[],
   id: string | null | undefined,
 ): { folder: ApiFolder; index: number; request: ApiRequest } | undefined {
@@ -43,27 +85,19 @@ function locateRequest(
  * API 测试共享状态：集合、环境、各请求的发送结果。
  * 每个请求对应一个 Shell Tab（props.requestId），集合树跨 Tab 共用。
  * TCP / UDP 会话按 requestId 保活，关 Tab 才 close；HTTP 仍一发一收。
- * 集合与环境写入 Platform SQLite（nm_app_setting / api.workspace），重启后按 id 还原。
+ * 集合写入 Platform SQLite（nm_app_setting / api.workspace v3）；
+ * 环境与变量写入 nm_api_environment / nm_api_variable，重启后按 id 还原。
  */
 export const useApiTesterStore = defineStore('api-tester', () => {
-  const {
-    resolveSend,
-    executeRequest,
-    openSocketSession,
-    sendSocketFrame,
-    closeSocketSession,
-    buildLiveExchange,
-    failExchange,
-    localizeSendError,
-    protocolOf,
-    SendError,
-  } = useApiSend()
+  // --- 1. 状态与索引 ---
   const folders = reactive<ApiFolder[]>([])
   const environments = reactive<ApiEnvironment[]>([])
+  const globals = reactive<ApiVariableBag>({ vars: emptyVars(), kinds: emptyKinds() })
+  const runProfiles = reactive<ApiRunProfile[]>([])
+  const mockServers = reactive<ApiMockServer[]>([])
   const envId = ref('')
   const treeFilter = ref('')
   const historyFilter = ref('')
-  const sideView = ref<ApiSideView>('collection')
   const history = reactive<ApiHistoryItem[]>([])
   const sending = reactive<Record<string, boolean>>({})
   const exchanges = reactive<Record<string, ApiExchange | null>>({})
@@ -73,53 +107,291 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   const sendGen = new Map<string, number>()
   const sendAbort = new Map<string, AbortController>()
   const ready = ref(false)
-  let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let catalogLoading = false
+  let unloadHookInstalled = false
+  /** hydrate 完成前用户已改过集合时，禁止 applyWorkspace 覆盖。 */
+  let touchedBeforeReady = false
+  /** requestId → folderId，Send / variableScope O(1) 查表。 */
+  const requestFolderIndex = new Map<string, string>()
+
+  function rebuildRequestIndex(): void {
+    requestFolderIndex.clear()
+    for (const folder of folders) {
+      for (const req of folder.requests) {
+        requestFolderIndex.set(req.id, folder.id)
+      }
+    }
+  }
+
+  function variableScope(requestId?: string | null): ApiVariableScope {
+    return scopeForRequest(folders, globals, requestId, requestFolderIndex)
+  }
 
   function seedEmpty(): void {
     replaceList(folders, defaultFolders(String(i18n.global.t('modules.api.drafts'))))
     replaceList(environments, defaultEnvironments())
+    globals.vars = emptyVars()
+    globals.kinds = emptyKinds()
+    replaceList(runProfiles, [])
+    replaceList(mockServers, [])
     envId.value = environments[0]?.id ?? ''
+    rebuildRequestIndex()
   }
 
-  function applyWorkspace(state: NonNullable<ReturnType<typeof parseWorkspace>>): void {
-    replaceList(folders, state.folders)
-    replaceList(environments, state.environments.length ? state.environments : defaultEnvironments())
-    envId.value = environments.some((item) => item.id === state.envId)
-      ? state.envId
-      : (environments[0]?.id ?? '')
+  function applyFolderSnapshot(
+    nextFolders: readonly ApiFolder[],
+    nextEnvId: string,
+    profiles?: readonly ApiRunProfile[],
+    mocks?: readonly ApiMockServer[],
+  ): void {
+    replaceList(folders, nextFolders.map((folder) => ({ ...folder, vars: emptyVars(), kinds: emptyKinds() })))
+    replaceList(runProfiles, profiles ?? [])
+    replaceList(mockServers, mocks ?? [])
+    envId.value = nextEnvId
+    rebuildRequestIndex()
   }
 
-  function persistNow(): void {
-    if (!ready.value || !isBridgeAvailable()) return
-    settingsApi.set(SETTING_KEY, JSON.stringify(serializeWorkspace(folders, environments, envId.value))).catch(
-      (error: unknown) => {
+  function applyWorkspaceStructure(state: NonNullable<ReturnType<typeof parseWorkspace>>): void {
+    applyFolderSnapshot(state.folders, state.envId, state.runProfiles, state.mockServers)
+  }
+
+  function applyLegacyWorkspaceStructure(state: ApiLegacyWorkspaceV2): void {
+    applyFolderSnapshot(state.folders, state.envId, state.runProfiles, state.mockServers)
+  }
+
+  function mergeWorkspaceMeta(state: NonNullable<ReturnType<typeof parseWorkspace>>): void {
+    replaceList(runProfiles, state.runProfiles ?? [])
+    replaceList(mockServers, state.mockServers ?? [])
+    if (state.envId) envId.value = state.envId
+  }
+
+  // --- 2. 持久化接线：只配回调，写盘逻辑在 *persist ---
+  const workspacePersist = createWorkspacePersister({
+    canWrite: () => ready.value && isBridgeAvailable(),
+    serialize: () =>
+      JSON.stringify(
+        serializeWorkspace(folders, envId.value, {
+          runProfiles,
+          mockServers,
+        }),
+      ),
+    write: (payload) => {
+      settingsApi.set(SETTING_KEY, payload).catch((error: unknown) => {
         if (isPlatformUnavailable(error)) return
         console.warn('[api-tester] workspace save failed', error)
-      },
-    )
+      })
+    },
+  })
+
+  const catalogPersist = createCatalogPersister({
+    canFlush: () => ready.value && isBridgeAvailable() && !catalogLoading,
+    flushScope: async (scope, scopeRefId) => {
+      try {
+        if (scope === 'global') {
+          await apiCatalogApi.replaceScope({
+            variableScope: 'global',
+            variables: recordToVariableInputs(globals.vars, globals.kinds),
+          })
+          return
+        }
+        if (scope === 'environment') {
+          const env = environments.find((item) => item.id === scopeRefId)
+          if (!env) return
+          await apiCatalogApi.updateEnvironment({
+            environmentId: env.id,
+            environmentName: env.name,
+            baseUrl: env.baseUrl,
+          })
+          await apiCatalogApi.replaceScope({
+            variableScope: 'environment',
+            scopeRefId: env.id,
+            variables: recordToVariableInputs(env.vars, env.kinds),
+          })
+          return
+        }
+        if (scope === 'folder') {
+          const folder = folderById(scopeRefId)
+          if (!folder) return
+          await apiCatalogApi.replaceScope({
+            variableScope: 'folder',
+            scopeRefId: folder.id,
+            variables: recordToVariableInputs(folder.vars, folder.kinds),
+          })
+        }
+      } catch (error) {
+        if (isPlatformUnavailable(error)) return
+        console.warn('[api-tester] catalog save failed', error)
+      }
+    },
+  })
+
+  function queueCatalogScope(scope: CatalogVariableScope, scopeRefId = ''): void {
+    catalogPersist.queue(scope, scopeRefId)
   }
 
-  function persistSoon(): void {
-    if (!ready.value || !isBridgeAvailable()) return
-    if (persistTimer !== null) clearTimeout(persistTimer)
-    persistTimer = setTimeout(() => {
-      persistTimer = null
-      persistNow()
-    }, PERSIST_MS)
+  /** 当前请求字段编辑：只标脏，700ms 后写 workspace。 */
+  function markWorkspaceDirty(): void {
+    workspacePersist.markDirty()
+  }
+
+  function persistStructureNow(): void {
+    if (!isBridgeAvailable()) return
+    workspacePersist.flushNow()
+  }
+
+  async function loadCatalogFromPlatform(): Promise<void> {
+    if (!isBridgeAvailable()) return
+    catalogLoading = true
+    try {
+      const [envRes, varRes] = await Promise.all([
+        withPlatformRetry(() => apiCatalogApi.listEnvironments()),
+        withPlatformRetry(() => apiCatalogApi.listVariables()),
+      ])
+      const globalsTyped = catalogToTypedRecord(varRes.variables, 'global')
+      const runtimeEnvs = envRes.environments.map((row) =>
+        catalogEnvironmentToRuntime(row, catalogToTypedRecord(varRes.variables, 'environment', row.environmentId)),
+      )
+      replaceList(environments, runtimeEnvs.length ? runtimeEnvs : defaultEnvironments())
+      globals.vars = globalsTyped.vars
+      globals.kinds = globalsTyped.kinds
+      applyFolderVariables(folders, varRes.variables)
+      envId.value = environments.some((item) => item.id === envId.value)
+        ? envId.value
+        : (environments[0]?.id ?? '')
+    } catch (error) {
+      console.warn('[api-tester] catalog load failed', error)
+      if (environments.length === 0) replaceList(environments, defaultEnvironments())
+      if (!envId.value) envId.value = environments[0]?.id ?? ''
+    } finally {
+      catalogLoading = false
+    }
+  }
+
+  async function ensureDefaultCatalog(): Promise<void> {
+    if (!isBridgeAvailable()) return
+    const listed = await withPlatformRetry(() => apiCatalogApi.listEnvironments())
+    if (listed.environments.length > 0) {
+      await loadCatalogFromPlatform()
+      return
+    }
+    const seed = defaultEnvironments()[0]!
+    await withPlatformRetry(() =>
+      apiCatalogApi.createEnvironment({
+        environmentId: seed.id,
+        environmentName: seed.name,
+        baseUrl: seed.baseUrl,
+      }),
+    )
+    await loadCatalogFromPlatform()
+  }
+
+  async function migrateLegacyCatalog(legacy: ApiLegacyWorkspaceV2): Promise<void> {
+    if (!isBridgeAvailable()) return
+    for (const env of legacy.environments.length ? legacy.environments : defaultEnvironments()) {
+      await withPlatformRetry(() =>
+        apiCatalogApi.createEnvironment({
+          environmentId: env.id,
+          environmentName: env.name,
+          baseUrl: env.baseUrl,
+        }),
+      )
+      const vars = { ...env.vars }
+      delete vars.baseUrl
+      await withPlatformRetry(() =>
+        apiCatalogApi.replaceScope({
+          variableScope: 'environment',
+          scopeRefId: env.id,
+          variables: recordToVariableInputs(vars, env.kinds),
+        }),
+      )
+    }
+    await withPlatformRetry(() =>
+      apiCatalogApi.replaceScope({
+        variableScope: 'global',
+        variables: recordToVariableInputs(legacy.globals?.vars ?? {}, legacy.globals?.kinds),
+      }),
+    )
+    for (const folder of legacy.folders) {
+      if (Object.keys(folder.vars).length === 0) continue
+      await withPlatformRetry(() =>
+        apiCatalogApi.replaceScope({
+          variableScope: 'folder',
+          scopeRefId: folder.id,
+          variables: recordToVariableInputs(folder.vars, folder.kinds),
+        }),
+      )
+    }
+    await loadCatalogFromPlatform()
+  }
+
+  async function migrateLegacyCatalogIfNeeded(legacy: ApiLegacyWorkspaceV2): Promise<void> {
+    if (!isBridgeAvailable()) return
+    const listed = await withPlatformRetry(() => apiCatalogApi.listEnvironments())
+    if (listed.environments.length > 0) {
+      await loadCatalogFromPlatform()
+      return
+    }
+    await migrateLegacyCatalog(legacy)
+  }
+
+  // --- 3. hydrate：读 workspace，再叠 catalog；ready 前改集合不覆盖 ---
+  function markTouchedBeforeReady(): void {
+    if (!ready.value) touchedBeforeReady = true
+  }
+
+  function installUnloadPersistHook(): void {
+    if (unloadHookInstalled || typeof window === 'undefined') return
+    unloadHookInstalled = true
+    window.addEventListener('beforeunload', () => {
+      workspacePersist.cancelTimer()
+      catalogPersist.cancelTimer()
+      if (!catalogLoading) {
+        queueCatalogScope('global')
+        for (const env of environments) queueCatalogScope('environment', env.id)
+        for (const folder of folders) queueCatalogScope('folder', folder.id)
+      }
+      catalogPersist.flushNow()
+      workspacePersist.flushNow()
+    })
   }
 
   async function hydrate(): Promise<void> {
     if (ready.value) return
+    installUnloadPersistHook()
     try {
       if (isBridgeAvailable()) {
         const res = await withPlatformRetry(() => settingsApi.get(SETTING_KEY))
+        const legacy = parseLegacyWorkspaceV2(res.value)
         const saved = parseWorkspace(res.value)
-        if (saved && saved.folders.length > 0) {
-          applyWorkspace(saved)
+        if (touchedBeforeReady) {
+          if (folders.length === 0) {
+            if (saved?.folders.length) applyWorkspaceStructure(saved)
+            else if (legacy?.folders.length) applyLegacyWorkspaceStructure(legacy)
+            else seedEmpty()
+            await ensureDefaultCatalog()
+          } else {
+            const diskFolders = saved?.folders ?? legacy?.folders
+            if (diskFolders?.length) mergeWorkspaceFolders(folders, diskFolders)
+            if (saved) mergeWorkspaceMeta(saved)
+            else if (legacy) {
+              envId.value = legacy.envId || envId.value
+              replaceList(runProfiles, legacy.runProfiles ?? runProfiles)
+              replaceList(mockServers, legacy.mockServers ?? mockServers)
+            }
+            await loadCatalogFromPlatform()
+          }
+        } else if (saved?.folders.length) {
+          applyWorkspaceStructure(saved)
+          await loadCatalogFromPlatform()
+        } else if (legacy?.folders.length) {
+          applyLegacyWorkspaceStructure(legacy)
+          await migrateLegacyCatalogIfNeeded(legacy)
+          persistStructureNow()
         } else {
           seedEmpty()
+          await ensureDefaultCatalog()
         }
-      } else {
+      } else if (folders.length === 0) {
         seedEmpty()
       }
     } catch (error) {
@@ -127,13 +399,19 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       if (folders.length === 0) seedEmpty()
     } finally {
       ready.value = true
-      watch([folders, environments, envId], persistSoon, { deep: true })
-      persistSoon()
+      rebuildRequestIndex()
+      watch(envId, () => persistStructureNow())
+      workspacePersist.replayPending()
+      catalogPersist.flushSoon(0)
       void refreshHistory()
     }
   }
 
   const readyPromise = hydrate()
+
+  function whenReady(): Promise<void> {
+    return readyPromise
+  }
 
   function afterReady(run: () => string | undefined): string | undefined {
     if (ready.value) return run()
@@ -141,12 +419,28 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     return undefined
   }
 
+  // --- 4. 定位与 Tab：一条请求一个 Shell Tab，hydrate 完再开 ---
   const environment = computed<ApiEnvironment | undefined>(() =>
     environments.find((item) => item.id === envId.value),
   )
 
+  function locate(
+    id: string | null | undefined,
+  ): { folder: ApiFolder; index: number; request: ApiRequest } | undefined {
+    if (!id) return undefined
+    const folderId = requestFolderIndex.get(id)
+    if (folderId) {
+      const folder = folderById(folderId)
+      if (folder) {
+        const index = folder.requests.findIndex((item) => item.id === id)
+        if (index >= 0) return { folder, index, request: folder.requests[index]! }
+      }
+    }
+    return scanLocateRequest(folders, id)
+  }
+
   function requestById(id: string | null | undefined): ApiRequest | undefined {
-    return findRequestIn(folders, id)
+    return locate(id)?.request
   }
 
   function firstRequestId(): string | undefined {
@@ -205,6 +499,98 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     return folders.find((folder) => folder.id === id)
   }
 
+  // --- 5. 环境 / 变量：定义走 catalog，集合 JSON 只记 envId ---
+  function syncEnvBaseUrl(env: ApiEnvironment): void {
+    if (env.baseUrl.trim()) {
+      env.vars.baseUrl = env.baseUrl.trim()
+    }
+  }
+
+  function addEnvironment(name: string): ApiEnvironment {
+    const trimmed = name.trim() || 'Environment'
+    const baseUrl = '127.0.0.1:9000'
+    const env: ApiEnvironment = {
+      id: createId('env'),
+      name: uniqueName(trimmed, environments.map((item) => item.name)),
+      baseUrl,
+      vars: { baseUrl },
+      kinds: emptyKinds(),
+    }
+    environments.push(env)
+    if (!envId.value) envId.value = env.id
+    if (isBridgeAvailable()) {
+      void withPlatformRetry(() =>
+        apiCatalogApi.createEnvironment({
+          environmentId: env.id,
+          environmentName: env.name,
+          baseUrl: env.baseUrl,
+        }),
+      ).catch((error: unknown) => {
+        if (isPlatformUnavailable(error)) return
+        console.warn('[api-tester] create environment failed', error)
+      })
+    }
+    return env
+  }
+
+  function renameEnvironment(environmentId: string, name: string): ApiEnvironment | undefined {
+    const env = environments.find((item) => item.id === environmentId)
+    if (!env) return undefined
+    const trimmed = name.trim()
+    if (!trimmed) return env
+    env.name = uniqueName(
+      trimmed,
+      environments.filter((item) => item.id !== environmentId).map((item) => item.name),
+    )
+    queueCatalogScope('environment', environmentId)
+    return env
+  }
+
+  function removeEnvironment(environmentId: string): boolean {
+    if (environments.length <= 1) return false
+    const index = environments.findIndex((item) => item.id === environmentId)
+    if (index < 0) return false
+    environments.splice(index, 1)
+    if (envId.value === environmentId) {
+      envId.value = environments[0]?.id ?? ''
+    }
+    if (isBridgeAvailable()) {
+      void withPlatformRetry(() => apiCatalogApi.deleteEnvironment({ environmentId })).catch((error: unknown) => {
+        if (isPlatformUnavailable(error)) return
+        console.warn('[api-tester] delete environment failed', error)
+      })
+    }
+    return true
+  }
+
+  function updateEnvironmentBaseUrl(environmentId: string, baseUrl: string): void {
+    const env = environments.find((item) => item.id === environmentId)
+    if (!env) return
+    env.baseUrl = baseUrl.trim()
+    syncEnvBaseUrl(env)
+    queueCatalogScope('environment', environmentId)
+  }
+
+  /** 环境面板整表写回：只 queue 这一个 scope。 */
+  function replaceGlobalVars(vars: Record<string, string>, kinds: Record<string, ApiVariableKind> = emptyKinds()): void {
+    globals.vars = vars
+    globals.kinds = kinds
+    queueCatalogScope('global')
+  }
+
+  function replaceEnvironmentVars(
+    environmentId: string,
+    vars: Record<string, string>,
+    kinds: Record<string, ApiVariableKind> = emptyKinds(),
+  ): void {
+    const env = environments.find((item) => item.id === environmentId)
+    if (!env) return
+    env.vars = vars
+    env.kinds = kinds
+    queueCatalogScope('environment', environmentId)
+  }
+
+  // --- 6. 集合 CRUD：改树立刻 flush workspace；导入文件夹变量再 queue catalog ---
   function closeRequestTabs(ids: readonly string[]): void {
     const tabStore = useTabStore()
     for (const id of ids) {
@@ -222,19 +608,26 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   function ensureDrafts(draftsName = 'Drafts'): ApiFolder {
     const existing = folders.find((folder) => folder.id === 'drafts')
     if (existing) return existing
-    const created: ApiFolder = { id: 'drafts', name: draftsName, requests: [] }
+    const created: ApiFolder = { id: 'drafts', name: draftsName, parentId: null, vars: emptyVars(), kinds: emptyKinds(), requests: [] }
     folders.push(created)
     return created
   }
 
-  function addFolder(name: string): ApiFolder {
+  function addFolder(name: string, parentId: string | null = null): ApiFolder | null {
+    markTouchedBeforeReady()
+    if (parentId && !canAddChildFolder(folders, parentId)) return null
     const trimmed = name.trim() || 'Folder'
     const folder: ApiFolder = {
-      id: newId('folder'),
+      id: createId('folder'),
       name: uniqueName(trimmed, folders.map((item) => item.name)),
+      parentId,
+      vars: emptyVars(),
+      kinds: emptyKinds(),
       requests: [],
     }
     folders.push(folder)
+    rebuildRequestIndex()
+    persistStructureNow()
     return folder
   }
 
@@ -247,14 +640,26 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       trimmed,
       folders.filter((item) => item.id !== folderId).map((item) => item.name),
     )
+    workspacePersist.markDirty()
     return folder
   }
 
   function deleteFolder(folderId: string): boolean {
-    const index = folders.findIndex((folder) => folder.id === folderId)
-    if (index < 0) return false
-    const [removed] = folders.splice(index, 1)
-    closeRequestTabs(removed?.requests.map((req) => req.id) ?? [])
+    const folder = folderById(folderId)
+    if (!folder) return false
+    const ids = collectDescendantFolderIds(folders, folderId)
+    const requestIds: string[] = []
+    for (const id of ids) {
+      const item = folderById(id)
+      if (item) requestIds.push(...item.requests.map((req) => req.id))
+    }
+    closeRequestTabs(requestIds)
+    for (const id of [...ids].reverse()) {
+      const index = folders.findIndex((item) => item.id === id)
+      if (index >= 0) folders.splice(index, 1)
+    }
+    rebuildRequestIndex()
+    persistStructureNow()
     return true
   }
 
@@ -265,10 +670,11 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     listen?: boolean
     name?: string
   }): ApiRequest {
+    markTouchedBeforeReady()
     const folder = folderById(opts?.folderId) ?? ensureDrafts(opts?.draftsName)
     const method = opts?.method ?? 'GET'
     const req: ApiRequest = {
-      id: newId('req'),
+      id: createId('req'),
       name: uniqueName(
         opts?.name?.trim() || 'Untitled',
         folder.requests.map((item) => item.name),
@@ -277,16 +683,21 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       url: '',
       params: [],
       headers: [],
+      auth: defaultAuth(),
+      bodyMode: 'none',
       body: '',
+      bodyForm: [],
     }
     applyPaneDefaults(req, { listen: opts?.listen })
     folder.requests.push(req)
+    requestFolderIndex.set(req.id, folder.id)
     openRequestTab(req.id)
+    persistStructureNow()
     return req
   }
 
   function renameRequest(requestId: string, name: string): ApiRequest | undefined {
-    const located = locateRequest(folders, requestId)
+    const located = locate(requestId)
     if (!located) return undefined
     const trimmed = name.trim()
     if (!trimmed) return located.request
@@ -296,11 +707,12 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     )
     const tabId = findRequestTabId(requestId)
     syncTabTitle(tabId, requestId)
+    workspacePersist.markDirty()
     return located.request
   }
 
   function duplicateRequest(requestId: string): ApiRequest | undefined {
-    const located = locateRequest(folders, requestId)
+    const located = locate(requestId)
     if (!located) return undefined
     const copy = cloneRequest(
       located.request,
@@ -310,28 +722,100 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       ),
     )
     located.folder.requests.splice(located.index + 1, 0, copy)
+    requestFolderIndex.set(copy.id, located.folder.id)
     openRequestTab(copy.id)
+    persistStructureNow()
     return copy
   }
 
   function deleteRequest(requestId: string): boolean {
-    const located = locateRequest(folders, requestId)
+    const located = locate(requestId)
     if (!located) return false
     located.folder.requests.splice(located.index, 1)
+    requestFolderIndex.delete(requestId)
     closeRequestTabs([requestId])
+    persistStructureNow()
     return true
   }
 
   function moveRequest(requestId: string, folderId: string): boolean {
-    const located = locateRequest(folders, requestId)
+    const located = locate(requestId)
     const target = folderById(folderId)
-    if (!located || !target || located.folder.id === folderId) return false
+    if (!located || !target) return false
+    if (located.folder.id === folderId) return true
     located.folder.requests.splice(located.index, 1)
     located.request.name = uniqueName(
       located.request.name,
       target.requests.map((item) => item.name),
     )
     target.requests.push(located.request)
+    requestFolderIndex.set(requestId, folderId)
+    persistStructureNow()
+    return true
+  }
+
+  function moveFolder(folderId: string, parentId: string | null): boolean {
+    const folder = folderById(folderId)
+    if (!folder) return false
+    if (folder.parentId === parentId) return true
+    if (parentId) {
+      if (!folderById(parentId) || !canNestFolder(folders, folderId, parentId)) return false
+    }
+    const siblingNames = folders
+      .filter((item) => item.id !== folderId && item.parentId === parentId)
+      .map((item) => item.name)
+    folder.name = uniqueName(folder.name, siblingNames)
+    folder.parentId = parentId
+    persistStructureNow()
+    return true
+  }
+
+  function reorderFolder(dragId: string, dropId: string, position: 'before' | 'after'): boolean {
+    const drag = folderById(dragId)
+    const drop = folderById(dropId)
+    if (!drag || !drop || dragId === dropId) return false
+    const nextParent = drop.parentId
+    if (nextParent !== drag.parentId) {
+      if (nextParent && !canNestFolder(folders, dragId, nextParent)) return false
+      const siblingNames = folders
+        .filter((item) => item.id !== dragId && item.parentId === nextParent)
+        .map((item) => item.name)
+      drag.name = uniqueName(drag.name, siblingNames)
+      drag.parentId = nextParent
+    }
+    const from = folders.indexOf(drag)
+    folders.splice(from, 1)
+    let to = folders.indexOf(drop)
+    if (to < 0) {
+      folders.push(drag)
+    } else {
+      if (position === 'after') to += 1
+      folders.splice(to, 0, drag)
+    }
+    persistStructureNow()
+    return true
+  }
+
+  function reorderRequest(dragId: string, dropId: string, position: 'before' | 'after'): boolean {
+    const dragLoc = locate(dragId)
+    const dropLoc = locate(dropId)
+    if (!dragLoc || !dropLoc || dragId === dropId) return false
+    if (dragLoc.folder.id !== dropLoc.folder.id && !moveRequest(dragId, dropLoc.folder.id)) return false
+    const folder = folderById(dropLoc.folder.id)
+    if (!folder) return false
+    const dragReq = folder.requests.find((item) => item.id === dragId)
+    const dropReq = folder.requests.find((item) => item.id === dropId)
+    if (!dragReq || !dropReq) return false
+    const from = folder.requests.indexOf(dragReq)
+    folder.requests.splice(from, 1)
+    let to = folder.requests.indexOf(dropReq)
+    if (to < 0) {
+      folder.requests.push(dragReq)
+    } else {
+      if (position === 'after') to += 1
+      folder.requests.splice(to, 0, dragReq)
+    }
+    persistStructureNow()
     return true
   }
 
@@ -347,6 +831,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
           requests += 1
         }
       }
+      rebuildRequestIndex()
+      persistStructureNow()
       return { folders: 0, requests }
     }
     const names = folders.map((folder) => folder.name)
@@ -356,7 +842,12 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       names.push(folder.name)
       folders.push(folder)
       requests += folder.requests.length
+      if (Object.keys(folder.vars).length > 0) {
+        queueCatalogScope('folder', folder.id)
+      }
     }
+    rebuildRequestIndex()
+    persistStructureNow()
     return { folders: incoming.length, requests }
   }
 
@@ -370,6 +861,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     if (tab) tab.tooltip = tabTooltip(req)
   }
 
+  // --- 7. 发送：HTTP 一发一收；TCP/UDP 按 requestId 保活，关 Tab 才 close ---
   async function send(requestId: string, opts?: { encoding?: ApiSocketEncoding; peerAddr?: string }): Promise<void> {
     const req = requestById(requestId)
     if (!req || sending[requestId]) return
@@ -393,7 +885,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     exchanges[requestId] = null
     const started = performance.now()
     try {
-      const exchange = await executeRequest(req, environment.value, ac.signal)
+      const scope = variableScope(requestId)
+      const exchange = await executeRequest(req, environment.value, ac.signal, scope)
       if (sendGen.get(requestId) !== gen) return
       exchanges[requestId] = exchange
       void rememberHistory(req, exchange)
@@ -424,7 +917,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     sending[requestId] = true
     const started = performance.now()
     try {
-      const { target, payload } = resolveSend(req, environment.value)
+      const scope = variableScope(requestId)
+      const { target, payload } = resolveSend(req, environment.value, scope)
       const sessionId = await ensureLive(requestId, target, ac.signal)
       if (payload) {
         await sendSocketFrame(sessionId, payload, target, encoding, peerAddr)
@@ -495,13 +989,21 @@ export const useApiTesterStore = defineStore('api-tester', () => {
         if (!live || live.sessionId !== sessionId) return
         if (event.type === 'api.socket.data') {
           const frames = socketLogs[requestId] ?? (socketLogs[requestId] = [])
-          frames.push(event)
+          const { dropped } = appendSocketFrame(frames, event)
           if (event.localAddr) live.localAddr = event.localAddr
+          if (event.remoteAddr) live.remoteAddr = event.remoteAddr
+          exchanges[requestId] = patchLiveExchangeFromFrame(
+            exchanges[requestId],
+            live,
+            frames,
+            event,
+            dropped,
+          )
         } else {
           live.state = event.state
+          if (event.remoteAddr) live.remoteAddr = event.remoteAddr
+          patchLiveExchange(requestId)
         }
-        if (event.remoteAddr) live.remoteAddr = event.remoteAddr
-        patchLiveExchange(requestId)
         if (event.type === 'api.session.state' && (event.state === 'closed' || event.state === 'lost')) {
           detachLive(requestId, false)
         }
@@ -527,7 +1029,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     sending[requestId] = true
     const started = performance.now()
     try {
-      const { target } = resolveSend(req, environment.value)
+      const { target } = resolveSend(req, environment.value, variableScope(requestId))
       await ensureLive(requestId, target, ac.signal)
       if (sendGen.get(requestId) !== gen) return
       patchLiveExchange(requestId)
@@ -565,6 +1067,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     if (live) await closeSocketSession(live.sessionId)
   }
 
+  // --- 8. 历史：只写 nm_api_history，不进 workspace ---
   async function refreshHistory(): Promise<void> {
     if (!isBridgeAvailable()) return
     try {
@@ -579,12 +1082,13 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   async function rememberHistory(req: ApiRequest, exchange: ApiExchange): Promise<void> {
     const env = environment.value
     const offline = !isBridgeAvailable()
+    const scope = variableScope(req.id)
     const itemHint: ApiHistoryItem = {
       historyId: `local-${Date.now()}`,
       requestId: req.id,
       requestName: req.name,
       method: req.method,
-      url: resolveRequestUrl(req, env),
+      url: resolveRequest(req, env, scope).url,
       environmentName: env?.name ?? '',
       request: offline
         ? { ...req, params: req.params.map((row) => ({ ...row })), headers: req.headers.map((row) => ({ ...row })) }
@@ -656,6 +1160,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       const folder = ensureDrafts()
       const copy = cloneRequest(request, uniqueName(request.name, folder.requests.map((row) => row.name)))
       folder.requests.push(copy)
+      requestFolderIndex.set(copy.id, folder.id)
       requestId = copy.id
     }
     if (!requestId || !requestById(requestId)) return
@@ -722,24 +1227,64 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   function curl(requestId: string): string {
     const req = requestById(requestId)
     if (!req) return ''
-    return buildCurl(req, environment.value)
+    return buildCurl(req, environment.value, variableScope(requestId))
+  }
+
+  function resolveEnvironmentForSend(opts?: ApiSendOptions): ApiEnvironment | undefined {
+    if (opts?.envId) {
+      return environments.find((item) => item.id === opts.envId)
+    }
+    return environment.value
+  }
+
+  /** 不绑 Tab 的发送入口；Runner / vitest 批量调用。 */
+  async function sendResolved(req: ApiRequest, opts?: ApiSendOptions): Promise<ApiExchange> {
+    if (!isBridgeAvailable()) {
+      throw new SendError('need-desktop', 'desktop only')
+    }
+    const env = resolveEnvironmentForSend(opts)
+    const scope = opts?.scope ?? variableScope(req.id)
+    const ac = new AbortController()
+    const signal = opts?.signal ?? ac.signal
+    try {
+      const exchange = await executeRequest(req, env, signal, scope)
+      if (opts?.meta) {
+        exchange.meta = { ...opts.meta }
+      }
+      if (!opts?.skipHistory) {
+        void rememberHistory(req, exchange)
+      }
+      return exchange
+    } catch (error) {
+      if (error instanceof SendError) throw error
+      const exchange = failExchange(localizeSendError(error), 1, protocolOf(req.method))
+      if (opts?.meta) {
+        exchange.meta = { ...opts.meta }
+      }
+      if (!opts?.skipHistory) {
+        void rememberHistory(req, exchange)
+      }
+      return exchange
+    }
   }
 
   return {
     folders,
     environments,
+    globals,
+    runProfiles,
+    mockServers,
     envId,
     environment,
     ready,
+    whenReady,
     treeFilter,
     historyFilter,
-    sideView,
     history,
     sending,
     exchanges,
     sockets,
     socketLogs,
-    interpolateEnv,
     requestById,
     folderById,
     firstRequestId,
@@ -748,14 +1293,26 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     addFolder,
     renameFolder,
     deleteFolder,
+    addEnvironment,
+    renameEnvironment,
+    removeEnvironment,
+    updateEnvironmentBaseUrl,
+    replaceGlobalVars,
+    replaceEnvironmentVars,
+    markWorkspaceDirty,
+    variableScope,
     addRequest,
     renameRequest,
     duplicateRequest,
     deleteRequest,
     moveRequest,
+    moveFolder,
+    reorderFolder,
+    reorderRequest,
     mergeImported,
     syncTabTitle,
     send,
+    sendResolved,
     connectSocket,
     clearSocketLog,
     cancel,
