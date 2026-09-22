@@ -75,7 +75,7 @@ const editorLanguage = computed(() => {
       v-else
       v-model="bodyModel"
       :language="editorLanguage"
-      :theme="appStore.theme"
+      :theme="appStore.editorTheme"
       :show-toolbar="false"
       embedded
       height="100%"

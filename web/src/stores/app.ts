@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import type { RsLocale, RsThemeMode } from '@niuma/ui'
+import type { RsCodeEditorTheme, RsLocale, RsResolvedTheme } from '@niuma/ui'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
@@ -19,7 +19,7 @@ function readStoredLocale(): RsLocale {
   return 'zh-CN'
 }
 
-function resolveSystemTheme(): RsThemeMode {
+function resolveSystemTheme(): RsResolvedTheme {
   if (typeof window === 'undefined') return 'light'
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
@@ -27,7 +27,7 @@ function resolveSystemTheme(): RsThemeMode {
 export const useAppStore = defineStore('app', () => {
   const themePreference = ref<ThemePreference>(readStoredTheme())
   const locale = ref<RsLocale>(readStoredLocale())
-  const systemTheme = ref<RsThemeMode>(resolveSystemTheme())
+  const systemTheme = ref<RsResolvedTheme>(resolveSystemTheme())
 
   if (typeof window !== 'undefined') {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
@@ -35,8 +35,13 @@ export const useAppStore = defineStore('app', () => {
     })
   }
 
-  const resolvedTheme = computed<RsThemeMode>(() =>
+  const resolvedTheme = computed<RsResolvedTheme>(() =>
     themePreference.value === 'system' ? systemTheme.value : themePreference.value,
+  )
+
+  /** 代码编辑器没有 system：跟随时用 auto，继承页面上已解析的明暗。 */
+  const editorTheme = computed<RsCodeEditorTheme>(() =>
+    themePreference.value === 'system' ? 'auto' : themePreference.value,
   )
 
   function setThemePreference(mode: ThemePreference) {
@@ -61,6 +66,7 @@ export const useAppStore = defineStore('app', () => {
   return {
     themePreference,
     theme: resolvedTheme,
+    editorTheme,
     locale,
     setThemePreference,
     setLocale,

@@ -80,7 +80,7 @@ const lineEnds: { id: SocketLineEnd; labelKey: string }[] = [
       <RsCodeEditor
         v-model="body"
         language="plaintext"
-        :theme="appStore.theme"
+        :theme="appStore.editorTheme"
         :placeholder="placeholder"
         :show-toolbar="false"
         :fold-gutter="false"

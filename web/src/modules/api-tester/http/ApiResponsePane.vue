@@ -100,7 +100,7 @@ const editorLang = computed(() => {
       <RsCodeEditor
         :model-value="editorText"
         :language="editorLang"
-        :theme="appStore.theme"
+        :theme="appStore.editorTheme"
         :show-toolbar="false"
         readonly
         embedded

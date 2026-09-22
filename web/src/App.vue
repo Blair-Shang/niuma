@@ -88,7 +88,7 @@ onBeforeUnmount(() => {
 
 <template>
   <RsConfigProvider
-    :theme="appStore.theme"
+    :theme="appStore.themePreference"
     :locale="appStore.locale"
     control-size="md"
     class="nm-root"
