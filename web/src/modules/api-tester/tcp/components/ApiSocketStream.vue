@@ -4,7 +4,7 @@
  */
 import { RsButton, RsEmpty } from '@niuma/ui'
 import type { ApiSocketDataEvent } from '@/api/types/api-socket'
-import type { ApiLiveSocket } from '../types'
+import type { ApiLiveSocket } from '../../types'
 
 defineProps<{
   frames: ApiSocketDataEvent[]

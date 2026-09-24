@@ -9,7 +9,8 @@ export interface SocketFrameChoice {
   mode: SocketFrameMode
   delimiter: SocketFrameDelimiter
   lengthOffset: number
-  lengthSize: SocketLengthSize
+  /** 打开连接前会经 normalizeLengthSize 收成 1、2 或 4。 */
+  lengthSize: number
   lengthEndian: SocketLengthEndian
   lengthAdjust: number
 }

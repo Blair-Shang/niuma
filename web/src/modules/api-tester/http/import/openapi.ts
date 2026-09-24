@@ -139,7 +139,7 @@ function formFromMedia(
   if (rows.length === 0) {
     const example = node ? mediaExample(node, doc) : ''
     if (example && mode === 'urlencoded') {
-      return { bodyMode, body: '', bodyForm: loosePairs(example) }
+      return { bodyMode: mode, body: '', bodyForm: loosePairs(example) }
     }
   }
   return { bodyMode: rows.length ? mode : 'none', body: '', bodyForm: rows }
