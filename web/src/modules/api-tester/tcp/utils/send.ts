@@ -3,20 +3,22 @@
  */
 import { apiSocketApi } from '@/api'
 import type { ApiSocketDataEvent, ApiSocketEncoding, ApiSocketSessionInfo } from '@/api/types/api-socket'
-import type { ApiExchange, ApiLiveSocket } from '../types'
-import { newKvRow } from '../utils/format'
-import { resolveSocketSendDest, socketOpenFields, type SocketTarget } from '../utils/target'
+import type { ApiExchange, ApiLiveSocket } from '../../types'
+import { newKvRow } from '../../utils/format'
+import { resolveSocketSendDest, socketOpenFields, type SocketTarget } from '../../utils/target'
+import type { SocketFrameOpen } from './frame'
 
 const SOCKET_OPEN_MS = 10000
 /** 套接字日志封顶，避免高速率 TCP 无界涨内存。 */
 export const SOCKET_LOG_MAX = 400
 
-export async function openSocketSession(target: SocketTarget): Promise<ApiSocketSessionInfo> {
+export async function openSocketSession(target: SocketTarget, frame?: SocketFrameOpen): Promise<ApiSocketSessionInfo> {
   return apiSocketApi.open({
     kind: target.transport,
     timeoutMs: SOCKET_OPEN_MS,
     encoding: 'utf8',
     ...socketOpenFields(target),
+    ...frame,
   })
 }
 
@@ -26,13 +28,16 @@ export async function sendSocketFrame(
   target: SocketTarget,
   encoding: ApiSocketEncoding = 'auto',
   peerAddr?: string,
+  peerId?: string,
+  broadcast = false,
 ): Promise<void> {
   if (!payload) return
-  const dest = resolveSocketSendDest(target, peerAddr)
+  const dest = resolveSocketSendDest(target, peerAddr, { broadcast })
   await apiSocketApi.send({
     sessionId,
     data: payload,
     encoding,
+    peerId: peerId || undefined,
     host: dest?.host,
     port: dest?.port,
   })
@@ -40,6 +45,17 @@ export async function sendSocketFrame(
 
 export async function closeSocketSession(sessionId: string): Promise<void> {
   await apiSocketApi.close({ sessionId }).catch(() => undefined)
+}
+
+export async function listSocketPeers(sessionId: string): Promise<{ peerId: string; remoteAddr: string }[]> {
+  const res = await apiSocketApi.peers({ sessionId })
+  return (res.peers ?? [])
+    .filter((peer) => peer.peerId)
+    .map((peer) => ({ peerId: peer.peerId, remoteAddr: peer.remoteAddr || peer.peerId }))
+}
+
+export async function kickSocketPeer(sessionId: string, peerId: string): Promise<void> {
+  await apiSocketApi.kick({ sessionId, peerId })
 }
 
 export function buildLiveExchange(
@@ -70,16 +86,36 @@ export function buildLiveExchange(
   }
 }
 
-/** 追加一帧并裁掉超出上限的旧帧。dropped > 0 时调用方应整份重算 exchange。 */
+/** TCP 按 peerId、UDP 按来源地址分桶，避免一个对端挤掉另一个。 */
+export function socketFrameBucket(event: ApiSocketDataEvent): string {
+  const peerId = event.peerId?.trim()
+  if (peerId) return `peer:${peerId}`
+  const addr = event.remoteAddr?.trim()
+  if (addr) return `addr:${addr}`
+  return '*'
+}
+
+/** 追加一帧并只裁本连接的旧帧。dropped > 0 时调用方应整份重算 exchange。 */
 export function appendSocketFrame(
   frames: ApiSocketDataEvent[],
   event: ApiSocketDataEvent,
   max = SOCKET_LOG_MAX,
 ): { dropped: number } {
   frames.push(event)
-  if (frames.length <= max) return { dropped: 0 }
-  const dropped = frames.length - max
-  frames.splice(0, dropped)
+  const bucket = socketFrameBucket(event)
+  let count = 0
+  for (const row of frames) {
+    if (socketFrameBucket(row) === bucket) count += 1
+  }
+  if (count <= max) return { dropped: 0 }
+  const extra = count - max
+  let dropped = 0
+  for (let i = 0; i < frames.length && dropped < extra; i += 1) {
+    if (socketFrameBucket(frames[i]) !== bucket) continue
+    frames.splice(i, 1)
+    i -= 1
+    dropped += 1
+  }
   return { dropped }
 }
 

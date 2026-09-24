@@ -4,9 +4,10 @@
  */
 import { RsButton, RsInput, RsSplitPane, type RsSplitPaneItem } from '@niuma/ui'
 import type { ApiRequest } from '../types'
-import { useApiSocketSession } from './useApiSocketSession'
-import ApiSocketCompose from './ApiSocketCompose.vue'
-import ApiSocketStream from './ApiSocketStream.vue'
+import { useApiSocketSession } from './composables/useApiSocketSession'
+import ApiSocketCompose from './components/ApiSocketCompose.vue'
+import ApiSocketFrame from './components/ApiSocketFrame.vue'
+import ApiSocketStream from './components/ApiSocketStream.vue'
 import './socket.css'
 
 const splitPanes: RsSplitPaneItem[] = [
@@ -25,6 +26,16 @@ const {
   port,
   encode,
   lineEnd,
+  frameMode,
+  frameDelimiter,
+  lengthOffset,
+  lengthSize,
+  lengthEndian,
+  lengthAdjust,
+  broadcast,
+  repeatMs,
+  repeating,
+  canRepeat,
   logView,
   logEl,
   sending,
@@ -42,6 +53,7 @@ const {
   emptyLog,
   onConnect,
   onSend,
+  onToggleRepeat,
   onCancel,
   onClose,
   onClear,
@@ -112,9 +124,19 @@ const {
       <div class="nm-api-sock__meta">
         <span>{{ t('modules.api.socketPeer') }} {{ live?.remoteAddr || '—' }}</span>
         <span>{{ t('modules.api.socketLocal') }} {{ live?.localAddr || '—' }}</span>
-        <span>TX {{ formatBytes(outboundBytes) }}</span>
-        <span>RX {{ formatBytes(inboundBytes) }}</span>
+        <span>{{ t('modules.api.socketOut') }} {{ formatBytes(outboundBytes) }}</span>
+        <span>{{ t('modules.api.socketIn') }} {{ formatBytes(inboundBytes) }}</span>
         <span v-if="exchange">{{ formatDuration(exchange.durationMs) }}</span>
+        <ApiSocketFrame
+          v-if="request.method === 'TCP'"
+          v-model:mode="frameMode"
+          v-model:delimiter="frameDelimiter"
+          v-model:length-offset="lengthOffset"
+          v-model:length-size="lengthSize"
+          v-model:length-endian="lengthEndian"
+          v-model:length-adjust="lengthAdjust"
+          :locked="Boolean(live)"
+        />
       </div>
       <p v-if="exchange?.error" class="nm-api-sock__banner" role="alert">{{ exchange.error }}</p>
     </header>
@@ -141,11 +163,17 @@ const {
           v-model:encode="encode"
           v-model:line-end="lineEnd"
           v-model:body="bodyModel"
+          v-model:broadcast="broadcast"
+          v-model:repeat-ms="repeatMs"
+          :repeating="repeating"
           :can-send="canSend"
+          :can-repeat="canRepeat"
+          :show-broadcast="request.method === 'UDP'"
           :encode-hint="encodeHint"
           :send-label="t('modules.api.send')"
           :placeholder="encode === 'hex' ? '70 69 6e 67' : ''"
           @send="onSend"
+          @toggle-repeat="onToggleRepeat"
           @keydown="onComposeKey"
         />
       </template>

@@ -1,20 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
-  COLLECTION_VERSION,
   defaultAuth,
   defaultEnvironments,
   defaultFolders,
   emptyVars,
   fileSlug,
+  isApiWorkspaceText,
   minimalRequest,
   mergeWorkspaceFolders,
   parseCollection,
-  parseLegacyWorkspaceV2,
   parseWorkspace,
   serializeCollection,
   serializeWorkspace,
   uniqueName,
-  WORKSPACE_VERSION,
+  workspaceHasEmbeddedCatalog,
 } from './collection-io'
 import { newKvRow } from './format'
 import type { ApiEnvironment, ApiFolder } from '../types'
@@ -52,7 +51,7 @@ describe('api collection io', () => {
   it('round-trips folders and remints ids on import', () => {
     const demo = sampleFolders()
     const file = serializeCollection(demo)
-    expect(file.version).toBe(COLLECTION_VERSION)
+    expect(file).not.toHaveProperty('version')
     const parsed = parseCollection(JSON.stringify(file))
     expect('folders' in parsed).toBe(true)
     if (!('folders' in parsed)) return
@@ -64,23 +63,23 @@ describe('api collection io', () => {
     expect(JSON.stringify(file)).not.toContain('history')
   })
 
-  it('rejects v1 workspace snapshot', () => {
+  it('reads a v1 workspace, including socket servers and environments without vars', () => {
     const legacy = {
       kind: 'niuma.api-workspace',
       version: 1,
       folders: [
         {
-          id: 'f1',
-          name: 'Legacy',
+          id: 'drafts',
+          name: '草稿',
           requests: [
             {
-              id: 'r1',
-              name: 'Hit',
-              method: 'POST',
-              url: '{{baseUrl}}/x',
+              id: 'req-server',
+              name: 'TCP 服务端',
+              method: 'TCP',
+              url: '0.0.0.0:9000',
               params: [],
               headers: [],
-              body: '{"a":1}',
+              body: '',
             },
           ],
         },
@@ -88,20 +87,51 @@ describe('api collection io', () => {
       environments: [{ id: 'local', name: 'Local', baseUrl: 'http://127.0.0.1:1' }],
       envId: 'local',
     }
-    expect(parseWorkspace(JSON.stringify(legacy))).toBeNull()
+    const parsed = parseWorkspace(JSON.stringify(legacy))
+    expect(parsed?.folders[0]?.requests[0]).toMatchObject({
+      id: 'req-server',
+      method: 'TCP',
+      url: '0.0.0.0:9000',
+    })
+    expect(parsed?.environments?.[0]).toMatchObject({
+      id: 'local',
+      baseUrl: 'http://127.0.0.1:1',
+      vars: { baseUrl: 'http://127.0.0.1:1' },
+    })
+    expect(parsed?.envId).toBe('local')
+    expect(workspaceHasEmbeddedCatalog(parsed!)).toBe(true)
+    expect(isApiWorkspaceText(JSON.stringify(legacy))).toBe(true)
   })
 
-  it('rejects collection without v2 version', () => {
-    expect(
-      parseCollection(
-        JSON.stringify({
-          kind: 'niuma.api-collection',
-          version: 1,
-          exportedAt: new Date().toISOString(),
-          folders: [],
-        }),
-      ),
-    ).toEqual({ error: 'invalid' })
+  it('reads collection files that still carry a version field', () => {
+    const parsed = parseCollection(
+      JSON.stringify({
+        kind: 'niuma.api-collection',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        folders: [
+          {
+            id: 'drafts',
+            name: '草稿',
+            requests: [
+              {
+                id: 'req-server',
+                name: 'TCP 服务端',
+                method: 'TCP',
+                url: '0.0.0.0:9000',
+                params: [],
+                headers: [],
+                body: '',
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    expect('folders' in parsed).toBe(true)
+    if (!('folders' in parsed)) return
+    expect(parsed.folders[0]?.requests[0]?.method).toBe('TCP')
+    expect(parsed.folders[0]?.requests[0]?.id).not.toBe('req-server')
   })
 
   it('rejects unknown kind', () => {
@@ -127,17 +157,18 @@ describe('api collection io', () => {
       runProfiles: [],
       mockServers: [],
     })
-    expect(snap.version).toBe(WORKSPACE_VERSION)
+    expect(snap).not.toHaveProperty('version')
+    expect(snap).not.toHaveProperty('environments')
     const parsed = parseWorkspace(JSON.stringify(snap))
     expect(parsed?.folders[0]?.id).toBe(folders[0]?.id)
     expect(parsed?.folders[0]?.requests[0]?.id).toBe(folders[0]?.requests[0]?.id)
     expect(parsed?.folders[0]?.vars).toEqual(emptyVars())
     expect(parsed?.envId).toBe(environments[0]?.id)
-    expect(snap).not.toHaveProperty('environments')
     expect(snap).not.toHaveProperty('globals')
+    expect(parsed && workspaceHasEmbeddedCatalog(parsed)).toBe(false)
   })
 
-  it('round-trips TCP server in workspace v3', () => {
+  it('round-trips a TCP server in the workspace snapshot', () => {
     const folders: ApiFolder[] = [
       {
         id: 'drafts',
@@ -154,14 +185,15 @@ describe('api collection io', () => {
   it('rejects workspace when all folders fail to parse', () => {
     const broken = {
       kind: 'niuma.api-workspace',
-      version: WORKSPACE_VERSION,
+      version: 3,
       folders: [{ id: 'drafts', name: '' }],
       envId: 'local',
     }
     expect(parseWorkspace(JSON.stringify(broken))).toBeNull()
+    expect(isApiWorkspaceText(JSON.stringify(broken))).toBe(true)
   })
 
-  it('parses legacy v2 workspace for catalog migration', () => {
+  it('reads a v2 workspace into the same snapshot, including globals', () => {
     const legacy = {
       kind: 'niuma.api-workspace',
       version: 2,
@@ -170,10 +202,11 @@ describe('api collection io', () => {
       envId: 'prod',
       globals: { vars: { org: 'demo' } },
     }
-    expect(parseWorkspace(JSON.stringify(legacy))).toBeNull()
-    const parsed = parseLegacyWorkspaceV2(JSON.stringify(legacy))
-    expect(parsed?.environments[0]?.id).toBe('prod')
+    const parsed = parseWorkspace(JSON.stringify(legacy))
+    expect(parsed?.folders[0]?.id).toBe('shop')
+    expect(parsed?.environments?.[0]?.id).toBe('prod')
     expect(parsed?.globals?.vars.org).toBe('demo')
+    expect(parsed && workspaceHasEmbeddedCatalog(parsed)).toBe(true)
   })
 
   it('returns null for missing or foreign workspace text', () => {
@@ -205,7 +238,6 @@ describe('api collection io', () => {
   it('remints nested parentId and flattens cycles on import', () => {
     const file = {
       kind: 'niuma.api-collection',
-      version: COLLECTION_VERSION,
       exportedAt: new Date().toISOString(),
       folders: [
         { id: 'root', name: 'Root', parentId: null, vars: {}, requests: [] },

@@ -230,6 +230,10 @@ func formatContextPrompt(ws *ContextWorkspace, attachments []ContextAttachment) 
 			b.WriteString(dialect)
 			b.WriteByte('\n')
 		}
+		if guide := workspaceGuide(ws.ModuleID, ws.DialectFamily); guide != "" {
+			b.WriteString(guide)
+			b.WriteByte('\n')
+		}
 	}
 	for _, a := range attachments {
 		detail := a.Detail
@@ -302,14 +306,24 @@ func moduleDialectPrompt(moduleID, family string, caps []string) string {
 	if len(caps) > 0 {
 		return formatCapabilitiesDialect(fam, caps)
 	}
-	switch fam {
-	case "vastbase":
+	if fam == "vastbase" {
 		return dialectVastbasePrompt
-	case "ssh":
+	}
+	return ""
+}
+
+// workspaceGuide 按页签族注入工具用法。与方言规则分开，避免有 capabilities 时把「直接调工具」丢掉。
+func workspaceGuide(moduleID, family string) string {
+	fam := strings.ToLower(strings.TrimSpace(family))
+	id := strings.ToLower(strings.TrimSpace(moduleID))
+	switch {
+	case host.IsSQLModule(fam) || host.IsSQLModule(id):
+		return workspaceSQLPrompt
+	case fam == "ssh" || id == "ssh":
 		return workspaceSSHPrompt
-	case "redis":
+	case fam == "redis" || id == "redis":
 		return workspaceRedisPrompt
-	case "mongodb":
+	case fam == "mongodb" || id == "mongodb":
 		return workspaceMongoPrompt
 	default:
 		return ""

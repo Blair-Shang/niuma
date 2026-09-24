@@ -20,7 +20,7 @@ func (m *Manager) dialTCP(dialCtx, sessCtx context.Context, sess *session) error
 	sess.localAddr = conn.LocalAddr().String()
 	sess.remoteAddr = conn.RemoteAddr().String()
 	sess.state = StateConnected
-	go m.readTCP(sessCtx, sess, conn, "")
+	go m.readTCP(sessCtx, sess, conn, "", newStreamFramer(sess.spec.Frame))
 	return nil
 }
 
@@ -63,11 +63,11 @@ func (m *Manager) acceptLoop(ctx context.Context, sess *session) {
 		sess.peers[peerID] = p
 		sess.mu.Unlock()
 		sess.emitState(StateAccepted, peerID, p.remoteAddr, "")
-		go m.readTCP(ctx, sess, conn, peerID)
+		go m.readTCP(ctx, sess, conn, peerID, newStreamFramer(sess.spec.Frame))
 	}
 }
 
-func (m *Manager) readTCP(ctx context.Context, sess *session, conn net.Conn, peerID string) {
+func (m *Manager) readTCP(ctx context.Context, sess *session, conn net.Conn, peerID string, frames *streamFramer) {
 	buf := make([]byte, sess.spec.ReadLimit)
 	for {
 		if ctx.Err() != nil || sess.isClosed() {
@@ -75,7 +75,19 @@ func (m *Manager) readTCP(ctx context.Context, sess *session, conn net.Conn, pee
 		}
 		n, err := conn.Read(buf)
 		if n > 0 {
-			sess.emitData(peerID, conn.RemoteAddr().String(), conn.LocalAddr().String(), DirIn, buf[:n])
+			ready, ferr := frames.Push(buf[:n])
+			remote, local := conn.RemoteAddr().String(), conn.LocalAddr().String()
+			for _, frame := range ready {
+				sess.emitData(peerID, remote, local, DirIn, frame)
+			}
+			if ferr != nil {
+				if peerID != "" {
+					_ = sess.dropPeer(peerID, StateLost, ferr.Error())
+				} else {
+					m.loseSession(sess, ferr.Error())
+				}
+				return
+			}
 		}
 		if err == nil {
 			continue

@@ -14,10 +14,11 @@ import {
   downloadJson,
   emptyVars,
   fileSlug,
-  parseCollection,
   pickJsonFile,
   serializeCollection,
 } from '../utils/collection-io'
+import { parseImportedCollection } from '../http/import/dispatch'
+import { parseCurl } from '../http/import/curl'
 import { folderTreeKey, handleApiTreeDrop, type ApiTreeCtx } from '../utils/collection-tree'
 import { canAddChildFolder } from '../utils/folder-tree'
 import { findPaneCreate, listApiPaneCreates, paneCreateKey } from './pane-registry'
@@ -76,6 +77,10 @@ export function useApiCollectionPanel() {
   const requestDraft = ref<RequestCreateDraft>({})
   const folderDraft = ref<FolderCreateDraft>({})
 
+  const curlDlgOpen = ref(false)
+  const curlDlgValue = ref('')
+  const curlDlgError = ref('')
+  const curlFolderId = ref<string | undefined>(undefined)
   const confirmOpen = ref(false)
   const confirmKind = ref<'folder' | 'request' | 'history' | 'history-all'>('folder')
   const confirmId = ref('')
@@ -123,6 +128,7 @@ export function useApiCollectionPanel() {
 
   const historyRowCtxItems = computed<RsContextMenuItem[]>(() => [
     { key: 'open-history', label: t('modules.api.openHistory'), icon: 'send' },
+    { key: 'save-history', label: t('modules.api.saveHistory'), icon: 'save' },
     { key: 'sep-hist', label: '', separator: true },
     { key: 'delete-history', label: t('modules.api.deleteHistory'), icon: 'trash-2', danger: true },
   ])
@@ -149,6 +155,7 @@ export function useApiCollectionPanel() {
     { key: 'history', label: t('modules.api.history'), icon: 'history' },
     { key: 'sep-io', label: '', separator: true },
     { key: 'import', label: t('modules.api.importCollection'), icon: 'upload' },
+    { key: 'import-curl', label: t('modules.api.importCurl'), icon: 'terminal' },
     { key: 'export', label: t('modules.api.exportCollection'), icon: 'download' },
   ])
 
@@ -158,6 +165,7 @@ export function useApiCollectionPanel() {
       ...createCtxItems(),
       { key: 'sep-io', label: '', separator: true },
       { key: 'import', label: t('modules.api.importCollection'), icon: 'upload' },
+      { key: 'import-curl', label: t('modules.api.importCurl'), icon: 'terminal' },
       { key: 'export', label: t('modules.api.exportFolder'), icon: 'download' },
       { key: 'sep-manage', label: '', separator: true },
     ]
@@ -316,14 +324,41 @@ export function useApiCollectionPanel() {
   async function importInto(folderId?: string): Promise<void> {
     const text = await pickJsonFile()
     if (text == null) return
-    const parsed = parseCollection(text)
+    const parsed = parseImportedCollection(text)
     if ('error' in parsed) {
-      toast.error(t(parsed.error === 'kind' ? 'modules.api.importKindError' : 'modules.api.importError'))
+      toast.error(t(parsed.error === 'unsupported' ? 'modules.api.importKindError' : 'modules.api.importError'))
       return
     }
     const result = api.mergeImported(parsed.folders, folderId)
     if (folderId) expandFolder(folderId)
+    for (const folder of parsed.folders) {
+      if (folder.parentId == null) expandFolder(folder.id)
+    }
     toast.success(t('modules.api.importSuccess', { folders: result.folders, requests: result.requests }))
+  }
+
+  function openCurlDialog(folderId?: string): void {
+    curlFolderId.value = folderId
+    curlDlgValue.value = ''
+    curlDlgError.value = ''
+    curlDlgOpen.value = true
+  }
+
+  function onCurlImport(): void {
+    const text = curlDlgValue.value.trim()
+    if (!text) {
+      curlDlgError.value = t('modules.api.importCurlEmpty')
+      return
+    }
+    const req = parseCurl(text)
+    if (!req) {
+      curlDlgError.value = t('modules.api.importCurlError')
+      return
+    }
+    api.addPreparedRequest(req, curlFolderId.value)
+    expandFolder(curlFolderId.value)
+    curlDlgOpen.value = false
+    toast.success(t('modules.api.importCurlSuccess'))
   }
 
   function openEnvironments(): void {
@@ -352,6 +387,10 @@ export function useApiCollectionPanel() {
       void importInto()
       return
     }
+    if (key === 'import-curl') {
+      openCurlDialog()
+      return
+    }
     if (key === 'export') {
       exportFolders(api.folders, `niuma-api-${fileSlug('collection')}.json`)
     }
@@ -363,6 +402,10 @@ export function useApiCollectionPanel() {
     if (tryCreatePane(key, folderId)) return
     if (key === 'import') {
       void importInto(folderId)
+      return
+    }
+    if (key === 'import-curl') {
+      openCurlDialog(folderId)
       return
     }
     if (key === 'export') {
@@ -421,6 +464,16 @@ export function useApiCollectionPanel() {
     if (!historyId) return
     if (key === 'open-history') {
       void api.openHistory(historyId)
+      return
+    }
+    if (key === 'save-history') {
+      void api.saveHistoryToCollection(historyId).then((saved) => {
+        if (!saved) {
+          toast.error(t('modules.api.historySaveError'))
+          return
+        }
+        toast.success(t('modules.api.historySaved'))
+      })
       return
     }
     if (key === 'delete-history') {
@@ -484,6 +537,9 @@ export function useApiCollectionPanel() {
     confirmOpen,
     confirmTitle,
     confirmDesc,
+    curlDlgOpen,
+    curlDlgValue,
+    curlDlgError,
     activeCtxItems,
     onSelect,
     onTreeDrop,
@@ -492,6 +548,7 @@ export function useApiCollectionPanel() {
     openConfirm,
     onNameSave,
     onConfirmDelete,
+    onCurlImport,
     onCtxSelect,
   }
 }

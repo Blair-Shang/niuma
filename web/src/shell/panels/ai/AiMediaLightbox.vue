@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
   width: 36px;
   height: 36px;
   border: 1px solid color-mix(in srgb, #fff 18%, transparent);
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   background: color-mix(in srgb, #1a1a1a 88%, transparent);
   color: #f3f3f3;
   cursor: pointer;
@@ -126,8 +126,8 @@ onBeforeUnmount(() => {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   box-shadow: 0 16px 48px rgb(0 0 0 / 0.45);
-  background: var(--nm-editor-bg, #1f1f1f);
+  background: var(--nm-editor-bg);
 }
 </style>

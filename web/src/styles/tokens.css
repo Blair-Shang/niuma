@@ -23,8 +23,25 @@ body,
   --nm-topbar-bg: color-mix(in srgb, var(--nm-frame-bg) 80%, transparent);
   --nm-content-radius: var(--rs-radius);
   --nm-glass-blur: 24px;
+  /* 明暗与皮肤只覆盖这些变量，组件不写 data-rs-theme 选择器 */
+  --nm-glass-bg: color-mix(in srgb, var(--rs-surface) 72%, transparent);
+  --nm-aurora-opacity: 0.38;
+  --nm-elev-highlight: color-mix(in srgb, #fff 46%, transparent);
+  --nm-elev-shadow: 0 24px 60px rgb(15 23 42 / 14%);
+  --nm-on-aurora: #fff;
+  --nm-letter-spacing: -0.011em;
+  --nm-editor-glow: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--rs-primary) 28%, transparent),
+    transparent 72%
+  );
+  /* 活动栏领域色。已安装主题用内联变量整包替换，组件只读这些名字。 */
+  --nm-activity-explorer: #3b82f6;
+  --nm-activity-data: #8b5cf6;
+  --nm-activity-ops: #f59e0b;
+  --nm-activity-devtools: #22c55e;
 
-  /* Apple 式极光色相（柔和、偏 pastel，非霓虹） */
+  /* 默认壳的极光是独立一套，不从 --rs-* 混合。新主题整包替换这些变量。 */
   --nm-aurora-a: #5ac8fa;
   --nm-aurora-b: #bf5af2;
   --nm-aurora-c: #ff375f;
@@ -39,6 +56,94 @@ body,
   --nm-font-brand: var(--rs-font-size-sm);
 }
 
+[data-rs-theme='dark'] {
+  --nm-glass-bg: color-mix(in srgb, var(--rs-surface) 65%, transparent);
+  --nm-aurora-opacity: 0.55;
+  --nm-elev-highlight: rgb(255 255 255 / 6%);
+  --nm-elev-shadow: 0 28px 70px rgb(0 0 0 / 42%);
+}
+
+/*
+ * 弹出层会复制 data-rs-theme，从而盖住根节点上 applyColorTheme 的内联色。
+ * 与页面同明暗的层改回继承，主题岛（明暗相反）仍用自己的样式表。
+ */
+:root[data-rs-theme='light'] [data-rs-theme='light'],
+:root[data-rs-theme='dark'] [data-rs-theme='dark'] {
+  --rs-primary: inherit;
+  --rs-primary-hover: inherit;
+  --rs-primary-foreground: inherit;
+  --rs-primary-container: inherit;
+  --rs-on-primary-container: inherit;
+  --rs-bg: inherit;
+  --rs-surface: inherit;
+  --rs-surface-elevated: inherit;
+  --rs-surface-hover: inherit;
+  --rs-item-hover: inherit;
+  --rs-input-bg: inherit;
+  --rs-input-border: inherit;
+  --rs-input-border-hover: inherit;
+  --rs-border: inherit;
+  --rs-border-subtle: inherit;
+  --rs-text-primary: inherit;
+  --rs-text-secondary: inherit;
+  --rs-text-tertiary: inherit;
+  --rs-text-disabled: inherit;
+  --rs-text-inverse: inherit;
+  --rs-danger: inherit;
+  --rs-danger-container: inherit;
+  --rs-on-danger-container: inherit;
+  --rs-success: inherit;
+  --rs-success-container: inherit;
+  --rs-on-success-container: inherit;
+  --rs-warning: inherit;
+  --rs-warning-container: inherit;
+  --rs-on-warning-container: inherit;
+  --rs-info: inherit;
+  --rs-info-container: inherit;
+  --rs-on-info-container: inherit;
+  --nm-glass-bg: inherit;
+  --nm-aurora-opacity: inherit;
+  --nm-elev-highlight: inherit;
+  --nm-elev-shadow: inherit;
+  --nm-aurora-a: inherit;
+  --nm-aurora-b: inherit;
+  --nm-aurora-c: inherit;
+  --nm-aurora-d: inherit;
+  --nm-aurora-e: inherit;
+  --nm-on-aurora: inherit;
+  --nm-editor-glow: inherit;
+  --nm-letter-spacing: inherit;
+  --nm-activity-explorer: inherit;
+  --nm-activity-data: inherit;
+  --nm-activity-ops: inherit;
+  --nm-activity-devtools: inherit;
+  --rs-terminal-shell-bg: inherit;
+  --rs-terminal-bg: inherit;
+  --rs-terminal-fg: inherit;
+  --rs-terminal-cursor: inherit;
+  --rs-terminal-cursor-accent: inherit;
+  --rs-terminal-row-stripe: inherit;
+  --rs-terminal-selection-bg: inherit;
+  --rs-terminal-selection-fg: inherit;
+  --rs-terminal-border: inherit;
+  --rs-terminal-ansi-black: inherit;
+  --rs-terminal-ansi-red: inherit;
+  --rs-terminal-ansi-green: inherit;
+  --rs-terminal-ansi-yellow: inherit;
+  --rs-terminal-ansi-blue: inherit;
+  --rs-terminal-ansi-magenta: inherit;
+  --rs-terminal-ansi-cyan: inherit;
+  --rs-terminal-ansi-white: inherit;
+  --rs-terminal-ansi-bright-black: inherit;
+  --rs-terminal-ansi-bright-red: inherit;
+  --rs-terminal-ansi-bright-green: inherit;
+  --rs-terminal-ansi-bright-yellow: inherit;
+  --rs-terminal-ansi-bright-blue: inherit;
+  --rs-terminal-ansi-bright-magenta: inherit;
+  --rs-terminal-ansi-bright-cyan: inherit;
+  --rs-terminal-ansi-bright-white: inherit;
+}
+
 .nm-app {
   display: flex;
   flex-direction: column;
@@ -51,18 +156,14 @@ body,
   line-height: var(--rs-line-height-normal);
   font-family: var(--rs-font-sans);
   font-feature-settings: 'kern' 1, 'liga' 1;
-  letter-spacing: -0.011em;
+  letter-spacing: var(--nm-letter-spacing);
 }
 
-/* macOS-inspired translucent chrome */
+/* macOS-inspired translucent chrome。底色走 --nm-glass-bg，随明暗和皮肤变。 */
 .nm-glass {
-  background: color-mix(in srgb, var(--rs-surface) 72%, transparent);
+  background: var(--nm-glass-bg);
   backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
-}
-
-[data-rs-theme='dark'] .nm-glass {
-  background: color-mix(in srgb, var(--rs-surface) 65%, transparent);
 }
 
 .nm-toolbar {
@@ -74,7 +175,7 @@ body,
   border-bottom: 1px solid var(--rs-border-subtle);
 }
 
-/** 全宽顶栏：毛玻璃 + 底层流动极光 */
+/** 全宽顶栏：毛玻璃 + 层内极光。内容抬到极光之上，避免滤镜层盖住图标。 */
 .nm-topbar {
   position: relative;
   display: flex;
@@ -90,11 +191,16 @@ body,
   -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(180%);
 }
 
+.nm-topbar > * {
+  position: relative;
+  z-index: 1;
+}
+
 .nm-topbar::before {
   content: '';
   position: absolute;
   inset: -40% -20%;
-  z-index: -1;
+  z-index: 0;
   background:
     radial-gradient(ellipse 50% 80% at 10% 50%, color-mix(in srgb, var(--nm-aurora-a) 42%, transparent), transparent 70%),
     radial-gradient(ellipse 45% 90% at 45% 20%, color-mix(in srgb, var(--nm-aurora-b) 34%, transparent), transparent 68%),
@@ -102,15 +208,8 @@ body,
     radial-gradient(ellipse 35% 60% at 92% 30%, color-mix(in srgb, var(--nm-aurora-d) 30%, transparent), transparent 60%);
   background-size: 140% 140%;
   animation: nm-aurora-drift 14s ease-in-out infinite alternate;
+  opacity: var(--nm-aurora-opacity);
   pointer-events: none;
-}
-
-[data-rs-theme='dark'] .nm-topbar::before {
-  opacity: 0.55;
-}
-
-[data-rs-theme='light'] .nm-topbar::before {
-  opacity: 0.38;
 }
 
 .nm-topbar__brand {
@@ -188,7 +287,7 @@ body,
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--nm-editor-bg);
+  background: transparent;
 }
 
 .nm-workspace-view {
@@ -244,16 +343,7 @@ body,
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 0.4rem;
-  color: #fff;
-  box-shadow:
-    0 0.5px 0 rgb(255 255 255 / 0.35) inset,
-    0 1px 3px rgb(0 0 0 / 0.12);
-}
-
-.nm-brand-icon::before {
-  content: '';
-  position: absolute;
-  inset: -70%;
+  color: var(--nm-on-aurora);
   background: conic-gradient(
     from 0deg,
     var(--nm-aurora-a),
@@ -263,7 +353,9 @@ body,
     var(--nm-aurora-e),
     var(--nm-aurora-a)
   );
-  animation: nm-aurora-spin 10s linear infinite;
+  box-shadow:
+    0 0.5px 0 rgb(255 255 255 / 0.35) inset,
+    0 1px 3px rgb(0 0 0 / 0.12);
 }
 
 .nm-brand-icon::after {
@@ -293,12 +385,6 @@ body,
   border-radius: 0.45rem;
 }
 
-@keyframes nm-aurora-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes nm-aurora-drift {
   0% {
     transform: translate3d(-4%, -6%, 0) scale(1.05);
@@ -312,18 +398,8 @@ body,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nm-topbar::before,
-  .nm-brand-icon::before {
+  .nm-topbar::before {
     animation: none;
-  }
-
-  .nm-brand-icon::before {
-    background: linear-gradient(
-      135deg,
-      var(--nm-aurora-a),
-      var(--nm-aurora-b) 40%,
-      var(--nm-aurora-c)
-    );
   }
 }
 

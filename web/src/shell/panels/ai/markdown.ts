@@ -7,6 +7,8 @@ import type { Tokens } from 'marked'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
+import c from 'highlight.js/lib/languages/c'
+import cpp from 'highlight.js/lib/languages/cpp'
 import csharp from 'highlight.js/lib/languages/csharp'
 import css from 'highlight.js/lib/languages/css'
 import diff from 'highlight.js/lib/languages/diff'
@@ -16,9 +18,12 @@ import ini from 'highlight.js/lib/languages/ini'
 import java from 'highlight.js/lib/languages/java'
 import javascript from 'highlight.js/lib/languages/javascript'
 import json from 'highlight.js/lib/languages/json'
+import kotlin from 'highlight.js/lib/languages/kotlin'
 import markdown from 'highlight.js/lib/languages/markdown'
 import nginx from 'highlight.js/lib/languages/nginx'
+import php from 'highlight.js/lib/languages/php'
 import plaintext from 'highlight.js/lib/languages/plaintext'
+import powershell from 'highlight.js/lib/languages/powershell'
 import python from 'highlight.js/lib/languages/python'
 import rust from 'highlight.js/lib/languages/rust'
 import sql from 'highlight.js/lib/languages/sql'
@@ -51,6 +56,13 @@ hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('sh', bash)
 hljs.registerLanguage('shell', bash)
 hljs.registerLanguage('zsh', bash)
+hljs.registerLanguage('c', c)
+hljs.registerLanguage('h', c)
+hljs.registerLanguage('cpp', cpp)
+hljs.registerLanguage('c++', cpp)
+hljs.registerLanguage('cc', cpp)
+hljs.registerLanguage('cxx', cpp)
+hljs.registerLanguage('hpp', cpp)
 hljs.registerLanguage('csharp', csharp)
 hljs.registerLanguage('cs', csharp)
 hljs.registerLanguage('css', css)
@@ -65,11 +77,18 @@ hljs.registerLanguage('toml', ini)
 hljs.registerLanguage('java', java)
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
+hljs.registerLanguage('jsx', javascript)
 hljs.registerLanguage('json', json)
+hljs.registerLanguage('kotlin', kotlin)
+hljs.registerLanguage('kt', kotlin)
 hljs.registerLanguage('markdown', markdown)
 hljs.registerLanguage('md', markdown)
 hljs.registerLanguage('nginx', nginx)
+hljs.registerLanguage('php', php)
 hljs.registerLanguage('plaintext', plaintext)
+hljs.registerLanguage('powershell', powershell)
+hljs.registerLanguage('ps1', powershell)
+hljs.registerLanguage('pwsh', powershell)
 hljs.registerLanguage('text', plaintext)
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('py', python)

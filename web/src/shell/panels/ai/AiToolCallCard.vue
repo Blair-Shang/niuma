@@ -186,14 +186,14 @@ async function onReject(): Promise<void> {
 <style scoped>
 .nm-ai-tool {
   margin: 0.65em 0;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--rs-text) 3%, transparent);
   overflow: hidden;
 }
 
 .nm-ai-tool--running {
-  border-color: color-mix(in srgb, var(--nm-aurora-a) 35%, var(--rs-border-subtle));
+  border-color: color-mix(in srgb, var(--rs-primary) 35%, var(--rs-border-subtle));
 }
 
 .nm-ai-tool--error {
@@ -201,7 +201,7 @@ async function onReject(): Promise<void> {
 }
 
 .nm-ai-tool--pending {
-  border-color: color-mix(in srgb, var(--rs-warning, #d97706) 40%, var(--rs-border-subtle));
+  border-color: color-mix(in srgb, var(--rs-warning) 40%, var(--rs-border-subtle));
 }
 
 .nm-ai-tool__head {
@@ -223,7 +223,7 @@ async function onReject(): Promise<void> {
 }
 
 .nm-ai-tool--running .nm-ai-tool__icon {
-  color: color-mix(in srgb, var(--nm-aurora-a) 80%, var(--rs-text));
+  color: var(--rs-primary);
 }
 
 .nm-ai-tool--error .nm-ai-tool__icon {
@@ -231,16 +231,16 @@ async function onReject(): Promise<void> {
 }
 
 .nm-ai-tool--pending .nm-ai-tool__icon {
-  color: var(--rs-warning, #d97706);
+  color: var(--rs-warning);
 }
 
 .nm-ai-tool__risk {
   flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-semibold);
+  letter-spacing: var(--nm-letter-spacing);
   text-transform: uppercase;
-  color: var(--rs-warning, #d97706);
+  color: var(--rs-warning);
 }
 
 .nm-ai-tool__icon :deep(.is-spin) {
@@ -256,15 +256,15 @@ async function onReject(): Promise<void> {
 .nm-ai-tool__title {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .nm-ai-tool__status {
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
@@ -282,8 +282,8 @@ async function onReject(): Promise<void> {
 }
 
 .nm-ai-tool__label {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-medium);
   color: var(--rs-muted);
   margin-bottom: 4px;
 }
@@ -293,11 +293,12 @@ async function onReject(): Promise<void> {
   max-height: 10rem;
   overflow: auto;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: color-mix(in srgb, var(--rs-text) 5%, transparent);
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   line-height: 1.45;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--rs-text);
 }
 
@@ -311,7 +312,7 @@ async function onReject(): Promise<void> {
 
 .nm-ai-tool__hint {
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 

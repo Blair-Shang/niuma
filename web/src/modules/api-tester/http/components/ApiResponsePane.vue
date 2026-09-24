@@ -3,8 +3,8 @@ import { RsCodeEditor, RsEmpty, RsTabs, type RsTabItem } from '@niuma/ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { formatBytes, formatDuration, formatHexDump, formatHexDumpFromHex, prettyJson, statusTone } from '../utils/format'
-import type { ApiExchange, ApiResponseView } from '../types'
+import { formatBytes, formatDuration, formatHexDump, formatHexDumpFromHex, prettyJson, statusTone } from '../../utils/format'
+import type { ApiExchange, ApiResponseView } from '../../types'
 
 const props = defineProps<{
   exchange: ApiExchange | null

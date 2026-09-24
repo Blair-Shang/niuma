@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "niuma-sftp-service"
-version = "1.1.4"
+version = "1.1.5"
 dependencies = [
  "async-trait",
  "niuma-logutil",

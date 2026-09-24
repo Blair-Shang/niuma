@@ -184,11 +184,24 @@ onUnmounted(() => {
 }
 
 .nm-editor {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  background: var(--nm-editor-bg);
+  background: var(--rs-bg);
+}
+
+.nm-editor::before {
+  content: '';
+  position: absolute;
+  inset: 8% 6% -6% 10%;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--nm-editor-glow);
+  filter: blur(8px);
+  pointer-events: none;
 }
 </style>

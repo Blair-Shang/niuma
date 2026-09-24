@@ -137,6 +137,12 @@ export interface ApiHistoryItem {
 
 export type ApiResponseView = 'pretty' | 'raw' | 'headers' | 'hex'
 
+/** TCP 监听下仍连着的一个客户端。 */
+export interface ApiLivePeer {
+  peerId: string
+  remoteAddr: string
+}
+
 /** 某请求页签上仍开着的 TCP / UDP 会话。 */
 export interface ApiLiveSocket {
   requestId: string
@@ -147,6 +153,8 @@ export interface ApiLiveSocket {
   state: string
   localAddr?: string
   remoteAddr?: string
+  /** 仅 tcp-server：当前已接入的连接，断开即移除。 */
+  peers?: ApiLivePeer[]
   startedAt: number
 }
 

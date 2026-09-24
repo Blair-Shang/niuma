@@ -2,8 +2,8 @@
 import { RsTabs, type RsTabItem } from '@niuma/ui'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ApiRequest } from '../types'
-import ApiKvEditor from '../layout/ApiKvEditor.vue'
+import type { ApiRequest } from '../../types'
+import ApiKvEditor from '../../layout/ApiKvEditor.vue'
 import ApiBodyEditor from './ApiBodyEditor.vue'
 import ApiRequestAuth from './ApiRequestAuth.vue'
 

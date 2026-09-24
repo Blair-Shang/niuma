@@ -1,6 +1,6 @@
 /**
  * L1 套接字事件总线。按 sessionId 分流，HTTP 收包与 TCP/UDP 会话共用。
- * 无 Vue；不是 composable，也不放 tcp/（http/send 同样订阅）。
+ * 无 Vue；不是 composable，也不放 tcp/（http/utils/send 同样订阅）。
  */
 import { apiSocketApi } from '@/api'
 import type { ApiSocketDataEvent, ApiSocketStateEvent } from '@/api/types/api-socket'

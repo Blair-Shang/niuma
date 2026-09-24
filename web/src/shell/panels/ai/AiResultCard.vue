@@ -70,7 +70,7 @@ const previewRows = computed(() => (parsed.value?.rows ?? []).slice(0, 8))
 <style scoped>
 .nm-ai-result {
   margin: 0.65em 0;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 75%, transparent);
   overflow: hidden;
@@ -85,15 +85,15 @@ const previewRows = computed(() => (parsed.value?.rows ?? []).slice(0, 8))
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-semibold);
   border-bottom: 1px solid var(--rs-border-subtle);
   color: var(--rs-text);
 }
 
 .nm-ai-result__summary {
   margin: 8px 10px 0;
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
@@ -106,7 +106,7 @@ const previewRows = computed(() => (parsed.value?.rows ?? []).slice(0, 8))
 .nm-ai-result table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
 }
 
 .nm-ai-result th,
@@ -119,21 +119,21 @@ const previewRows = computed(() => (parsed.value?.rows ?? []).slice(0, 8))
 
 .nm-ai-result th {
   background: color-mix(in srgb, var(--rs-text) 5%, transparent);
-  font-weight: 600;
+  font-weight: var(--rs-font-weight-semibold);
 }
 
 .nm-ai-result__raw {
   margin: 8px 10px 10px;
   max-height: 10rem;
   overflow: auto;
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   white-space: pre-wrap;
   color: var(--rs-muted);
 }
 
 .nm-ai-result__more {
   padding: 0 10px 8px;
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 </style>

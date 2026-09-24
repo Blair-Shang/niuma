@@ -200,7 +200,7 @@ func SQLToolSpecs() []ToolSpec {
 		},
 		{
 			Name:        ToolRunReadonly,
-			Description: "Run a read-only statement (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE) on the current connection. For INSERT/UPDATE/DELETE/DDL use sql_exec so the user can confirm.",
+			Description: "Run a read-only statement (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE) on the current connection. For INSERT/UPDATE/DELETE/DDL call sql_exec directly; the app shows a confirm card.",
 			Parameters: objectSchema(schemaProps(map[string]any{
 				"sql": map[string]any{"type": "string"},
 			}), []string{"sql"}),
@@ -208,9 +208,9 @@ func SQLToolSpecs() []ToolSpec {
 		},
 		{
 			Name:        ToolExec,
-			Description: "Run SQL on the current connection (DML/DDL). Requires user confirmation, same as ssh_exec. Prefer sql_run_readonly for SELECT/SHOW/EXPLAIN.",
+			Description: "Run SQL on the current connection (DML/DDL). Call it directly when the user asks to change data or schema; the app shows a confirm card. Do not ask in chat first. Prefer sql_run_readonly for SELECT/SHOW/EXPLAIN. One statement per call; issue every statement the task needs in the same turn.",
 			Parameters: objectSchema(schemaProps(map[string]any{
-				"sql": map[string]any{"type": "string", "description": "SQL to execute after the user approves"},
+				"sql": map[string]any{"type": "string", "description": "One SQL statement. The app confirms before it runs."},
 			}), []string{"sql"}),
 			Risk: "dangerous",
 		},

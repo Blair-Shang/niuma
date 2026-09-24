@@ -2,7 +2,7 @@
 /**
  * API 侧栏：API 管理树常驻，环境配置开 Shell Tab，历史同栏展开。
  */
-import { RsButton, RsConfirmDialog, RsContextMenu, RsIcon, RsInput, type RsContextMenuItem } from '@niuma/ui'
+import { RsButton, RsConfirmDialog, RsContextMenu, RsIcon, RsInput, useRsToast, type RsContextMenuItem } from '@niuma/ui'
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useApiTesterStore } from '../stores/api-tester'
@@ -13,6 +13,7 @@ const ApiHistoryPane = defineAsyncComponent(() => import('./ApiHistoryPane.vue')
 
 const { t } = useI18n()
 const api = useApiTesterStore()
+const toast = useRsToast()
 const { historyOpen, historySeen, openEnvironments, toggleHistory } = useApiSideNav()
 
 const histTarget = ref('')
@@ -22,6 +23,7 @@ const histConfirmAll = ref(false)
 
 const histCtxItems = computed<RsContextMenuItem[]>(() => [
   { key: 'open-history', label: t('modules.api.openHistory'), icon: 'send' },
+  { key: 'save-history', label: t('modules.api.saveHistory'), icon: 'save' },
   { key: 'sep-hist', label: '', separator: true },
   { key: 'delete-history', label: t('modules.api.deleteHistory'), icon: 'trash-2', danger: true },
 ])
@@ -43,6 +45,16 @@ function onOpenHistory(historyId: string): void {
 function onHistCtxSelect(key: string): void {
   if (key === 'open-history') {
     onOpenHistory(histTarget.value)
+    return
+  }
+  if (key === 'save-history') {
+    void api.saveHistoryToCollection(histTarget.value).then((saved) => {
+      if (!saved) {
+        toast.error(t('modules.api.historySaveError'))
+        return
+      }
+      toast.success(t('modules.api.historySaved'))
+    })
     return
   }
   if (key === 'delete-history') {

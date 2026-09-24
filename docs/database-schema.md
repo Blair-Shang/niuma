@@ -195,7 +195,7 @@ PRIMARY KEY (parent_id, child_id)
 
 | 键 / 表 | 说明 | 版本 / 迁移 |
 |---------|------|-------------|
-| `api.workspace` | 工作区 JSON v3：folders + envId + runProfiles + mockServers | **v3**（见 [37 §5](./37-api-workbench.md)） |
+| `api.workspace` | 工作区 JSON：folders + envId + runProfiles + mockServers。读盘不按 version 丢弃旧快照 | 见 [37 §5](./37-api-workbench.md) |
 | `nm_api_environment` | 环境定义（名称、baseUrl） | `environment_id` · 000014 |
 | `nm_api_variable` | 变量行：scope（global/environment/folder）+ kind + value | `variable_id` · 000014 |
 | `api.run.reports.{runId}` | 压测报告（P4 可选，大对象单独 key） | 预留（见 [38 §3](./38-api-run.md)） |

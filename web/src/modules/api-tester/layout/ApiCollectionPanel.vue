@@ -29,11 +29,15 @@ const {
   confirmOpen,
   confirmTitle,
   confirmDesc,
+  curlDlgOpen,
+  curlDlgValue,
+  curlDlgError,
   activeCtxItems,
   onSelect,
   onTreeDrop,
   onNameSave,
   onConfirmDelete,
+  onCurlImport,
   onCtxSelect,
 } = useApiCollectionPanel()
 </script>
@@ -96,6 +100,44 @@ const {
         confirm-variant="danger"
         @confirm="onConfirmDelete"
       />
+
+      <RsDialog
+        v-model:open="curlDlgOpen"
+        :title="t('modules.api.importCurlTitle')"
+        width="md"
+        layout="form"
+        :resizable="false"
+        :fullscreenable="false"
+        :show-overlay="false"
+        :close-on-overlay-click="false"
+      >
+        <template #body>
+          <form class="nm-api-col__form" autocomplete="off" @submit.prevent="onCurlImport">
+            <p class="nm-api-col__hint">{{ t('modules.api.importCurlHint') }}</p>
+            <div class="nm-api-col__field">
+              <RsLabel for="nm-api-curl">{{ t('modules.api.importCurl') }}</RsLabel>
+              <textarea
+                id="nm-api-curl"
+                v-model="curlDlgValue"
+                class="nm-api-col__curl"
+                rows="8"
+                spellcheck="false"
+                :placeholder="t('modules.api.importCurlPlaceholder')"
+              />
+            </div>
+            <p v-if="curlDlgError" class="nm-api-col__error" role="alert">{{ curlDlgError }}</p>
+            <div class="nm-api-col__actions">
+              <span class="nm-api-col__actions-spacer" />
+              <RsButton type="button" variant="ghost" @click="curlDlgOpen = false">
+                {{ t('common.cancel') }}
+              </RsButton>
+              <RsButton type="submit" variant="primary">
+                {{ t('common.confirm') }}
+              </RsButton>
+            </div>
+          </form>
+        </template>
+      </RsDialog>
     </div>
   </RsContextMenu>
 </template>
@@ -134,6 +176,31 @@ const {
   margin: 0;
   font-size: var(--rs-font-size-sm);
   color: var(--rs-danger);
+}
+
+.nm-api-col__hint {
+  margin: 0;
+  font-size: var(--rs-font-size-sm);
+  color: var(--rs-muted);
+}
+
+.nm-api-col__curl {
+  width: 100%;
+  min-height: 8rem;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: var(--rs-space-sm);
+  border: 1px solid var(--rs-border);
+  border-radius: 6px;
+  background: var(--rs-bg);
+  color: var(--rs-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--rs-font-size-sm);
+}
+
+.nm-api-col__curl:focus {
+  outline: 2px solid color-mix(in srgb, var(--rs-primary) 55%, transparent);
+  outline-offset: 1px;
 }
 
 .nm-api-col__actions {

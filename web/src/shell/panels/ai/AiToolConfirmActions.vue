@@ -44,25 +44,28 @@ function onMore(value: string): void {
       >
         {{ t('ai.toolApprove') }}
       </RsButton>
-      <RsDropdown
-        :items="moreItems"
-        :disabled="props.deciding"
-        :show-selected="false"
-        @select="onMore"
-      >
-        <template #trigger>
-          <RsButton
-            size="sm"
-            variant="primary"
-            class="nm-ai-confirm__more"
-            :disabled="props.deciding"
-            :aria-label="t('ai.toolApproveMore')"
-            @click.stop
-          >
-            <RsIcon name="chevron-down" :size="12" />
-          </RsButton>
-        </template>
-      </RsDropdown>
+      <span class="nm-ai-confirm__more-host" @click.stop>
+        <RsDropdown
+          :items="moreItems"
+          :disabled="props.deciding"
+          :show-selected="false"
+          content-width="fit"
+          placement="top-end"
+          @select="onMore"
+        >
+          <template #trigger>
+            <RsButton
+              size="sm"
+              variant="primary"
+              class="nm-ai-confirm__more"
+              :disabled="props.deciding"
+              :aria-label="t('ai.toolApproveMore')"
+            >
+              <RsIcon name="chevron-down" :size="12" />
+            </RsButton>
+          </template>
+        </RsDropdown>
+      </span>
     </div>
     <RsButton size="sm" variant="ghost" :disabled="props.deciding" @click.stop="emit('reject')">
       {{ t('ai.toolReject') }}
@@ -83,6 +86,14 @@ function onMore(value: string): void {
   align-items: stretch;
 }
 
+.nm-ai-confirm__more-host {
+  display: inline-flex;
+}
+
+.nm-ai-confirm__approve :deep(.rs-dropdown) {
+  display: inline-flex;
+}
+
 .nm-ai-confirm__approve :deep(.rs-dropdown__trigger-slot) {
   display: inline-flex;
 }
@@ -97,6 +108,6 @@ function onMore(value: string): void {
   padding-inline: 6px;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  border-left: 1px solid color-mix(in srgb, var(--rs-primary-fg, #fff) 28%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--rs-primary-foreground) 28%, transparent);
 }
 </style>

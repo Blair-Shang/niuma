@@ -188,6 +188,25 @@ func TestUDPClientConnectedAndServerReply(t *testing.T) {
 	}
 }
 
+func TestUDPBroadcastSend(t *testing.T) {
+	t.Parallel()
+	m := NewManager(nil)
+	ctx := context.Background()
+	sess, err := m.Open(ctx, OpenSpec{Kind: KindUDP, LocalHost: "0.0.0.0", LocalPort: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Close(sess.SessionID) })
+	if _, err := m.Send(ctx, SendSpec{
+		SessionID: sess.SessionID,
+		Data:      "discover",
+		Host:      "255.255.255.255",
+		Port:      9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUDPListenSpecificLocal(t *testing.T) {
 	t.Parallel()
 	m := NewManager(nil)

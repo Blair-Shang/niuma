@@ -14,6 +14,8 @@ export interface WorkspacePersister {
   cancelTimer: () => void
   /** hydrate 完成前记下的脏标记，ready 后补写。 */
   replayPending: () => void
+  /** 磁盘快照未能解析时丢掉待写，避免用空种子覆盖。 */
+  discardPending: () => void
 }
 
 export function createWorkspacePersister(opts: {
@@ -72,5 +74,11 @@ export function createWorkspacePersister(opts: {
     else markDirty(delay)
   }
 
-  return { markDirty, flushNow, cancelTimer, replayPending }
+  function discardPending(): void {
+    pending = false
+    pendingDelay = debounceMs
+    cancelTimer()
+  }
+
+  return { markDirty, flushNow, cancelTimer, replayPending, discardPending }
 }

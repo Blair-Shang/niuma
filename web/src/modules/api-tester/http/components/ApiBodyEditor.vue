@@ -3,8 +3,8 @@ import { RsCodeEditor, RsSelect, type RsSelectOption } from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import type { ApiBodyMode, ApiRequest } from '../types'
-import ApiKvEditor from '../layout/ApiKvEditor.vue'
+import type { ApiBodyMode, ApiRequest } from '../../types'
+import ApiKvEditor from '../../layout/ApiKvEditor.vue'
 
 const props = defineProps<{
   request: ApiRequest

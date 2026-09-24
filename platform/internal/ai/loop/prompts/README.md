@@ -12,6 +12,7 @@
 | `workspace_ssh.txt` | SSH 页签 Context Pack 规则：走 ssh_*、禁止臆造路径/指标 |
 | `workspace_redis.txt` | Redis 页签 Context Pack 规则：走 redis_* / redis_run_readonly、禁止 KEYS/MONITOR |
 | `workspace_mongodb.txt` | MongoDB 页签 Context Pack 规则：走 mongo_*、集合用 collection 不是 table |
+| `workspace_sql.txt` | SQL 页签：走 sql_*；改库直接调 sql_exec，确认卡片即确认 |
 | `current_turn.txt` | 连续用户消息时插入：只回答最后一条，旧未回复问题不当当前任务 |
 
 ## 分层（勿把模块手册写进 system_default）

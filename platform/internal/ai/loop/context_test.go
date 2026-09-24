@@ -152,6 +152,30 @@ func TestNormalizeContext_mongoWorkspace(t *testing.T) {
 	}
 }
 
+func TestNormalizeContext_sqlWorkspace(t *testing.T) {
+	draft := &ContextDraft{
+		Workspace: &ContextWorkspace{
+			ModuleID:      "mysql",
+			ProfileID:     "p-mysql",
+			SessionID:     "s-mysql",
+			Title:         "gateway_test",
+			Database:      "gateway_test",
+			DialectFamily: "mysql",
+			Capabilities:  []string{"charset.utf8mb4"},
+		},
+	}
+	n := NormalizeContext(draft)
+	if !strings.Contains(n.PromptBlock, "[Workspace · SQL]") {
+		t.Fatalf("missing sql workspace rules: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "sql_exec") {
+		t.Fatalf("missing sql_exec hint: %q", n.PromptBlock)
+	}
+	if !strings.Contains(n.PromptBlock, "capabilities=charset.utf8mb4") {
+		t.Fatalf("dialect rules dropped: %q", n.PromptBlock)
+	}
+}
+
 func TestNormalizeContext_stripsSecrets(t *testing.T) {
 	draft := &ContextDraft{
 		Attachments: []ContextAttachment{{

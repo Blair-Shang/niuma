@@ -1,7 +1,7 @@
 # 37 — API 调试工作台（Web 模块）
 
-> 版本：v0.1.13 · 日期：2026-09-18  
-> 状态：**P1 已落地**（明文 `http://`、集合 v3、环境/变量关系表、历史）；P2 导入 / Mock、P3 HTTPS / WS 未做  
+> 版本：v0.1.14 · 日期：2026-09-23  
+> 状态：**P1 已落地**；P2 已落地 cURL / Postman v2 / OpenAPI 3 导入与历史保存；本机 Mock 仍未做  
 > 关联：[36 — L1 api-service](./36-api-module.md) · [38 — 压测与 Runner 预留](./38-api-run.md) · [39 — 本地 HTTP Mock](./39-api-mock.md) · [database-schema §5.5](./database-schema.md)
 
 ---
@@ -30,7 +30,7 @@ NiuMa API = Postman 的「集合 + 环境 + 发送 + 本地 Mock」
 
 **保留：本机 HTTP Mock Server**（见 [39 — 本地 HTTP Mock](./39-api-mock.md)）：侧栏启停、路由表、从请求/OpenAPI 生成；仅 `127.0.0.1` / 本机端口。
 
-**单机协作替代：** 导出 `niuma.api-collection` v2 JSON → Git / 网盘 / IM 传文件 → 对方导入。无账号体系、无合并冲突 UI。
+**单机协作替代：** 导出 `niuma.api-collection` JSON → Git / 网盘 / IM 传文件 → 对方导入。无账号体系、无合并冲突 UI。
 
 ---
 
@@ -49,10 +49,10 @@ NiuMa API = Postman 的「集合 + 环境 + 发送 + 本地 Mock」
 | HTTPS / TLS | 有 | 有 | L1 原生 HTTP | **P3** |
 | WebSocket | 有 | 有 | kind 已登记，工作台占位；L1 真连 **P3** | **P3** |
 | 发送历史 | 有 | 有 | `nm_api_history` + 侧栏历史 | **已落地** |
-| cURL 导入导出 | 有 | 有 | 导出已有；导入 **P2** | P2 |
-| Postman 导入 | 有 | 有 | v2.1 适配器 | **P2** |
-| OpenAPI 导入 | 有 | **强项** | OpenAPI 3 适配器 | **P2** |
-| 历史 → 保存请求 | 有 | 有 | 未建（P2） | **P2** |
+| cURL 导入导出 | 有 | 有 | 导出 `buildCurl`；导入单条 curl | **已落地** |
+| Postman 导入 | 有 | 有 | v2.0 / v2.1 适配器 | **已落地** |
+| OpenAPI 导入 | 有 | **强项** | OpenAPI 3 JSON | **已落地** |
+| 历史 → 保存请求 | 有 | 有 | 右键保存到原文件夹或草稿 | **已落地** |
 | Collection Runner | 有 | 自动化测试 | `platform.api.run.*` + UI | **P4** |
 | Mock（本地 HTTP） | 有（可云） | **核心** | 本机 Mock Server | **P2**（见 [39](./39-api-mock.md)） |
 | API 设计台 | 弱 | **核心** | 不做；仅从 OpenAPI 导入 | — |
@@ -67,21 +67,21 @@ NiuMa API = Postman 的「集合 + 环境 + 发送 + 本地 Mock」
 |--------------|------------|
 | Collections 心智模型 | `ApiFolder` + `ApiCollectionPanel` 侧栏树 |
 | Environment 一键切换 | `envId` + `ApiEnvironmentPanel` |
-| Authorization Tab | `ApiRequest.auth` → `http/http-auth.ts` → Header |
+| Authorization Tab | `ApiRequest.auth` → `http/utils/http-auth.ts` → Header |
 | Body 模式切换 | `ApiRequest.bodyMode` + `ApiBodyEditor` |
-| 变量插值 | `http/request-resolve.ts` 统一链路 |
-| Import / Export JSON | `niuma.api-collection` v2 |
+| 变量插值 | `http/utils/request-resolve.ts` 统一链路 |
+| Import / Export JSON | `niuma.api-collection` |
 | History | `nm_api_history` + `ApiHistoryPane` |
-| cURL 分享 | `format.buildCurl` |
+| cURL 分享 | `http/utils/curl.ts` `buildCurl` |
 | 本地 Mock Server | `mockServers` + [39](./39-api-mock.md) P2 |
 
 ### 2.3 吸收 Apifox 的优势
 
 | Apifox 优势 | NiuMa 落点 |
 |-------------|------------|
-| OpenAPI 一键生成请求 | P2，文件未建 |
-| OpenAPI 生成 Mock 路由 | P2，文件未建 |
-| Postman 迁移友好 | P2，文件未建 |
+| OpenAPI 一键生成请求 | `http/import/openapi.ts` |
+| OpenAPI 生成 Mock 路由 | P2，随本机 Mock，文件未建 |
+| Postman 迁移友好 | `http/import/postman.ts` |
 | 环境变量表格式管理 | `ApiEnvironment.vars` + 环境 Panel KV 表 |
 | 文件夹级变量 | `ApiFolder.vars` |
 | 请求结构清晰（Method / URL / Params / Headers / Body） | `http/HttpWorkspace` + Auth Tab |
@@ -104,12 +104,12 @@ NiuMa API = Postman 的「集合 + 环境 + 发送 + 本地 Mock」
 ```
 SideNav ApiSideNav             → 同一栏：API 管理树 + 可展开历史；环境配置开 Shell Tab
 Pinia useApiTesterStore        → CRUD、发送、持久化
-nm_app_setting.api.workspace   → 集合结构 + envId + runProfiles + mockServers（v3 JSON）
+nm_app_setting.api.workspace   → 集合结构 + envId + runProfiles + mockServers（读盘不按 version 丢弃）
 nm_api_environment             → 环境定义（baseUrl / 名称）
 nm_api_variable                → 全局 / 环境 / 文件夹变量（typed rows）
 nm_api_history                 → 发送历史（关系表，见 database-schema）
 ApiHome + layout/pane-registry → HTTP / Socket 工作台分发
-http/request-resolve + http/send · tcp/send → 拼包一次 + L1 执行
+http/utils/request-resolve + http/utils/send · tcp/utils/send → 拼包一次 + L1 执行
 api-service (L1)               → TCP/UDP；HTTP/TLS 远期原生
 ```
 
@@ -145,10 +145,13 @@ web/src/modules/api-tester/
 │   ├── ApiEnvironmentPanel.vue   # 环境 / 全局变量详情
 │   ├── ApiCollectionPanel.vue
 │   └── useApiCollectionPanel.ts / useApiSideNav.ts
-├── http/                         # HTTP 工作台 + 私有 utils（对齐 mysql 自包含）
-│   ├── register.ts + defaults.ts + send.ts
-│   ├── HttpWorkspace.vue + RequestBar/Editor/Auth/Body/Response
-│   └── request-resolve.ts / http-wire.ts / http-auth.ts
+├── http/                         # HTTP 工作台。私有代码留在本目录，不进外层 utils
+│   ├── register.ts               # 协议登记
+│   ├── HttpWorkspace.vue         # 工作台入口
+│   ├── components/               # 地址栏 / 编辑器 / Auth / Body / 响应
+│   ├── composables/              # useHttpWorkspace
+│   ├── import/                   # cURL、Postman、OpenAPI 解析
+│   └── utils/                    # request-resolve / http-wire / http-auth / send / curl / defaults
 ├── tcp/                          # TCP 工作台 + 套接字私有 utils
 │   ├── register.ts + defaults.ts + send.ts
 │   ├── Client/Server Workspace + Compose/Stream
@@ -158,22 +161,22 @@ web/src/modules/api-tester/
 ├── composables/
 │   └── useApiRequestPersist.ts   # HTTP / 套接字工作台共用标脏
 ├── stores/api-tester.ts
-├── utils/                        # 跨协议公用：集合 / 落盘 / 地址 / socket-hub / 展示
+├── utils/                        # 只放跨协议公用：集合 / 落盘 / 地址 / socket-hub / 展示
 ├── run-registry.ts
 └── types.ts
 ```
 
-P2 未建（不要占空文件）：`import-openapi.ts`、`import-postman.ts`、`ApiMockPanel.vue`。WebSocket 已占 kind / loader，不进 HTTP 方法栏；真连 P3。
+P2 未建（不要占空文件）：`ApiMockPanel.vue`。WebSocket 已占 kind / loader，不进 HTTP 方法栏；真连 P3。导入在 `http/import/`（curl / postman / openapi），不放外层 utils。
 
 ---
 
-## 5. 数据模型 v3
+## 5. 数据模型
 
 ### 5.1 存储分层
 
 | 数据 | 存储 | 说明 |
 |------|------|------|
-| 文件夹 / 请求 / auth / body | `api.workspace` v3 JSON | 保留 id，重启 Tab 可还原 |
+| 文件夹 / 请求 / auth / body | `api.workspace` JSON | 保留 id，重启 Tab 可还原；不按 version 丢弃 |
 | 当前 envId / runProfiles / mockServers | 同上 | `envId` 指向关系表 |
 | 环境名称 / baseUrl | `nm_api_environment` | Platform `platform.api.environment.*` |
 | globals / env / folder 变量 | `nm_api_variable` | scope + `variable_kind`；Platform `platform.api.variable.*` |
@@ -181,10 +184,10 @@ P2 未建（不要占空文件）：`import-openapi.ts`、`import-postman.ts`、
 
 ### 5.2 信封
 
-| kind | version | 存储位置 | 用途 |
-|------|---------|----------|------|
-| `niuma.api-workspace` | **3** | `nm_app_setting.api.workspace` | 本机工作区（**不含** environments/globals） |
-| `niuma.api-collection` | **2** | 导入导出文件 | 分享 / 备份（仍含 folder.vars） |
+| kind | 存储位置 | 用途 |
+|------|----------|------|
+| `niuma.api-workspace` | `nm_app_setting.api.workspace` | 本机工作区。写出不含 environments / globals |
+| `niuma.api-collection` | 导入导出文件 | 分享 / 备份（仍含 folder.vars） |
 
 ### 5.3 核心类型
 
@@ -215,7 +218,6 @@ interface ApiFolder extends ApiVariableBag {
 
 interface ApiWorkspaceState {
   kind: 'niuma.api-workspace'
-  version: 3
   folders: ApiFolder[]          // 持久化时 vars 为空；内存态由 catalog 填充
   envId: string
   runProfiles?: ApiRunProfile[]
@@ -234,13 +236,14 @@ globals  →  folder 链（根到叶）  →  environment.vars + baseUrl
 语法：`{{tokenName}}`，名称 `[a-zA-Z0-9_]+`。  
 `environment.baseUrl` 存 `nm_api_environment.base_url`；解析时注入变量 Map。
 
-### 5.5 版本策略
+### 5.5 读盘
 
-- **工作区只读写 v3**：`parseWorkspace` 要求 `version === 3`；JSON 不含 environments / globals。
-- **v2 一次性迁移**：启动时 `parseLegacyWorkspaceV2` → 导入 `nm_api_*` → 回写 v3 workspace。
-- **v1 不兼容**：解析失败走空种子。
-- **集合文件仍 v2**：`niuma.api-collection` 导出含 folder.vars；导入后 vars 写入 `nm_api_variable`。
-- **历史记录**：`nm_api_history.request_json` 仍宽松还原，与工作区 schema 无关。
+- **不按 version 拒收**。`kind === niuma.api-workspace` 且文件夹能解析，就把请求载入。旧文件里的 `version` 字段忽略。
+- **写出是当前结构**：只有 folders、envId、runProfiles、mockServers。环境与变量在关系表。
+- **旧快照若仍内嵌 environments / globals / folder.vars**：catalog 里还没有对应 scope 时写入 `nm_api_*`，然后把工作区收成当前结构。关系表里已有的 scope 不覆盖。
+- **文件夹一条都解析不出来**（kind 仍是工作区）：留在磁盘，不用空种子覆盖。
+- **集合文件**同样不看 version。导出含 folder.vars；导入后写入 `nm_api_variable`。
+- **历史记录**：`nm_api_history.request_json` 仍宽松还原，与工作区无关。
 
 ---
 
@@ -289,7 +292,7 @@ Store 暴露：
 
 | 交付 | 验收 |
 |------|------|
-| Schema v3 工作区 + v2 集合文件 | 打开/导入；v2 workspace 一次性迁 catalog；v1 回退空种子 |
+| 工作区 + 集合文件 | 打开/导入不看 version；旧快照内嵌环境在 catalog 为空时迁入，解析失败不覆盖磁盘 |
 | 环境 Panel + 变量 | 切环境后 `{{token}}` 生效 |
 | Auth Bearer / Basic / API Key | Authorization 自动写 Header |
 | Body urlencoded / form（文本字段） | POST 编码正确 |
@@ -301,16 +304,16 @@ Store 暴露：
 
 ### P2 — 互操作 + 本地 Mock（~2 周）
 
-| 交付 | 来源优势 |
-|------|----------|
-| OpenAPI 3 导入 | Apifox |
-| OpenAPI → Mock 路由（可选） | Apifox |
-| **本机 HTTP Mock 启停** | Postman + Apifox（见 [39](./39-api-mock.md)） |
-| 请求「保存为 Mock 路由」 | Postman |
-| Postman Collection v2.1 导入 | Postman + Apifox |
-| cURL 导入单请求 | Postman |
-| 历史 → 保存到集合 | Postman |
-| 完善 `buildCurl`（auth + bodyMode） | 已随 `resolveRequest` 落地 |
+| 交付 | 来源优势 | 状态 |
+|------|----------|------|
+| OpenAPI 3 JSON 导入 | Apifox | 已落地 |
+| OpenAPI → Mock 路由（可选） | Apifox | 未做 |
+| **本机 HTTP Mock 启停** | Postman + Apifox（见 [39](./39-api-mock.md)） | 未做 |
+| 请求「保存为 Mock 路由」 | Postman | 未做 |
+| Postman Collection v2.0 / v2.1 导入 | Postman + Apifox | 已落地 |
+| cURL 导入单请求 | Postman | 已落地 |
+| 历史 → 保存到集合 | Postman | 已落地 |
+| 完善 `buildCurl`（auth + bodyMode） | 已随 `resolveRequest` 落地 | 已落地 |
 
 ### P3 — L1 传输（依赖 api-service）
 
@@ -343,13 +346,15 @@ Store 暴露：
 
 | 项 | 现状 |
 |----|------|
-| workspace v3 / collection v2 | `collection-io.ts`；导入 remint 并重写 `parentId`，环掰回根 |
+| 工作区 / 集合文件 | `collection-io.ts`；不按 version 拒收；导入 remint 并重写 `parentId`，环掰回根 |
 | 环境 + 全局变量 | `nm_api_*` + `useApiEnvironmentPanel` |
-| Auth / Body / Params | `http/request-resolve` 一次算出；`http/http-wire` 只组字节 |
+| Auth / Body / Params | `http/utils/request-resolve` 一次算出；`http/utils/http-wire` 只组字节 |
 | 嵌套文件夹 ≤3 | `folder-tree.ts` |
 | 发送 | `send` / `sendResolved`；明文 HTTP 经 L1 TCP |
-| curl | `format.buildCurl` ← `resolveRequest` |
-| Runner / Mock / OpenAPI / WS | 未做；不要预占空文件 |
+| curl | `http/utils/curl` `buildCurl` ← `resolveRequest`；导入走 `http/import/curl` |
+| Postman / OpenAPI | `http/import/postman` / `openapi`，经 `http/import/dispatch` 进 `mergeImported` |
+| 历史保存 | 右键「保存到集合」；快照含 auth / bodyMode |
+| Runner / Mock | 未做；不要预占空文件 |
 
 人工冒烟仍有效：`{{baseUrl}}` + Bearer、urlencoded POST、子文件夹变量、导出再导入、`sendResolved` batch。
 
@@ -400,3 +405,4 @@ Store 暴露：
 | v0.1.11 | 2026-09-18 | 环境配置改为 Shell 单例 Tab；侧栏「API 管理」+ 分区图标与颜色 |
 | v0.1.12 | 2026-09-18 | 环境 Tab 对齐设置「模型接入」：左列表 + 右详情；浏览与设为当前分离 |
 | v0.1.13 | 2026-09-18 | 环境变量表增加类型列；kind 写入 catalog，后端按 string/secret/number 等处理 |
+| v0.1.14 | 2026-09-23 | P2 导入：cURL、Postman v2、OpenAPI 3 JSON；历史保存到集合。本机 Mock 仍未做 |

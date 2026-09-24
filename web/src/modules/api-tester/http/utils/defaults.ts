@@ -1,6 +1,6 @@
-import type { ApiRequest } from '../types'
-import { newKvRow } from '../utils/format'
-import { looksLikeHttpUrl } from '../utils/request-kind'
+import type { ApiRequest } from '../../types'
+import { newKvRow } from '../../utils/format'
+import { looksLikeHttpUrl } from '../../utils/request-kind'
 
 /** HTTP 新建 / 切协议默认值。无 Vue。 */
 export function applyHttpDefaults(req: ApiRequest): void {

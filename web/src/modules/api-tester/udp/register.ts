@@ -1,5 +1,5 @@
 import { registerApiPaneFeature } from '../layout/pane-kind-loaders'
-import { resolveSocketPane } from '../tcp/defaults'
+import { resolveSocketPane } from '../tcp/utils/defaults'
 
 let registered = false
 

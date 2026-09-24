@@ -1,4 +1,4 @@
-import type { ApiAuth, ApiRequest } from '../types'
+import type { ApiAuth, ApiRequest } from '../../types'
 
 /** 将结构化 Auth 写入 Header Map（key 小写）；不覆盖用户已填的同名校验由调用方决定。 */
 export function applyAuthHeaders(

@@ -2,8 +2,8 @@
 import { RsInput, RsLabel, RsSelect, type RsSelectOption } from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { defaultAuth } from '../utils/collection-io'
-import type { ApiAuthType, ApiRequest } from '../types'
+import { defaultAuth } from '../../utils/collection-io'
+import type { ApiAuthType, ApiRequest } from '../../types'
 
 const props = defineProps<{
   request: ApiRequest

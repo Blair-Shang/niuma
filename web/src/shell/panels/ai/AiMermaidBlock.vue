@@ -5,6 +5,7 @@
 import { copyTextToClipboard, RsIcon } from '@niuma/ui'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAppStore } from '@/stores/app'
 
 const props = defineProps<{
   source: string
@@ -12,6 +13,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const appStore = useAppStore()
 const host = ref<HTMLElement | null>(null)
 const viewport = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
@@ -40,15 +42,67 @@ const transformStyle = computed(() => ({
 
 const scaleLabel = computed(() => `${Math.round(scale.value * 100)}%`)
 
+function cssVar(style: CSSStyleDeclaration, name: string): string {
+  return style.getPropertyValue(name).trim()
+}
+
+/** 用当前语义色重配 Mermaid。换皮肤后必须再调，模块缓存不会自己变色。 */
+function applyMermaidTheme(api: (typeof import('mermaid'))['default']): void {
+  const style = getComputedStyle(document.documentElement)
+  const text = cssVar(style, '--rs-text-primary')
+  const surface = cssVar(style, '--rs-surface')
+  const elevated = cssVar(style, '--rs-surface-elevated') || surface
+  const border = cssVar(style, '--rs-border')
+  const muted = cssVar(style, '--rs-text-secondary')
+  const primary = cssVar(style, '--rs-primary')
+  const fontFamily = getComputedStyle(document.body).fontFamily
+  api.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      darkMode: appStore.theme === 'dark',
+      fontFamily,
+      background: surface,
+      primaryColor: elevated,
+      primaryTextColor: text,
+      primaryBorderColor: border,
+      secondaryColor: surface,
+      secondaryTextColor: text,
+      tertiaryColor: cssVar(style, '--rs-item-hover') || surface,
+      tertiaryTextColor: text,
+      lineColor: muted || border,
+      textColor: text,
+      mainBkg: elevated,
+      nodeBorder: border,
+      clusterBkg: surface,
+      clusterBorder: border,
+      titleColor: text,
+      edgeLabelBackground: elevated,
+      actorBkg: elevated,
+      actorBorder: border,
+      actorTextColor: text,
+      signalColor: text,
+      signalTextColor: text,
+      labelBoxBkgColor: elevated,
+      labelBoxBorderColor: border,
+      labelTextColor: text,
+      loopTextColor: text,
+      noteBkgColor: cssVar(style, '--rs-warning-container') || elevated,
+      noteTextColor: cssVar(style, '--rs-on-warning-container') || text,
+      noteBorderColor: cssVar(style, '--rs-warning') || border,
+      activationBkgColor: primary,
+      activationBorderColor: primary,
+      sequenceNumberColor: cssVar(style, '--rs-primary-foreground') || text,
+    },
+  })
+}
+
 async function getMermaid() {
   if (!mermaidMod) {
     mermaidMod = await import('mermaid')
-    mermaidMod.default.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: document.documentElement.getAttribute('data-rs-theme') === 'light' ? 'default' : 'dark',
-    })
   }
+  applyMermaidTheme(mermaidMod.default)
   return mermaidMod.default
 }
 
@@ -183,7 +237,7 @@ async function render(): Promise<void> {
 }
 
 watch(
-  () => [props.active, props.source] as const,
+  () => [props.active, props.source, appStore.themeId, appStore.theme] as const,
   () => {
     void render()
   },
@@ -249,7 +303,7 @@ onBeforeUnmount(() => {
 .nm-ai-mermaid {
   margin: 0.65em 0;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 80%, transparent);
 }
@@ -270,10 +324,10 @@ onBeforeUnmount(() => {
   min-height: 24px;
   padding: 0 7px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-muted);
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   cursor: pointer;
 }
 
@@ -285,7 +339,7 @@ onBeforeUnmount(() => {
 .nm-ai-mermaid__scale {
   min-width: 2.6em;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -329,7 +383,7 @@ onBeforeUnmount(() => {
 .nm-ai-mermaid__pending,
 .nm-ai-mermaid__error {
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
@@ -342,9 +396,9 @@ onBeforeUnmount(() => {
   max-height: 8rem;
   overflow: auto;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: color-mix(in srgb, var(--rs-text) 5%, transparent);
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   white-space: pre-wrap;
 }
 </style>

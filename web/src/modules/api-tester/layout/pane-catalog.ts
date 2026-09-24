@@ -1,8 +1,8 @@
 /**
  * 协议静态表。对齐运维 CONN_KIND_DEFS：启动可读 methods / creates，不 import 工作台 Vue。
  */
-import { applyHttpDefaults } from '../http/defaults'
-import { applyTcpDefaults, tcpCreates } from '../tcp/defaults'
+import { applyHttpDefaults } from '../http/utils/defaults'
+import { applyTcpDefaults, tcpCreates } from '../tcp/utils/defaults'
 import { applyUdpDefaults, udpCreates } from '../udp/defaults'
 import { applyWebsocketDefaults } from '../websocket/defaults'
 import type { ApiPaneKind, ApiPaneKindDef } from './pane-types'

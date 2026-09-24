@@ -195,7 +195,7 @@ func MongoToolSpecs() []ToolSpec {
 		},
 		{
 			Name:        ToolMongoExec,
-			Description: "Run a mongosh statement on the current database (writes included). Requires user confirmation. Prefer mongo_find / mongo_run_readonly for reads.",
+			Description: "Run a mongosh statement on the current database (writes included). Call it directly when the user asks to write; the app shows a confirm card. Do not ask in chat first. Prefer mongo_find / mongo_run_readonly for reads.",
 			Parameters: objectSchema(schemaProps(map[string]any{
 				"input":   map[string]any{"type": "string", "description": "mongosh statement after the user approves"},
 				"command": map[string]any{"type": "string", "description": "Alias of input"},

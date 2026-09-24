@@ -180,7 +180,7 @@ func RedisToolSpecs() []ToolSpec {
 		},
 		{
 			Name:        ToolRedisExec,
-			Description: "Run a Redis command on the current session (args[0] is the command). Requires user confirmation. Prefer redis_run_readonly for GET/TYPE/TTL. Do not start MONITOR or other long-lived subscriptions.",
+			Description: "Run a Redis command on the current session (args[0] is the command). Call it directly for writes; the app shows a confirm card. Do not ask in chat first. Prefer redis_run_readonly for GET/TYPE/TTL. Do not start MONITOR or other long-lived subscriptions.",
 			Parameters: objectSchema(schemaProps(map[string]any{
 				"args":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Command tokens, e.g. [\"SET\",\"foo\",\"1\"]"},
 				"command": map[string]any{"type": "string", "description": "Alternative: a single command line, split on whitespace"},

@@ -7,7 +7,7 @@
  *
  *   1. 状态与索引
  *   2. 持久化接线（workspace / catalog）
- *   3. hydrate（读盘 + v2 迁 catalog）
+ *   3. hydrate（读盘；旧快照里的环境在 catalog 为空时迁入）
  *   4. Tab
  *   5. 环境 / 变量
  *   6. 集合 CRUD
@@ -17,8 +17,8 @@
  * 外部实现：
  * - utils/workspace-persist：workspace JSON（结构立即 / 字段防抖）
  * - utils/catalog-persist：环境与变量关系表（按 scope 排队）
- * - http/request-resolve：变量 + Auth + URL/Body
- * - http/send：HTTP 执行；tcp/send：套接字会话
+ * - http/utils/request-resolve：变量 + Auth + URL/Body
+ * - http/utils/send：HTTP 执行；tcp/utils/send：套接字会话
  * - composables/useApiRequestPersist：当前请求字段编辑标脏
  *
  * 运行时 exchanges / sockets / sending 不进 workspace。
@@ -37,25 +37,29 @@ import {
   localizeSendError,
   protocolOf,
   resolveSend,
-} from '../http/send'
+} from '../http/utils/send'
 import {
   appendSocketFrame,
   buildLiveExchange,
   closeSocketSession,
+  kickSocketPeer,
+  listSocketPeers,
   openSocketSession,
   patchLiveExchangeFromFrame,
   sendSocketFrame,
-} from '../tcp/send'
+} from '../tcp/utils/send'
+import { adoptLivePeers, applyLiveSocketEvent } from '../tcp/utils/live-peers'
+import type { SocketFrameOpen } from '../tcp/utils/frame'
 import { createId } from '@/utils/id'
-import { cloneRequest, defaultAuth, defaultEnvironments, defaultFolders, emptyKinds, emptyVars, mergeWorkspaceFolders, parseLegacyWorkspaceV2, parseWorkspace, serializeWorkspace, uniqueName, type ApiLegacyWorkspaceV2 } from '../utils/collection-io'
+import { cloneRequest, defaultAuth, defaultEnvironments, defaultFolders, emptyKinds, emptyVars, isApiWorkspaceText, mergeWorkspaceFolders, parseWorkspace, serializeWorkspace, uniqueName, workspaceHasEmbeddedCatalog, type ApiWorkspaceState } from '../utils/collection-io'
 import { applyFolderVariables, catalogEnvironmentToRuntime, catalogToTypedRecord, recordToVariableInputs } from '../utils/catalog-sync'
 import { createCatalogPersister } from '../utils/catalog-persist'
 import { createWorkspacePersister } from '../utils/workspace-persist'
 import { applyPaneDefaults } from '../layout/pane-registry'
-import { buildCurl } from '../utils/format'
-import { resolveRequest } from '../http/request-resolve'
+import { buildCurl } from '../http/utils/curl'
+import { resolveRequest } from '../http/utils/request-resolve'
 import { canAddChildFolder, canNestFolder, collectDescendantFolderIds, scopeForRequest, type ApiVariableScope } from '../utils/folder-tree'
-import { toHistoryItem, toHistorySummary } from '../utils/history-map'
+import { requestFromHistory, toHistoryItem, toHistorySummary } from '../utils/history-map'
 import { tabTitle, tabTooltip } from '../utils/tab-chrome'
 import { isSocketMethod, type SocketTarget } from '../utils/target'
 import type { ApiEnvironment, ApiExchange, ApiFolder, ApiHistoryItem, ApiLiveSocket, ApiMethod, ApiMockServer, ApiRequest, ApiRunProfile, ApiSendOptions, ApiVariableBag, ApiVariableKind } from '../types'
@@ -85,7 +89,7 @@ function scanLocateRequest(
  * API 测试共享状态：集合、环境、各请求的发送结果。
  * 每个请求对应一个 Shell Tab（props.requestId），集合树跨 Tab 共用。
  * TCP / UDP 会话按 requestId 保活，关 Tab 才 close；HTTP 仍一发一收。
- * 集合写入 Platform SQLite（nm_app_setting / api.workspace v3）；
+ * 集合写入 Platform SQLite（nm_app_setting / api.workspace）；
  * 环境与变量写入 nm_api_environment / nm_api_variable，重启后按 id 还原。
  */
 export const useApiTesterStore = defineStore('api-tester', () => {
@@ -104,6 +108,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   const sockets = reactive<Record<string, ApiLiveSocket>>({})
   const socketLogs = reactive<Record<string, ApiSocketDataEvent[]>>({})
   const socketUnwatch = new Map<string, () => void>()
+  const peerSyncGen = new Map<string, number>()
+  const peerSyncAt = new Map<string, number>()
   const sendGen = new Map<string, number>()
   const sendAbort = new Map<string, AbortController>()
   const ready = ref(false)
@@ -111,6 +117,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   let unloadHookInstalled = false
   /** hydrate 完成前用户已改过集合时，禁止 applyWorkspace 覆盖。 */
   let touchedBeforeReady = false
+  /** 磁盘已是工作区但文件夹解析失败：本会话不回写，避免空种子覆盖。 */
+  let keepDisk = false
   /** requestId → folderId，Send / variableScope O(1) 查表。 */
   const requestFolderIndex = new Map<string, string>()
 
@@ -151,11 +159,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     rebuildRequestIndex()
   }
 
-  function applyWorkspaceStructure(state: NonNullable<ReturnType<typeof parseWorkspace>>): void {
-    applyFolderSnapshot(state.folders, state.envId, state.runProfiles, state.mockServers)
-  }
-
-  function applyLegacyWorkspaceStructure(state: ApiLegacyWorkspaceV2): void {
+  function applyWorkspaceStructure(state: ApiWorkspaceState): void {
     applyFolderSnapshot(state.folders, state.envId, state.runProfiles, state.mockServers)
   }
 
@@ -167,7 +171,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
 
   // --- 2. 持久化接线：只配回调，写盘逻辑在 *persist ---
   const workspacePersist = createWorkspacePersister({
-    canWrite: () => ready.value && isBridgeAvailable(),
+    canWrite: () => ready.value && isBridgeAvailable() && !keepDisk,
     serialize: () =>
       JSON.stringify(
         serializeWorkspace(folders, envId.value, {
@@ -285,9 +289,54 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     await loadCatalogFromPlatform()
   }
 
-  async function migrateLegacyCatalog(legacy: ApiLegacyWorkspaceV2): Promise<void> {
+  /** 旧快照内嵌的环境 / 变量写入关系表。关系表已有同 scope 时不覆盖。 */
+  async function adoptCatalog(state: ApiWorkspaceState | null): Promise<void> {
     if (!isBridgeAvailable()) return
-    for (const env of legacy.environments.length ? legacy.environments : defaultEnvironments()) {
+    const listed = await withPlatformRetry(() => apiCatalogApi.listEnvironments())
+    if (listed.environments.length === 0) {
+      if (state && workspaceHasEmbeddedCatalog(state)) {
+        await importEmbeddedCatalog(state)
+        return
+      }
+      await ensureDefaultCatalog()
+      return
+    }
+    if (state && workspaceHasEmbeddedCatalog(state)) {
+      await fillEmbeddedVarsIfAbsent(state)
+    }
+    await loadCatalogFromPlatform()
+  }
+
+  async function fillEmbeddedVarsIfAbsent(state: ApiWorkspaceState): Promise<void> {
+    const varRes = await withPlatformRetry(() => apiCatalogApi.listVariables())
+    const hasGlobal = varRes.variables.some((row) => row.variableScope === 'global')
+    if (!hasGlobal && state.globals && Object.keys(state.globals.vars).length > 0) {
+      await withPlatformRetry(() =>
+        apiCatalogApi.replaceScope({
+          variableScope: 'global',
+          variables: recordToVariableInputs(state.globals?.vars ?? {}, state.globals?.kinds),
+        }),
+      )
+    }
+    for (const folder of state.folders) {
+      if (Object.keys(folder.vars).length === 0) continue
+      const hasFolder = varRes.variables.some(
+        (row) => row.variableScope === 'folder' && row.scopeRefId === folder.id,
+      )
+      if (hasFolder) continue
+      await withPlatformRetry(() =>
+        apiCatalogApi.replaceScope({
+          variableScope: 'folder',
+          scopeRefId: folder.id,
+          variables: recordToVariableInputs(folder.vars, folder.kinds),
+        }),
+      )
+    }
+  }
+
+  async function importEmbeddedCatalog(state: ApiWorkspaceState): Promise<void> {
+    if (!isBridgeAvailable()) return
+    for (const env of state.environments?.length ? state.environments : defaultEnvironments()) {
       await withPlatformRetry(() =>
         apiCatalogApi.createEnvironment({
           environmentId: env.id,
@@ -308,10 +357,10 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     await withPlatformRetry(() =>
       apiCatalogApi.replaceScope({
         variableScope: 'global',
-        variables: recordToVariableInputs(legacy.globals?.vars ?? {}, legacy.globals?.kinds),
+        variables: recordToVariableInputs(state.globals?.vars ?? {}, state.globals?.kinds),
       }),
     )
-    for (const folder of legacy.folders) {
+    for (const folder of state.folders) {
       if (Object.keys(folder.vars).length === 0) continue
       await withPlatformRetry(() =>
         apiCatalogApi.replaceScope({
@@ -322,16 +371,6 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       )
     }
     await loadCatalogFromPlatform()
-  }
-
-  async function migrateLegacyCatalogIfNeeded(legacy: ApiLegacyWorkspaceV2): Promise<void> {
-    if (!isBridgeAvailable()) return
-    const listed = await withPlatformRetry(() => apiCatalogApi.listEnvironments())
-    if (listed.environments.length > 0) {
-      await loadCatalogFromPlatform()
-      return
-    }
-    await migrateLegacyCatalog(legacy)
   }
 
   // --- 3. hydrate：读 workspace，再叠 catalog；ready 前改集合不覆盖 ---
@@ -361,35 +400,28 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     try {
       if (isBridgeAvailable()) {
         const res = await withPlatformRetry(() => settingsApi.get(SETTING_KEY))
-        const legacy = parseLegacyWorkspaceV2(res.value)
         const saved = parseWorkspace(res.value)
-        if (touchedBeforeReady) {
-          if (folders.length === 0) {
-            if (saved?.folders.length) applyWorkspaceStructure(saved)
-            else if (legacy?.folders.length) applyLegacyWorkspaceStructure(legacy)
-            else seedEmpty()
-            await ensureDefaultCatalog()
-          } else {
-            const diskFolders = saved?.folders ?? legacy?.folders
-            if (diskFolders?.length) mergeWorkspaceFolders(folders, diskFolders)
-            if (saved) mergeWorkspaceMeta(saved)
-            else if (legacy) {
-              envId.value = legacy.envId || envId.value
-              replaceList(runProfiles, legacy.runProfiles ?? runProfiles)
-              replaceList(mockServers, legacy.mockServers ?? mockServers)
-            }
-            await loadCatalogFromPlatform()
+        if (saved) {
+          if (touchedBeforeReady && folders.length > 0) {
+            if (saved.folders.length) mergeWorkspaceFolders(folders, saved.folders)
+            mergeWorkspaceMeta(saved)
+          } else if (saved.folders.length) {
+            applyWorkspaceStructure(saved)
+          } else if (folders.length === 0) {
+            seedEmpty()
           }
-        } else if (saved?.folders.length) {
-          applyWorkspaceStructure(saved)
+          await adoptCatalog(saved)
+          if (workspaceHasEmbeddedCatalog(saved)) persistStructureNow()
+        } else if (isApiWorkspaceText(res.value)) {
+          keepDisk = true
+          console.warn('[api-tester] workspace left on disk; folder list did not parse')
+          if (folders.length === 0) seedEmpty()
           await loadCatalogFromPlatform()
-        } else if (legacy?.folders.length) {
-          applyLegacyWorkspaceStructure(legacy)
-          await migrateLegacyCatalogIfNeeded(legacy)
-          persistStructureNow()
-        } else {
+        } else if (folders.length === 0) {
           seedEmpty()
           await ensureDefaultCatalog()
+        } else {
+          await loadCatalogFromPlatform()
         }
       } else if (folders.length === 0) {
         seedEmpty()
@@ -401,7 +433,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       ready.value = true
       rebuildRequestIndex()
       watch(envId, () => persistStructureNow())
-      workspacePersist.replayPending()
+      if (keepDisk) workspacePersist.discardPending()
+      else workspacePersist.replayPending()
       catalogPersist.flushSoon(0)
       void refreshHistory()
     }
@@ -605,10 +638,17 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     }
   }
 
-  function ensureDrafts(draftsName = 'Drafts'): ApiFolder {
+  function ensureDrafts(draftsName?: string): ApiFolder {
     const existing = folders.find((folder) => folder.id === 'drafts')
     if (existing) return existing
-    const created: ApiFolder = { id: 'drafts', name: draftsName, parentId: null, vars: emptyVars(), kinds: emptyKinds(), requests: [] }
+    const created: ApiFolder = {
+      id: 'drafts',
+      name: draftsName?.trim() || String(i18n.global.t('modules.api.drafts')),
+      parentId: null,
+      vars: emptyVars(),
+      kinds: emptyKinds(),
+      requests: [],
+    }
     folders.push(created)
     return created
   }
@@ -694,6 +734,18 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     openRequestTab(req.id)
     persistStructureNow()
     return req
+  }
+
+  /** 把已经拼好的请求放进文件夹（cURL / 历史保存）。 */
+  function addPreparedRequest(source: ApiRequest, folderId?: string): ApiRequest {
+    markTouchedBeforeReady()
+    const folder = folderById(folderId) ?? ensureDrafts()
+    const copy = cloneRequest(source, uniqueName(source.name, folder.requests.map((item) => item.name)))
+    folder.requests.push(copy)
+    requestFolderIndex.set(copy.id, folder.id)
+    openRequestTab(copy.id)
+    persistStructureNow()
+    return copy
   }
 
   function renameRequest(requestId: string, name: string): ApiRequest | undefined {
@@ -862,11 +914,30 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   }
 
   // --- 7. 发送：HTTP 一发一收；TCP/UDP 按 requestId 保活，关 Tab 才 close ---
-  async function send(requestId: string, opts?: { encoding?: ApiSocketEncoding; peerAddr?: string }): Promise<void> {
+  async function send(
+    requestId: string,
+    opts?: {
+      encoding?: ApiSocketEncoding
+      peerAddr?: string
+      peerId?: string
+      frame?: SocketFrameOpen
+      data?: string
+      broadcast?: boolean
+    },
+  ): Promise<void> {
     const req = requestById(requestId)
     if (!req || sending[requestId]) return
     if (isSocketMethod(req.method)) {
-      await sendLive(requestId, req, opts?.encoding ?? 'auto', opts?.peerAddr)
+      await sendLive(
+        requestId,
+        req,
+        opts?.encoding ?? 'auto',
+        opts?.peerAddr,
+        opts?.peerId,
+        opts?.frame,
+        opts?.data,
+        opts?.broadcast,
+      )
       return
     }
     if (sockets[requestId]) {
@@ -908,6 +979,10 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     req: ApiRequest,
     encoding: ApiSocketEncoding = 'auto',
     peerAddr?: string,
+    peerId?: string,
+    frame?: SocketFrameOpen,
+    data?: string,
+    broadcast = false,
   ): Promise<void> {
     const gen = (sendGen.get(requestId) ?? 0) + 1
     sendGen.set(requestId, gen)
@@ -919,9 +994,10 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     try {
       const scope = variableScope(requestId)
       const { target, payload } = resolveSend(req, environment.value, scope)
-      const sessionId = await ensureLive(requestId, target, ac.signal)
-      if (payload) {
-        await sendSocketFrame(sessionId, payload, target, encoding, peerAddr)
+      const sessionId = await ensureLive(requestId, target, ac.signal, frame)
+      const body = data !== undefined ? data : payload
+      if (body) {
+        await sendSocketFrame(sessionId, body, target, encoding, peerAddr, peerId, broadcast)
       }
       if (sendGen.get(requestId) !== gen) return
       patchLiveExchange(requestId)
@@ -944,11 +1020,16 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     return live.kind === target.transport && live.host === target.host && live.port === target.port
   }
 
-  async function ensureLive(requestId: string, target: SocketTarget, signal: AbortSignal): Promise<string> {
+  async function ensureLive(
+    requestId: string,
+    target: SocketTarget,
+    signal: AbortSignal,
+    frame?: SocketFrameOpen,
+  ): Promise<string> {
     const existing = sockets[requestId]
     if (existing && sameLiveTarget(existing, target)) return existing.sessionId
     if (existing) await closeLiveSocket(requestId)
-    const info = await openSocketSession(target)
+    const info = await openSocketSession(target, frame)
     if (signal.aborted) {
       await closeSocketSession(info.sessionId)
       throw new SendError('cancelled', 'cancelled')
@@ -980,6 +1061,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       state: info.state,
       localAddr: info.localAddr,
       remoteAddr: info.remoteAddr,
+      peers: info.kind === 'tcp-server' ? [] : undefined,
       startedAt: performance.now(),
     }
     socketUnwatch.set(
@@ -990,8 +1072,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
         if (event.type === 'api.socket.data') {
           const frames = socketLogs[requestId] ?? (socketLogs[requestId] = [])
           const { dropped } = appendSocketFrame(frames, event)
-          if (event.localAddr) live.localAddr = event.localAddr
-          if (event.remoteAddr) live.remoteAddr = event.remoteAddr
+          applyLiveSocketEvent(live, event)
+          if (live.kind === 'tcp-server') maybeRefreshPeers(requestId)
           exchanges[requestId] = patchLiveExchangeFromFrame(
             exchanges[requestId],
             live,
@@ -999,17 +1081,41 @@ export const useApiTesterStore = defineStore('api-tester', () => {
             event,
             dropped,
           )
-        } else {
-          live.state = event.state
-          if (event.remoteAddr) live.remoteAddr = event.remoteAddr
-          patchLiveExchange(requestId)
-        }
-        if (event.type === 'api.session.state' && (event.state === 'closed' || event.state === 'lost')) {
+        } else if (applyLiveSocketEvent(live, event) === 'ended') {
           detachLive(requestId, false)
+        } else {
+          patchLiveExchange(requestId)
+          if (live.kind === 'tcp-server') void refreshPeers(requestId)
         }
       }),
     )
     patchLiveExchange(requestId)
+    if (info.kind === 'tcp-server') void refreshPeers(requestId)
+  }
+
+  function maybeRefreshPeers(requestId: string): void {
+    const now = Date.now()
+    if (now - (peerSyncAt.get(requestId) ?? 0) < 1000) return
+    peerSyncAt.set(requestId, now)
+    void refreshPeers(requestId)
+  }
+
+  async function refreshPeers(requestId: string): Promise<void> {
+    const live = sockets[requestId]
+    if (!live || live.kind !== 'tcp-server') return
+    const sessionId = live.sessionId
+    const gen = (peerSyncGen.get(requestId) ?? 0) + 1
+    peerSyncGen.set(requestId, gen)
+    peerSyncAt.set(requestId, Date.now())
+    try {
+      const peers = await listSocketPeers(sessionId)
+      if (peerSyncGen.get(requestId) !== gen) return
+      const current = sockets[requestId]
+      if (!current || current.sessionId !== sessionId) return
+      adoptLivePeers(current, peers)
+    } catch (error) {
+      console.warn('[api-tester] peer list failed', error)
+    }
   }
 
   function patchLiveExchange(requestId: string): void {
@@ -1018,7 +1124,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     exchanges[requestId] = buildLiveExchange(live, socketLogs[requestId] ?? [])
   }
 
-  async function connectSocket(requestId: string): Promise<void> {
+  async function connectSocket(requestId: string, frame?: SocketFrameOpen): Promise<void> {
     const req = requestById(requestId)
     if (!req || sending[requestId] || !isSocketMethod(req.method)) return
     const gen = (sendGen.get(requestId) ?? 0) + 1
@@ -1030,7 +1136,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     const started = performance.now()
     try {
       const { target } = resolveSend(req, environment.value, variableScope(requestId))
-      await ensureLive(requestId, target, ac.signal)
+      await ensureLive(requestId, target, ac.signal, frame)
       if (sendGen.get(requestId) !== gen) return
       patchLiveExchange(requestId)
     } catch (error) {
@@ -1044,14 +1150,31 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     }
   }
 
-  function clearSocketLog(requestId: string): void {
-    socketLogs[requestId] = []
+  function clearSocketLog(requestId: string, scope?: { peerId?: string; remoteAddr?: string }): void {
+    const frames = socketLogs[requestId]
+    if (!frames) return
+    if (scope?.peerId) {
+      socketLogs[requestId] = frames.filter((row) => row.peerId !== scope.peerId)
+    } else if (scope?.remoteAddr) {
+      socketLogs[requestId] = frames.filter((row) => row.remoteAddr?.trim() !== scope.remoteAddr)
+    } else {
+      socketLogs[requestId] = []
+    }
     patchLiveExchange(requestId)
+  }
+
+  async function kickPeer(requestId: string, peerId: string): Promise<void> {
+    const live = sockets[requestId]
+    if (!live || !peerId) return
+    await kickSocketPeer(live.sessionId, peerId)
+    await refreshPeers(requestId)
   }
 
   function detachLive(requestId: string, markClosed: boolean): void {
     socketUnwatch.get(requestId)?.()
     socketUnwatch.delete(requestId)
+    peerSyncGen.delete(requestId)
+    peerSyncAt.delete(requestId)
     const live = sockets[requestId]
     if (live && markClosed) {
       live.state = 'closed'
@@ -1076,6 +1199,26 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     } catch (error) {
       if (isPlatformUnavailable(error)) return
       console.warn('[api-tester] history load failed', error)
+    }
+  }
+
+  function snapshotRequest(req: ApiRequest): Record<string, unknown> {
+    return {
+      id: req.id,
+      name: req.name,
+      method: req.method,
+      url: req.url,
+      params: req.params.map((row) => ({ ...row })),
+      headers: req.headers.map((row) => ({ ...row })),
+      auth: {
+        type: req.auth.type,
+        bearer: req.auth.bearer ? { ...req.auth.bearer } : undefined,
+        basic: req.auth.basic ? { ...req.auth.basic } : undefined,
+        apiKey: req.auth.apiKey ? { ...req.auth.apiKey } : undefined,
+      },
+      bodyMode: req.bodyMode,
+      body: req.body,
+      bodyForm: (req.bodyForm ?? []).map((row) => ({ ...row })),
     }
   }
 
@@ -1110,15 +1253,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
           requestUrl: itemHint.url,
           environmentId: env?.id,
           environmentName: env?.name ?? '',
-          requestJson: {
-            id: req.id,
-            name: req.name,
-            method: req.method,
-            url: req.url,
-            params: req.params,
-            headers: req.headers,
-            body: req.body,
-          },
+          requestJson: snapshotRequest(req),
           exchangeJson: exchange,
           durationMs: exchange.durationMs,
           httpStatus: exchange.status,
@@ -1136,9 +1271,9 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     }
   }
 
-  async function openHistory(historyId: string): Promise<void> {
+  async function loadHistoryPayload(historyId: string): Promise<{ request: ApiRequest | null; exchange: ApiExchange | null }> {
     const item = history.find((row) => row.historyId === historyId)
-    if (!item) return
+    if (!item) return { request: null, exchange: null }
     let request = item.request
     let exchange = item.exchange
     if ((!request || !exchange) && isBridgeAvailable() && !historyId.startsWith('local-')) {
@@ -1155,17 +1290,34 @@ export const useApiTesterStore = defineStore('api-tester', () => {
         }
       }
     }
+    return { request: requestFromHistory(item, request), exchange }
+  }
+
+  async function openHistory(historyId: string): Promise<void> {
+    const item = history.find((row) => row.historyId === historyId)
+    if (!item) return
+    const loaded = await loadHistoryPayload(historyId)
     let requestId = item.requestId
-    if (!requestById(requestId) && request) {
+    if (!requestById(requestId) && loaded.request) {
       const folder = ensureDrafts()
-      const copy = cloneRequest(request, uniqueName(request.name, folder.requests.map((row) => row.name)))
+      const copy = cloneRequest(loaded.request, uniqueName(loaded.request.name, folder.requests.map((row) => row.name)))
       folder.requests.push(copy)
       requestFolderIndex.set(copy.id, folder.id)
       requestId = copy.id
     }
     if (!requestId || !requestById(requestId)) return
-    if (exchange) exchanges[requestId] = exchange
+    if (loaded.exchange) exchanges[requestId] = loaded.exchange
     openRequestTab(requestId)
+  }
+
+  /** 历史另存为集合请求。原请求还在时放在同一文件夹，否则进草稿。 */
+  async function saveHistoryToCollection(historyId: string): Promise<ApiRequest | null> {
+    const item = history.find((row) => row.historyId === historyId)
+    if (!item) return null
+    const loaded = await loadHistoryPayload(historyId)
+    if (!loaded.request) return null
+    const folder = locate(item.requestId)?.folder ?? ensureDrafts()
+    return addPreparedRequest(loaded.request, folder.id)
   }
 
   async function deleteHistory(historyId: string): Promise<void> {
@@ -1302,6 +1454,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     markWorkspaceDirty,
     variableScope,
     addRequest,
+    addPreparedRequest,
     renameRequest,
     duplicateRequest,
     deleteRequest,
@@ -1315,11 +1468,13 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     sendResolved,
     connectSocket,
     clearSocketLog,
+    kickPeer,
     cancel,
     closeSocket,
     curl,
     refreshHistory,
     openHistory,
+    saveHistoryToCollection,
     deleteHistory,
     clearHistory,
   }

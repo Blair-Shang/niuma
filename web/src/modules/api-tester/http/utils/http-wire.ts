@@ -1,7 +1,7 @@
 /**
  * HTTP/1.1 明文编解码。不插值、不写 Auth；调用方先 resolveRequest。
  */
-import type { ApiKvRow } from '../types'
+import type { ApiKvRow } from '../../types'
 import type { ResolvedRequest } from './request-resolve'
 
 /** 把已解析请求编成 HTTP/1.1 明文（经 api-service TCP 发出）。 */

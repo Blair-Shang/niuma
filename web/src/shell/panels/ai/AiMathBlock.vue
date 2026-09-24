@@ -53,7 +53,7 @@ onMounted(() => {
   margin: 0.65em 0;
   padding: 10px 12px;
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 70%, transparent);
   text-align: center;
@@ -61,14 +61,14 @@ onMounted(() => {
 
 .nm-ai-math-block__pending,
 .nm-ai-math-block__raw {
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
   text-align: left;
   white-space: pre-wrap;
 }
 
 .nm-ai-math-block__body {
-  font-size: 15px;
+  font-size: var(--nm-font-title);
   color: var(--rs-text);
 }
 </style>

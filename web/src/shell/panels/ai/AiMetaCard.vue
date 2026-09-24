@@ -71,7 +71,7 @@ const subtitle = computed(() => {
   gap: 10px;
   margin: 0.65em 0;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--rs-text) 3.5%, transparent);
 }
@@ -83,14 +83,14 @@ const subtitle = computed(() => {
   width: 28px;
   height: 28px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   color: var(--rs-muted);
   background: color-mix(in srgb, var(--rs-text) 6%, transparent);
 }
 
 .nm-ai-card--tool .nm-ai-card__icon {
-  color: color-mix(in srgb, var(--nm-aurora-a) 70%, var(--rs-text));
-  background: color-mix(in srgb, var(--nm-aurora-a) 12%, transparent);
+  color: var(--rs-primary);
+  background: color-mix(in srgb, var(--rs-primary) 12%, transparent);
 }
 
 .nm-ai-card__body {
@@ -99,21 +99,21 @@ const subtitle = computed(() => {
 }
 
 .nm-ai-card__title {
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-text);
 }
 
 .nm-ai-card__sub {
   margin-top: 2px;
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
   overflow-wrap: anywhere;
 }
 
 .nm-ai-card__raw {
   margin: 6px 0 0;
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   white-space: pre-wrap;
   color: var(--rs-muted);
 }

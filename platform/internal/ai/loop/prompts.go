@@ -21,6 +21,7 @@ var (
 	workspaceSSHPrompt    string
 	workspaceRedisPrompt  string
 	workspaceMongoPrompt  string
+	workspaceSQLPrompt    string
 	currentTurnPrompt     string
 )
 
@@ -33,6 +34,7 @@ func init() {
 	workspaceSSHPrompt = mustPrompt("prompts/workspace_ssh.txt")
 	workspaceRedisPrompt = mustPrompt("prompts/workspace_redis.txt")
 	workspaceMongoPrompt = mustPrompt("prompts/workspace_mongodb.txt")
+	workspaceSQLPrompt = mustPrompt("prompts/workspace_sql.txt")
 	currentTurnPrompt = mustPrompt("prompts/current_turn.txt")
 }
 

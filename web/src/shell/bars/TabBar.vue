@@ -558,6 +558,7 @@ function onDragEnd(): void {
   width: 100%;
   min-width: 0;
   border-bottom: 1px solid var(--rs-border-subtle);
+  background: color-mix(in srgb, var(--rs-surface) 70%, var(--rs-bg));
 }
 
 /* 激活组：Tab 栏顶部一条高亮线，指示焦点所在分屏 */

@@ -72,13 +72,6 @@ func (m *Manager) Open(ctx context.Context, spec OpenSpec) (SessionInfo, error) 
 	if err != nil {
 		return SessionInfo{}, err
 	}
-	m.mu.Lock()
-	n := len(m.sessions)
-	m.mu.Unlock()
-	if n >= MaxSessions {
-		return SessionInfo{}, fmt.Errorf("api: too many sessions (max %d)", MaxSessions)
-	}
-
 	sid := id.UniqueID("sess")
 	sessCtx, cancel := context.WithCancel(context.Background())
 	sess := &session{
@@ -91,6 +84,16 @@ func (m *Manager) Open(ctx context.Context, spec OpenSpec) (SessionInfo, error) 
 		peers:    make(map[string]*peer),
 	}
 
+	// 先登记再启动读循环。否则对端在登记前断开时，loseSession 找不到会话，连接会留在表外且不再有人读。
+	m.mu.Lock()
+	if len(m.sessions) >= MaxSessions {
+		m.mu.Unlock()
+		cancel()
+		return SessionInfo{}, fmt.Errorf("api: too many sessions (max %d)", MaxSessions)
+	}
+	m.sessions[sid] = sess
+	m.mu.Unlock()
+
 	switch spec.Kind {
 	case KindTCPClient:
 		err = m.dialTCP(ctx, sessCtx, sess)
@@ -102,13 +105,14 @@ func (m *Manager) Open(ctx context.Context, spec OpenSpec) (SessionInfo, error) 
 		err = fmt.Errorf("api: unknown kind %q", spec.Kind)
 	}
 	if err != nil {
-		cancel()
+		if taken, takeErr := m.take(sid); takeErr == nil {
+			taken.shutdown(StateClosed, err.Error())
+		} else {
+			cancel()
+		}
 		return SessionInfo{}, err
 	}
 
-	m.mu.Lock()
-	m.sessions[sid] = sess
-	m.mu.Unlock()
 	sess.emitState(sess.state, "", sess.remoteAddr, "")
 	return sess.info(), nil
 }
@@ -363,6 +367,11 @@ func normalizeSpec(spec OpenSpec) (OpenSpec, error) {
 		spec.ReadLimit = MaxPayload
 	}
 	spec.Encoding = codec.Normalize(string(spec.Encoding))
+	frame, err := normalizeFrame(spec.Frame)
+	if err != nil {
+		return spec, err
+	}
+	spec.Frame = frame
 	spec.Host = strings.TrimSpace(spec.Host)
 	spec.LocalHost = strings.TrimSpace(spec.LocalHost)
 	if spec.Port < 0 || spec.Port > 65535 {

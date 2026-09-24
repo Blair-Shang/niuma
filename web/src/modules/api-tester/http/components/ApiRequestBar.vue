@@ -2,8 +2,8 @@
 import { RsButton, RsInput, RsSelect, type RsSelectOption } from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ApiEnvironment, ApiMethod, ApiRequest } from '../types'
-import { applyPaneMethod } from '../layout/pane-registry'
+import type { ApiEnvironment, ApiMethod, ApiRequest } from '../../types'
+import { applyPaneMethod } from '../../layout/pane-registry'
 
 const props = defineProps<{
   request: ApiRequest

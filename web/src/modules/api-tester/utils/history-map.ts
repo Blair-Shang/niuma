@@ -46,6 +46,26 @@ export function parseHistoryRequest(raw: unknown): ApiRequest | null {
   }
 }
 
+/** 历史快照缺 request_json 时，用列表摘要拼一条可保存的请求。 */
+export function requestFromHistory(item: ApiHistoryItem, parsed: ApiRequest | null): ApiRequest | null {
+  if (parsed) return parsed
+  const name = item.requestName.trim()
+  const url = item.url.trim()
+  if (!name && !url) return null
+  return {
+    id: item.requestId || 'history-req',
+    name: name || url,
+    method: item.method,
+    url,
+    params: [],
+    headers: [],
+    auth: defaultAuth(),
+    bodyMode: 'none',
+    body: '',
+    bodyForm: [],
+  }
+}
+
 /** 把库里的 exchange_json 还原成响应面板数据。 */
 export function parseHistoryExchange(raw: unknown): ApiExchange | null {
   if (!raw || typeof raw !== 'object') return null

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { minimalRequest } from '../utils/collection-io'
+import { minimalRequest } from '../../utils/collection-io'
 import { applyAuthHeaders, authQueryParam } from './http-auth'
 
 describe('http-auth', () => {

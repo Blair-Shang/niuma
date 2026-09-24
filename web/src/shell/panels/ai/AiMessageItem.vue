@@ -332,7 +332,7 @@ async function onBranch(): Promise<void> {
   width: 28px;
   height: 28px;
   margin-top: 2px;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   flex-shrink: 0;
   color: var(--rs-muted);
   background: color-mix(in srgb, var(--rs-text) 6%, transparent);
@@ -340,9 +340,9 @@ async function onBranch(): Promise<void> {
 }
 
 .nm-ai-msg--assistant .nm-ai-msg__avatar {
-  color: color-mix(in srgb, var(--nm-aurora-a) 75%, var(--rs-text));
-  background: color-mix(in srgb, var(--nm-aurora-a) 12%, transparent);
-  border-color: color-mix(in srgb, var(--nm-aurora-a) 22%, var(--rs-border-subtle));
+  color: var(--rs-primary);
+  background: color-mix(in srgb, var(--rs-primary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--rs-primary) 28%, var(--rs-border-subtle));
 }
 
 .nm-ai-msg--user .nm-ai-msg__avatar {
@@ -376,8 +376,8 @@ async function onBranch(): Promise<void> {
 }
 
 .nm-ai-msg__time {
-  font-size: 11px;
-  font-weight: 450;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-regular);
   color: var(--rs-muted);
 }
 
@@ -407,7 +407,7 @@ async function onBranch(): Promise<void> {
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-muted);
   cursor: pointer;
@@ -422,8 +422,8 @@ async function onBranch(): Promise<void> {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
-  font-weight: 450;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-regular);
   color: var(--rs-muted);
 }
 
@@ -431,8 +431,8 @@ async function onBranch(): Promise<void> {
   content: '';
   width: 5px;
   height: 5px;
-  border-radius: 50%;
-  background: var(--nm-aurora-e);
+  border-radius: var(--rs-radius-full);
+  background: var(--rs-success);
   animation: nm-ai-pulse 1.2s ease-in-out infinite;
 }
 
@@ -470,7 +470,7 @@ async function onBranch(): Promise<void> {
   display: block;
   padding: 0;
   margin: 0;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   overflow: hidden;
   border: 1px solid var(--rs-border-subtle);
   max-width: 220px;
@@ -500,7 +500,7 @@ async function onBranch(): Promise<void> {
 
 .nm-ai-msg__file {
   max-width: min(100%, 28rem);
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--rs-text) 4%, transparent);
   overflow: hidden;
@@ -534,7 +534,7 @@ async function onBranch(): Promise<void> {
   max-height: 12rem;
   overflow: auto;
   border-top: 1px solid var(--rs-border-subtle);
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
@@ -553,11 +553,11 @@ async function onBranch(): Promise<void> {
   max-width: 10rem;
   min-height: 22px;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--rs-text) 4%, transparent);
   color: var(--rs-muted);
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   cursor: pointer;
 }
 
@@ -586,7 +586,7 @@ async function onBranch(): Promise<void> {
 
 .nm-ai-msg__think {
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--rs-text) 3.5%, transparent);
   overflow: hidden;
@@ -596,8 +596,8 @@ async function onBranch(): Promise<void> {
   cursor: pointer;
   list-style: none;
   padding: 6px 10px;
-  font-size: 11.5px;
-  font-weight: 500;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-medium);
   color: var(--rs-muted);
   user-select: none;
 }
@@ -621,21 +621,21 @@ async function onBranch(): Promise<void> {
   padding: 0 10px 8px;
   max-height: 12rem;
   overflow: auto;
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   line-height: 1.5;
   color: var(--rs-muted);
 }
 
 .nm-ai-msg__think-body :deep(.nm-ai-md) {
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
 .nm-ai-msg__body {
   max-width: 100%;
-  font-size: 13px;
+  font-size: var(--nm-font-body);
   line-height: 1.6;
-  letter-spacing: -0.011em;
+  letter-spacing: var(--nm-letter-spacing);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--rs-text);
@@ -652,7 +652,7 @@ async function onBranch(): Promise<void> {
 .nm-ai-msg--user .nm-ai-msg__body--user {
   max-width: min(100%, 22rem);
   padding: 9px 12px;
-  border-radius: 12px 12px 4px 12px;
+  border-radius: var(--rs-radius) var(--rs-radius) var(--rs-radius-xs) var(--rs-radius);
   background: color-mix(in srgb, var(--rs-text) 7%, transparent);
 }
 

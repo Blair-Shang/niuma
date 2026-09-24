@@ -23,6 +23,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { RsIcon } from '@niuma/ui'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAppStore } from '@/stores/app'
 import { parseAiChartOption } from './echarts-lite'
 import AiMediaLightbox from './AiMediaLightbox.vue'
 
@@ -48,6 +49,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const appStore = useAppStore()
 const option = ref<EChartsOption | null>(null)
 const parseError = ref<string | null>(null)
 const shellEl = ref<HTMLElement | null>(null)
@@ -85,6 +87,12 @@ function unbindResizeObserver(): void {
   resizeObserver = null
 }
 
+function applyOption(source: string): void {
+  const res = parseAiChartOption(source)
+  option.value = res.option
+  parseError.value = res.error
+}
+
 watch(
   () => [props.active, props.source] as const,
   async ([active, source]) => {
@@ -95,9 +103,7 @@ watch(
       previewOpen.value = false
       return
     }
-    const res = parseAiChartOption(source)
-    option.value = res.option
-    parseError.value = res.error
+    applyOption(source)
     await nextTick()
     bindResizeObserver()
     // 再等一帧，确保 flex/分栏布局完成
@@ -106,6 +112,17 @@ watch(
     })
   },
   { immediate: true },
+)
+
+watch(
+  () => [appStore.themeId, appStore.theme] as const,
+  async () => {
+    if (!props.active) {
+      return
+    }
+    await nextTick()
+    applyOption(props.source)
+  },
 )
 
 onBeforeUnmount(() => {
@@ -172,7 +189,7 @@ function openPreview(): void {
 .nm-ai-chart {
   margin: 0.65em 0;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 80%, transparent);
 }
@@ -195,7 +212,7 @@ function openPreview(): void {
   width: 28px;
   height: 28px;
   border: 1px solid var(--rs-border-subtle);
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   background: color-mix(in srgb, var(--nm-elevated-bg) 88%, transparent);
   color: var(--rs-muted);
   cursor: pointer;
@@ -215,7 +232,7 @@ function openPreview(): void {
 .nm-ai-chart__pending,
 .nm-ai-chart__error {
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
@@ -228,10 +245,10 @@ function openPreview(): void {
   max-height: 8rem;
   overflow: auto;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: color-mix(in srgb, var(--rs-text) 5%, transparent);
   color: var(--rs-muted);
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   white-space: pre-wrap;
 }
 </style>
@@ -242,7 +259,7 @@ function openPreview(): void {
   width: 100%;
   height: 100%;
   min-height: 320px;
-  border-radius: 12px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 92%, transparent);
 }

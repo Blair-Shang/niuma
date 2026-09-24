@@ -4,8 +4,8 @@
  * HTTP/1.1 字节串仍由 http-wire 负责。
  */
 import { createId } from '@/utils/id'
-import type { ApiEnvironment, ApiFolder, ApiKvRow, ApiRequest, ApiVariableBag } from '../types'
-import type { ApiVariableScope } from '../utils/folder-tree'
+import type { ApiEnvironment, ApiFolder, ApiKvRow, ApiRequest, ApiVariableBag } from '../../types'
+import type { ApiVariableScope } from '../../utils/folder-tree'
 import { applyAuthHeaders, authQueryParam } from './http-auth'
 
 const ENV_TOKEN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g

@@ -269,8 +269,8 @@ function onTitleKeydown(e: KeyboardEvent): void {
   margin: 0;
   background: transparent;
   font-size: var(--nm-font-body);
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-weight: var(--rs-font-weight-semibold);
+  letter-spacing: var(--nm-letter-spacing);
   line-height: 1;
   color: var(--rs-text);
   white-space: nowrap;
@@ -292,12 +292,12 @@ function onTitleKeydown(e: KeyboardEvent): void {
   height: 26px;
   margin: 0;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   border: 1px solid var(--rs-border-subtle);
   background: var(--nm-editor-bg);
   color: var(--rs-text);
   font-size: var(--nm-font-body);
-  font-weight: 600;
+  font-weight: var(--rs-font-weight-semibold);
 }
 
 .nm-ai-header__rename {
@@ -322,7 +322,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-text-secondary);
   cursor: pointer;
@@ -366,7 +366,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
 
 .nm-ai-history__title {
   font-size: var(--nm-font-caption);
-  font-weight: 600;
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-text-secondary);
 }
 
@@ -376,7 +376,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   gap: 4px;
   border: 0;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-text);
   font-size: var(--nm-font-caption);
@@ -407,7 +407,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   display: flex;
   align-items: center;
   gap: 2px;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   margin-right: 0.25rem;
 }
 
@@ -424,7 +424,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   color: var(--rs-text);
   text-align: left;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
 }
 
 .nm-ai-history__item-main:hover {
@@ -447,7 +447,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
   height: 26px;
   flex-shrink: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-text-secondary);
   cursor: pointer;
@@ -459,7 +459,7 @@ function onTitleKeydown(e: KeyboardEvent): void {
 }
 
 .nm-ai-history__item-del:hover {
-  color: var(--rs-danger, #ef4444);
-  background: color-mix(in srgb, var(--rs-danger, #ef4444) 12%, transparent);
+  color: var(--rs-danger);
+  background: color-mix(in srgb, var(--rs-danger) 12%, transparent);
 }
 </style>

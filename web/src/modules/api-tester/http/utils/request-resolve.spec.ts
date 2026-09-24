@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { newKvRow } from '../utils/format'
+import { newKvRow } from '../../utils/format'
 import { buildVariableContext, buildVariableMap, folderVariableChain, interpolateVariables, resolveRequest } from './request-resolve'
-import type { ApiFolder, ApiRequest } from '../types'
+import type { ApiFolder, ApiRequest } from '../../types'
 
 const folders: ApiFolder[] = [
   { id: 'root', name: 'Root', parentId: null, vars: { org: 'acme' }, requests: [] },

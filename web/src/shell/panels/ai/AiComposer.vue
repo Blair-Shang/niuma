@@ -709,10 +709,10 @@ function cancelEditing(): void {
   gap: 8px;
   margin-bottom: 6px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   font-size: var(--nm-font-caption);
   color: var(--rs-text-secondary);
-  background: color-mix(in srgb, var(--rs-warning, #d97706) 12%, transparent);
+  background: color-mix(in srgb, var(--rs-warning) 12%, transparent);
 }
 
 .nm-ai-composer__edit-cancel {
@@ -736,7 +736,7 @@ function cancelEditing(): void {
   position: relative;
   width: 72px;
   height: 72px;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   overflow: hidden;
   border: 1px solid var(--rs-border-subtle);
 }
@@ -758,7 +758,7 @@ function cancelEditing(): void {
   width: 18px;
   height: 18px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--rs-radius-full);
   background: color-mix(in srgb, #000 55%, transparent);
   color: #fff;
   cursor: pointer;
@@ -766,14 +766,14 @@ function cancelEditing(): void {
 
 .nm-ai-composer__file-size {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
 .nm-ai-composer__attach-error {
   margin: 0 2px 4px;
   font-size: var(--nm-font-caption);
-  color: var(--rs-danger, #ef4444);
+  color: var(--rs-danger);
 }
 
 .nm-ai-chip--file {
@@ -785,12 +785,12 @@ function cancelEditing(): void {
   flex-direction: column;
   gap: 4px;
   padding: 10px 10px 8px;
-  border-radius: 14px;
+  border-radius: var(--rs-radius-lg);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 92%, var(--nm-editor-bg));
   box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 4%, transparent) inset,
-    0 6px 20px color-mix(in srgb, #000 18%, transparent);
+    inset 0 1px 0 var(--nm-elev-highlight),
+    var(--nm-elev-shadow);
 }
 
 .nm-ai-composer__shell:focus-within {
@@ -819,11 +819,11 @@ function cancelEditing(): void {
   max-width: 11.5rem;
   min-height: 24px;
   padding: 2px 4px 2px 7px;
-  border-radius: 7px;
+  border-radius: var(--rs-radius-sm);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--rs-text) 4.5%, transparent);
   color: var(--rs-text);
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   line-height: 1.2;
 }
 
@@ -856,7 +856,7 @@ function cancelEditing(): void {
   height: 18px;
   flex-shrink: 0;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-muted);
   cursor: pointer;
@@ -880,7 +880,7 @@ function cancelEditing(): void {
   outline: none;
   background: transparent;
   color: var(--rs-text);
-  font-size: 13px;
+  font-size: var(--nm-font-body);
   line-height: 1.5;
   padding: 2px 4px;
   font-family: inherit;
@@ -898,19 +898,19 @@ function cancelEditing(): void {
   z-index: 20;
   max-height: 14rem;
   overflow: auto;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: var(--nm-elevated-bg);
-  box-shadow: 0 10px 28px color-mix(in srgb, #000 22%, transparent);
+  box-shadow: var(--nm-elev-shadow);
   scrollbar-width: thin;
 }
 
 .nm-ai-mention__head {
   padding: 8px 12px 4px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-muted);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--nm-letter-spacing);
 }
 
 .nm-ai-mention__list {
@@ -947,7 +947,7 @@ function cancelEditing(): void {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
-  border-radius: 7px;
+  border-radius: var(--rs-radius-sm);
   background: color-mix(in srgb, var(--rs-text) 6%, transparent);
   color: var(--rs-muted);
 }
@@ -961,15 +961,15 @@ function cancelEditing(): void {
 }
 
 .nm-ai-mention__label {
-  font-size: 12.5px;
-  font-weight: 550;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .nm-ai-mention__meta {
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -992,10 +992,10 @@ function cancelEditing(): void {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   background: transparent;
   color: var(--rs-muted);
-  font-weight: 700;
+  font-weight: var(--rs-font-weight-bold);
   line-height: 1;
   cursor: pointer;
 }
@@ -1043,7 +1043,7 @@ function cancelEditing(): void {
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--rs-radius-full);
   background: color-mix(in srgb, var(--rs-text) 88%, transparent);
   color: var(--nm-editor-bg);
   cursor: pointer;
@@ -1056,6 +1056,6 @@ function cancelEditing(): void {
 
 .nm-ai-composer__send--stop {
   background: color-mix(in srgb, var(--rs-danger) 85%, transparent);
-  color: #fff;
+  color: var(--rs-primary-foreground);
 }
 </style>

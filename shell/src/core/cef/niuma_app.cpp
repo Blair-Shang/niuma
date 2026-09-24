@@ -56,9 +56,6 @@ void NiuMaApp::OnBeforeCommandLineProcessing(
   command_line->AppendSwitch("allow-file-access-from-files");
   command_line->AppendSwitch("use-alloy-style");
   command_line->AppendSwitchWithValue("lang", "zh-CN");
-  // Chrome 137+ 默认禁用 SwiftShader。本机 GPU 崩溃后没有软件回退，
-  // backdrop-filter / 合成会直接失败。允许 SwiftShader 以免界面透底。
-  command_line->AppendSwitch("enable-unsafe-swiftshader");
 
   // 三端共用：桌面单窗不要按 Chrome 标签页做会话恢复 / 后台续下 / 丢页。
   command_line->AppendSwitch("no-first-run");
@@ -71,24 +68,11 @@ void NiuMaApp::OnBeforeCommandLineProcessing(
       command_line, "disable-features",
       "IntensiveWakeUpThrottling,WebContentsDiscard,DownloadAutoResumption");
 
-#if defined(OS_WIN)
-  // Win11 + 高 DPI 上 DComp Present / Graphite / Dawn 会把 GPU 进程打成
-  // STATUS_BREAKPOINT。仍走硬件 ANGLE/D3D11，只换 Present 和实验渲染器。
-  command_line->AppendSwitch("disable-direct-composition");
-  command_line->AppendSwitchWithValue("use-angle", "d3d11");
-  MergeCommaSwitch(
-      command_line, "disable-features",
-      "SkiaGraphite,SkiaGraphitePrecompilation,WebGPU,WebGPUService,Vulkan,"
-      "DirectComposition,CalculateNativeWinOcclusion");
-#elif defined(OS_LINUX)
-  // Linux 显卡驱动差异大：关掉 Graphite/Vulkan/Dawn，走 ANGLE+GL。
-  // 不要套 Windows 的 D3D11 / DirectComposition。
-  MergeCommaSwitch(command_line, "disable-features",
-                   "SkiaGraphite,SkiaGraphitePrecompilation,WebGPU,"
-                   "WebGPUService,Vulkan");
-#endif
-  // macOS：保持默认 Metal（含 Graphite）。WebGPU/丢页已在上面按需关。
-  // 不要 --use-angle=d3d11，也不要 disable-direct-composition。
+  // GPU 与 Chrome / Electron 出厂一致：硬件优先（Windows 为 ANGLE +
+  // DirectComposition，macOS 为 Metal）。不钉 --use-angle，不关
+  // DirectComposition，不预关 Graphite / WebGPU，也不开
+  // --enable-unsafe-swiftshader。GPU 进程反复崩溃后由 Chromium 自己关掉
+  // 硬件加速，改走 CPU 光栅。
 }
 
 CefRefPtr<CefClient> NiuMaApp::GetDefaultClient() {

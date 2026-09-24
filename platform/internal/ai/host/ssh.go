@@ -140,7 +140,7 @@ func SSHToolSpecs() []ToolSpec {
 		},
 		{
 			Name:        ToolSSHExec,
-			Description: "Run a short non-interactive command on the current SSH session. Requires user confirmation. Do not run editors, pagers, or long-lived interactive programs.",
+			Description: "Run a short non-interactive command on the current SSH session. Call it directly when the user asks to run a command; the app shows a confirm card. Do not ask in chat first. Do not run editors, pagers, or long-lived interactive programs.",
 			Parameters: objectSchema(schemaProps(map[string]any{
 				"command": map[string]any{"type": "string", "description": "Remote shell command"},
 			}), []string{"command"}),

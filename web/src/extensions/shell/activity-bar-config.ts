@@ -17,10 +17,10 @@ export interface ActivityBarItem {
  * 顺序：资源管理 → 数据库 → 运维工具 → API；彩色线框与领域语义对应。
  */
 export const ACTIVITY_BAR_ITEMS: readonly ActivityBarItem[] = [
-  { category: 'explorer', icon: 'folder', labelKey: 'nav.category.explorer', color: '#3B82F6' },
-  { category: 'data', icon: 'database', labelKey: 'nav.category.data', color: '#8B5CF6' },
-  { category: 'ops', icon: 'server', labelKey: 'nav.category.ops', color: '#F59E0B' },
-  { category: 'devtools', icon: 'api', labelKey: 'nav.category.api', color: '#22C55E' },
+  { category: 'explorer', icon: 'folder', labelKey: 'nav.category.explorer', color: 'var(--nm-activity-explorer)' },
+  { category: 'data', icon: 'database', labelKey: 'nav.category.data', color: 'var(--nm-activity-data)' },
+  { category: 'ops', icon: 'server', labelKey: 'nav.category.ops', color: 'var(--nm-activity-ops)' },
+  { category: 'devtools', icon: 'api', labelKey: 'nav.category.api', color: 'var(--nm-activity-devtools)' },
 ] as const
 
 /**

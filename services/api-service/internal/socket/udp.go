@@ -110,7 +110,25 @@ func listenUDP(spec OpenSpec) (*net.UDPConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("api: listen udp: %w", err)
 	}
+	if err := enableBroadcast(conn); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("api: udp broadcast: %w", err)
+	}
 	return conn, nil
+}
+
+func enableBroadcast(conn *net.UDPConn) error {
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var sockErr error
+	if err := raw.Control(func(fd uintptr) {
+		sockErr = setBroadcast(fd)
+	}); err != nil {
+		return err
+	}
+	return sockErr
 }
 
 func udpBind(spec OpenSpec) (string, int) {

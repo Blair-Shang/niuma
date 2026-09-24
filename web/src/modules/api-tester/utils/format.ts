@@ -1,12 +1,9 @@
 /**
- * 展示层格式化：curl、字节、hex、状态色。
- * 插值与拼包走 request-resolve，这里不再自己合并变量表。
+ * 跨协议展示：字节、hex、状态色、键值行。
+ * curl 在 http/utils/curl，不放这里。
  */
 import { createId } from '@/utils/id'
-import type { ApiEnvironment, ApiKvRow, ApiRequest } from '../types'
-import { titleHttpHeader } from '../http/http-wire'
-import { resolveRequest } from '../http/request-resolve'
-import type { ApiVariableScope } from './folder-tree'
+import type { ApiKvRow } from '../types'
 
 export function enabledRows(rows: ApiKvRow[]): ApiKvRow[] {
   return rows.filter((row) => row.enabled && row.key.trim())
@@ -64,40 +61,6 @@ export function prettyJson(text: string): string {
   } catch {
     return text
   }
-}
-
-/** 生成可粘贴的 curl（仅演示，不含 cookie 文件）。 */
-export function buildCurl(
-  req: ApiRequest,
-  env: ApiEnvironment | undefined,
-  scope?: ApiVariableScope,
-): string {
-  const resolved = resolveRequest(req, env, scope)
-  const parts = ['curl']
-  if (req.method !== 'GET' && req.method !== 'TCP' && req.method !== 'UDP' && req.method !== 'WS') {
-    parts.push('-X', req.method)
-  }
-  parts.push(shellQuote(resolved.url))
-
-  for (const [key, value] of resolved.headers) {
-    parts.push('-H', shellQuote(`${titleHttpHeader(key)}: ${value}`))
-  }
-
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'TCP') {
-    return parts.join(' ')
-  }
-  if (req.bodyMode === 'urlencoded' && resolved.body) {
-    parts.push('--data-urlencode', shellQuote(resolved.body))
-    return parts.join(' ')
-  }
-  if (resolved.body) {
-    parts.push('--data-raw', shellQuote(resolved.body))
-  }
-  return parts.join(' ')
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 export function newKvRow(key = '', value = '', enabled = true): ApiKvRow {

@@ -44,8 +44,14 @@ type openParams struct {
 	LocalHost string `json:"localHost"`
 	LocalPort int    `json:"localPort"`
 	TimeoutMs int    `json:"timeoutMs"`
-	Encoding  string `json:"encoding"`
-	ReadLimit int    `json:"readLimit"`
+	Encoding     string `json:"encoding"`
+	ReadLimit    int    `json:"readLimit"`
+	Frame        string `json:"frame"`
+	Delimiter    string `json:"delimiter"`
+	LengthOffset int    `json:"lengthOffset"`
+	LengthSize   int    `json:"lengthSize"`
+	LengthEndian string `json:"lengthEndian"`
+	LengthAdjust int    `json:"lengthAdjust"`
 }
 
 type sessionIDParams struct {
@@ -194,6 +200,19 @@ func (d *Dispatcher) socketKick(_ context.Context, req Request) Response {
 	return envelope.OK(req.ID, map[string]any{"kicked": true})
 }
 
+func delimiterBytes(name string) []byte {
+	switch name {
+	case "lf":
+		return []byte{'\n'}
+	case "cr":
+		return []byte{'\r'}
+	case "crlf":
+		return []byte{'\r', '\n'}
+	default:
+		return nil
+	}
+}
+
 func parseOpenSpec(raw json.RawMessage) (socket.OpenSpec, error) {
 	if len(raw) == 0 {
 		return socket.OpenSpec{}, fmt.Errorf(errInvalidParamsFmt, "empty")
@@ -210,6 +229,14 @@ func parseOpenSpec(raw json.RawMessage) (socket.OpenSpec, error) {
 		LocalPort: params.LocalPort,
 		Encoding:  codec.Normalize(params.Encoding),
 		ReadLimit: params.ReadLimit,
+		Frame: socket.FrameSpec{
+			Mode:         socket.FrameMode(params.Frame),
+			Delimiter:    delimiterBytes(params.Delimiter),
+			LengthOffset: params.LengthOffset,
+			LengthSize:   params.LengthSize,
+			LittleEndian: params.LengthEndian == "little",
+			LengthAdjust: params.LengthAdjust,
+		},
 	}
 	if params.TimeoutMs > 0 {
 		spec.Timeout = time.Duration(params.TimeoutMs) * time.Millisecond

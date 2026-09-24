@@ -4,9 +4,10 @@
  */
 import { RsButton, RsInput, RsSplitPane, type RsSplitPaneItem } from '@niuma/ui'
 import type { ApiRequest } from '../types'
-import { useApiSocketSession } from './useApiSocketSession'
-import ApiSocketCompose from './ApiSocketCompose.vue'
-import ApiSocketStream from './ApiSocketStream.vue'
+import { SOCKET_ALL_PEERS, useApiSocketSession } from './composables/useApiSocketSession'
+import ApiSocketCompose from './components/ApiSocketCompose.vue'
+import ApiSocketFrame from './components/ApiSocketFrame.vue'
+import ApiSocketStream from './components/ApiSocketStream.vue'
 import './socket.css'
 
 const stagePanes: RsSplitPaneItem[] = [
@@ -30,6 +31,16 @@ const {
   port,
   encode,
   lineEnd,
+  frameMode,
+  frameDelimiter,
+  lengthOffset,
+  lengthSize,
+  lengthEndian,
+  lengthAdjust,
+  broadcast,
+  repeatMs,
+  repeating,
+  canRepeat,
   logView,
   logEl,
   sending,
@@ -38,7 +49,6 @@ const {
   frames,
   peers,
   selectedPeer,
-  replyAddr,
   bodyModel,
   inboundBytes,
   outboundBytes,
@@ -50,9 +60,11 @@ const {
   emptyLog,
   onConnect,
   onSend,
+  onToggleRepeat,
   onCancel,
   onClose,
   onClear,
+  onKick,
   onComposeKey,
   frameBytes,
   frameTime,
@@ -120,9 +132,19 @@ const {
       <div class="nm-api-sock__meta">
         <span>{{ t('modules.api.socketLocal') }} {{ live?.localAddr || '—' }}</span>
         <span>{{ t('modules.api.socketPeers') }} {{ peers.length }}</span>
-        <span>RX {{ formatBytes(inboundBytes) }}</span>
-        <span>TX {{ formatBytes(outboundBytes) }}</span>
+        <span>{{ t('modules.api.socketIn') }} {{ formatBytes(inboundBytes) }}</span>
+        <span>{{ t('modules.api.socketOut') }} {{ formatBytes(outboundBytes) }}</span>
         <span v-if="exchange">{{ formatDuration(exchange.durationMs) }}</span>
+        <ApiSocketFrame
+          v-if="request.method === 'TCP'"
+          v-model:mode="frameMode"
+          v-model:delimiter="frameDelimiter"
+          v-model:length-offset="lengthOffset"
+          v-model:length-size="lengthSize"
+          v-model:length-endian="lengthEndian"
+          v-model:length-adjust="lengthAdjust"
+          :locked="Boolean(live)"
+        />
       </div>
       <p v-if="exchange?.error" class="nm-api-sock__banner" role="alert">{{ exchange.error }}</p>
     </header>
@@ -141,15 +163,33 @@ const {
               </p>
               <div v-else class="nm-api-sock__peer-list">
                 <button
-                  v-for="addr in peers"
-                  :key="addr"
+                  v-if="peers.length > 1"
                   type="button"
                   class="nm-api-sock__peer"
-                  :class="{ 'nm-api-sock__peer--on': addr === selectedPeer || (!selectedPeer && addr === replyAddr) }"
-                  @click="selectedPeer = selectedPeer === addr ? '' : addr"
+                  :class="{ 'nm-api-sock__peer--on': selectedPeer === SOCKET_ALL_PEERS }"
+                  @click="selectedPeer = SOCKET_ALL_PEERS"
                 >
-                  {{ addr }}
+                  {{ t('modules.api.socketAllPeers') }}
                 </button>
+                <div
+                  v-for="peer in peers"
+                  :key="peer.key"
+                  class="nm-api-sock__peer-row"
+                  :class="{ 'nm-api-sock__peer-row--on': peer.key === selectedPeer }"
+                >
+                  <button type="button" class="nm-api-sock__peer" @click="selectedPeer = peer.key">
+                    {{ peer.label }}
+                  </button>
+                  <button
+                    v-if="peer.peerId"
+                    type="button"
+                    class="nm-api-sock__peer-kick"
+                    :aria-label="t('modules.api.socketKick')"
+                    @click="onKick(peer.peerId)"
+                  >
+                    {{ t('modules.api.socketKick') }}
+                  </button>
+                </div>
               </div>
             </aside>
           </template>
@@ -176,11 +216,17 @@ const {
           v-model:encode="encode"
           v-model:line-end="lineEnd"
           v-model:body="bodyModel"
+          v-model:broadcast="broadcast"
+          v-model:repeat-ms="repeatMs"
+          :repeating="repeating"
           :can-send="canSend"
+          :can-repeat="canRepeat"
+          :show-broadcast="request.method === 'UDP'"
           :encode-hint="encodeHint"
           :send-label="t('modules.api.socketReply')"
           :placeholder="encode === 'hex' ? '70 69 6e 67' : ''"
           @send="onSend"
+          @toggle-repeat="onToggleRepeat"
           @keydown="onComposeKey"
         />
       </template>

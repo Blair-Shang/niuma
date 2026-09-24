@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildCurl,
   formatBytes,
   formatHexDump,
   newKvRow,
   prettyJson,
   statusTone,
 } from './format'
-import { interpolateVariables, resolveRequest } from '../http/request-resolve'
+import { buildCurl } from '../http/utils/curl'
+import { interpolateVariables, resolveRequest } from '../http/utils/request-resolve'
 import { defaultAuth, minimalRequest } from './collection-io'
 import type { ApiEnvironment, ApiRequest } from '../types'
 

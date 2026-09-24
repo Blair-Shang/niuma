@@ -161,11 +161,15 @@ export function socketOpenFields(target: SocketTarget): {
   return { host: target.host, port: target.port }
 }
 
-/** UDP 服务端回包寄最近（或点选的）对端；客户端寄地址栏。 */
+/** UDP 服务端回包寄最近（或点选的）对端；客户端寄地址栏。广播固定发往 255.255.255.255，端口仍用地址栏。 */
 export function resolveSocketSendDest(
   target: SocketTarget,
   peerAddr?: string,
+  opts?: { broadcast?: boolean },
 ): { host: string; port: number } | undefined {
+  if (opts?.broadcast && target.transport === 'udp' && target.port > 0) {
+    return { host: '255.255.255.255', port: target.port }
+  }
   if (target.transport === 'udp' && target.listen) {
     return parseRemoteAddr(peerAddr) ?? undefined
   }

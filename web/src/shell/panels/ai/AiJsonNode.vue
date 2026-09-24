@@ -151,7 +151,7 @@ function showMore(): void {
   align-items: flex-start;
   gap: 6px;
   padding: 1px 0;
-  border-radius: 4px;
+  border-radius: var(--rs-radius-xs);
   min-width: 0;
 }
 
@@ -167,7 +167,7 @@ function showMore(): void {
   flex: 0 0 12px;
   width: 12px;
   color: var(--rs-muted);
-  font-size: 10px;
+  font-size: var(--nm-font-caption);
   line-height: 1.55;
   user-select: none;
 }
@@ -178,7 +178,7 @@ function showMore(): void {
 
 .nm-ai-json__key {
   flex: 0 1 auto;
-  color: color-mix(in srgb, var(--nm-aurora-a) 70%, var(--rs-text));
+  color: var(--rs-primary);
   word-break: break-all;
 }
 
@@ -190,15 +190,15 @@ function showMore(): void {
 }
 
 .nm-ai-json__val[data-kind='string'] {
-  color: color-mix(in srgb, var(--nm-aurora-e, #34d399) 70%, #c3e88d);
+  color: var(--rs-terminal-ansi-green);
 }
 
 .nm-ai-json__val[data-kind='number'] {
-  color: #f78c6c;
+  color: var(--rs-terminal-ansi-red);
 }
 
 .nm-ai-json__val[data-kind='boolean'] {
-  color: color-mix(in srgb, var(--nm-aurora-a) 55%, #c792ea);
+  color: var(--rs-terminal-ansi-magenta);
 }
 
 .nm-ai-json__val[data-kind='null'] {
@@ -222,8 +222,8 @@ function showMore(): void {
   padding: 0;
   border: none;
   background: transparent;
-  color: color-mix(in srgb, var(--nm-aurora-a) 70%, var(--rs-text));
-  font-size: 11px;
+  color: var(--rs-primary);
+  font-size: var(--nm-font-caption);
   cursor: pointer;
 }
 

@@ -4,7 +4,7 @@
  * 对齐 VastSession：壳不拼面板回调，新协议只加 catalog + {kind}/register。
  */
 import { RsButton, RsEmpty } from '@niuma/ui'
-import { computed, onActivated, onDeactivated, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabStore } from '@/stores/tab'
 import { apiPaneComponent, paneKindOf } from '../layout/pane-registry'
@@ -62,7 +62,9 @@ function onGlobalKey(event: KeyboardEvent): void {
   else void api.send(props.requestId)
 }
 
-onMounted(() => window.addEventListener('keydown', onGlobalKey))
+// keep-alive 首次插入会先 mounted 再 activated。只在 activated 注册，
+// 避免 Ctrl+Enter 挂上两份监听。切走时 deactivated 卸掉；当前页随壳销毁
+// 不再走 deactivated，由 unmounted 收尾。
 onActivated(() => window.addEventListener('keydown', onGlobalKey))
 onDeactivated(() => window.removeEventListener('keydown', onGlobalKey))
 onUnmounted(() => window.removeEventListener('keydown', onGlobalKey))

@@ -90,5 +90,13 @@ describe('api tester target', () => {
     const client = parseTarget('127.0.0.1:9000', 'UDP')
     expect(socketOpenFields(client)).toEqual({ host: '127.0.0.1', port: 9000 })
     expect(resolveSocketSendDest(client, 'ignored:1')).toEqual({ host: '127.0.0.1', port: 9000 })
+    expect(resolveSocketSendDest(client, undefined, { broadcast: true })).toEqual({
+      host: '255.255.255.255',
+      port: 9000,
+    })
+    expect(resolveSocketSendDest(listen, '10.0.0.8:54321', { broadcast: true })).toEqual({
+      host: '255.255.255.255',
+      port: 9000,
+    })
   })
 })

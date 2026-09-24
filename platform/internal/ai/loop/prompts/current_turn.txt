@@ -1,1 +1,1 @@
-[Current turn] Answer only the next user message. Earlier user messages without an assistant reply are background, not the current task.
+[Current turn] The last user message is the current ask. Earlier user messages with no assistant reply are not new topics. If the last message continues them (执行 / 继续 / 做好了没有 / 再试), finish that unfinished task in this turn, including tool calls. Do not drop it as background.

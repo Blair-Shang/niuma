@@ -75,7 +75,7 @@ onBeforeUnmount(() => {
     <div class="nm-ai-json__head">
       <button type="button" class="nm-ai-json__toggle" @click="open = !open">
         {{ open ? '▾' : '▸' }} JSON
-        <span v-if="!parsed.ok" class="nm-ai-json__bad">invalid</span>
+        <span v-if="!parsed.ok" class="nm-ai-json__bad">{{ t('ai.jsonInvalid') }}</span>
       </button>
       <div class="nm-ai-json__actions">
         <button
@@ -123,7 +123,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .nm-ai-json {
   margin: 0.65em 0;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 80%, transparent);
   overflow: hidden;
@@ -149,8 +149,8 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   color: var(--rs-muted);
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-semibold);
   cursor: pointer;
 }
 
@@ -168,11 +168,11 @@ onBeforeUnmount(() => {
   min-height: 22px;
   padding: 0 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-muted);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-medium);
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
 
 .nm-ai-json__bad {
   color: var(--rs-danger);
-  font-weight: 500;
+  font-weight: var(--rs-font-weight-medium);
 }
 
 .nm-ai-json__tree {
@@ -194,7 +194,7 @@ onBeforeUnmount(() => {
   list-style: none;
   max-height: 32rem;
   overflow: auto;
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   font-family: ui-monospace, Menlo, Consolas, monospace;
   line-height: 1.55;
 }
@@ -204,7 +204,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
   max-height: 32rem;
   overflow: auto;
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   font-family: ui-monospace, Menlo, Consolas, monospace;
   line-height: 1.55;
   white-space: pre-wrap;

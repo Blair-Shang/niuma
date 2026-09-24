@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { minimalRequest } from '../utils/collection-io'
-import { newKvRow } from '../utils/format'
+import { minimalRequest } from '../../utils/collection-io'
+import { newKvRow } from '../../utils/format'
 import { buildHttpRequest, parseHttpResponse } from './http-wire'
 import { resolveRequest } from './request-resolve'
 

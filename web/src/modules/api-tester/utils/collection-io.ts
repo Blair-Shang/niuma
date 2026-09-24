@@ -1,6 +1,6 @@
 /**
  * 集合 / 工作区信封：解析、序列化、id remint。
- * workspace v3 写出时 folder.vars 为空；变量走 catalog。导入后须再写 nm_api_variable。
+ * 读盘只认 kind 和字段，不按 version 拒收。写出是当前结构：环境与变量不进 workspace JSON。
  */
 import { createId } from '@/utils/id'
 import { newKvRow } from './format'
@@ -22,10 +22,7 @@ import type {
 } from '../types'
 
 export const COLLECTION_KIND = 'niuma.api-collection'
-export const COLLECTION_VERSION = 2
 export const WORKSPACE_KIND = 'niuma.api-workspace'
-export const WORKSPACE_VERSION = 3
-export const LEGACY_WORKSPACE_VERSION = 2
 
 const METHODS = new Set<ApiMethod>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'WS', 'TCP', 'UDP'])
 const AUTH_TYPES = new Set<ApiAuthType>(['none', 'bearer', 'basic', 'apikey'])
@@ -34,7 +31,6 @@ const BODY_MODES = new Set<ApiBodyMode>(['none', 'raw', 'json', 'text', 'urlenco
 /** 集合导出信封。不含环境 Token / 密码，也不含发送历史。 */
 export interface ApiCollectionFile {
   kind: typeof COLLECTION_KIND
-  version: number
   exportedAt: string
   folders: ApiFolder[]
 }
@@ -45,26 +41,18 @@ export interface ApiWorkspaceExtras {
   mockServers?: ApiMockServer[]
 }
 
-/** 本机工作区快照 v3：集合结构 + envId；环境与变量走 Platform 关系表。 */
+/**
+ * 本机工作区。写出只含集合结构与 envId。
+ * environments / globals 只在读到旧快照时出现，供 catalog 为空时迁入关系表。
+ */
 export interface ApiWorkspaceState {
   kind: typeof WORKSPACE_KIND
-  version: number
   folders: ApiFolder[]
   envId: string
   runProfiles?: ApiRunProfile[]
   mockServers?: ApiMockServer[]
-}
-
-/** v2 工作区（仅用于一次性迁移 import）。 */
-export interface ApiLegacyWorkspaceV2 {
-  kind: typeof WORKSPACE_KIND
-  version: typeof LEGACY_WORKSPACE_VERSION
-  folders: ApiFolder[]
-  environments: ApiEnvironment[]
-  envId: string
+  environments?: ApiEnvironment[]
   globals?: ApiVariableBag
-  runProfiles?: ApiRunProfile[]
-  mockServers?: ApiMockServer[]
 }
 
 export function defaultAuth(): ApiAuth {
@@ -286,12 +274,14 @@ function asEnvironment(raw: unknown): ApiEnvironment | null {
   const item = raw as Record<string, unknown>
   const name = asText(item.name).trim()
   if (!name) return null
-  if (!('vars' in item)) return null
+  const baseUrl = asText(item.baseUrl).trim()
+  const vars = 'vars' in item ? asVars(item.vars) : emptyVars()
+  if (baseUrl && !vars.baseUrl) vars.baseUrl = baseUrl
   return {
     id: asText(item.id).trim() || createId('env'),
     name,
-    baseUrl: asText(item.baseUrl),
-    vars: asVars(item.vars),
+    baseUrl,
+    vars,
     kinds: emptyKinds(),
   }
 }
@@ -367,7 +357,6 @@ function asMockServers(raw: unknown): ApiMockServer[] {
 export function serializeCollection(folders: ApiFolder[]): ApiCollectionFile {
   return {
     kind: COLLECTION_KIND,
-    version: COLLECTION_VERSION,
     exportedAt: new Date().toISOString(),
     folders: folders.map((folder) => ({
       id: folder.id,
@@ -389,7 +378,6 @@ export function parseCollection(text: string): { folders: ApiFolder[] } | { erro
   if (!parsed || typeof parsed !== 'object') return { error: 'invalid' }
   const root = parsed as Record<string, unknown>
   if (root.kind !== COLLECTION_KIND) return { error: 'kind' }
-  if (typeof root.version !== 'number' || root.version !== COLLECTION_VERSION) return { error: 'invalid' }
   const rawFolders = Array.isArray(root.folders) ? root.folders : []
   const folders = readFolders(rawFolders, true)
   if (folders.length === 0 && rawFolders.length > 0) return { error: 'invalid' }
@@ -403,7 +391,6 @@ export function serializeWorkspace(
 ): ApiWorkspaceState {
   return {
     kind: WORKSPACE_KIND,
-    version: WORKSPACE_VERSION,
     folders: folders.map((folder) => ({
       id: folder.id,
       name: folder.name,
@@ -428,51 +415,42 @@ export function parseWorkspace(text: string | null | undefined): ApiWorkspaceSta
   if (!parsed || typeof parsed !== 'object') return null
   const root = parsed as Record<string, unknown>
   if (root.kind !== WORKSPACE_KIND) return null
-  if (typeof root.version !== 'number' || root.version !== WORKSPACE_VERSION) return null
   const rawFolders = Array.isArray(root.folders) ? root.folders : []
   const folders = readFolders(rawFolders, false)
-  if (folders.length === 0 && rawFolders.length > 0) return null
-  const envId = asText(root.envId).trim()
+  if (rawFolders.length > 0 && folders.length === 0) return null
+  const environments = Array.isArray(root.environments)
+    ? root.environments.map(asEnvironment).filter((env): env is ApiEnvironment => env !== null)
+    : []
+  const globals = root.globals ? asVariableBag(root.globals) : undefined
   return {
     kind: WORKSPACE_KIND,
-    version: WORKSPACE_VERSION,
     folders,
-    envId,
+    envId: asText(root.envId).trim(),
     runProfiles: asRunProfiles(root.runProfiles),
     mockServers: asMockServers(root.mockServers),
+    environments: environments.length > 0 ? environments : undefined,
+    globals: globals && Object.keys(globals.vars).length > 0 ? globals : undefined,
   }
 }
 
-/** 解析 v2 工作区 JSON，仅供迁移 Platform 关系表时使用。 */
-export function parseLegacyWorkspaceV2(text: string | null | undefined): ApiLegacyWorkspaceV2 | null {
-  if (!text) return null
+/** kind 已是工作区，但文件夹一条都没解析出来。调用方不得用空种子覆盖这份磁盘。 */
+export function isApiWorkspaceText(text: string | null | undefined): boolean {
+  if (!text) return false
   let parsed: unknown
   try {
     parsed = JSON.parse(text) as unknown
   } catch {
-    return null
+    return false
   }
-  if (!parsed || typeof parsed !== 'object') return null
-  const root = parsed as Record<string, unknown>
-  if (root.kind !== WORKSPACE_KIND) return null
-  if (typeof root.version !== 'number' || root.version !== LEGACY_WORKSPACE_VERSION) return null
-  const rawFolders = Array.isArray(root.folders) ? root.folders : []
-  const folders = readFolders(rawFolders, false)
-  const rawEnvs = Array.isArray(root.environments) ? root.environments : []
-  const environments = rawEnvs
-    .map(asEnvironment)
-    .filter((env): env is ApiEnvironment => env !== null)
-  const envId = asText(root.envId).trim()
-  return {
-    kind: WORKSPACE_KIND,
-    version: LEGACY_WORKSPACE_VERSION,
-    folders,
-    environments,
-    envId,
-    globals: asVariableBag(root.globals),
-    runProfiles: asRunProfiles(root.runProfiles),
-    mockServers: asMockServers(root.mockServers),
-  }
+  if (!parsed || typeof parsed !== 'object') return false
+  return (parsed as Record<string, unknown>).kind === WORKSPACE_KIND
+}
+
+/** 旧快照仍把环境或变量写在 JSON 里。 */
+export function workspaceHasEmbeddedCatalog(state: ApiWorkspaceState): boolean {
+  if (state.environments?.length) return true
+  if (state.globals && Object.keys(state.globals.vars).length > 0) return true
+  return state.folders.some((folder) => Object.keys(folder.vars).length > 0)
 }
 
 export function downloadJson(filename: string, data: unknown): void {

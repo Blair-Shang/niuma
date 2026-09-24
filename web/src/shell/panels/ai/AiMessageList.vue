@@ -582,8 +582,8 @@ function focusAttachment(id: string): void {
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 1px solid color-mix(in srgb, var(--rs-warning, #d97706) 35%, var(--rs-border-subtle));
-  background: color-mix(in srgb, var(--rs-warning, #d97706) 8%, var(--nm-editor-bg));
+  border-top: 1px solid color-mix(in srgb, var(--rs-warning) 35%, var(--rs-border-subtle));
+  background: color-mix(in srgb, var(--rs-warning) 8%, var(--nm-editor-bg));
 }
 
 .nm-ai-pending-bar__row {
@@ -606,13 +606,13 @@ function focusAttachment(id: string): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-semibold);
   color: var(--rs-text);
 }
 
 .nm-ai-pending-bar__hint {
-  font-size: 11.5px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
@@ -650,7 +650,7 @@ function focusAttachment(id: string): void {
   width: 44px;
   height: 44px;
   margin-bottom: 4px;
-  border-radius: 12px;
+  border-radius: var(--rs-radius);
   color: var(--rs-muted);
   background: color-mix(in srgb, var(--rs-text) 5%, transparent);
   border: 1px solid var(--rs-border-subtle);
@@ -658,9 +658,9 @@ function focusAttachment(id: string): void {
 
 .nm-ai-messages__welcome-title {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: var(--nm-font-title);
+  font-weight: var(--rs-font-weight-semibold);
+  letter-spacing: var(--nm-letter-spacing);
   color: var(--rs-text);
 }
 
@@ -676,7 +676,7 @@ function focusAttachment(id: string): void {
 .nm-ai-messages__welcome-desc {
   margin: 0;
   max-width: 16rem;
-  font-size: 12.5px;
+  font-size: var(--nm-font-caption);
   line-height: 1.5;
   color: var(--rs-muted);
 }
@@ -684,7 +684,7 @@ function focusAttachment(id: string): void {
 .nm-ai-messages__spinner {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--rs-radius-full);
   border: 2px solid color-mix(in srgb, var(--rs-text) 12%, transparent);
   border-top-color: color-mix(in srgb, var(--rs-text) 55%, transparent);
   animation: nm-ai-spin 0.7s linear infinite;
@@ -697,11 +697,11 @@ function focusAttachment(id: string): void {
 }
 
 .nm-ai-messages__compare {
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px dashed var(--rs-border-subtle);
   padding: 6px 10px;
   color: var(--rs-muted);
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
 }
 
 .nm-ai-messages__compare summary {
@@ -715,8 +715,8 @@ function focusAttachment(id: string): void {
   align-items: flex-start;
   gap: 8px;
   padding: 9px 11px;
-  border-radius: 10px;
-  font-size: 12px;
+  border-radius: var(--rs-radius);
+  font-size: var(--nm-font-caption);
   line-height: 1.45;
 }
 
@@ -739,13 +739,13 @@ function focusAttachment(id: string): void {
 
 .nm-ai-messages__error-details summary {
   cursor: pointer;
-  font-weight: 600;
+  font-weight: var(--rs-font-weight-semibold);
 }
 
 .nm-ai-messages__error-details pre {
   margin: 6px 0 0;
   white-space: pre-wrap;
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   opacity: 0.9;
 }
 

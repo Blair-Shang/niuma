@@ -374,9 +374,9 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 
 <style scoped>
 .nm-ai-md {
-  font-size: 13px;
+  font-size: var(--nm-font-body);
   line-height: 1.65;
-  letter-spacing: -0.011em;
+  letter-spacing: var(--nm-letter-spacing);
   color: var(--rs-text);
   overflow-wrap: anywhere;
 }
@@ -405,8 +405,8 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 .nm-ai-md :deep(h3),
 .nm-ai-md :deep(h4) {
   margin: 1em 0 0.45em;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-weight: var(--rs-font-weight-semibold);
+  letter-spacing: var(--nm-letter-spacing);
   line-height: 1.35;
   color: var(--rs-text);
 }
@@ -425,13 +425,13 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 }
 
 .nm-ai-md :deep(a) {
-  color: color-mix(in srgb, var(--nm-aurora-a) 70%, var(--rs-text));
+  color: var(--rs-primary);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .nm-ai-md :deep(strong) {
-  font-weight: 650;
+  font-weight: var(--rs-font-weight-semibold);
 }
 
 .nm-ai-md :deep(em) {
@@ -484,7 +484,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 
 .nm-ai-md :deep(input[type='checkbox']) {
   margin: 0.35em 0 0;
-  accent-color: color-mix(in srgb, var(--nm-aurora-a) 80%, var(--rs-text));
+  accent-color: var(--rs-primary);
   pointer-events: none;
 }
 
@@ -506,13 +506,13 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 
 .nm-ai-md :deep(:not(pre) > code) {
   padding: 0.12em 0.38em;
-  border-radius: 5px;
+  border-radius: var(--rs-radius-xs);
   background: color-mix(in srgb, var(--rs-text) 8%, transparent);
 }
 
 .nm-ai-md :deep(.nm-ai-md__codeblock) {
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--rs-radius);
   border: 1px solid var(--rs-border-subtle);
   background: color-mix(in srgb, var(--nm-elevated-bg) 88%, transparent);
 }
@@ -528,8 +528,8 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 }
 
 .nm-ai-md :deep(.nm-ai-md__code-lang) {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-medium);
   color: var(--rs-muted);
   text-transform: lowercase;
 }
@@ -552,11 +552,11 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   min-height: 22px;
   padding: 0 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--rs-radius-xs);
   background: transparent;
   color: var(--rs-muted);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-medium);
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -623,7 +623,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   min-width: 1.6em;
   padding-right: 8px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--nm-font-caption);
   line-height: 1.55;
   text-align: right;
   color: color-mix(in srgb, var(--rs-muted) 80%, transparent);
@@ -653,7 +653,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   display: block;
   padding: 0;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
   line-height: 1.55;
   color: var(--rs-text);
   white-space: pre;
@@ -661,7 +661,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 
 .nm-ai-md :deep(.hljs-comment),
 .nm-ai-md :deep(.hljs-quote) {
-  color: color-mix(in srgb, var(--rs-muted) 88%, #8b9cb3);
+  color: var(--rs-text-tertiary);
   font-style: italic;
 }
 
@@ -669,25 +669,25 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 .nm-ai-md :deep(.hljs-selector-tag),
 .nm-ai-md :deep(.hljs-section),
 .nm-ai-md :deep(.hljs-link) {
-  color: color-mix(in srgb, var(--nm-aurora-a) 55%, #c792ea);
+  color: var(--rs-terminal-ansi-magenta);
 }
 
 .nm-ai-md :deep(.hljs-string),
 .nm-ai-md :deep(.hljs-doctag),
 .nm-ai-md :deep(.hljs-template-tag) {
-  color: color-mix(in srgb, var(--nm-aurora-e, #34d399) 70%, #c3e88d);
+  color: var(--rs-terminal-ansi-green);
 }
 
 .nm-ai-md :deep(.hljs-number),
 .nm-ai-md :deep(.hljs-literal),
 .nm-ai-md :deep(.hljs-bullet) {
-  color: #f78c6c;
+  color: var(--rs-terminal-ansi-red);
 }
 
 .nm-ai-md :deep(.hljs-title),
 .nm-ai-md :deep(.hljs-title.function_),
 .nm-ai-md :deep(.hljs-name) {
-  color: #82aaff;
+  color: var(--rs-terminal-ansi-blue);
 }
 
 .nm-ai-md :deep(.hljs-attr),
@@ -697,49 +697,22 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 .nm-ai-md :deep(.hljs-type),
 .nm-ai-md :deep(.hljs-built_in),
 .nm-ai-md :deep(.hljs-selector-class) {
-  color: #ffcb6b;
+  color: var(--rs-terminal-ansi-yellow);
 }
 
 .nm-ai-md :deep(.hljs-meta),
 .nm-ai-md :deep(.hljs-symbol) {
-  color: #89ddff;
+  color: var(--rs-terminal-ansi-cyan);
 }
 
 .nm-ai-md :deep(.hljs-deletion) {
-  color: #f07178;
-  background: color-mix(in srgb, #f07178 12%, transparent);
+  color: var(--rs-terminal-ansi-red);
+  background: color-mix(in srgb, var(--rs-terminal-ansi-red) 12%, transparent);
 }
 
 .nm-ai-md :deep(.hljs-addition) {
-  color: #c3e88d;
-  background: color-mix(in srgb, #c3e88d 12%, transparent);
-}
-
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-keyword),
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-selector-tag) {
-  color: #7c3aed;
-}
-
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-string),
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-doctag) {
-  color: #057a55;
-}
-
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-number),
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-literal) {
-  color: #c2410c;
-}
-
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-title),
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-name) {
-  color: #1d4ed8;
-}
-
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-attr),
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-variable),
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-type),
-[data-rs-theme='light'] .nm-ai-md :deep(.hljs-built_in) {
-  color: #b45309;
+  color: var(--rs-terminal-ansi-green);
+  background: color-mix(in srgb, var(--rs-terminal-ansi-green) 12%, transparent);
 }
 
 .nm-ai-md :deep(.nm-ai-md__table-wrap) {
@@ -747,7 +720,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--rs-border-subtle);
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   background: color-mix(in srgb, var(--nm-elevated-bg) 60%, transparent);
 }
 
@@ -755,7 +728,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   width: 100%;
   min-width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--nm-font-caption);
   margin: 0;
 }
 
@@ -781,7 +754,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 .nm-ai-md :deep(th) {
   position: sticky;
   top: 0;
-  font-weight: 600;
+  font-weight: var(--rs-font-weight-semibold);
   background: color-mix(in srgb, var(--rs-text) 6%, var(--nm-elevated-bg));
   color: var(--rs-text);
 }
@@ -799,7 +772,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   display: block;
   max-width: 100%;
   height: auto;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   border: 1px solid var(--rs-border-subtle);
   cursor: zoom-in;
 }
@@ -811,9 +784,9 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
 .nm-ai-md :deep(.nm-ai-md__img-fallback) {
   display: inline-block;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--rs-radius-sm);
   border: 1px dashed var(--rs-border-subtle);
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 
@@ -832,7 +805,7 @@ const hasContent = computed(() => viewBlocks.value.length > 0)
   margin-top: 1em;
   padding-top: 0.5em;
   border-top: 1px solid var(--rs-border-subtle);
-  font-size: 12px;
+  font-size: var(--nm-font-caption);
   color: var(--rs-muted);
 }
 </style>

@@ -3,7 +3,7 @@ import { RsDropdown, RsButton, RsIcon, RsInput } from '@niuma/ui'
 import type { RsDropdownItems } from '@niuma/ui'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import type { ThemePreference } from '@/stores/app'
+import { themeMenu } from '@/theme/registry'
 import { pluginApi } from '@/api'
 import type { PluginRecord } from '@/api/types/plugin'
 import { useBridgeStore } from '@/stores/bridge'
@@ -65,12 +65,12 @@ const validSections = new Set<SettingsSection>([
   'runtime',
 ])
 
-const themeOptions = computed(
-  (): { value: ThemePreference; label: string; icon: string }[] => [
-    { value: 'light', label: t('settings.themeLight'), icon: 'sun' },
-    { value: 'dark', label: t('settings.themeDark'), icon: 'moon' },
-    { value: 'system', label: t('settings.themeSystem'), icon: 'monitor' },
-  ],
+const themeItems = computed<RsDropdownItems>(() =>
+  themeMenu().map((item) => ({
+    value: item.id,
+    label: t(item.labelKey),
+    icon: item.icon,
+  })),
 )
 
 const localeItems = computed<RsDropdownItems>(() => [
@@ -136,10 +136,6 @@ function selectSection(id: SettingsSection): void {
   if (id === 'plugins' && !plugins.value.length) {
     void loadPlugins()
   }
-}
-
-function onThemeSelect(value: ThemePreference): void {
-  appStore.setThemePreference(value)
 }
 
 function onLocaleSelect(value: string): void {
@@ -252,19 +248,11 @@ onMounted(() => {
             <p class="nm-setting-row__label">{{ t('settings.themeLabel') }}</p>
             <p class="nm-setting-row__desc">{{ t('settings.themeDesc') }}</p>
           </div>
-          <div class="nm-segmented">
-            <button
-              v-for="opt in themeOptions"
-              :key="opt.value"
-              type="button"
-              class="nm-segmented__btn"
-              :class="{ 'nm-segmented__btn--active': appStore.themePreference === opt.value }"
-              :aria-pressed="appStore.themePreference === opt.value"
-              @click="onThemeSelect(opt.value)"
-            >
-              <RsIcon :name="opt.icon" :size="14" />
-              <span>{{ opt.label }}</span>
-            </button>
+          <div class="nm-setting-row__control">
+            <RsDropdown
+              v-model="appStore.themeId"
+              :items="themeItems"
+            />
           </div>
         </div>
 
@@ -599,42 +587,6 @@ onMounted(() => {
 
 .nm-account-profile .nm-caption {
   margin: 0;
-}
-
-/* 主题分段控件 */
-.nm-segmented {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border-radius: var(--rs-radius-sm);
-  background: color-mix(in srgb, var(--rs-text) 6%, transparent);
-}
-
-.nm-segmented__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.3rem 0.7rem;
-  border: none;
-  border-radius: calc(var(--rs-radius-sm) - 2px);
-  background: transparent;
-  color: var(--rs-muted);
-  font-size: var(--nm-font-caption);
-  cursor: pointer;
-  transition:
-    background var(--rs-transition-fast),
-    color var(--rs-transition-fast),
-    box-shadow var(--rs-transition-fast);
-}
-
-.nm-segmented__btn:hover {
-  color: var(--rs-text);
-}
-
-.nm-segmented__btn--active {
-  background: var(--rs-surface-elevated);
-  color: var(--rs-text);
-  box-shadow: var(--rs-shadow-sm);
 }
 
 .nm-settings__hint {

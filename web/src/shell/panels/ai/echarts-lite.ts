@@ -24,6 +24,8 @@ type ChartTheme = {
   border: string
   surface: string
   accent: string
+  /** 系列色。第一种跟主色，其余跟终端 ANSI，换皮肤一起变。 */
+  palette: string[]
 }
 
 function readChartTheme(): ChartTheme {
@@ -34,16 +36,25 @@ function readChartTheme(): ChartTheme {
       border: '#334155',
       surface: '#1e293b',
       accent: '#3b82f6',
+      palette: ['#3b82f6', '#7dcc7d', '#d8d890', '#c89ae8', '#6ec9c9'],
     }
   }
   const style = getComputedStyle(document.documentElement)
   const pick = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
+  const accent = pick('--rs-primary', pick('--rs-accent', '#3b82f6'))
   return {
     text: pick('--rs-muted', '#94a3b8'),
     foreground: pick('--rs-text', pick('--rs-foreground', '#e2e8f0')),
     border: pick('--rs-border-subtle', '#334155'),
     surface: pick('--rs-surface-elevated', pick('--rs-surface-subtle', '#1e293b')),
-    accent: pick('--rs-primary', pick('--rs-accent', '#3b82f6')),
+    accent,
+    palette: [
+      accent,
+      pick('--rs-terminal-ansi-green', '#7dcc7d'),
+      pick('--rs-terminal-ansi-yellow', '#d8d890'),
+      pick('--rs-terminal-ansi-magenta', '#c89ae8'),
+      pick('--rs-terminal-ansi-cyan', '#6ec9c9'),
+    ],
   }
 }
 
@@ -67,13 +78,14 @@ function isLite(v: unknown): v is NmChartLite {
 function baseTheme(opts?: {
   hasTitle?: boolean
   hasLegend?: boolean
-}): Pick<EChartsOption, 'textStyle' | 'grid' | 'tooltip' | 'legend'> {
+}): Pick<EChartsOption, 'color' | 'textStyle' | 'grid' | 'tooltip' | 'legend'> {
   const theme = readChartTheme()
   const hasTitle = Boolean(opts?.hasTitle)
   const hasLegend = opts?.hasLegend !== false
   // 标题与图例分层，避免叠字；给绘图区留出顶边距
   const gridTop = hasTitle && hasLegend ? 64 : hasTitle || hasLegend ? 44 : 28
   return {
+    color: theme.palette,
     textStyle: { color: theme.foreground, fontSize: 11 },
     grid: { left: 48, right: 16, top: gridTop, bottom: 36 },
     tooltip: {
@@ -234,7 +246,7 @@ export function liteToOption(lite: NmChartLite): EChartsOption {
   const cartesianType: 'bar' | 'line' | 'scatter' =
     lite.type === 'line' || lite.type === 'scatter' ? lite.type : 'bar'
   const xData = lite.x ?? []
-  const palette = [theme.accent, '#34d399', '#f59e0b', '#a78bfa', '#f472b6']
+  const palette = theme.palette
   return {
     ...base,
     title,

@@ -15,6 +15,14 @@ export interface ApiSocketOpenParams {
   timeoutMs?: number
   encoding?: ApiSocketEncoding
   readLimit?: number
+  /** raw | delimiter | length。空着表示原始流。 */
+  frame?: 'raw' | 'delimiter' | 'length'
+  /** lf | cr | crlf，仅 delimiter。 */
+  delimiter?: 'lf' | 'cr' | 'crlf'
+  lengthOffset?: number
+  lengthSize?: number
+  lengthEndian?: 'big' | 'little'
+  lengthAdjust?: number
 }
 
 export interface ApiSocketSessionInfo {

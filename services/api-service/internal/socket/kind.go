@@ -67,6 +67,7 @@ type OpenSpec struct {
 	Timeout   time.Duration
 	Encoding  codec.Encoding
 	ReadLimit int
+	Frame     FrameSpec
 }
 
 // SendSpec 在已打开的会话上发送一帧。
