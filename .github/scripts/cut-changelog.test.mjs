@@ -54,7 +54,7 @@ test('leaves the tagged 1.1.6 section untouched and plans the next version from 
   assert.equal(planRelease(original, publishedSet('1.1.6'), '1.1.6'), '')
   assert.equal(planRelease(original, publishedSet('1.1.6'), '1.1.7'), '1.1.7')
   const next = promote(original, '1.1.7', '2026-10-08')
-  assert.match(next, /## \[1\.1\.7\] - 2026-10-08\n\n### 修复\n\n- SSH 终端/)
+  assert.match(next, /## \[1\.1\.7\] - 2026-10-08\n\n### 修复\n\n- 在多个 Shell 页签之间切换后，SSH 终端/)
   assert.match(next, /## \[1\.1\.6\] - 2026-09-24/)
   assert.doesNotMatch(next.split('## [1.1.7]')[0], /切换 SFTP/)
   assert.equal(promote(next, '1.1.7', '2026-10-09'), next)
