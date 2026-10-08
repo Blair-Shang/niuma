@@ -232,6 +232,20 @@ func describeTable(ctx context.Context, rt Runtime, s scopeArgs) (string, error)
 	})
 }
 
+// registerSQLQueryCancel 把这条 query.exec 登记到 run 的停止表。
+// 回调走 Background：停止时原 ctx 已经取消，不能再用它发 query.cancel。
+func registerSQLQueryCancel(ctx context.Context, rt Runtime, ns, sessionID, requestID string) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(requestID) == "" {
+		return
+	}
+	RegisterStop(ctx, func() {
+		_ = invokeJSON(context.Background(), rt, ns+".query.cancel", map[string]any{
+			"sessionId": sessionID,
+			"requestId": requestID,
+		}, nil)
+	})
+}
+
 func runSQL(ctx context.Context, rt Runtime, s scopeArgs, readonly bool) (string, error) {
 	if err := s.requireIdentity(); err != nil {
 		return "", err
@@ -268,14 +282,21 @@ func runSQL(ctx context.Context, rt Runtime, s scopeArgs, readonly bool) (string
 		}()
 	}
 
+	requestID := nextAIQueryRequestID()
 	params := map[string]any{
 		"sessionId": sessionID,
 		"sql":       s.SQL,
 		"limit":     200,
 		"timeoutMs": 30000,
+		"requestId": requestID,
 	}
 	if s.Database != "" {
 		params["database"] = s.Database
+	}
+	// 先登记再执行：停止时用 requestId 调 query.cancel，只停这一条，不影响编辑器里的其它查询。
+	registerSQLQueryCancel(ctx, rt, ns, sessionID, requestID)
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	var result struct {
 		Columns []struct {

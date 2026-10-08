@@ -2,7 +2,9 @@
  * 外来导入共用的请求 / 文件夹骨架。适配器只填字段，id 在这里生成。
  */
 import { createId } from '@/utils/id'
-import type { ApiAuth, ApiBodyMode, ApiFolder, ApiKvRow, ApiMethod, ApiRequest } from '../../types'
+import type { ApiAuth, ApiBodyMode, ApiFolder, ApiGraphQLBody, ApiHttpSettings, ApiKvRow, ApiMethod, ApiRequest } from '../../types'
+import { normalizeGraphQL } from '../graphql/body'
+import { normalizeHttpSettings } from '../settings/settings'
 import { defaultAuth, emptyKinds, emptyVars, uniqueName } from '../../utils/collection-io'
 import { newKvRow } from '../../utils/format'
 
@@ -20,6 +22,11 @@ export function importedRequest(partial: {
   bodyMode?: ApiBodyMode
   body?: string
   bodyForm?: ApiKvRow[]
+  graphql?: ApiGraphQLBody
+  settings?: ApiHttpSettings
+  preRequestScript?: string
+  testScript?: string
+  grpcMethod?: string
 }): ApiRequest {
   return {
     id: createId('req'),
@@ -32,6 +39,11 @@ export function importedRequest(partial: {
     bodyMode: partial.bodyMode ?? 'none',
     body: partial.body ?? '',
     bodyForm: partial.bodyForm ?? [],
+    graphql: normalizeGraphQL(partial.graphql),
+    settings: normalizeHttpSettings(partial.settings),
+    preRequestScript: partial.preRequestScript ?? '',
+    testScript: partial.testScript ?? '',
+    grpcMethod: partial.grpcMethod ?? '',
   }
 }
 

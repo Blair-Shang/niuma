@@ -36,8 +36,8 @@ export function useHttpWorkspace(props: { request: ApiRequest; requestId?: strin
   })
 
   const splitPanes = computed<RsSplitPaneItem[]>(() => [
-    { key: 'request', size: 46, min: 22, resizerHandle: true },
-    { key: 'response', size: 54, min: 24 },
+    { key: 'request', size: 48, min: 28, resizerHandle: true },
+    { key: 'response', size: 52, min: 24 },
   ])
 
   function onSend(): void {

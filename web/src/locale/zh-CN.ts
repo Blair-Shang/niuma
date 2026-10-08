@@ -72,6 +72,7 @@ export default {
     noHistory: '暂无历史对话',
     deleteChat: '删除对话',
     newChat: '新对话',
+    chatRunning: '生成中',
     renameChat: '重命名对话',
     untitled: '未命名对话',
     roleUser: '你',

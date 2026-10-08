@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { aiApi } from '@/api/ai'
 import { subscribeBridgeEventByPrefix } from '@/api/event-bus'
 import type {
@@ -27,41 +27,108 @@ import {
 } from '@/shell/panels/ai/system-provider'
 
 /**
- * AI 对话状态 — 会话列表、消息、流式缓冲与 run 生命周期。
+ * AI 对话状态。每个会话各自保存消息、流式缓冲和 run，切换只更换当前显示的会话。
  *
  * 面板开关仍由 useShellStore.aiPanelOpen 控制；本 store 只管对话数据。
  */
+type RunStatus = 'idle' | 'running' | 'done' | 'cancelled' | 'error'
+
+/** 一路会话的画面与进行中的 run。事件按 conversationId 写回这一份。 */
+interface ConversationSession {
+  messages: AiMessage[]
+  runId: string | null
+  streamingText: string
+  runStatus: RunStatus
+  runError: string | null
+  sending: boolean
+  toolHistory: AiLiveToolInvocation[]
+  liveTools: AiLiveToolInvocation[]
+  previousAssistantContent: string | null
+  editingMessageId: string | null
+  cancelPending: boolean
+  loaded: boolean
+}
+
+const EMPTY_MESSAGES: AiMessage[] = []
+const EMPTY_TOOLS: AiLiveToolInvocation[] = []
+
+function sessionBusy(slot: ConversationSession): boolean {
+  return slot.sending || slot.runStatus === 'running'
+}
+
+function createSession(): ConversationSession {
+  return {
+    messages: [],
+    runId: null,
+    streamingText: '',
+    runStatus: 'idle',
+    runError: null,
+    sending: false,
+    toolHistory: [],
+    liveTools: [],
+    previousAssistantContent: null,
+    editingMessageId: null,
+    cancelPending: false,
+    loaded: false,
+  }
+}
+
 export const useAiStore = defineStore('ai', () => {
   const conversations = ref<AiConversation[]>([])
   const activeConversationId = ref<string | null>(null)
-  const messages = ref<AiMessage[]>([])
   const providers = ref<AiProvider[]>([])
   const skills = ref<AiSkill[]>([])
   const selectedProviderId = ref<string>('')
   const selectedModelCode = ref<string>('')
   const selectedSkillCode = ref<string>('')
-
-  const runId = ref<string | null>(null)
-  const streamingText = ref('')
-  const runStatus = ref<'idle' | 'running' | 'done' | 'cancelled' | 'error'>('idle')
-  const runError = ref<string | null>(null)
   const loading = ref(false)
-  const sending = ref(false)
   const error = ref<string | null>(null)
-  /** 历史工具调用（conversation.get）；流式进行中与 liveTools 合并展示。 */
-  const toolHistory = ref<AiLiveToolInvocation[]>([])
-  /** 进行中的工具调用（Bridge 事件驱动）。 */
-  const liveTools = ref<AiLiveToolInvocation[]>([])
-  /** 重新生成前保留的上一版助手正文（对比用）。 */
-  const previousAssistantContent = ref<string | null>(null)
-  /** 编辑重发：目标 user messageId。 */
-  const editingMessageId = ref<string | null>(null)
   /** askSelection / 外部注入的待挂 @ 附件。 */
   const pendingComposerAttachments = ref<AiContextAttachment[]>([])
   /** 将用户消息填入输入框。 */
   const composerDraft = ref('')
 
+  /**
+   * 只留当前画面和仍在跑的会话。结束后的正文在库里，离开画面就丢掉内存副本。
+   * 事件只更新已有槽，不因迟到事件再造出一份会话。
+   */
+  const sessions = reactive<Record<string, ConversationSession>>({})
+  /** 已删除的会话。迟到的 runId 只负责取消，不再写回画面。 */
+  const droppedConversationIds = new Set<string>()
+  const loadGen = new Map<string, number>()
+
+  function sessionOf(id: string): ConversationSession {
+    if (!sessions[id]) {
+      sessions[id] = createSession()
+    }
+    return sessions[id]
+  }
+
+  const activeLive = computed(() => {
+    const id = activeConversationId.value
+    return id ? sessions[id] ?? null : null
+  })
+
+  const messages = computed(() => activeLive.value?.messages ?? EMPTY_MESSAGES)
+  const runId = computed(() => activeLive.value?.runId ?? null)
+  const streamingText = computed(() => activeLive.value?.streamingText ?? '')
+  const runStatus = computed(() => activeLive.value?.runStatus ?? 'idle')
+  const runError = computed(() => activeLive.value?.runError ?? null)
+  const sending = computed(() => activeLive.value?.sending ?? false)
+  const toolHistory = computed(() => activeLive.value?.toolHistory ?? EMPTY_TOOLS)
+  const liveTools = computed(() => activeLive.value?.liveTools ?? EMPTY_TOOLS)
+  const previousAssistantContent = computed(() => activeLive.value?.previousAssistantContent ?? null)
+  const editingMessageId = computed(() => activeLive.value?.editingMessageId ?? null)
   const isStreaming = computed(() => runStatus.value === 'running')
+  const busyConversationIds = computed(() => {
+    const ids = new Set<string>()
+    for (const [id, slot] of Object.entries(sessions)) {
+      if (slot.sending || slot.runStatus === 'running') {
+        ids.add(id)
+      }
+    }
+    return ids
+  })
 
   const activeConversation = computed(() =>
     conversations.value.find((c) => c.conversationId === activeConversationId.value) ?? null,
@@ -88,6 +155,122 @@ export const useAiStore = defineStore('ai', () => {
   })
 
   let eventUnsub: (() => void) | null = null
+  /** 已经结束的 run。只留最近若干个，挡住刚结束那一轮的迟到事件。 */
+  const closedRunIds = new Set<string>()
+  const closedRunLimit = 64
+
+  function acceptsRun(slot: ConversationSession, eventRunId?: string): boolean {
+    if (eventRunId && closedRunIds.has(eventRunId)) {
+      return false
+    }
+    if (slot.cancelPending && !slot.runId) {
+      return false
+    }
+    if (slot.runId && eventRunId && eventRunId !== slot.runId) {
+      return false
+    }
+    if (!slot.runId && !slot.sending && slot.runStatus !== 'running') {
+      return false
+    }
+    return true
+  }
+
+  function closeRun(id: string | undefined): void {
+    if (!id || closedRunIds.has(id)) {
+      return
+    }
+    closedRunIds.add(id)
+    while (closedRunIds.size > closedRunLimit) {
+      const oldest = closedRunIds.values().next().value
+      if (!oldest) {
+        break
+      }
+      closedRunIds.delete(oldest)
+    }
+  }
+
+  /** 丢掉不在画面上、也没有进行中 run 的会话副本。取消/失败保留状态，正文仍从库里再取。 */
+  function releaseIdleSession(id: string | null | undefined): void {
+    if (!id || id === activeConversationId.value) {
+      return
+    }
+    const slot = sessions[id]
+    if (!slot || sessionBusy(slot)) {
+      return
+    }
+    loadGen.delete(id)
+    if (slot.runStatus === 'cancelled' || slot.runStatus === 'error') {
+      slot.messages = []
+      slot.toolHistory = []
+      slot.liveTools = []
+      slot.streamingText = ''
+      slot.previousAssistantContent = null
+      slot.loaded = false
+      return
+    }
+    delete sessions[id]
+  }
+
+  /** 当前画面刷新工具历史；不在画面上的会话立刻释放正文副本。 */
+  function settleSessionView(conversationId: string): void {
+    if (activeConversationId.value === conversationId) {
+      void reloadToolHistory(conversationId)
+      return
+    }
+    releaseIdleSession(conversationId)
+  }
+
+  function discardRun(id: string): void {
+    closeRun(id)
+    void aiApi.cancelChat({ runId: id }).catch(() => undefined)
+  }
+
+  /** 进行中的工具收成终态，留在该会话的历史里。 */
+  function settleOpenTools(slot: ConversationSession, errorText: string): void {
+    const mark = (t: AiLiveToolInvocation): AiLiveToolInvocation =>
+      t.status === 'running' || t.status === 'pending'
+        ? { ...t, status: 'error', error: t.error || errorText }
+        : t
+    const byId = new Map(slot.toolHistory.map((t) => [t.invocationId, t]))
+    for (const t of slot.liveTools) {
+      byId.set(t.invocationId, t)
+    }
+    slot.toolHistory = [...byId.values()].map(mark)
+    slot.liveTools = []
+  }
+
+  /**
+   * 采纳 streamChat 返回的 runId，写回发起这次发送的会话。
+   * 该会话已停止或已删除时，取消这一轮并返回 false。
+   */
+  function adoptRun(conversationId: string, id: string): boolean {
+    if (droppedConversationIds.has(conversationId)) {
+      discardRun(id)
+      return false
+    }
+    const slot = sessions[conversationId]
+    if (!slot) {
+      discardRun(id)
+      return false
+    }
+    if (!slot.cancelPending) {
+      slot.runId = id
+      return true
+    }
+    slot.cancelPending = false
+    closeRun(id)
+    settleOpenTools(slot, 'cancelled')
+    slot.streamingText = ''
+    slot.runId = null
+    slot.runStatus = 'cancelled'
+    slot.sending = false
+    void aiApi.cancelChat({ runId: id }).catch((e) => {
+      if (activeConversationId.value === conversationId) {
+        error.value = e instanceof Error ? e.message : String(e)
+      }
+    })
+    return false
+  }
 
   function mapInvocationStatus(status: string): AiLiveToolStatus {
     if (status === 'pending') return 'pending'
@@ -98,9 +281,9 @@ export const useAiStore = defineStore('ai', () => {
 
   function mapToolInvocations(
     records: AiToolInvocationRecord[] | undefined,
-    confirmableIds?: Set<string>,
+    confirmableIds: Set<string> | undefined,
+    currentRun: string | null,
   ): AiLiveToolInvocation[] {
-    const currentRun = runId.value
     return (records ?? []).map((r) => {
       let status = mapInvocationStatus(String(r.status))
       let error = r.error
@@ -141,22 +324,24 @@ export const useAiStore = defineStore('ai', () => {
     if (!ev || typeof ev !== 'object' || !('type' in ev)) {
       return
     }
+    const conversationId = 'conversationId' in ev ? ev.conversationId : undefined
+    if (!conversationId || droppedConversationIds.has(conversationId)) {
+      return
+    }
+    const slot = sessions[conversationId]
+    if (!slot || !acceptsRun(slot, ev.runId)) {
+      return
+    }
     if (ev.type === 'platform.ai.token') {
-      if (runId.value && ev.runId !== runId.value) {
-        return
-      }
-      streamingText.value += ev.delta ?? ''
+      slot.streamingText += ev.delta ?? ''
       return
     }
     if (ev.type === 'platform.ai.message') {
-      if (ev.conversationId && activeConversationId.value && ev.conversationId !== activeConversationId.value) {
-        return
-      }
       if (ev.role === 'assistant' && ev.content != null) {
-        streamingText.value = ''
-        const exists = messages.value.some((m) => m.messageId === ev.messageId)
+        slot.streamingText = ''
+        const exists = slot.messages.some((m) => m.messageId === ev.messageId)
         if (!exists) {
-          messages.value.push({
+          slot.messages.push({
             messageId: ev.messageId,
             conversationId: ev.conversationId,
             messageRole: ev.role,
@@ -169,10 +354,7 @@ export const useAiStore = defineStore('ai', () => {
       return
     }
     if (ev.type === 'platform.ai.tool.start') {
-      if (runId.value && ev.runId !== runId.value) {
-        return
-      }
-      const existing = liveTools.value.find((t) => t.invocationId === ev.invocationId)
+      const existing = slot.liveTools.find((t) => t.invocationId === ev.invocationId)
       if (existing) {
         existing.status = 'running'
         existing.toolName = ev.toolName
@@ -180,7 +362,7 @@ export const useAiStore = defineStore('ai', () => {
         if (ev.risk) existing.risk = ev.risk
         return
       }
-      liveTools.value.push({
+      slot.liveTools.push({
         invocationId: ev.invocationId,
         toolName: ev.toolName,
         status: 'running',
@@ -192,10 +374,7 @@ export const useAiStore = defineStore('ai', () => {
       return
     }
     if (ev.type === 'platform.ai.tool.pending') {
-      if (runId.value && ev.runId !== runId.value) {
-        return
-      }
-      const existing = liveTools.value.find((t) => t.invocationId === ev.invocationId)
+      const existing = slot.liveTools.find((t) => t.invocationId === ev.invocationId)
       if (existing) {
         existing.status = 'pending'
         existing.toolName = ev.toolName || existing.toolName
@@ -203,7 +382,7 @@ export const useAiStore = defineStore('ai', () => {
         existing.risk = ev.risk
         return
       }
-      liveTools.value.push({
+      slot.liveTools.push({
         invocationId: ev.invocationId,
         toolName: ev.toolName || 'tool',
         status: 'pending',
@@ -215,9 +394,6 @@ export const useAiStore = defineStore('ai', () => {
       return
     }
     if (ev.type === 'platform.ai.tool.result') {
-      if (runId.value && ev.runId !== runId.value) {
-        return
-      }
       const applyResult = (t: AiLiveToolInvocation): AiLiveToolInvocation => {
         if (t.invocationId !== ev.invocationId) {
           return t
@@ -233,79 +409,66 @@ export const useAiStore = defineStore('ai', () => {
           error: ev.error,
         }
       }
-      liveTools.value = liveTools.value.map(applyResult)
-      toolHistory.value = toolHistory.value.map(applyResult)
+      slot.liveTools = slot.liveTools.map(applyResult)
+      slot.toolHistory = slot.toolHistory.map(applyResult)
       return
     }
     if (ev.type === 'platform.ai.run.status') {
-      if (runId.value && ev.runId !== runId.value) {
-        return
+      if (ev.status === 'done' || ev.status === 'cancelled' || ev.status === 'error') {
+        closeRun(ev.runId)
       }
       if (ev.status === 'running') {
-        runStatus.value = 'running'
-        runError.value = null
+        slot.runStatus = 'running'
+        slot.runError = null
         return
       }
       if (ev.status === 'done') {
-        runStatus.value = 'done'
-        sending.value = false
-        runId.value = null
-        streamingText.value = ''
-        previousAssistantContent.value = null
-        editingMessageId.value = null
+        slot.runStatus = 'done'
+        slot.sending = false
+        slot.runId = null
+        slot.streamingText = ''
+        slot.previousAssistantContent = null
+        slot.editingMessageId = null
+        slot.liveTools = []
         void refreshConversations()
-        if (activeConversationId.value) {
-          void reloadToolHistory(activeConversationId.value)
-        }
-        liveTools.value = []
+        settleSessionView(conversationId)
         return
       }
       if (ev.status === 'cancelled') {
-        runStatus.value = 'cancelled'
-        sending.value = false
-        runId.value = null
-        const markStopped = (t: (typeof liveTools.value)[number]) =>
-          t.status === 'running' || t.status === 'pending'
-            ? { ...t, status: 'error' as const, error: t.error || 'cancelled' }
-            : t
-        liveTools.value = liveTools.value.map(markStopped)
-        toolHistory.value = toolHistory.value.map(markStopped)
-        if (activeConversationId.value) {
-          void reloadToolHistory(activeConversationId.value)
-        }
+        slot.runStatus = 'cancelled'
+        slot.sending = false
+        slot.runId = null
+        settleOpenTools(slot, 'cancelled')
+        settleSessionView(conversationId)
         return
       }
       if (ev.status === 'error') {
-        runStatus.value = 'error'
-        runError.value = ev.error ?? 'unknown error'
-        sending.value = false
-        runId.value = null
-        streamingText.value = ''
-        const markFailed = (t: (typeof liveTools.value)[number]) =>
-          t.status === 'running' || t.status === 'pending'
-            ? { ...t, status: 'error' as const, error: runError.value ?? t.error }
-            : t
-        liveTools.value = liveTools.value.map(markFailed)
-        toolHistory.value = toolHistory.value.map(markFailed)
-        if (activeConversationId.value) {
-          void reloadToolHistory(activeConversationId.value)
-        }
-        return
+        slot.runStatus = 'error'
+        slot.runError = ev.error ?? 'unknown error'
+        slot.sending = false
+        slot.runId = null
+        slot.streamingText = ''
+        settleOpenTools(slot, slot.runError ?? 'error')
+        settleSessionView(conversationId)
       }
     }
   }
 
   async function reloadToolHistory(conversationId: string): Promise<void> {
+    const slot = sessions[conversationId]
+    if (!slot || droppedConversationIds.has(conversationId)) {
+      return
+    }
     try {
       const [res, pending] = await Promise.all([
         aiApi.getConversation({ conversationId }),
         aiApi.listPendingPolicy().catch(() => ({ invocationIds: [] as string[] })),
       ])
-      if (activeConversationId.value !== conversationId) {
+      if (slot.sending || slot.runStatus === 'running') {
         return
       }
       const confirmable = new Set(pending.invocationIds ?? [])
-      toolHistory.value = mapToolInvocations(res.toolInvocations, confirmable)
+      slot.toolHistory = mapToolInvocations(res.toolInvocations, confirmable, slot.runId)
     } catch {
       // ignore reload errors
     }
@@ -379,7 +542,7 @@ export const useAiStore = defineStore('ai', () => {
       if (!activeConversationId.value && conversations.value.length) {
         await openConversation(conversations.value[0].conversationId)
       } else if (activeConversationId.value) {
-        await reloadToolHistory(activeConversationId.value)
+        await hydrateConversation(activeConversationId.value)
       }
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -388,32 +551,72 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  async function openConversation(conversationId: string): Promise<void> {
-    loading.value = true
-    error.value = null
-    liveTools.value = []
-    editingMessageId.value = null
+  function applyConversationModel(providerId?: string, modelCode?: string): void {
+    if (providerId) {
+      selectedProviderId.value = providerId
+    }
+    if (modelCode) {
+      selectedModelCode.value = modelCode
+    }
+    reconcileSelectedModel()
+  }
+
+  /** 把已落库的消息写入该会话。进行中的 run 保持内存里的流式内容。 */
+  async function hydrateConversation(conversationId: string): Promise<void> {
+    const slot = sessionOf(conversationId)
+    if (slot.sending || slot.runStatus === 'running') {
+      return
+    }
+    const gen = (loadGen.get(conversationId) ?? 0) + 1
+    loadGen.set(conversationId, gen)
+    const showLoading = !slot.loaded && activeConversationId.value === conversationId
+    if (showLoading) {
+      loading.value = true
+    }
     try {
       const [res, pending] = await Promise.all([
         aiApi.getConversation({ conversationId }),
         aiApi.listPendingPolicy().catch(() => ({ invocationIds: [] as string[] })),
       ])
-      activeConversationId.value = conversationId
-      messages.value = (res.messages ?? []).filter((m) => m.messageRole !== 'tool')
+      if (loadGen.get(conversationId) !== gen || droppedConversationIds.has(conversationId)) {
+        return
+      }
+      if (sessionBusy(slot)) {
+        return
+      }
       const confirmable = new Set(pending.invocationIds ?? [])
-      toolHistory.value = mapToolInvocations(res.toolInvocations, confirmable)
-      if (res.conversation?.providerId) {
-        selectedProviderId.value = res.conversation.providerId
+      slot.messages = (res.messages ?? []).filter((m) => m.messageRole !== 'tool')
+      slot.toolHistory = mapToolInvocations(res.toolInvocations, confirmable, slot.runId)
+      slot.loaded = true
+      if (activeConversationId.value === conversationId) {
+        applyConversationModel(res.conversation?.providerId, res.conversation?.modelCode)
       }
-      if (res.conversation?.modelCode) {
-        selectedModelCode.value = res.conversation.modelCode
-      }
-      reconcileSelectedModel()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      if (activeConversationId.value === conversationId) {
+        error.value = e instanceof Error ? e.message : String(e)
+      }
     } finally {
-      loading.value = false
+      if (showLoading && activeConversationId.value === conversationId && loadGen.get(conversationId) === gen) {
+        loading.value = false
+      }
     }
+  }
+
+  async function openConversation(conversationId: string): Promise<void> {
+    const previousId = activeConversationId.value
+    activeConversationId.value = conversationId
+    if (previousId !== conversationId) {
+      releaseIdleSession(previousId)
+    }
+    error.value = null
+    const listed = conversations.value.find((c) => c.conversationId === conversationId)
+    applyConversationModel(listed?.providerId, listed?.modelCode)
+    const slot = sessionOf(conversationId)
+    if (slot.sending || slot.runStatus === 'running') {
+      loading.value = false
+      return
+    }
+    await hydrateConversation(conversationId)
   }
 
   async function resolveCloudAccessToken(): Promise<string | undefined> {
@@ -447,13 +650,20 @@ export const useAiStore = defineStore('ai', () => {
 
   async function removeConversation(conversationId: string): Promise<void> {
     error.value = null
+    const removingActive = activeConversationId.value === conversationId
     try {
       await aiApi.deleteConversation({ conversationId })
-      if (activeConversationId.value === conversationId) {
+      droppedConversationIds.add(conversationId)
+      const slot = sessions[conversationId]
+      if (slot?.runId) {
+        discardRun(slot.runId)
+      } else if (slot?.cancelPending || slot?.sending || slot?.runStatus === 'running') {
+        slot.cancelPending = true
+      }
+      delete sessions[conversationId]
+      loadGen.delete(conversationId)
+      if (removingActive) {
         activeConversationId.value = null
-        messages.value = []
-        toolHistory.value = []
-        liveTools.value = []
       }
       await refreshConversations()
       if (!activeConversationId.value && conversations.value.length) {
@@ -483,9 +693,6 @@ export const useAiStore = defineStore('ai', () => {
     }
     ensureEventSubscription()
     error.value = null
-    runError.value = null
-    liveTools.value = []
-    previousAssistantContent.value = null
 
     if (!activeConversationId.value) {
       await newConversation()
@@ -494,65 +701,92 @@ export const useAiStore = defineStore('ai', () => {
       }
     }
 
-    const editId = editingMessageId.value
-    sending.value = true
-    runStatus.value = 'running'
-    streamingText.value = ''
+    const conversationId = activeConversationId.value
+    const slot = sessionOf(conversationId)
+    if (slot.runId) {
+      closeRun(slot.runId)
+    }
+    const editId = slot.editingMessageId
+    slot.cancelPending = false
+    slot.runError = null
+    slot.liveTools = []
+    slot.previousAssistantContent = null
+    slot.runId = null
+    slot.sending = true
+    slot.runStatus = 'running'
+    slot.streamingText = ''
 
     if (editId) {
-      const idx = messages.value.findIndex((m) => m.messageId === editId)
+      const idx = slot.messages.findIndex((m) => m.messageId === editId)
       if (idx >= 0) {
-        messages.value = messages.value.slice(0, idx)
-        toolHistory.value = []
+        slot.messages = slot.messages.slice(0, idx)
+        slot.toolHistory = []
       }
     }
 
     const optimisticId = `local-${Date.now()}`
-    messages.value.push({
+    slot.messages.push({
       messageId: optimisticId,
-      conversationId: activeConversationId.value,
+      conversationId,
       messageRole: 'user',
       messageContent: displayContent,
       tokenCount: null,
       createdAt: new Date().toISOString(),
     })
 
+    const providerId = selectedProviderId.value || undefined
+    const modelCode = selectedModelCode.value || undefined
+    const skillCode = selectedSkillCode.value || undefined
+
     try {
       const cloudAccessToken = await resolveCloudAccessToken()
+      if (droppedConversationIds.has(conversationId) || !sessions[conversationId]) {
+        return
+      }
       const res = await aiApi.streamChat({
-        conversationId: activeConversationId.value,
+        conversationId,
         content: displayContent,
-        providerId: selectedProviderId.value || undefined,
-        modelCode: selectedModelCode.value || undefined,
-        skillCode: selectedSkillCode.value || undefined,
+        providerId,
+        modelCode,
+        skillCode,
         editFromMessageId: editId || undefined,
         context: options?.context,
         cloudAccessToken,
       })
-      runId.value = res.runId
-      editingMessageId.value = null
-      const idx = messages.value.findIndex((m) => m.messageId === optimisticId)
-      if (idx >= 0) {
-        messages.value[idx] = {
-          ...messages.value[idx],
-          messageId: res.userMessageId,
+      const current = sessions[conversationId]
+      if (current && !droppedConversationIds.has(conversationId)) {
+        current.editingMessageId = null
+        const idx = current.messages.findIndex((m) => m.messageId === optimisticId)
+        if (idx >= 0) {
+          current.messages[idx] = {
+            ...current.messages[idx],
+            messageId: res.userMessageId,
+          }
         }
       }
-    } catch (e) {
-      sending.value = false
-      runStatus.value = 'error'
-      const msg = e instanceof Error ? e.message : String(e)
-      if (msg === 'login_required') {
-        sending.value = false
-        runStatus.value = 'idle'
-        messages.value = messages.value.filter((m) => m.messageId !== optimisticId)
+      if (!adoptRun(conversationId, res.runId)) {
         return
       }
-      runError.value = msg
-      error.value = runError.value
-      messages.value = messages.value.filter((m) => m.messageId !== optimisticId)
-      if (editId && activeConversationId.value) {
-        await openConversation(activeConversationId.value)
+    } catch (e) {
+      const current = sessions[conversationId]
+      if (!current || droppedConversationIds.has(conversationId)) {
+        return
+      }
+      current.sending = false
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg === 'login_required') {
+        current.runStatus = 'idle'
+        current.messages = current.messages.filter((m) => m.messageId !== optimisticId)
+        return
+      }
+      current.runStatus = 'error'
+      current.runError = msg
+      current.messages = current.messages.filter((m) => m.messageId !== optimisticId)
+      if (activeConversationId.value === conversationId) {
+        error.value = msg
+      }
+      if (editId) {
+        await hydrateConversation(conversationId)
       }
     }
   }
@@ -567,19 +801,26 @@ export const useAiStore = defineStore('ai', () => {
     }
     ensureEventSubscription()
     error.value = null
-    runError.value = null
 
-    const idx = messages.value.findIndex((m) => m.messageId === assistantMessageId)
-    if (idx < 0 || messages.value[idx]?.messageRole !== 'assistant') {
+    const conversationId = activeConversationId.value
+    const slot = sessionOf(conversationId)
+    const idx = slot.messages.findIndex((m) => m.messageId === assistantMessageId)
+    if (idx < 0 || slot.messages[idx]?.messageRole !== 'assistant') {
       return
     }
 
-    previousAssistantContent.value = messages.value[idx]?.messageContent ?? null
-    sending.value = true
-    runStatus.value = 'running'
-    streamingText.value = ''
-    liveTools.value = []
-    messages.value = messages.value.slice(0, idx)
+    if (slot.runId) {
+      closeRun(slot.runId)
+    }
+    slot.cancelPending = false
+    slot.runError = null
+    slot.previousAssistantContent = slot.messages[idx]?.messageContent ?? null
+    slot.runId = null
+    slot.sending = true
+    slot.runStatus = 'running'
+    slot.streamingText = ''
+    slot.liveTools = []
+    slot.messages = slot.messages.slice(0, idx)
 
     const pack = options?.context
       ? null
@@ -588,37 +829,63 @@ export const useAiStore = defineStore('ai', () => {
       workspace: pack!.workspace,
       attachments: pack!.attachments,
     }
+    const providerId = selectedProviderId.value || undefined
+    const modelCode = selectedModelCode.value || undefined
+    const skillCode = selectedSkillCode.value || undefined
 
     try {
       const cloudAccessToken = await resolveCloudAccessToken()
+      if (droppedConversationIds.has(conversationId) || !sessions[conversationId]) {
+        return
+      }
       const res = await aiApi.streamChat({
-        conversationId: activeConversationId.value,
+        conversationId,
         regenerateFromMessageId: assistantMessageId,
-        providerId: selectedProviderId.value || undefined,
-        modelCode: selectedModelCode.value || undefined,
-        skillCode: selectedSkillCode.value || undefined,
+        providerId,
+        modelCode,
+        skillCode,
         context,
         cloudAccessToken,
       })
-      runId.value = res.runId
+      if (!adoptRun(conversationId, res.runId)) {
+        const current = sessions[conversationId]
+        if (current) {
+          current.previousAssistantContent = null
+        }
+        return
+      }
     } catch (e) {
-      sending.value = false
-      runStatus.value = 'error'
-      runError.value = e instanceof Error ? e.message : String(e)
-      error.value = runError.value
-      previousAssistantContent.value = null
-      await openConversation(activeConversationId.value)
+      const current = sessions[conversationId]
+      if (!current || droppedConversationIds.has(conversationId)) {
+        return
+      }
+      current.sending = false
+      current.runStatus = 'error'
+      current.runError = e instanceof Error ? e.message : String(e)
+      current.previousAssistantContent = null
+      if (activeConversationId.value === conversationId) {
+        error.value = current.runError
+      }
+      await hydrateConversation(conversationId)
     }
   }
 
   /** 将用户消息填入输入框并标记为编辑重发。 */
   function editUserMessage(messageId: string, content: string): void {
-    editingMessageId.value = messageId
+    const slot = activeLive.value
+    if (!slot) {
+      return
+    }
+    slot.editingMessageId = messageId
     composerDraft.value = content
   }
 
   function cancelEdit(): void {
-    editingMessageId.value = null
+    const slot = activeLive.value
+    if (!slot) {
+      return
+    }
+    slot.editingMessageId = null
   }
 
   /** askSelection：把附件排入 Composer。 */
@@ -722,11 +989,19 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   async function stop(): Promise<void> {
-    if (!runId.value) {
+    const slot = activeLive.value
+    if (!slot) {
+      return
+    }
+    const id = slot.runId
+    if (!id) {
+      if (slot.sending || slot.runStatus === 'running') {
+        slot.cancelPending = true
+      }
       return
     }
     try {
-      await aiApi.cancelChat({ runId: runId.value })
+      await aiApi.cancelChat({ runId: id })
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     }
@@ -743,9 +1018,10 @@ export const useAiStore = defineStore('ai', () => {
         decision,
         scope: decision === 'approve' ? scope : 'once',
       })
+      const slot = activeLive.value
       const hit =
-        liveTools.value.find((t) => t.invocationId === invocationId) ||
-        toolHistory.value.find((t) => t.invocationId === invocationId)
+        slot?.liveTools.find((t) => t.invocationId === invocationId) ||
+        slot?.toolHistory.find((t) => t.invocationId === invocationId)
       if (hit && decision === 'reject') {
         hit.status = 'error'
         hit.error = 'rejected'
@@ -780,6 +1056,7 @@ export const useAiStore = defineStore('ai', () => {
     previousAssistantContent,
     composerDraft,
     editingMessageId,
+    busyConversationIds,
     pendingComposerAttachments,
     bootstrap,
     refreshProviders,

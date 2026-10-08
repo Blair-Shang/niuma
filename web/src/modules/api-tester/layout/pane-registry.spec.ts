@@ -6,7 +6,7 @@ import { minimalRequest } from '../utils/collection-io'
 
 describe('api pane registry', () => {
   it('exposes static kind defs without loading workspaces', () => {
-    expect(API_PANE_KIND_DEFS.map((def) => def.kind)).toEqual(['http', 'tcp', 'udp', 'websocket'])
+    expect(API_PANE_KIND_DEFS.map((def) => def.kind)).toEqual(['http', 'tcp', 'udp', 'websocket', 'grpc'])
   })
 
   it('maps methods to registered kinds', () => {
@@ -14,14 +14,16 @@ describe('api pane registry', () => {
     expect(paneKindOf('TCP')).toBe('tcp')
     expect(paneKindOf('UDP')).toBe('udp')
     expect(paneKindOf('WS')).toBe('websocket')
+    expect(paneKindOf('GRPC')).toBe('grpc')
   })
 
-  it('lists create actions from catalog, not websocket', () => {
+  it('lists websocket beside the socket creates', () => {
     const keys = listApiPaneCreates().map((item) => item.method)
     expect(keys).toContain('GET')
     expect(keys).toContain('TCP')
     expect(keys).toContain('UDP')
-    expect(keys).not.toContain('WS')
+    expect(keys).toContain('WS')
+    expect(keys).toContain('GRPC')
   })
 
   it('nests TCP and UDP client/server creates', () => {

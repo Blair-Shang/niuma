@@ -9,12 +9,25 @@
  * @see docs/09-web-app-shell.md 第 6 节「Tab 工作区」
  */
 import type { AsyncComponentLoader } from 'vue'
+import { environmentView } from '@/modules/api-tester/environment/register'
+import { mockView } from '@/modules/api-tester/mock/register'
+import { runView } from '@/modules/api-tester/run/register'
+import { captureView } from '@/modules/api-tester/capture/register'
 
 /** 设置视图的 Tab moduleId（内部命名空间，避免与真实模块 id 冲突） */
 export const SETTINGS_VIEW_ID = 'workbench.view.settings'
 
 /** API 环境配置视图：全局单例 Tab，不进 Activity Bar */
 export const API_ENV_VIEW_ID = 'workbench.view.api-environments'
+
+/** 本机 Mock：全局单例 Tab */
+export const API_MOCK_VIEW_ID = 'workbench.view.api-mock'
+
+/** 集合运行：全局单例 Tab */
+export const API_RUN_VIEW_ID = 'workbench.view.api-run'
+
+/** 本机抓包：全局单例 Tab */
+export const API_CAPTURE_VIEW_ID = 'workbench.view.api-capture'
 
 /** 内置视图定义（元数据 + 组件懒加载器） */
 export interface InternalView {
@@ -36,9 +49,27 @@ const INTERNAL_VIEWS: Record<string, InternalView> = {
   },
   [API_ENV_VIEW_ID]: {
     id: API_ENV_VIEW_ID,
-    titleKey: 'modules.api.sideEnvironment',
-    icon: 'globe',
-    load: () => import('@/modules/api-tester/layout/ApiEnvironmentView.vue'),
+    titleKey: environmentView.titleKey,
+    icon: environmentView.icon,
+    load: environmentView.load,
+  },
+  [API_MOCK_VIEW_ID]: {
+    id: API_MOCK_VIEW_ID,
+    titleKey: mockView.titleKey,
+    icon: mockView.icon,
+    load: mockView.load,
+  },
+  [API_RUN_VIEW_ID]: {
+    id: API_RUN_VIEW_ID,
+    titleKey: runView.titleKey,
+    icon: runView.icon,
+    load: runView.load,
+  },
+  [API_CAPTURE_VIEW_ID]: {
+    id: API_CAPTURE_VIEW_ID,
+    titleKey: captureView.titleKey,
+    icon: captureView.icon,
+    load: captureView.load,
   },
 }
 

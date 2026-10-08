@@ -210,7 +210,15 @@ func (s *Service) runChatStream(
 			return
 		}
 
-		// 将本轮 assistant（含 tool_calls）加入上下文
+		// 先把本段说明落库并推给面板，工具出现在这段文字之后，而不是压在整段回答上面。
+		if strings.TrimSpace(result.Content) != "" {
+			if err := s.commitAssistant(runID, conversationID, result.Content); err != nil {
+				s.publishRunError(runID, conversationID, err)
+				return
+			}
+		}
+
+		// 将本轮 assistant（含 tool_calls）加入上下文。取消后不再追加，避免把半截工具结果送进下一轮模型请求。
 		messages = append(messages, ChatMessage{
 			Role:      MessageRoleAssistant,
 			Content:   result.Content,
@@ -218,7 +226,14 @@ func (s *Service) runChatStream(
 		})
 
 		for _, tc := range result.ToolCalls {
+			// 终态由 Cancel 发布。这里只停止后续工具，避免再发一轮模型请求。
+			if err := ctx.Err(); err != nil {
+				return
+			}
 			toolResult, invErr := s.invokeBoundTool(ctx, runID, conversationID, normalized, bound, tc)
+			if ctx.Err() != nil || errors.Is(invErr, context.Canceled) {
+				return
+			}
 			if invErr != nil {
 				toolResult = "ERROR: " + invErr.Error()
 			}
@@ -251,6 +266,9 @@ func (s *Service) invokeBoundTool(
 	bound map[string]boundTool,
 	tc ToolCall,
 ) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	b, ok := bound[tc.Function.Name]
 	if !ok {
 		return "", fmt.Errorf("unknown tool %q", tc.Function.Name)
@@ -308,24 +326,21 @@ func (s *Service) invokeBoundTool(
 					"resultSummary":  result,
 					"error":          errMsg,
 				})
+				if ctx.Err() != nil {
+					return result, ctx.Err()
+				}
 				return result, fmt.Errorf("%s", errMsg)
 			}
 		case <-ctx.Done():
 			s.policy.Cancel(invocationID)
-			errMsg := "cancelled"
-			result := "ERROR: " + errMsg
-			_ = s.Conversations.UpdateToolInvocation(context.Background(), invocationID, "cancelled", "", errMsg)
-			s.publish(map[string]any{
-				"type":           "platform.ai.tool.result",
-				"runId":          runID,
-				"conversationId": conversationID,
-				"invocationId":   invocationID,
-				"ok":             false,
-				"resultSummary":  result,
-				"error":          errMsg,
-			})
-			return result, ctx.Err()
+			return s.cancelledTool(runID, conversationID, invocationID)
 		}
+	}
+
+	if ctx.Err() != nil {
+		return s.cancelledTool(runID, conversationID, invocationID)
+	}
+	if needsConfirm {
 		_ = s.Conversations.UpdateToolInvocation(context.Background(), invocationID, "running", "", "")
 	}
 
@@ -396,6 +411,25 @@ func (s *Service) invokeBoundTool(
 	return result, nil
 }
 
+// cancelledTool 把尚未执行的调用收成取消。已经由 Cancel 写过终态时，更新会被条件挡住。
+func (s *Service) cancelledTool(runID, conversationID, invocationID string) (string, error) {
+	const errMsg = "cancelled"
+	result := "ERROR: " + errMsg
+	wrote, _ := s.Conversations.UpdateToolInvocationIfOpen(context.Background(), invocationID, "cancelled", "", errMsg)
+	if wrote {
+		s.publish(map[string]any{
+			"type":           "platform.ai.tool.result",
+			"runId":          runID,
+			"conversationId": conversationID,
+			"invocationId":   invocationID,
+			"ok":             false,
+			"resultSummary":  result,
+			"error":          errMsg,
+		})
+	}
+	return result, context.Canceled
+}
+
 func mergeWorkspaceArgs(rawArgs string, normalized NormalizedContext) json.RawMessage {
 	rawArgs = strings.TrimSpace(rawArgs)
 	if rawArgs == "" {
@@ -452,22 +486,21 @@ func truncateToolResult(s string) string {
 	return cut
 }
 
-func (s *Service) finishAssistant(_ context.Context, runID, conversationID string, provider *store.AIProvider, modelCode, content string) {
-	assistantID, idErr := s.ids.NextString()
-	if idErr != nil {
-		s.publishRunError(runID, conversationID, idErr)
-		return
+// commitAssistant 把一段助手正文落库并推送。工具轮次中的说明与最终回答共用这一条路径。
+func (s *Service) commitAssistant(runID, conversationID, content string) error {
+	assistantID, err := s.ids.NextString()
+	if err != nil {
+		return err
 	}
 	if err := s.Conversations.AppendMessage(context.Background(), store.AIMessage{
 		MessageID:      assistantID,
 		ConversationID: conversationID,
 		MessageRole:    MessageRoleAssistant,
 		MessageContent: content,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}); err != nil {
-		s.publishRunError(runID, conversationID, err)
-		return
+		return err
 	}
-	_ = s.Conversations.TouchConversation(context.Background(), conversationID, "", provider.ProviderID, modelCode)
 	s.publish(map[string]any{
 		"type":           "platform.ai.message",
 		"runId":          runID,
@@ -476,6 +509,17 @@ func (s *Service) finishAssistant(_ context.Context, runID, conversationID strin
 		"role":           MessageRoleAssistant,
 		"content":        content,
 	})
+	return nil
+}
+
+func (s *Service) finishAssistant(_ context.Context, runID, conversationID string, provider *store.AIProvider, modelCode, content string) {
+	if strings.TrimSpace(content) != "" {
+		if err := s.commitAssistant(runID, conversationID, content); err != nil {
+			s.publishRunError(runID, conversationID, err)
+			return
+		}
+	}
+	_ = s.Conversations.TouchConversation(context.Background(), conversationID, "", provider.ProviderID, modelCode)
 	s.publishRunStatus(runID, conversationID, "done", "")
 }
 

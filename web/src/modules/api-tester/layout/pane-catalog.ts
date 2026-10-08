@@ -4,7 +4,8 @@
 import { applyHttpDefaults } from '../http/utils/defaults'
 import { applyTcpDefaults, tcpCreates } from '../tcp/utils/defaults'
 import { applyUdpDefaults, udpCreates } from '../udp/defaults'
-import { applyWebsocketDefaults } from '../websocket/defaults'
+import { applyWebsocketDefaults, websocketCreates } from '../websocket/defaults'
+import { applyGrpcDefaults, grpcCreates } from '../grpc/defaults'
 import type { ApiPaneKind, ApiPaneKindDef } from './pane-types'
 
 export const API_PANE_KIND_DEFS: readonly ApiPaneKindDef[] = [
@@ -38,6 +39,15 @@ export const API_PANE_KIND_DEFS: readonly ApiPaneKindDef[] = [
     labelKey: 'modules.api.paneWebsocket',
     methods: ['WS'],
     applyDefaults: applyWebsocketDefaults,
+    creates: [websocketCreates],
+  },
+  {
+    kind: 'grpc',
+    icon: 'boxes',
+    labelKey: 'modules.api.paneGrpc',
+    methods: ['GRPC'],
+    applyDefaults: applyGrpcDefaults,
+    creates: [grpcCreates],
   },
 ]
 

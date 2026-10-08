@@ -20,6 +20,9 @@ export function tabTitle(req: ApiRequest): string {
 export function tabTooltip(req: ApiRequest): string {
   const name = req.name.trim() || '—'
   const url = req.url.trim() || '—'
+  if (req.method === 'WS') {
+    return [name, 'WebSocket', url].join('\n')
+  }
   if (isSocketMethod(req.method)) {
     const role = splitSocketUrl(req.url).listen
       ? i18n.global.t('modules.api.socketServer')

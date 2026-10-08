@@ -1,18 +1,11 @@
 import { registerApiPaneFeature } from '../layout/pane-kind-loaders'
+import { resolveWebsocketPane } from './defaults'
 
 let registered = false
 
-/** WebSocket 占位自注册。P3 再接 L1；工作台只提示尚未接入。 */
+/** WebSocket 客户端自注册。工作台在本目录，不进 HTTP / TCP。 */
 export function register(): void {
   if (registered) return
   registered = true
-  registerApiPaneFeature('websocket', {
-    resolvePane: () => ({
-      loader: () => import('./Workspace.vue'),
-      buildProps: (ctx) => ({
-        request: ctx.request,
-        requestId: ctx.requestId,
-      }),
-    }),
-  })
+  registerApiPaneFeature('websocket', { resolvePane: resolveWebsocketPane })
 }

@@ -201,6 +201,11 @@ function onTitleKeydown(e: KeyboardEvent): void {
                   class="nm-ai-history__item-main"
                   @click="onHistorySelect(c.conversationId)"
                 >
+                  <span
+                    v-if="aiStore.busyConversationIds.has(c.conversationId)"
+                    class="nm-ai-history__busy"
+                    :title="t('ai.chatRunning')"
+                  />
                   <span class="nm-ai-history__item-label">{{ conversationLabel(c.conversationTitle) }}</span>
                 </button>
                 <button
@@ -416,6 +421,9 @@ function onTitleKeydown(e: KeyboardEvent): void {
 }
 
 .nm-ai-history__item-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   border: 0;
@@ -431,8 +439,18 @@ function onTitleKeydown(e: KeyboardEvent): void {
   background: color-mix(in srgb, var(--rs-text) 6%, transparent);
 }
 
+.nm-ai-history__busy {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--rs-accent);
+  flex-shrink: 0;
+}
+
 .nm-ai-history__item-label {
   display: block;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

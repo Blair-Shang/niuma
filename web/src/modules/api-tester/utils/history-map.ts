@@ -1,8 +1,11 @@
 import type { ApiHistoryEntry, ApiHistorySummary } from '@/api/types/api'
 import { asAuth, defaultAuth, parseBodyMode } from '../utils/collection-io'
+import { normalizeGraphQL } from '../http/graphql/body'
+import { normalizeHttpSettings } from '../http/settings/settings'
+import { asCheckResults, asChecks, asPreSteps } from '../script/eval'
 import type { ApiExchange, ApiHistoryItem, ApiKvRow, ApiMethod, ApiRequest } from '../types'
 
-const METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'WS', 'TCP', 'UDP']
+const METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'WS', 'TCP', 'UDP', 'GRPC']
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value : ''
@@ -17,6 +20,7 @@ function asKvRows(raw: unknown): ApiKvRow[] {
       enabled: item.enabled !== false,
       key: asText(item.key),
       value: asText(item.value),
+      filePath: asText(item.filePath) || undefined,
     }
   })
 }
@@ -43,6 +47,15 @@ export function parseHistoryRequest(raw: unknown): ApiRequest | null {
     bodyMode: parseBodyMode(item.bodyMode) ?? (body.trim() ? 'json' : 'none'),
     body,
     bodyForm: asKvRows(item.bodyForm),
+    graphql: normalizeGraphQL(item.graphql),
+    insecureTLS: item.insecureTLS === true,
+    settings: normalizeHttpSettings(item.settings),
+    wsProtocols: asText(item.wsProtocols),
+    preSteps: asPreSteps(item.preSteps),
+    checks: asChecks(item.checks),
+    preRequestScript: asText(item.preRequestScript),
+    testScript: asText(item.testScript),
+    grpcMethod: asText(item.grpcMethod),
   }
 }
 
@@ -63,6 +76,8 @@ export function requestFromHistory(item: ApiHistoryItem, parsed: ApiRequest | nu
     bodyMode: 'none',
     body: '',
     bodyForm: [],
+    graphql: normalizeGraphQL(undefined),
+    settings: normalizeHttpSettings(undefined),
   }
 }
 
@@ -80,8 +95,22 @@ export function parseHistoryExchange(raw: unknown): ApiExchange | null {
     headers: asKvRows(item.headers),
     body: asText(item.body),
     hex: asText(item.hex) || undefined,
+    binary: item.binary === true || undefined,
+    redirects: asRedirects(item.redirects),
     error: asText(item.error) || undefined,
+    checks: asCheckResults(item.checks),
   }
+}
+
+function asRedirects(raw: unknown): { status: number; url: string }[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const hops = raw.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const hop = item as Record<string, unknown>
+    if (typeof hop.status !== 'number' || typeof hop.url !== 'string') return []
+    return [{ status: hop.status, url: hop.url }]
+  })
+  return hops.length ? hops : undefined
 }
 
 export function toHistorySummary(entry: ApiHistorySummary): ApiHistoryItem {

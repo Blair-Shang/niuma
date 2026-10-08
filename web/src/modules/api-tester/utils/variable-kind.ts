@@ -38,7 +38,7 @@ export function defaultValueForKind(kind: ApiVariableKind): string {
     case 'json':
       return '{}'
     case 'datetime':
-      return '2006-01-02T15:04:05Z'
+      return 'now:datetime'
     case 'uuid':
       return crypto.randomUUID()
     default:

@@ -113,7 +113,7 @@ macOS 用户数据目录：`~/Library/Application Support/NiuMa/`（运行时缓
 | 麒麟 | `pnpm release:kylin` |
 | macOS | `pnpm release:macos` |
 
-GitHub 托管流水线：推送 `v*` tag 或手动运行 **Pack and Release**（见 [scripts/README.md](../scripts/README.md) § GitHub Actions）。产物在 Actions Artifact 与 GitHub Release。
+GitHub 托管流水线：推送 `main` 且 changelog 有未发布条目时自动打包发版；也可推送 `v*` tag 或手动运行 **Pack and Release**（见 [scripts/README.md](../scripts/README.md) § GitHub Actions）。产物在 Actions Artifact 与 GitHub Release。
 
 ## Linux / 麒麟 GUI 安装程序
 

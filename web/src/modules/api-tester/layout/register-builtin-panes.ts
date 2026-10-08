@@ -16,6 +16,7 @@ const LOADERS: Record<ApiPaneKind, () => Promise<void>> = {
   tcp: () => import('../tcp/register').then((m) => m.register()),
   udp: () => import('../udp/register').then((m) => m.register()),
   websocket: () => import('../websocket/register').then((m) => m.register()),
+  grpc: () => import('../grpc/register').then((m) => m.register()),
 }
 
 let registered = false

@@ -371,6 +371,7 @@ export type AiBridgeEvent =
   | {
       type: 'platform.ai.tool.start'
       runId: string
+      conversationId?: string
       invocationId: string
       toolName: string
       argsSummary?: string
@@ -379,6 +380,7 @@ export type AiBridgeEvent =
   | {
       type: 'platform.ai.tool.result'
       runId: string
+      conversationId?: string
       invocationId: string
       ok: boolean
       resultSummary?: string
@@ -387,6 +389,7 @@ export type AiBridgeEvent =
   | {
       type: 'platform.ai.tool.pending'
       runId: string
+      conversationId?: string
       invocationId: string
       toolName?: string
       argsSummary?: string

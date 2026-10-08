@@ -24,7 +24,7 @@ pnpm dev              # 构建并启动 niuma.exe（真实 CEF 桌面窗口）
 | Windows 安装程序 | `pnpm pack:win:setup` | 输出 `output/windows-x64/setup/NiuMa-*-Setup.exe` |
 | Windows 一键发布 | `pnpm release:win` | 构建 + 绿色目录 + Setup 安装程序 |
 | 跨平台矩阵 | 见 [scripts/README.md](./scripts/README.md) | `release:<platform>` 含向导式安装程序 |
-| GitHub 自动打包 | Actions：**Pack and Release** | 推送 `v*` tag 或手动运行；详见 scripts/README.md |
+| GitHub 自动打包 | Actions：**Pack and Release** | 推送 `main` 且 changelog 有未发布条目时自动发版；也可推送 `v*` tag 或手动运行。详见 scripts/README.md |
 
 > 主应用必须在 CEF 中运行（`cefQuery` 桥接）。`pnpm dev:web` 仅用于调试 Web 层，**不是**桌面应用。
 

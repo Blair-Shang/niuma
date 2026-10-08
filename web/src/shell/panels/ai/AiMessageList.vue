@@ -15,6 +15,7 @@ import AiToolConfirmActions from './AiToolConfirmActions.vue'
 import { extractAttachmentMarkers } from './context-pack'
 import { extractImageMarkers, extractTextMarkers } from './attachment-utils'
 import { parseAssistantContent } from './parse-assistant-content'
+import { partitionAiTools } from './attach-tools'
 
 const { t } = useI18n()
 const aiStore = useAiStore()
@@ -38,7 +39,6 @@ const showLoginPrompt = computed(
 )
 
 const listEl = ref<HTMLElement | null>(null)
-const bottomEl = ref<HTMLElement | null>(null)
 /** 用户是否贴近底部；上翻阅读时不强制抢走滚动。 */
 const stickToBottom = ref(true)
 /** 列表内待确认卡片是否还在视口里；滚走后改用底部固定条。 */
@@ -93,78 +93,24 @@ const showCancelled = computed(() => aiStore.runStatus === 'cancelled')
 const showCompare = computed(() => Boolean(aiStore.previousAssistantContent && aiStore.isStreaming))
 
 /**
- * 将工具调用挂到对应助手消息：落在「上一轮用户消息之后、该助手消息之前/之时」。
- * 尚未落库的本轮工具留给流式气泡。
+ * 工具挂到所属轮次：有助手回复则挂回复，停在工具上则挂该轮用户消息。
+ * 当前 run 仍在流式输出的工具留给流式气泡，不跟到下一条。
  */
-const toolsByMessageId = computed(() => {
-  const map = new Map<string, AiLiveToolInvocation[]>()
-  const msgs = displayMessages.value
-  const tools = aiStore.displayTools
-  if (!tools.length || !msgs.length) {
-    return map
-  }
+const toolPartition = computed(() =>
+  partitionAiTools(displayMessages.value, aiStore.displayTools, {
+    streaming: aiStore.isStreaming,
+    activeRunId: aiStore.runId,
+    liveIds: new Set(aiStore.liveTools.map((t) => t.invocationId)),
+  }),
+)
 
-  const assistantIdx: number[] = []
-  for (let i = 0; i < msgs.length; i++) {
-    if (msgs[i].messageRole === 'assistant') {
-      assistantIdx.push(i)
-    }
-  }
-  if (!assistantIdx.length) {
-    return map
-  }
+const toolsByMessageId = computed(() => toolPartition.value.byMessageId)
 
-  const sorted = [...tools].sort((a, b) =>
-    String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
-  )
+const streamingTools = computed(() => toolPartition.value.streaming)
 
-  for (const tool of sorted) {
-    const tAt = tool.createdAt || ''
-    let targetId = ''
-    for (const idx of assistantIdx) {
-      const m = msgs[idx]
-      const mAt = m.createdAt || ''
-      if (tAt && mAt && tAt > mAt) {
-        continue
-      }
-      let prevUserAt = ''
-      for (let j = idx - 1; j >= 0; j--) {
-        if (msgs[j].messageRole === 'user') {
-          prevUserAt = msgs[j].createdAt || ''
-          break
-        }
-      }
-      if (tAt && prevUserAt && tAt < prevUserAt) {
-        continue
-      }
-      targetId = m.messageId
-      break
-    }
-    if (!targetId && !aiStore.isStreaming) {
-      targetId = msgs[assistantIdx[assistantIdx.length - 1]].messageId
-    }
-    if (!targetId) {
-      continue
-    }
-    const list = map.get(targetId)
-    if (list) {
-      list.push(tool)
-    } else {
-      map.set(targetId, [tool])
-    }
-  }
-  return map
-})
-
-/** 尚未挂到历史助手消息的工具（流式本轮 / 尚无助手气泡）。 */
-const streamingTools = computed(() => {
-  const attached = new Set<string>()
-  for (const list of toolsByMessageId.value.values()) {
-    for (const t of list) {
-      attached.add(t.invocationId)
-    }
-  }
-  return aiStore.displayTools.filter((t) => !attached.has(t.invocationId))
+const streamingContinued = computed(() => {
+  const last = displayMessages.value[displayMessages.value.length - 1]
+  return last?.messageRole === 'assistant'
 })
 
 const showStreamingBubble = computed(() => {
@@ -179,8 +125,16 @@ const showStreamingBubble = computed(() => {
   return last?.messageRole !== 'assistant'
 })
 
-function toolsForMessage(messageId: string): AiLiveToolInvocation[] {
-  return toolsByMessageId.value.get(messageId) ?? []
+const emptyPlacement = { before: [] as AiLiveToolInvocation[], after: [] as AiLiveToolInvocation[] }
+
+function placementFor(messageId: string): { before: AiLiveToolInvocation[]; after: AiLiveToolInvocation[] } {
+  return toolsByMessageId.value.get(messageId) ?? emptyPlacement
+}
+
+function continuesAssistant(index: number): boolean {
+  const current = displayMessages.value[index]
+  const previous = displayMessages.value[index - 1]
+  return current?.messageRole === 'assistant' && previous?.messageRole === 'assistant'
 }
 
 const pendingTools = computed(() => aiStore.displayTools.filter((x) => x.status === 'pending'))
@@ -310,16 +264,11 @@ function scrollToBottom(force = false): void {
       return
     }
     const el = listEl.value
-    const anchor = bottomEl.value
     if (!el) {
       return
     }
-    if (anchor) {
-      anchor.scrollIntoView({ block: 'end', behavior: 'auto' })
-    } else {
-      el.scrollTop = el.scrollHeight
-    }
-    // Markdown / 图表异步增高后再补一次
+    // 只动消息列表自己的 scrollTop。scrollIntoView 会把滚动冒到 window，关掉其它面板的右键。
+    el.scrollTop = el.scrollHeight
     requestAnimationFrame(() => {
       if (pendingTools.value.length && !force) {
         return
@@ -327,9 +276,7 @@ function scrollToBottom(force = false): void {
       if (!force && !stickToBottom.value) {
         return
       }
-      if (anchor) {
-        anchor.scrollIntoView({ block: 'end', behavior: 'auto' })
-      } else if (listEl.value) {
+      if (listEl.value) {
         listEl.value.scrollTop = listEl.value.scrollHeight
       }
     })
@@ -485,9 +432,10 @@ function focusAttachment(id: string): void {
 
     <template v-else>
       <AiMessageItem
-        v-for="m in displayMessages"
+        v-for="(m, index) in displayMessages"
         :key="m.messageId"
         class="nm-ai-messages__item"
+        :class="{ 'nm-ai-messages__item--continued': continuesAssistant(index) }"
         :message-id="m.messageId"
         :speaker="m.messageRole"
         :content="m.messageContent"
@@ -496,7 +444,9 @@ function focusAttachment(id: string): void {
         :files="m.files"
         :created-at="m.createdAt"
         :parsed="m.parsed"
-        :tools="toolsForMessage(m.messageId)"
+        :continued="continuesAssistant(index)"
+        :tools-before="placementFor(m.messageId).before"
+        :tools-after="placementFor(m.messageId).after"
         @focus-attachment="focusAttachment"
       />
 
@@ -512,14 +462,15 @@ function focusAttachment(id: string): void {
       <AiMessageItem
         v-if="showStreamingBubble"
         class="nm-ai-messages__item"
+        :class="{ 'nm-ai-messages__item--continued': streamingContinued }"
         speaker="assistant"
         :content="aiStore.streamingText"
         :parsed="streamingParsed"
-        :tools="streamingTools"
+        :continued="streamingContinued"
+        :tools-before="streamingTools"
         streaming
       />
 
-      <div ref="bottomEl" class="nm-ai-messages__anchor" aria-hidden="true" />
     </template>
 
     <div v-if="showCancelled" class="nm-ai-messages__status" role="status">
@@ -576,6 +527,10 @@ function focusAttachment(id: string): void {
   scroll-behavior: auto;
 }
 
+.nm-ai-messages__item--continued {
+  margin-top: -12px;
+}
+
 .nm-ai-pending-bar {
   flex-shrink: 0;
   display: flex;
@@ -621,14 +576,6 @@ function focusAttachment(id: string): void {
   flex-shrink: 0;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.nm-ai-messages__anchor {
-  width: 100%;
-  height: 1px;
-  flex-shrink: 0;
-  margin-top: -22px;
-  pointer-events: none;
 }
 
 .nm-ai-messages__welcome {

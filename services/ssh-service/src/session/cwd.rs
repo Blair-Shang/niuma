@@ -1,17 +1,32 @@
-//! Resolves the interactive PTY shell cwd on a remote Linux host.
+//! Reads the interactive shell cwd for the current SSH session.
+//!
+//! A separate `pwd` runs in a new exec channel and stays in the login directory.
+//! The shell's `/proc/<pid>/cwd` is what `pwd` prints after `cd`.
 
 use serde_json::{json, Value};
 
 use super::manager::SessionManager;
 
-/// Finds the newest interactive shell (pts/tty) cwd, excluding this exec process.
-const CWD_SCRIPT: &str = r#"
-SELF=$$
-best_pid=0
-best_cwd=""
+/// Prints the cwd of the PTY shell started by this SSH session.
+const PWD_SCRIPT: &str = r#"self=$$
+sshd=
+pid=$self
+i=0
+while [ "$i" -lt 8 ]; do
+  comm=$(cat "/proc/$pid/comm" 2>/dev/null) || break
+  case "$comm" in
+    sshd|sshd-session|dropbear) sshd=$pid; break ;;
+  esac
+  ppid=$(sed -n 's/^PPid:[ \t]*//p' "/proc/$pid/status" 2>/dev/null | head -n 1)
+  [ -n "$ppid" ] && [ "$ppid" != 0 ] && [ "$ppid" != "$pid" ] || break
+  pid=$ppid
+  i=$((i + 1))
+done
+[ -n "$sshd" ] || exit 1
 for p in /proc/[0-9]*; do
   pid=${p#/proc/}
-  [ "$pid" = "$SELF" ] && continue
+  ppid=$(sed -n 's/^PPid:[ \t]*//p' "$p/status" 2>/dev/null | head -n 1)
+  [ "$ppid" = "$sshd" ] || continue
   comm=$(cat "$p/comm" 2>/dev/null) || continue
   case "$comm" in
     bash|zsh|fish|sh|ash|dash|ksh|tcsh|csh) ;;
@@ -19,21 +34,15 @@ for p in /proc/[0-9]*; do
   esac
   fd0=$(readlink "$p/fd/0" 2>/dev/null) || continue
   case "$fd0" in
-    /dev/pts/*|/dev/tty*) ;;
+    /dev/pts/*) ;;
     *) continue ;;
   esac
   cwd=$(readlink "$p/cwd" 2>/dev/null) || continue
   [ -n "$cwd" ] || continue
-  if [ "$pid" -gt "$best_pid" ] 2>/dev/null; then
-    best_pid=$pid
-    best_cwd=$cwd
-  fi
-done
-if [ -n "$best_cwd" ]; then
-  printf '%s\n' "$best_cwd"
+  printf '%s\n' "$cwd"
   exit 0
-fi
-pwd
+done
+exit 1
 "#;
 
 /// Sanitizes a remote cwd so the Web SFTP pane can navigate it.
@@ -77,11 +86,11 @@ fn collapse_slashes(path: &str) -> String {
     out
 }
 
-/// Queries the remote interactive shell cwd for a PTY terminal.
+/// Queries the interactive shell cwd, then the caller navigates SFTP there.
 pub async fn terminal_cwd(manager: &SessionManager, terminal_id: &str) -> Result<Value, String> {
     let session_id = manager.session_id_for_terminal(terminal_id).await?;
     let result = manager
-        .exec(&session_id, CWD_SCRIPT.trim(), "terminal.cwd", false)
+        .exec(&session_id, PWD_SCRIPT, "terminal.cwd", false)
         .await?;
     let stdout = result["stdout"].as_str().unwrap_or("");
     let line = stdout
@@ -95,7 +104,7 @@ pub async fn terminal_cwd(manager: &SessionManager, terminal_id: &str) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_remote_cwd;
+    use super::{normalize_remote_cwd, PWD_SCRIPT};
 
     #[test]
     fn accepts_unix_and_tilde() {
@@ -104,5 +113,13 @@ mod tests {
         assert_eq!(normalize_remote_cwd("/var//www").as_deref(), Some("/var/www"));
         assert_eq!(normalize_remote_cwd("relative"), None);
         assert_eq!(normalize_remote_cwd(""), None);
+    }
+
+    #[test]
+    fn pwd_script_reads_the_pty_shell() {
+        assert!(PWD_SCRIPT.contains("readlink \"$p/cwd\""));
+        assert!(PWD_SCRIPT.contains("/dev/pts/"));
+        assert!(!PWD_SCRIPT.contains("\r"));
+        assert!(!PWD_SCRIPT.trim_end().ends_with("pwd"));
     }
 }

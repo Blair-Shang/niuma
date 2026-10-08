@@ -1,6 +1,6 @@
 {
   "name": "niuma",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "private": true,
   "license": "Apache-2.0",
   "description": "NiuMa 全能 AI 运维平台",
@@ -28,6 +28,7 @@
     "build:web": "pnpm version:sync && pnpm --filter @niuma/web build",
     "test:ui": "pnpm --dir ../niuma-ui test",
     "test:web": "pnpm --filter @niuma/web test",
+    "api:run": "node web/scripts/api-run.mjs",
     "build": "pnpm build:web && pnpm build:platform",
     "build:platform": "pnpm build:services && pnpm build:shell",
     "build:shell": "powershell -ExecutionPolicy Bypass -File scripts/entry/build.ps1 -Target shell -Platform windows -Arch x64",

@@ -3,6 +3,8 @@ package socket
 import (
 	"bytes"
 	"fmt"
+
+	"niuma/services/api-service/internal/http11"
 )
 
 // FrameMode 是 TCP 字节流的切帧方式。UDP 数据报本身就是一帧，不使用这里。
@@ -15,6 +17,8 @@ const (
 	FrameDelimiter FrameMode = "delimiter"
 	// FrameLength 按长度字段切帧。总长度 = 字段偏移 + 字段宽度 + 字段值 + 调整量。
 	FrameLength FrameMode = "length"
+	// FrameHTTP 按 HTTP/1.1 响应切帧，并解开 chunked 与 gzip/deflate。
+	FrameHTTP FrameMode = "http"
 )
 
 const (
@@ -33,25 +37,35 @@ type FrameSpec struct {
 	LittleEndian bool
 	// LengthAdjust 加在「偏移 + 字段宽 + 字段值」之后。Modbus TCP 为 0（总长 = 6 + length）。
 	LengthAdjust int
+	// HTTPMethod 只在 FrameHTTP 下使用。HEAD 的响应没有正文。
+	HTTPMethod string
 }
 
 // streamFramer 在一条连接上保留未凑齐的尾部。
 type streamFramer struct {
 	spec FrameSpec
 	buf  []byte
+	http *http11.Framer
 }
 
 func newStreamFramer(spec FrameSpec) *streamFramer {
 	if spec.Mode == "" {
 		spec.Mode = FrameRaw
 	}
-	return &streamFramer{spec: spec}
+	framer := &streamFramer{spec: spec}
+	if spec.Mode == FrameHTTP {
+		framer.http = http11.NewFramer(spec.HTTPMethod)
+	}
+	return framer
 }
 
 // Push 吃进一段 Read，返回已经凑齐的帧。尾部留在缓冲里。
 func (f *streamFramer) Push(chunk []byte) ([][]byte, error) {
 	if len(chunk) == 0 {
 		return nil, nil
+	}
+	if f.http != nil {
+		return f.http.Push(chunk)
 	}
 	if f.spec.Mode == FrameRaw {
 		out := make([]byte, len(chunk))
@@ -70,6 +84,14 @@ func (f *streamFramer) Push(chunk []byte) ([][]byte, error) {
 		}
 		frames = append(frames, frame)
 	}
+}
+
+// Flush 在连接关闭时交出靠关闭定界的 HTTP 正文。其它切帧方式没有尾帧。
+func (f *streamFramer) Flush() ([][]byte, error) {
+	if f.http == nil {
+		return nil, nil
+	}
+	return f.http.Flush()
 }
 
 func (f *streamFramer) pull() ([]byte, error) {
@@ -164,6 +186,8 @@ func normalizeFrame(spec FrameSpec) (FrameSpec, error) {
 		if spec.LengthAdjust < -64 || spec.LengthAdjust > MaxPayload {
 			return spec, fmt.Errorf("api: lengthAdjust out of range")
 		}
+		return spec, nil
+	case FrameHTTP:
 		return spec, nil
 	default:
 		return spec, fmt.Errorf("api: unknown frame mode %q", spec.Mode)

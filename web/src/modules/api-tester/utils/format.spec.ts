@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   formatBytes,
   formatHexDump,
+  isLargeText,
+  LARGE_TEXT_CHARS,
   newKvRow,
   prettyJson,
   statusTone,
@@ -52,6 +54,9 @@ describe('api tester format', () => {
     expect(line).toContain("-X POST")
     expect(line).toContain('https://api.demo.local/api/products')
     expect(prettyJson('{"a":1}')).toBe('{\n  "a": 1\n}')
+    const huge = `{"a":"${'x'.repeat(LARGE_TEXT_CHARS)}"}`
+    expect(isLargeText(huge)).toBe(true)
+    expect(prettyJson(huge)).toBe(huge)
   })
 
   it('formats size and hex dump', () => {

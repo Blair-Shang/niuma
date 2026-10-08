@@ -81,4 +81,59 @@ describe('import postman', () => {
     expect(leaf && folderDepth(folders ?? [], leaf.id)).toBe(3)
     expect(leaf?.requests.map((req) => req.name)).toEqual(['Deep'])
   })
+
+  it('keeps oauth2 client credentials from a postman request', () => {
+    const folders = importPostman({
+      info: { name: 'Auth', schema: SCHEMA },
+      item: [
+        {
+          name: 'Token',
+          request: {
+            method: 'GET',
+            url: 'https://api.example/me',
+            auth: {
+              type: 'oauth2',
+              oauth2: [
+                { key: 'grant_type', value: 'client_credentials' },
+                { key: 'accessTokenUrl', value: 'https://auth.example/token' },
+                { key: 'clientId', value: 'app' },
+                { key: 'clientSecret', value: 'secret' },
+                { key: 'client_authentication', value: 'body' },
+                { key: 'accessToken', value: 'already' },
+              ],
+            },
+          },
+        },
+      ],
+    })
+    const auth = folders?.[0]?.requests[0]?.auth
+    expect(auth?.type).toBe('oauth2')
+    expect(auth?.oauth2?.grant).toBe('client_credentials')
+    expect(auth?.oauth2?.clientAuth).toBe('body')
+    expect(auth?.oauth2?.accessToken).toBe('already')
+    expect(auth?.oauth2?.clientId).toBe('app')
+  })
+
+  it('keeps graphql query and variables', () => {
+    const folders = importPostman({
+      info: { name: 'Gql', schema: SCHEMA },
+      item: [
+        {
+          name: 'Ping',
+          request: {
+            method: 'POST',
+            url: 'https://api.example/graphql',
+            body: {
+              mode: 'graphql',
+              graphql: { query: 'query { ping }', variables: '{"id":1}' },
+            },
+          },
+        },
+      ],
+    })
+    const req = folders?.[0]?.requests[0]
+    expect(req?.bodyMode).toBe('graphql')
+    expect(req?.graphql?.query).toBe('query { ping }')
+    expect(req?.graphql?.variables).toBe('{"id":1}')
+  })
 })

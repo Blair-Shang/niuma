@@ -2,7 +2,7 @@ import type { Component } from 'vue'
 import type { ApiMethod, ApiRequest } from '../types'
 
 /** 协议 kind。与目录 http/ tcp/ udp/ websocket 对齐；启动只登记 loader。 */
-export type ApiPaneKind = 'http' | 'tcp' | 'udp' | 'websocket'
+export type ApiPaneKind = 'http' | 'tcp' | 'udp' | 'websocket' | 'grpc'
 
 export interface ApiPaneCreateOpts {
   listen?: boolean

@@ -93,6 +93,7 @@ func (m *Manager) readTCP(ctx context.Context, sess *session, conn net.Conn, pee
 			continue
 		}
 		if sess.isClosed() || ctx.Err() != nil || err == io.EOF {
+			flushFrames(sess, conn, peerID, frames)
 			if peerID != "" {
 				_ = sess.dropPeer(peerID, StateClosed, "")
 			} else if err == io.EOF {
@@ -106,6 +107,23 @@ func (m *Manager) readTCP(ctx context.Context, sess *session, conn net.Conn, pee
 			m.loseSession(sess, err.Error())
 		}
 		return
+	}
+}
+
+func flushFrames(sess *session, conn net.Conn, peerID string, frames *streamFramer) {
+	ready, _ := frames.Flush()
+	if len(ready) == 0 || conn == nil {
+		return
+	}
+	remote, local := "", ""
+	if addr := conn.RemoteAddr(); addr != nil {
+		remote = addr.String()
+	}
+	if addr := conn.LocalAddr(); addr != nil {
+		local = addr.String()
+	}
+	for _, frame := range ready {
+		sess.emitData(peerID, remote, local, DirIn, frame)
 	}
 }
 

@@ -30,6 +30,11 @@ export function applyAuthHeaders(
       headers.set(key.toLowerCase(), value)
       break
     }
+    case 'oauth2': {
+      const token = interpolate(auth.oauth2?.accessToken ?? '').trim()
+      if (token) headers.set('authorization', `Bearer ${token}`)
+      break
+    }
     default:
       break
   }

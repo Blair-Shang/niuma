@@ -4,9 +4,9 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useApiTesterStore } from '../stores/api-tester'
-import type { ApiEnvironment, ApiVarRow } from '../types'
-import { debounceFn, rowsToTypedRecord, typedRecordToRows } from '../utils/vars-rows'
+import { useApiTesterStore } from '../../stores/api-tester'
+import type { ApiEnvironment, ApiVarRow } from '../../types'
+import { debounceFn, rowsToTypedRecord, typedRecordToRows } from '../../utils/vars-rows'
 
 export type ApiEnvFocus = 'environment' | 'global'
 
@@ -20,14 +20,13 @@ export interface ApiEnvListItem {
 const focus = ref<ApiEnvFocus>('environment')
 const selectedEnvId = ref('')
 const listFilter = ref('')
-const nameDraft = ref('')
 const confirmRemoveOpen = ref(false)
 const globalRows = ref<ApiVarRow[]>([])
 const envVarRows = ref<ApiVarRow[]>([])
 let wired = false
 
-/** 环境页单例。View 与 Panel 共用，避免把 ref 当 props 传。 */
-export function useApiEnvironmentPanel() {
+/** 环境页单例。工作台与详情共用，避免把 ref 当 props 传。 */
+export function useEnvironmentPanel() {
   const { t } = useI18n()
   const api = useApiTesterStore()
 
@@ -51,9 +50,8 @@ export function useApiEnvironmentPanel() {
     const commitEnvVarRows = debounceFn(() => {
       const env = api.environments.find((item) => item.id === selectedEnvId.value)
       if (!env || focus.value !== 'environment') return
-      const keepBase = env.vars.baseUrl ?? env.baseUrl
       const typed = rowsToTypedRecord(envVarRows.value)
-      if (keepBase) typed.vars.baseUrl = keepBase
+      env.baseUrl = (typed.vars.baseUrl ?? '').trim()
       api.replaceEnvironmentVars(env.id, typed.vars, typed.kinds)
     }, 400)
 
@@ -64,17 +62,14 @@ export function useApiEnvironmentPanel() {
       () => {
         if (focus.value !== 'environment') {
           envVarRows.value = []
-          nameDraft.value = ''
           return
         }
         const env = api.environments.find((item) => item.id === selectedEnvId.value)
         if (!env) {
           envVarRows.value = []
-          nameDraft.value = ''
           return
         }
-        nameDraft.value = env.name
-        envVarRows.value = typedRecordToRows(env.vars, env.kinds, `env:${env.id}`, (key) => key === 'baseUrl')
+        envVarRows.value = typedRecordToRows(env.vars, env.kinds, `env:${env.id}`)
       },
       { immediate: true },
     )
@@ -123,18 +118,6 @@ export function useApiEnvironmentPanel() {
     selectEnvironment(env.id)
   }
 
-  function commitEnvName(): void {
-    const env = activeEnv.value
-    if (!env) return
-    const name = nameDraft.value.trim()
-    if (!name) {
-      nameDraft.value = env.name
-      return
-    }
-    const saved = api.renameEnvironment(env.id, name)
-    nameDraft.value = saved?.name ?? env.name
-  }
-
   function onRemoveEnv(): void {
     const env = activeEnv.value
     if (!env) return
@@ -145,19 +128,12 @@ export function useApiEnvironmentPanel() {
     confirmRemoveOpen.value = false
   }
 
-  function onBaseUrlInput(value: string): void {
-    const env = activeEnv.value
-    if (!env) return
-    api.updateEnvironmentBaseUrl(env.id, value)
-  }
-
   return {
     api,
     t,
     focus,
     selectedEnvId,
     listFilter,
-    nameDraft,
     confirmRemoveOpen,
     globalRows,
     envVarRows,
@@ -168,8 +144,6 @@ export function useApiEnvironmentPanel() {
     selectGlobal,
     useEnvironment,
     createEnvironment,
-    commitEnvName,
     onRemoveEnv,
-    onBaseUrlInput,
   }
 }

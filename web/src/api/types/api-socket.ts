@@ -15,8 +15,10 @@ export interface ApiSocketOpenParams {
   timeoutMs?: number
   encoding?: ApiSocketEncoding
   readLimit?: number
-  /** raw | delimiter | length。空着表示原始流。 */
-  frame?: 'raw' | 'delimiter' | 'length'
+  /** raw | delimiter | length | http。空着表示原始流。http 按 HTTP/1.1 响应切帧并解开压缩。 */
+  frame?: 'raw' | 'delimiter' | 'length' | 'http'
+  /** 仅 frame=http。HEAD 响应没有正文。 */
+  httpMethod?: string
   /** lf | cr | crlf，仅 delimiter。 */
   delimiter?: 'lf' | 'cr' | 'crlf'
   lengthOffset?: number

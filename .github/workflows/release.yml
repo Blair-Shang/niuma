@@ -2,10 +2,14 @@
 # 约束：build/pack/release 必须在目标 OS 上执行，禁止交叉编译。
 # 托管 runner 覆盖：Windows x64、Linux x64、macOS arm64。
 # ARM64 Windows / ARM64 Linux / 麒麟需自建 runner，未纳入本矩阵。
+# 推送 main：package.json 版本还没有 v* 标签，且 CHANGELOG 有列表条目时才打包。
+# 成功后收成版本段、打标签、发 Release。手工 v* 标签同样发版。
+# workflow_dispatch 只上传 Artifact。GITHUB_TOKEN 推送的 [release notes] 不会再次触发本工作流。
 name: Pack and Release
 
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -17,7 +21,7 @@ on:
 
 concurrency:
   group: pack-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -26,8 +30,89 @@ env:
   CI: 'true'
 
 jobs:
+  plan:
+    name: plan release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      should_pack: ${{ steps.plan.outputs.should_pack }}
+      should_publish: ${{ steps.plan.outputs.should_publish }}
+      cut_changelog: ${{ steps.plan.outputs.cut_changelog }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      date: ${{ steps.plan.outputs.date }}
+    defaults:
+      run:
+        working-directory: NiuMa
+    steps:
+      - name: Checkout NiuMa
+        uses: actions/checkout@v5
+        with:
+          path: NiuMa
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Decide whether to pack
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/cut-changelog.test.mjs
+          SHOULD_PACK=false
+          SHOULD_PUBLISH=false
+          CUT=false
+          VERSION=""
+          TAG=""
+          DATE=""
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SHOULD_PACK=true
+            echo "manual dispatch; pack only"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+            SHOULD_PACK=true
+            SHOULD_PUBLISH=true
+            VERSION="${TAG#v}"
+            echo "tag push ${TAG}"
+          elif git log -1 --format=%B | grep -F '[release notes]' >/dev/null; then
+            echo "release-notes commit; skip"
+          else
+            git fetch origin --tags --force
+            DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+            PUBLISHED=$(git tag -l 'v[0-9]*' | sed -nE 's/^v([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | paste -sd, -)
+            PKG=$(node -p "require('./package.json').version")
+            VERSION=$(node .github/scripts/cut-changelog.mjs plan --version "${PKG}" --published "${PUBLISHED}" --date "${DATE}")
+            if [[ -z "${VERSION}" ]]; then
+              VERSION=""
+              echo "no unpublished changelog notes; skip"
+            elif git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+              echo "v${VERSION} already published"
+              VERSION=""
+            else
+              SHOULD_PACK=true
+              SHOULD_PUBLISH=true
+              CUT=true
+              TAG="v${VERSION}"
+              echo "publish ${TAG}"
+            fi
+          fi
+          {
+            echo "should_pack=${SHOULD_PACK}"
+            echo "should_publish=${SHOULD_PUBLISH}"
+            echo "cut_changelog=${CUT}"
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+            echo "date=${DATE}"
+          } >> "$GITHUB_OUTPUT"
+
   pack:
     name: pack (${{ matrix.artifact }})
+    needs: plan
+    if: needs.plan.outputs.should_pack == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     defaults:
@@ -251,8 +336,8 @@ jobs:
 
   publish:
     name: GitHub Release
-    needs: pack
-    if: ${{ always() && !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
+    needs: [plan, pack]
+    if: ${{ always() && !cancelled() && needs.plan.outputs.should_publish == 'true' && needs.pack.result != 'skipped' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
@@ -307,17 +392,41 @@ jobs:
             ls -lh release-files
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Cut changelog and tag
+        if: needs.plan.outputs.cut_changelog == 'true'
+        uses: actions/checkout@v5
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-          draft: false
-          fail_on_unmatched_files: true
-          files: release-files/*
+          path: NiuMa
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Record changelog version
+        if: needs.plan.outputs.cut_changelog == 'true'
+        working-directory: NiuMa
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.plan.outputs.version }}"
+          DATE="${{ needs.plan.outputs.date }}"
+          git fetch origin --tags --force
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "v${VERSION} already published" >&2
+            exit 1
+          fi
+          node .github/scripts/cut-changelog.mjs apply --version "${VERSION}" --date "${DATE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "changelog already records v${VERSION}"
+          else
+            git commit -m "docs: 记录 v${VERSION} 版本说明 [release notes]"
+            git push origin HEAD:main
+          fi
+          git tag -a "v${VERSION}" -m "v${VERSION}"
+          git push origin "v${VERSION}"
 
       - name: Checkout release scripts
         uses: actions/checkout@v5
@@ -326,17 +435,63 @@ jobs:
           sparse-checkout: |
             .github/scripts/push-cloud-release.mjs
             .github/scripts/prune-github-release-assets.mjs
+            .github/scripts/cut-changelog.mjs
             CHANGELOG.md
           sparse-checkout-cone-mode: false
+
+      - name: Release notes from changelog
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=release-scripts/CHANGELOG.md
+          if [[ -f NiuMa/CHANGELOG.md ]]; then
+            SRC=NiuMa/CHANGELOG.md
+          fi
+          node release-scripts/.github/scripts/cut-changelog.mjs notes \
+            --version "${{ needs.plan.outputs.version }}" \
+            --changelog "${SRC}" \
+            --notes release-notes.md
+          if [[ -s release-notes.md ]]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release
+        if: steps.notes.outputs.has_notes == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.plan.outputs.tag }}
+          name: ${{ needs.plan.outputs.tag }}
+          body_path: release-notes.md
+          draft: false
+          fail_on_unmatched_files: true
+          files: release-files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release from commits
+        if: steps.notes.outputs.has_notes != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.plan.outputs.tag }}
+          name: ${{ needs.plan.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          fail_on_unmatched_files: true
+          files: release-files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload installers to niuma-cloud
         if: env.NIUMA_CLOUD_PIPELINE_TOKEN != ''
         env:
           NIUMA_CLOUD_API_BASE: ${{ vars.NIUMA_CLOUD_API_BASE || 'https://www.niuma007.com/niuma/cloud' }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
           NIUMA_CHANNEL: stable
           NIUMA_PREVIEW_CHANNEL: beta
-          CHANGELOG_PATH: release-scripts/CHANGELOG.md
+          CHANGELOG_PATH: ${{ needs.plan.outputs.cut_changelog == 'true' && 'NiuMa/CHANGELOG.md' || 'release-scripts/CHANGELOG.md' }}
         run: node release-scripts/.github/scripts/push-cloud-release.mjs release-files
 
       # 只删过旧 release 的安装包，保留页、tag、说明。官网分发走 niuma-cloud。

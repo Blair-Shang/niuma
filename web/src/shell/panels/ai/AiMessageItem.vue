@@ -3,17 +3,16 @@
  * 单条对话消息：用户/助手布局；MD 渲染；底部工具条（复制/重试/编辑/分支）。
  */
 import { copyTextToClipboard, RsIcon } from '@niuma/ui'
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiLiveToolInvocation } from '@/api/types/ai'
 import { useAiStore } from '@/stores/ai'
 import AiMarkdown from './AiMarkdown.vue'
 import AiMediaLightbox from './AiMediaLightbox.vue'
+import AiToolCallList from './AiToolCallList.vue'
 import type { AiContextAttachment } from './context-pack'
 import type { ExtractedTextFile } from './attachment-utils'
 import type { ParsedAssistantContent } from './parse-assistant-content'
-
-const AiToolCallCard = defineAsyncComponent(() => import('./AiToolCallCard.vue'))
 
 const props = withDefaults(
   defineProps<{
@@ -26,8 +25,12 @@ const props = withDefaults(
     attachments?: AiContextAttachment[]
     images?: string[]
     files?: ExtractedTextFile[]
-    /** 本轮助手输出内的工具调用（嵌在对话气泡中，不单独占位）。 */
-    tools?: AiLiveToolInvocation[]
+    /** 同一轮里紧接上一段助手文字，不再重复头像。 */
+    continued?: boolean
+    /** 先于这段文字发生的工具。 */
+    toolsBefore?: AiLiveToolInvocation[]
+    /** 这段文字之后、下一段文字之前的工具。 */
+    toolsAfter?: AiLiveToolInvocation[]
   }>(),
   {
     messageId: '',
@@ -37,7 +40,9 @@ const props = withDefaults(
     attachments: () => [],
     images: () => [],
     files: () => [],
-    tools: () => [],
+    continued: false,
+    toolsBefore: () => [],
+    toolsAfter: () => [],
   },
 )
 
@@ -141,7 +146,7 @@ async function onBranch(): Promise<void> {
 </script>
 
 <template>
-  <article class="nm-ai-msg" :class="`nm-ai-msg--${speaker}`">
+  <article class="nm-ai-msg" :class="[`nm-ai-msg--${speaker}`, { 'nm-ai-msg--continued': continued }]">
     <div
       class="nm-ai-msg__avatar"
       :aria-label="isUser ? t('ai.roleUser') : t('ai.roleAssistant')"
@@ -149,7 +154,7 @@ async function onBranch(): Promise<void> {
       <RsIcon :name="isUser ? 'user' : 'bot'" :size="13" />
     </div>
     <div class="nm-ai-msg__main">
-      <div v-if="streaming || timeLabel" class="nm-ai-msg__role-row">
+      <div v-if="streaming || (timeLabel && !continued)" class="nm-ai-msg__role-row">
         <div class="nm-ai-msg__meta">
           <span v-if="streaming" class="nm-ai-msg__live">{{ t('ai.streaming') }}</span>
           <span v-else class="nm-ai-msg__time">{{ timeLabel }}</span>
@@ -184,45 +189,18 @@ async function onBranch(): Promise<void> {
             <AiMarkdown :source="parsed.thinking" lite />
           </div>
         </details>
-        <div v-if="tools.length" class="nm-ai-msg__tools">
-          <AiToolCallCard
-            v-for="tool in tools"
-            :key="tool.invocationId"
-            :name="tool.toolName"
-            :status="tool.status"
-            :args-summary="tool.argsSummary"
-            :result-summary="tool.resultSummary"
-            :error="tool.error"
-            :risk="tool.risk"
-            :confirmable="tool.status === 'pending'"
-            @approve="(scope) => aiStore.confirmTool(tool.invocationId, 'approve', scope)"
-            @reject="aiStore.confirmTool(tool.invocationId, 'reject')"
-          />
-        </div>
+        <AiToolCallList v-if="toolsBefore.length" :tools="toolsBefore" />
         <div v-if="parsed.body || streaming" class="nm-ai-msg__body nm-ai-msg__body--md">
           <AiMarkdown v-if="parsed.body" :source="parsed.body" :streaming="streaming" />
           <span v-if="streaming" class="nm-ai-msg__caret" aria-hidden="true" />
         </div>
+        <AiToolCallList v-if="toolsAfter.length" :tools="toolsAfter" />
       </template>
 
-      <div
-        v-else-if="isAssistant && tools.length"
-        class="nm-ai-msg__tools"
-      >
-        <AiToolCallCard
-          v-for="tool in tools"
-          :key="tool.invocationId"
-          :name="tool.toolName"
-          :status="tool.status"
-          :args-summary="tool.argsSummary"
-          :result-summary="tool.resultSummary"
-          :error="tool.error"
-          :risk="tool.risk"
-          :confirmable="tool.status === 'pending'"
-          @approve="(scope) => aiStore.confirmTool(tool.invocationId, 'approve', scope)"
-          @reject="aiStore.confirmTool(tool.invocationId, 'reject')"
-        />
-      </div>
+      <template v-else-if="isAssistant && (toolsBefore.length || toolsAfter.length)">
+        <AiToolCallList v-if="toolsBefore.length" :tools="toolsBefore" />
+        <AiToolCallList v-if="toolsAfter.length" :tools="toolsAfter" />
+      </template>
 
       <div v-if="images.length" class="nm-ai-msg__images">
         <button
@@ -252,8 +230,8 @@ async function onBranch(): Promise<void> {
       <div v-if="isUser" class="nm-ai-msg__body nm-ai-msg__body--md nm-ai-msg__body--user">
         <AiMarkdown v-if="content" :source="content" lite />
       </div>
-
       <div v-else-if="!isAssistant" class="nm-ai-msg__body">{{ content }}</div>
+      <AiToolCallList v-if="isUser && toolsAfter.length" :tools="toolsAfter" />
 
       <div v-if="!streaming" class="nm-ai-msg__actions">
         <button
@@ -337,6 +315,10 @@ async function onBranch(): Promise<void> {
   color: var(--rs-muted);
   background: color-mix(in srgb, var(--rs-text) 6%, transparent);
   border: 1px solid var(--rs-border-subtle);
+}
+
+.nm-ai-msg--continued .nm-ai-msg__avatar {
+  visibility: hidden;
 }
 
 .nm-ai-msg--assistant .nm-ai-msg__avatar {
@@ -570,18 +552,6 @@ async function onBranch(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.nm-ai-msg__tools {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  max-width: 100%;
-}
-
-.nm-ai-msg__tools :deep(.nm-ai-tool) {
-  margin: 0;
 }
 
 .nm-ai-msg__think {

@@ -190,7 +190,7 @@ sudo apt-get install -f   # 补依赖
 
 ## GitHub Actions 自动打包
 
-工作流：[.github/workflows/release.yml](../.github/workflows/release.yml)。在对应 OS 的 GitHub 托管 runner 上跑 `release:*`，打包后校验 CEF 运行时（`resources.pak` 等），产物上传 Artifact；打 `v*` tag 时只把用户安装包挂到 GitHub Release（`Setup.exe` / `.deb` / `Setup.run` / `.dmg` / `Setup.pkg`）。绿色目录里的 `niuma.exe`、服务进程、`Uninstall.run` 已打进安装包，不单独上架。
+工作流：[.github/workflows/release.yml](../.github/workflows/release.yml)。推送到 `main` 且 changelog 有未发布条目时，或推送 `v*` tag 时，在对应 OS 的 GitHub 托管 runner 上跑 `release:*`，打包后校验 CEF 运行时（`resources.pak` 等），产物上传 Artifact。发版时只把用户安装包挂到 GitHub Release（`Setup.exe` / `.deb` / `Setup.run` / `.dmg` / `Setup.pkg`）。绿色目录里的 `niuma.exe`、服务进程、`Uninstall.run` 已打进安装包，不单独上架。
 
 | Runner | 命令 | 产物 |
 |--------|------|------|
@@ -202,12 +202,16 @@ Windows arm64 / Linux arm64 / 麒麟没有官方托管 runner，需自建后再�
 
 ### 触发
 
+推送到 `main`：把 `package.json` 的 `version` 改成新的 `x.y.z`，并把本次变更写在 `CHANGELOG.md` 的 `[Unreleased]` 列表里。该版本还没有 `v*` 标签时，流水线启动矩阵打包；成功后收成 `## [x.y.z] - 日期`，提交说明带 `[release notes]`，打标签并发布。没有未发布条目时不打包。
+
+手工推送标签同样打包发版：
+
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.7
+git push origin v1.1.7
 ```
 
-或 Actions → **Pack and Release** → Run workflow。未打 `v*` tag 时只留 Artifact，不创建 Release（避免 `pack-*` 垃圾 tag）。`v*` 构建会校验 tag 与 `package.json` 版本一致。
+Actions → **Pack and Release** → Run workflow 只上传 Artifact，不创建 Release。`v*` 构建会校验 tag 与 `package.json` 版本一致。
 
 `@niuma/ui` 是同级私有仓（`link:../../niuma-ui`）。工作流会再 checkout `{owner}/niuma-ui`。请在本仓 Settings → Secrets 配置：
 

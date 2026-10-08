@@ -120,6 +120,38 @@ func TestCallSQLReadonlyRejectsInsert(t *testing.T) {
 	}
 }
 
+func TestCallSQLExecRegistersCancel(t *testing.T) {
+	rt := &sqlStubRuntime{kind: "mysql"}
+	reg := NewStopRegistry()
+	ctx := ContextWithStops(context.Background(), reg)
+	_, err := CallSQL(ctx, rt, ToolExec, map[string]any{
+		"sessionId": "s1",
+		"moduleId":  "mysql",
+		"database":  "ai_coding",
+		"sql":       "SELECT 1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.lastMethod != "mysql.query.exec" {
+		t.Fatalf("method=%s", rt.lastMethod)
+	}
+	reqID, _ := rt.lastParams["requestId"].(string)
+	if reqID == "" {
+		t.Fatal("requestId required")
+	}
+	reg.Fire()
+	if rt.lastMethod != "mysql.query.cancel" {
+		t.Fatalf("cancel method=%s", rt.lastMethod)
+	}
+	if got, _ := rt.lastParams["requestId"].(string); got != reqID {
+		t.Fatalf("cancel requestId=%s want %s", got, reqID)
+	}
+	if got, _ := rt.lastParams["sessionId"].(string); got != "s1" {
+		t.Fatalf("cancel sessionId=%s", got)
+	}
+}
+
 func TestIsSQLToolIncludesExec(t *testing.T) {
 	if !IsSQLTool(ToolExec) || !IsSQLTool(ToolRunReadonly) {
 		t.Fatal("sql_exec should be official sql tool")

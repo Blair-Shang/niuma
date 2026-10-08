@@ -72,6 +72,7 @@ export default {
     noHistory: 'No conversations yet',
     deleteChat: 'Delete chat',
     newChat: 'New chat',
+    chatRunning: 'Generating',
     renameChat: 'Rename chat',
     untitled: 'Untitled',
     roleUser: 'You',

@@ -3,6 +3,9 @@
  * 读盘只认 kind 和字段，不按 version 拒收。写出是当前结构：环境与变量不进 workspace JSON。
  */
 import { createId } from '@/utils/id'
+import { normalizeGraphQL } from '../http/graphql/body'
+import { normalizeHttpSettings } from '../http/settings/settings'
+import { asChecks, asPreSteps } from '../script/eval'
 import { newKvRow } from './format'
 import { normalizeFolderGraph } from './folder-tree'
 import type {
@@ -15,6 +18,7 @@ import type {
   ApiMethod,
   ApiMockRoute,
   ApiMockServer,
+  ApiOAuth2,
   ApiRequest,
   ApiRunProfile,
   ApiVariableBag,
@@ -24,9 +28,9 @@ import type {
 export const COLLECTION_KIND = 'niuma.api-collection'
 export const WORKSPACE_KIND = 'niuma.api-workspace'
 
-const METHODS = new Set<ApiMethod>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'WS', 'TCP', 'UDP'])
-const AUTH_TYPES = new Set<ApiAuthType>(['none', 'bearer', 'basic', 'apikey'])
-const BODY_MODES = new Set<ApiBodyMode>(['none', 'raw', 'json', 'text', 'urlencoded', 'form'])
+const METHODS = new Set<ApiMethod>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'WS', 'TCP', 'UDP', 'GRPC'])
+const AUTH_TYPES = new Set<ApiAuthType>(['none', 'bearer', 'basic', 'apikey', 'oauth2', 'digest', 'awsv4', 'ntlm'])
+const BODY_MODES = new Set<ApiBodyMode>(['none', 'raw', 'json', 'text', 'urlencoded', 'form', 'graphql'])
 
 /** 集合导出信封。不含环境 Token / 密码，也不含发送历史。 */
 export interface ApiCollectionFile {
@@ -83,6 +87,10 @@ function cloneAuth(auth: ApiAuth): ApiAuth {
   if (auth.bearer) out.bearer = { ...auth.bearer }
   if (auth.basic) out.basic = { ...auth.basic }
   if (auth.apiKey) out.apiKey = { ...auth.apiKey }
+  if (auth.oauth2) out.oauth2 = { ...auth.oauth2 }
+  if (auth.digest) out.digest = { ...auth.digest }
+  if (auth.awsv4) out.awsv4 = { ...auth.awsv4 }
+  if (auth.ntlm) out.ntlm = { ...auth.ntlm }
   return out
 }
 
@@ -99,6 +107,15 @@ function cloneRequestPlain(req: ApiRequest): ApiRequest {
     bodyMode: req.bodyMode,
     body: req.body,
     bodyForm: (req.bodyForm ?? []).map((row) => ({ ...row })),
+    graphql: normalizeGraphQL(req.graphql),
+    insecureTLS: req.insecureTLS === true,
+    settings: normalizeHttpSettings(req.settings),
+    wsProtocols: req.wsProtocols ?? '',
+    preSteps: asPreSteps(req.preSteps),
+    checks: asChecks(req.checks),
+    preRequestScript: req.preRequestScript ?? '',
+    testScript: req.testScript ?? '',
+    grpcMethod: req.grpcMethod ?? '',
   }
 }
 
@@ -111,6 +128,11 @@ export function cloneRequest(req: ApiRequest, name = req.name): ApiRequest {
     params: cloneKvRows(req.params),
     headers: cloneKvRows(req.headers),
     bodyForm: cloneKvRows(req.bodyForm ?? []),
+    preSteps: asPreSteps(req.preSteps).map((step) => ({ ...step, id: createId('pre') })),
+    checks: asChecks(req.checks).map((check) => ({ ...check, id: createId('chk') })),
+    preRequestScript: req.preRequestScript ?? '',
+    testScript: req.testScript ?? '',
+    grpcMethod: req.grpcMethod ?? '',
   }
 }
 
@@ -162,14 +184,58 @@ export function asAuth(raw: unknown): ApiAuth {
       in: apiKey.in === 'query' ? 'query' : 'header',
     }
   }
+  if (type === 'oauth2') auth.oauth2 = asOAuth(item.oauth2)
+  if (type === 'digest') auth.digest = asUserPass(item.digest)
+  if (type === 'awsv4') auth.awsv4 = asAws(item.awsv4)
+  if (type === 'ntlm') auth.ntlm = { ...asUserPass(item.ntlm), domain: asText((item.ntlm as Record<string, unknown> | undefined)?.domain) }
   return auth
+}
+
+function asUserPass(raw: unknown): { username: string; password: string } {
+  const item = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  return { username: asText(item.username), password: asText(item.password) }
+}
+
+function asAws(raw: unknown): ApiAuth['awsv4'] {
+  const item = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  return {
+    accessKey: asText(item.accessKey),
+    secretKey: asText(item.secretKey),
+    region: asText(item.region),
+    service: asText(item.service),
+    sessionToken: asText(item.sessionToken),
+  }
+}
+
+function asOAuth(raw: unknown): ApiOAuth2 {
+  const item = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const grant = item.grant === 'password' || item.grant === 'authorization_code' ? item.grant : 'client_credentials'
+  return {
+    grant,
+    clientAuth: item.clientAuth === 'body' ? 'body' : 'basic',
+    accessTokenUrl: asText(item.accessTokenUrl),
+    authUrl: asText(item.authUrl),
+    callbackUrl: asText(item.callbackUrl) || 'http://127.0.0.1:53682/callback',
+    clientId: asText(item.clientId),
+    clientSecret: asText(item.clientSecret),
+    scope: asText(item.scope),
+    username: asText(item.username),
+    password: asText(item.password),
+    accessToken: asText(item.accessToken),
+    refreshToken: asText(item.refreshToken),
+    expiresAt: typeof item.expiresAt === 'number' && Number.isFinite(item.expiresAt) ? item.expiresAt : 0,
+    codeVerifier: asText(item.codeVerifier),
+  }
 }
 
 function asKvRows(raw: unknown): ApiKvRow[] {
   if (!Array.isArray(raw)) return []
   return raw.map((row) => {
     const item = row && typeof row === 'object' ? (row as Record<string, unknown>) : {}
-    return newKvRow(asText(item.key), asText(item.value), item.enabled !== false)
+    return {
+      ...newKvRow(asText(item.key), asText(item.value), item.enabled !== false),
+      filePath: asText(item.filePath) || undefined,
+    }
   })
 }
 
@@ -192,6 +258,15 @@ function asRequest(raw: unknown, remintId: boolean): ApiRequest | null {
     bodyMode,
     body: asText(item.body),
     bodyForm: asKvRows(item.bodyForm),
+    graphql: normalizeGraphQL(item.graphql),
+    insecureTLS: item.insecureTLS === true,
+    settings: normalizeHttpSettings(item.settings),
+    wsProtocols: asText(item.wsProtocols),
+    preSteps: asPreSteps(item.preSteps),
+    checks: asChecks(item.checks),
+    preRequestScript: asText(item.preRequestScript),
+    testScript: asText(item.testScript),
+    grpcMethod: asText(item.grpcMethod),
   }
 }
 
@@ -340,6 +415,7 @@ function asMockServers(raw: unknown): ApiMockServer[] {
         bodyMode: parseBodyMode(route.bodyMode) ?? 'none',
         delayMs: typeof route.delayMs === 'number' ? route.delayMs : undefined,
         sourceRequestId: asText(route.sourceRequestId).trim() || undefined,
+        script: asText(route.script),
       })
     }
     out.push({

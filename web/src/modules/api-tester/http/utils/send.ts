@@ -1,23 +1,23 @@
 /**
- * HTTP 发送执行。无 Vue 状态，store / Runner 直接 import 具名函数。
- * 拼包走 resolveRequest；本文件开会话、收帧、组 HTTP exchange。
+ * HTTP / HTTPS 发送。解析仍在前端；TLS、重定向、Cookie 和 HTTP/2 由 api-service 完成。
  */
-import { apiSocketApi, isBridgeAvailable } from '@/api'
-import type { ApiSocketDataEvent } from '@/api/types/api-socket'
+import { apiHttpApi, BridgeError, isBridgeAvailable } from '@/api'
+import type { ApiHttpExchangeResult } from '@/api/types/api-http'
 import { i18n } from '@/locale'
-import { watchSocketSession } from '../../utils/socket-hub'
 import type { ApiEnvironment, ApiExchange, ApiRequest } from '../../types'
 import type { ApiVariableScope } from '../../utils/folder-tree'
 import { newKvRow } from '../../utils/format'
 import { isSocketMethod, parseTarget, TargetError, type SocketTarget } from '../../utils/target'
-import { buildHttpRequest, parseHttpResponse } from './http-wire'
-import { resolveRequest } from './request-resolve'
+import { loadApiCookies, saveApiCookies } from './cookie-jar'
+import { GraphQLBodyError } from '../graphql/body'
+import { applyMessageHeaders, titleHttpHeader } from './http-wire'
+import { interpolateVariables, resolveRequest } from './request-resolve'
+import { OAuthError, ensureOAuthToken } from './oauth'
+import { applyAwsSigV4 } from './aws-sig'
+import { buildDigestAuthorization, parseDigestChallenge } from './digest'
+import { httpTransportOf } from '../settings/settings'
 
-const HTTP_WAIT_MS = 15000
-/** 无新帧时的收包轮询间隔；有数据仍靠事件立刻醒。 */
-const HTTP_POLL_MS = 200
-
-export type SendErrorCode = 'need-desktop' | 'cancelled' | TargetError['code']
+export type SendErrorCode = 'need-desktop' | 'cancelled' | 'oauth' | TargetError['code']
 
 export class SendError extends Error {
   readonly code: SendErrorCode
@@ -31,9 +31,9 @@ export class SendError extends Error {
 
 const SEND_ERROR_KEYS: Record<string, string> = {
   'need-desktop': 'modules.api.needDesktop',
-  https: 'modules.api.httpsUnsupported',
   ws: 'modules.api.wsUnsupported',
   'bad-url': 'modules.api.badUrl',
+  oauth: 'modules.api.oauthNeedToken',
 }
 
 export interface ResolvedSend {
@@ -60,47 +60,143 @@ export function resolveSend(
     throw error
   }
   const payload = target.http
-    ? buildHttpRequest(req.method, target.path, target.host, target.port, resolved)
+    ? ''
     : resolved.body
   return { target, payload }
 }
 
-/** 明文 HTTP：打开 TCP、发完整报文、等响应后关闭。 */
+/** 通过 api-service 发送 HTTP / HTTPS，并写回 Cookie。 */
 export async function executeRequest(
   req: ApiRequest,
   env: ApiEnvironment | undefined,
   signal: AbortSignal,
   scope?: ApiVariableScope,
 ): Promise<ApiExchange> {
-  const { target, payload } = resolveSend(req, env, scope)
-  const started = performance.now()
-
-  const session = await apiSocketApi.open({
-    kind: target.transport,
-    host: target.host,
-    port: target.port,
-    timeoutMs: HTTP_WAIT_MS,
-    encoding: 'utf8',
-  })
-
-  const inbound = collectInbound(session.sessionId, signal)
+  let preview
   try {
-    throwIfAborted(signal)
-    if (payload) {
-      await apiSocketApi.send({
-        sessionId: session.sessionId,
-        data: payload,
-        encoding: 'utf8',
-        host: target.host,
-        port: target.port,
+    preview = resolveRequest(req, env, scope)
+  } catch (error) {
+    throw localizeBodyError(error)
+  }
+  if (!isBridgeAvailable()) {
+    throw new SendError('need-desktop', 'desktop only')
+  }
+  let target: ReturnType<typeof parseTarget>
+  try {
+    target = parseTarget(preview.url, req.method)
+  } catch (error) {
+    if (error instanceof TargetError) {
+      throw new SendError(error.code, error.message)
+    }
+    throw error
+  }
+  if (!target.http || !target.url) {
+    throw new SendError('bad-url', 'invalid url')
+  }
+  throwIfAborted(signal)
+  const cancelId = crypto.randomUUID()
+  const onAbort = () => {
+    void apiHttpApi.cancel({ cancelId }).catch(() => undefined)
+  }
+  signal.addEventListener('abort', onAbort)
+  try {
+    let resolved = preview
+    if (req.auth?.type === 'oauth2') {
+      try {
+        await ensureOAuthToken(
+          req,
+          (text) => interpolateVariables(text, resolved.values),
+          req.insecureTLS === true,
+          signal,
+        )
+      } catch (error) {
+        if (error instanceof OAuthError && error.code === 'need-token') {
+          throw new SendError('oauth', 'oauth')
+        }
+        if (error instanceof OAuthError) throw new Error(error.message)
+        throw error
+      }
+      try {
+        resolved = resolveRequest(req, env, scope)
+      } catch (error) {
+        throw localizeBodyError(error)
+      }
+      try {
+        target = parseTarget(resolved.url, req.method)
+      } catch (error) {
+        if (error instanceof TargetError) throw new SendError(error.code, error.message)
+        throw error
+      }
+      if (!target.url) throw new SendError('bad-url', 'invalid url')
+    }
+    const formParts = formPartsOf(req, resolved.values)
+    const headerMap = new Map(
+      [...applyMessageHeaders(req.method, resolved.body, resolved.headers).entries()]
+        .filter(([key]) => key !== 'content-length' && key !== 'connection')
+        .filter(([key]) => formParts.length === 0 || key !== 'content-type'),
+    )
+    const fill = (text: string) => interpolateVariables(text, resolved.values)
+    if (req.auth?.type === 'awsv4' && req.auth.awsv4) {
+      const aws = req.auth.awsv4
+      await applyAwsSigV4({
+        method: req.method,
+        url: target.url,
+        headers: headerMap,
+        body: formParts.length > 0 ? '' : resolved.body,
+        accessKey: fill(aws.accessKey),
+        secretKey: fill(aws.secretKey),
+        region: fill(aws.region),
+        service: fill(aws.service),
+        sessionToken: fill(aws.sessionToken),
       })
     }
-    const frames = await inbound.wait(HTTP_WAIT_MS, req.method)
-    const durationMs = Math.max(1, Math.round(performance.now() - started))
-    return toHttpExchange(req.method, session.remoteAddr ?? `${target.host}:${target.port}`, frames, durationMs)
+    const headers = [...headerMap.entries()].map(([name, value]) => ({ name: titleHttpHeader(name), value }))
+    const transport = httpTransportOf(req, fill)
+    const ntlm = req.auth?.type === 'ntlm' ? req.auth.ntlm : undefined
+    const call = (nextHeaders: { name: string; value: string }[]) => apiHttpApi.exchange({
+      cancelId,
+      method: req.method,
+      url: target.url,
+      headers: nextHeaders,
+      body: req.method === 'GET' || req.method === 'HEAD' || formParts.length > 0 ? '' : resolved.body,
+      parts: formParts.length > 0 ? formParts : undefined,
+      timeoutMs: transport.timeoutMs,
+      followRedirects: true,
+      insecure: transport.insecure,
+      proxy: transport.proxy,
+      certPath: transport.certPath,
+      keyPath: transport.keyPath,
+      cookies: loadApiCookies(),
+      ntlmUser: ntlm ? fill(ntlm.username) : undefined,
+      ntlmPassword: ntlm ? fill(ntlm.password) : undefined,
+      ntlmDomain: ntlm ? fill(ntlm.domain) : undefined,
+    })
+    let result = await call(headers)
+    if (req.auth?.type === 'digest' && result.status === 401 && req.auth.digest) {
+      const www = result.headers.find((row) => row.name.toLowerCase() === 'www-authenticate')?.value ?? ''
+      const challenge = parseDigestChallenge(www)
+      if (challenge) {
+        const uri = `${new URL(target.url).pathname}${new URL(target.url).search}`
+        const authorization = buildDigestAuthorization({
+          username: fill(req.auth.digest.username),
+          password: fill(req.auth.digest.password),
+          method: req.method,
+          uri,
+          challenge,
+        })
+        result = await call([...headers, { name: 'Authorization', value: authorization }])
+      }
+    }
+    saveApiCookies(result.cookies ?? [])
+    return exchangeFromResult(result)
+  } catch (error) {
+    if (error instanceof BridgeError && error.message === 'cancelled') {
+      throw new SendError('cancelled', 'cancelled')
+    }
+    if (error instanceof SendError) throw error
+    throw error
   } finally {
-    inbound.stop()
-    await apiSocketApi.close({ sessionId: session.sessionId }).catch(() => undefined)
+    signal.removeEventListener('abort', onAbort)
   }
 }
 
@@ -121,6 +217,8 @@ export function failExchange(error: unknown, durationMs: number, protocol = ''):
 
 export function protocolOf(method: ApiRequest['method']): string {
   if (isSocketMethod(method)) return method
+  if (method === 'GRPC') return 'gRPC'
+  if (method === 'WS') return 'WebSocket'
   return 'HTTP/1.1'
 }
 
@@ -133,95 +231,56 @@ export function localizeSendError(error: unknown): Error {
   return new Error(String(i18n.global.t(key)))
 }
 
-function collectInbound(sessionId: string, signal: AbortSignal) {
-  const chunks: ApiSocketDataEvent[] = []
-  let closed = false
-  let notify: (() => void) | null = null
-
-  const off = watchSocketSession(sessionId, (event) => {
-    if (event.type === 'api.socket.data' && event.direction === 'in') {
-      chunks.push(event)
-      notify?.()
-    }
-    if (event.type === 'api.session.state' && (event.state === 'lost' || event.state === 'closed')) {
-      closed = true
-      notify?.()
-    }
-  })
-
-  async function wait(timeoutMs: number, httpMethod: string): Promise<ApiSocketDataEvent[]> {
-    const deadline = Date.now() + timeoutMs
-    let lastCount = -1
-    while (Date.now() < deadline) {
-      throwIfAborted(signal)
-      if (chunks.length !== lastCount || closed) {
-        lastCount = chunks.length
-        const raw = joinText(chunks)
-        const parsed = parseHttpResponse(raw, httpMethod)
-        if (parsed?.complete || (closed && parsed)) {
-          return chunks
-        }
-        if (closed && raw) {
-          return chunks
-        }
-      }
-      const left = Math.max(1, deadline - Date.now())
-      await new Promise<void>((resolve) => {
-        notify = resolve
-        window.setTimeout(resolve, Math.min(HTTP_POLL_MS, left))
-      })
-      notify = null
-    }
-    return chunks
+function localizeBodyError(error: unknown): Error {
+  if (error instanceof GraphQLBodyError) {
+    return new Error(String(i18n.global.t('modules.api.graphqlVariables')))
   }
-
-  return {
-    wait,
-    stop() {
-      off()
-    },
-  }
+  return error instanceof Error ? error : new Error(String(error))
 }
 
-function toHttpExchange(
-  method: string,
-  peer: string,
-  frames: ApiSocketDataEvent[],
-  durationMs: number,
-): ApiExchange {
-  const raw = joinText(frames)
-  const hex = frames.map((frame) => frame.hex ?? '').join('')
-  const sizeBytes = hex ? Math.floor(hex.length / 2) : new TextEncoder().encode(raw).length
-  const headers = [newKvRow('peer', peer)]
-  const parsed = parseHttpResponse(raw, method)
-  if (parsed) {
-    return {
-      ok: parsed.status < 400,
-      status: parsed.status,
-      statusText: parsed.statusText,
-      durationMs,
-      sizeBytes: new TextEncoder().encode(parsed.body).length,
-      protocol: 'HTTP/1.1',
-      headers: parsed.headers.length ? parsed.headers : headers,
-      body: parsed.body,
-      hex,
-    }
-  }
+function formPartsOf(req: ApiRequest, values: Record<string, string>) {
+  if (req.bodyMode !== 'form') return []
+  const parts = (req.bodyForm ?? [])
+    .filter((row) => row.enabled && row.key.trim() && row.filePath?.trim())
+    .map((row) => ({
+      name: row.key.trim(),
+      value: '',
+      filePath: interpolateVariables(row.filePath ?? '', values),
+    }))
+  if (parts.length === 0) return []
+  const text = (req.bodyForm ?? [])
+    .filter((row) => row.enabled && row.key.trim() && !row.filePath?.trim())
+    .map((row) => ({
+      name: row.key.trim(),
+      value: interpolateVariables(row.value, values),
+    }))
+  return [...text, ...parts]
+}
+
+function exchangeFromResult(result: ApiHttpExchangeResult): ApiExchange {
+  const durationMs = result.durationMs > 0 ? result.durationMs : 1
   return {
-    ok: Boolean(raw),
-    status: null,
-    statusText: raw ? 'Incomplete' : 'No reply',
+    ok: result.status < 400,
+    status: result.status,
+    statusText: result.statusText,
     durationMs,
-    sizeBytes,
-    protocol: 'HTTP/1.1',
-    headers,
-    body: raw,
-    hex,
+    sizeBytes: result.sizeBytes,
+    protocol: result.protocol || 'HTTP/1.1',
+    headers: (result.headers ?? []).map((header) => newKvRow(header.name, header.value)),
+    body: result.body ?? '',
+    hex: result.binary && result.bodyBase64 ? base64ToHex(result.bodyBase64) : undefined,
+    binary: result.binary || undefined,
+    redirects: result.redirects?.length ? result.redirects : undefined,
   }
 }
 
-function joinText(frames: ApiSocketDataEvent[]): string {
-  return frames.map((frame) => frame.data ?? '').join('')
+function base64ToHex(value: string): string {
+  const bin = atob(value)
+  let hex = ''
+  for (let i = 0; i < bin.length; i += 1) {
+    hex += bin.charCodeAt(i).toString(16).padStart(2, '0')
+  }
+  return hex
 }
 
 function throwIfAborted(signal: AbortSignal): void {

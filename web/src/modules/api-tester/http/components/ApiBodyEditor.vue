@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { RsCodeEditor, RsSelect, type RsSelectOption } from '@niuma/ui'
+import { RsCodeEditor, RsTabs, type RsTabItem } from '@niuma/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import type { ApiBodyMode, ApiRequest } from '../../types'
+import { isLargeText } from '../../utils/format'
 import ApiKvEditor from '../../layout/ApiKvEditor.vue'
+import ApiGraphQLBody from '../graphql/ApiGraphQLBody.vue'
 
 const props = defineProps<{
   request: ApiRequest
@@ -13,13 +15,14 @@ const props = defineProps<{
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const modeOptions = computed<RsSelectOption[]>(() => [
+const modeOptions = computed<RsTabItem[]>(() => [
   { value: 'none', label: t('modules.api.bodyNone') },
   { value: 'json', label: 'JSON' },
   { value: 'text', label: 'Text' },
   { value: 'raw', label: 'Raw' },
-  { value: 'urlencoded', label: 'x-www-form-urlencoded' },
-  { value: 'form', label: 'form-data' },
+  { value: 'urlencoded', label: 'URL Encoded' },
+  { value: 'form', label: 'Form Data' },
+  { value: 'graphql', label: 'GraphQL' },
 ])
 
 const bodyMode = computed({
@@ -44,7 +47,10 @@ const bodyFormModel = computed({
   },
 })
 
+const largeBody = computed(() => isLargeText(props.request.body))
+
 const editorLanguage = computed(() => {
+  if (largeBody.value) return 'plaintext'
   if (props.request.bodyMode === 'json') return 'json'
   return 'plaintext'
 })
@@ -52,34 +58,44 @@ const editorLanguage = computed(() => {
 
 <template>
   <div class="nm-api-body">
-    <div class="nm-api-body__mode">
-      <RsSelect
-        v-model="bodyMode"
-        :options="modeOptions"
-        size="sm"
-        radius="sm"
-        :searchable="false"
-        :clearable="false"
-        :filter-option="false"
-      />
-    </div>
+    <RsTabs
+      v-model="bodyMode"
+      class="nm-api-body__mode"
+      :items="modeOptions"
+      size="sm"
+      variant="segmented"
+      panelless
+      borderless
+      content-gap="none"
+    />
 
     <div v-if="bodyMode === 'none'" class="nm-api-body__empty">{{ t('modules.api.bodyNoneHint') }}</div>
 
     <ApiKvEditor
-      v-else-if="bodyMode === 'urlencoded' || bodyMode === 'form'"
+      v-else-if="bodyMode === 'urlencoded'"
       v-model="bodyFormModel"
+      table
+    />
+    <ApiKvEditor
+      v-else-if="bodyMode === 'form'"
+      v-model="bodyFormModel"
+      table
+      files
     />
 
-    <RsCodeEditor
-      v-else
-      v-model="bodyModel"
-      :language="editorLanguage"
-      :theme="appStore.editorTheme"
-      :show-toolbar="false"
-      embedded
-      height="100%"
-    />
+    <ApiGraphQLBody v-else-if="bodyMode === 'graphql'" :request="request" />
+
+    <template v-else>
+      <p v-if="largeBody" class="nm-api-body__empty">{{ t('modules.api.largePayload') }}</p>
+      <RsCodeEditor
+        v-model="bodyModel"
+        :language="editorLanguage"
+        :theme="appStore.editorTheme"
+        :show-toolbar="false"
+        embedded
+        height="100%"
+      />
+    </template>
   </div>
 </template>
 
@@ -94,12 +110,12 @@ const editorLanguage = computed(() => {
 
 .nm-api-body__mode {
   flex-shrink: 0;
-  padding: 0.375rem 0.75rem 0;
+  padding: var(--rs-space-sm) var(--rs-space-md) 0;
 }
 
 .nm-api-body__empty {
-  padding: 0.75rem;
-  color: var(--rs-text-muted);
+  padding: var(--rs-space-md);
+  color: var(--rs-muted);
   font-size: var(--rs-font-size-xs);
 }
 

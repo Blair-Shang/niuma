@@ -97,26 +97,25 @@ function attachOscCwdHandlers(): void {
 }
 
 async function resolveTerminalCwd(): Promise<string | null> {
+  const terminalId = pane.terminalId.value
+  if (terminalId) {
+    try {
+      const result = await sshApi.terminalCwd({ terminalId })
+      const fromPty = normalizeRemoteCwd(result.path)
+      if (fromPty) {
+        return fromPty
+      }
+    } catch {
+      // 远端没有 /proc 或还没绑上这块 PTY 时，再用屏幕上的路径
+    }
+  }
   const fromOsc = normalizeRemoteCwd(lastOscCwd)
   if (fromOsc) {
     return fromOsc
   }
-  const fromPrompt = extractPromptPathFromTerminal(
+  return extractPromptPathFromTerminal(
     (terminalRef.value?.getTerminal() ?? null) as TerminalCwdBufferHost | null,
   )
-  if (fromPrompt) {
-    return fromPrompt
-  }
-  const terminalId = pane.terminalId.value
-  if (!terminalId) {
-    return null
-  }
-  try {
-    const result = await sshApi.terminalCwd({ terminalId })
-    return normalizeRemoteCwd(result.path)
-  } catch {
-    return null
-  }
 }
 
 async function onSftpToCwd(): Promise<void> {

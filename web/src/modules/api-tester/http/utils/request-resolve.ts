@@ -4,8 +4,10 @@
  * HTTP/1.1 字节串仍由 http-wire 负责。
  */
 import { createId } from '@/utils/id'
-import type { ApiEnvironment, ApiFolder, ApiKvRow, ApiRequest, ApiVariableBag } from '../../types'
+import type { ApiEnvironment, ApiFolder, ApiKvRow, ApiRequest, ApiVariableBag, ApiVariableKind } from '../../types'
+import { materializeVariableValue } from '../../utils/variable-dynamic'
 import type { ApiVariableScope } from '../../utils/folder-tree'
+import { encodeGraphQL } from '../graphql/body'
 import { applyAuthHeaders, authQueryParam } from './http-auth'
 
 const ENV_TOKEN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
@@ -13,7 +15,9 @@ const ENV_TOKEN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
 /** 变量插值上下文：globals → 文件夹链 → 环境。 */
 export interface ApiVariableContext {
   globals: Record<string, string>
+  globalsKinds?: Record<string, ApiVariableKind>
   folderVars: Record<string, string>[]
+  folderKinds?: Record<string, ApiVariableKind>[]
   environment?: ApiEnvironment
 }
 
@@ -41,11 +45,10 @@ export function mergeVariableMaps(...maps: readonly Record<string, string>[]): R
   return out
 }
 
-/** 从根到叶收集文件夹 vars。上行用 seen，parentId 环不会转起来。 */
-export function folderVariableChain(folders: readonly ApiFolder[], folderId: string | null | undefined): Record<string, string>[] {
+/** 从根到叶收集文件夹。上行用 seen，parentId 环不会转起来。 */
+function folderNodes(folders: readonly ApiFolder[], folderId: string | null | undefined): ApiFolder[] {
   if (!folderId) return []
   const byId = new Map(folders.map((folder) => [folder.id, folder]))
-  const chain: Record<string, string>[] = []
   const seen = new Set<string>()
   let current = byId.get(folderId)
   const parents: ApiFolder[] = []
@@ -54,10 +57,12 @@ export function folderVariableChain(folders: readonly ApiFolder[], folderId: str
     parents.push(current)
     current = current.parentId ? byId.get(current.parentId) : undefined
   }
-  for (let i = parents.length - 1; i >= 0; i -= 1) {
-    chain.push(parents[i]!.vars)
-  }
-  return chain
+  return parents.reverse()
+}
+
+/** 从根到叶收集文件夹 vars。 */
+export function folderVariableChain(folders: readonly ApiFolder[], folderId: string | null | undefined): Record<string, string>[] {
+  return folderNodes(folders, folderId).map((folder) => folder.vars)
 }
 
 /** 构造完整变量上下文。 */
@@ -67,22 +72,42 @@ export function buildVariableContext(opts: {
   folderId?: string | null
   environment?: ApiEnvironment
 }): ApiVariableContext {
+  const folders = folderNodes(opts.folders ?? [], opts.folderId)
   return {
     globals: { ...(opts.globals?.vars ?? {}) },
-    folderVars: folderVariableChain(opts.folders ?? [], opts.folderId),
+    globalsKinds: opts.globals?.kinds,
+    folderVars: folders.map((folder) => folder.vars),
+    folderKinds: folders.map((folder) => folder.kinds ?? {}),
     environment: opts.environment,
   }
 }
 
 /** 按优先级合并为 flat map（含 baseUrl）。 */
 export function buildVariableMap(ctx: ApiVariableContext): Record<string, string> {
-  const maps: Record<string, string>[] = [ctx.globals]
-  maps.push(...ctx.folderVars)
+  const values: Record<string, string> = {}
+  const kinds: Record<string, ApiVariableKind> = {}
+  const layers: { vars: Record<string, string>; kinds?: Record<string, ApiVariableKind> }[] = [
+    { vars: ctx.globals, kinds: ctx.globalsKinds },
+  ]
+  ctx.folderVars.forEach((vars, index) => {
+    layers.push({ vars, kinds: ctx.folderKinds?.[index] })
+  })
   if (ctx.environment) {
-    maps.push(ctx.environment.vars)
-    maps.push({ baseUrl: ctx.environment.baseUrl })
+    layers.push({ vars: ctx.environment.vars, kinds: ctx.environment.kinds })
+    layers.push({ vars: { baseUrl: ctx.environment.baseUrl } })
   }
-  return mergeVariableMaps(...maps)
+  for (const layer of layers) {
+    for (const [key, value] of Object.entries(layer.vars)) {
+      values[key] = value
+      kinds[key] = layer.kinds?.[key] ?? 'string'
+    }
+  }
+  const now = new Date()
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(values)) {
+    out[key] = materializeVariableValue(kinds[key] ?? 'string', value, now)
+  }
+  return out
 }
 
 /** 将 {{name}} 替换为变量值；未知 token 保留原文。 */
@@ -124,6 +149,9 @@ export function resolveRequestBody(
       body: `${parts.join('')}--${boundary}--\r\n`,
       contentType: `multipart/form-data; boundary=${boundary}`,
     }
+  }
+  if (req.bodyMode === 'graphql') {
+    return encodeGraphQL(req.graphql, interpolate)
   }
   const body = interpolate(req.body)
   if (!body) return { body: '' }

@@ -65,8 +65,17 @@ describe('api tester target', () => {
     })
   })
 
-  it('rejects https websocket and bare host', () => {
-    expect(() => parseTarget('https://example.com', 'GET')).toThrow(TargetError)
+  it('parses https on port 443', () => {
+    expect(parseTarget('https://example.com/a', 'GET')).toMatchObject({
+      host: 'example.com',
+      port: 443,
+      path: '/a',
+      url: 'https://example.com/a',
+      http: true,
+    })
+  })
+
+  it('rejects websocket and bare host', () => {
     expect(() => parseTarget('ws://example.com', 'WS')).toThrow(TargetError)
     expect(() => parseTarget('10.0.0.8', 'TCP')).toThrow(TargetError)
   })

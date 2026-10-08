@@ -30,6 +30,21 @@ describe('request-resolve', () => {
     expect(map.envName).toBe('dev')
   })
 
+  it('materializes datetime variables when the request is resolved', () => {
+    const map = buildVariableMap(
+      buildVariableContext({
+        environment: {
+          id: 'e1',
+          name: 'Dev',
+          baseUrl: 'http://127.0.0.1:8080',
+          vars: { today: 'now:date' },
+          kinds: { today: 'datetime' },
+        },
+      }),
+    )
+    expect(map.today).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
   it('interpolates unknown tokens verbatim', () => {
     expect(interpolateVariables('{{a}}/{{missing}}', { a: '1' })).toBe('1/{{missing}}')
   })

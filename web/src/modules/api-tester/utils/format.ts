@@ -53,9 +53,19 @@ function formatHexBytes(bytes: Uint8Array): string {
   return lines.join('\n')
 }
 
+/**
+ * 超过后不再 pretty-print、展开 Hex，也不再走 JSON 高亮。
+ * 原文仍交给编辑器按视口绘制。
+ */
+export const LARGE_TEXT_CHARS = 256 * 1024
+
+export function isLargeText(text: string): boolean {
+  return text.length > LARGE_TEXT_CHARS
+}
+
 export function prettyJson(text: string): string {
   const trimmed = text.trim()
-  if (!trimmed) return text
+  if (!trimmed || isLargeText(text)) return text
   try {
     return JSON.stringify(JSON.parse(trimmed), null, 2)
   } catch {

@@ -14,7 +14,7 @@ const ApiHistoryPane = defineAsyncComponent(() => import('./ApiHistoryPane.vue')
 const { t } = useI18n()
 const api = useApiTesterStore()
 const toast = useRsToast()
-const { historyOpen, historySeen, openEnvironments, toggleHistory } = useApiSideNav()
+const { historyOpen, historySeen, openEnvironments, openMock, openRunner, openCapture, toggleHistory } = useApiSideNav()
 
 const histTarget = ref('')
 const histMenuOpen = ref(false)
@@ -123,6 +123,42 @@ function openClearHistory(): void {
       >
         <RsIcon name="globe" :size="13" class="nm-api-sidenav__tone" />
         <span class="nm-api-sidenav__head-title">{{ t('modules.api.sideEnvironment') }}</span>
+        <RsIcon name="external-link" :size="12" class="nm-api-sidenav__jump" />
+      </button>
+    </section>
+
+    <section class="nm-api-sidenav__section">
+      <button
+        type="button"
+        class="nm-api-sidenav__head nm-api-sidenav__head--btn nm-api-sidenav__head--env"
+        @click="openMock"
+      >
+        <RsIcon name="server" :size="13" class="nm-api-sidenav__tone" />
+        <span class="nm-api-sidenav__head-title">{{ t('modules.api.sideMock') }}</span>
+        <RsIcon name="external-link" :size="12" class="nm-api-sidenav__jump" />
+      </button>
+    </section>
+
+    <section class="nm-api-sidenav__section">
+      <button
+        type="button"
+        class="nm-api-sidenav__head nm-api-sidenav__head--btn nm-api-sidenav__head--env"
+        @click="openRunner"
+      >
+        <RsIcon name="list-checks" :size="13" class="nm-api-sidenav__tone" />
+        <span class="nm-api-sidenav__head-title">{{ t('modules.api.sideRunner') }}</span>
+        <RsIcon name="external-link" :size="12" class="nm-api-sidenav__jump" />
+      </button>
+    </section>
+
+    <section class="nm-api-sidenav__section">
+      <button
+        type="button"
+        class="nm-api-sidenav__head nm-api-sidenav__head--btn nm-api-sidenav__head--env"
+        @click="openCapture"
+      >
+        <RsIcon name="radar" :size="13" class="nm-api-sidenav__tone" />
+        <span class="nm-api-sidenav__head-title">{{ t('modules.api.sideCapture') }}</span>
         <RsIcon name="external-link" :size="12" class="nm-api-sidenav__jump" />
       </button>
     </section>

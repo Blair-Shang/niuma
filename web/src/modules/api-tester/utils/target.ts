@@ -2,13 +2,15 @@ import type { ApiMethod } from '../types'
 
 export type SocketTransport = 'tcp-client' | 'tcp-server' | 'udp'
 
-/** 工作台一条发送解析出的对端。HTTP 也走 TCP。 */
+/** 工作台一条发送解析出的对端。HTTP / HTTPS 走 api.http.exchange。 */
 export interface SocketTarget {
   transport: SocketTransport
   protocol: string
   host: string
   port: number
   path: string
+  /** 绝对 URL。仅 HTTP / HTTPS 有值。 */
+  url: string
   http: boolean
   /** 通配地址或 listen:// 时绑定本机，会话保持到关标签。 */
   listen: boolean
@@ -37,7 +39,7 @@ export class TargetError extends Error {
 
 const SCHEME = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//
 
-/** 从地址栏解析 host/port；TCP/UDP 为原始套接字，其余方法按明文 HTTP。 */
+/** 从地址栏解析 host/port；TCP/UDP 为原始套接字，其余方法按 HTTP 或 HTTPS。 */
 export function parseTarget(raw: string, method: ApiMethod): SocketTarget {
   const text = raw.trim()
   if (!text) {
@@ -66,29 +68,27 @@ function parseHttpTarget(text: string): SocketTarget {
     throw new TargetError('bad-url', 'invalid url')
   }
   const scheme = parsed.protocol.replace(/:$/, '').toLowerCase()
-  if (scheme === 'https') {
-    throw new TargetError('https', 'https not supported')
-  }
   if (scheme === 'ws' || scheme === 'wss') {
     throw new TargetError('ws', 'websocket not supported')
   }
   if (scheme === 'tcp' || scheme === 'udp' || scheme === 'listen') {
     return parseHostPort(stripScheme(text), scheme === 'udp' ? 'udp' : 'tcp', scheme === 'listen')
   }
-  if (scheme !== 'http') {
+  if (scheme !== 'http' && scheme !== 'https') {
     throw new TargetError('bad-url', `unsupported scheme ${scheme}`)
   }
-  const port = parsed.port ? Number(parsed.port) : 80
+  const port = parsed.port ? Number(parsed.port) : scheme === 'https' ? 443 : 80
   if (!parsed.hostname || !Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new TargetError('bad-url', 'invalid host or port')
   }
   const path = `${parsed.pathname || '/'}${parsed.search}`
   return {
     transport: 'tcp-client',
-    protocol: 'HTTP/1.1',
+    protocol: scheme === 'https' ? 'HTTPS' : 'HTTP/1.1',
     host: parsed.hostname,
     port,
     path,
+    url: parsed.href,
     http: true,
     listen: false,
   }
@@ -126,6 +126,7 @@ function socketTarget(host: string, port: number, proto: 'tcp' | 'udp', forceLis
     host: resolved,
     port,
     path: '',
+    url: '',
     http: false,
     listen,
   }

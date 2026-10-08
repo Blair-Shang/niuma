@@ -31,6 +31,9 @@ describe('api tester http wire', () => {
     expect(wire).toContain('GET /api/items?limit=20 HTTP/1.1')
     expect(wire).toContain('Host: example.com')
     expect(wire).toContain('Connection: close')
+    expect(wire).toContain('User-Agent: NiuMa')
+    expect(wire).toContain('Accept-Encoding: gzip, deflate')
+    expect(wire).not.toContain('Content-Length:')
     expect(wire.endsWith('\r\n\r\n')).toBe(true)
   })
 
@@ -60,6 +63,23 @@ describe('api tester http wire', () => {
     )
     expect(wire).toContain('Content-Type: application/x-www-form-urlencoded')
     expect(wire).toContain('a=1&b=two')
+  })
+
+  it('writes content-length 0 for an empty POST and strips header CR LF', () => {
+    const wire = wireOf(
+      { method: 'POST', headers: [newKvRow('X-Note', 'a\r\nInjected: 1')] },
+      '/echo',
+      '127.0.0.1',
+      8080,
+    )
+    expect(wire).toContain('Content-Length: 0')
+    expect(wire).not.toContain('\r\nInjected:')
+  })
+
+  it('decodes a chunked response', () => {
+    const raw = 'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n'
+    const parsed = parseHttpResponse(raw, 'GET')
+    expect(parsed).toMatchObject({ status: 200, body: 'hello', complete: true })
   })
 
   it('parses a complete response', () => {

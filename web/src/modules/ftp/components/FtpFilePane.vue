@@ -483,7 +483,7 @@ defineExpose({ resetOnNavigate, clearSelection })
           variant="ghost"
           icon="rotate-cw"
           icon-only
-          :disabled="loading"
+          :loading="loading"
           :tooltip="t('modules.ftp.session.refresh')"
           @click="emit('refresh')"
         />

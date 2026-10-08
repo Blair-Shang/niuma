@@ -25,7 +25,8 @@
  */
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
-import { apiCatalogApi, apiHistoryApi, isBridgeAvailable, isPlatformUnavailable, settingsApi, withPlatformRetry } from '@/api'
+import { apiCatalogApi, apiHistoryApi, apiMockApi, apiWsApi, isBridgeAvailable, isPlatformUnavailable, settingsApi, withPlatformRetry } from '@/api'
+import type { ApiMockHit } from '@/api/types/api-mock'
 import type { ApiVariableScope as CatalogVariableScope } from '@/api/types/api-catalog'
 import { i18n } from '@/locale'
 import type { ApiSocketDataEvent, ApiSocketEncoding } from '@/api/types/api-socket'
@@ -38,6 +39,7 @@ import {
   protocolOf,
   resolveSend,
 } from '../http/utils/send'
+import { executeGrpc } from '../grpc/send'
 import {
   appendSocketFrame,
   buildLiveExchange,
@@ -52,12 +54,18 @@ import { adoptLivePeers, applyLiveSocketEvent } from '../tcp/utils/live-peers'
 import type { SocketFrameOpen } from '../tcp/utils/frame'
 import { createId } from '@/utils/id'
 import { cloneRequest, defaultAuth, defaultEnvironments, defaultFolders, emptyKinds, emptyVars, isApiWorkspaceText, mergeWorkspaceFolders, parseWorkspace, serializeWorkspace, uniqueName, workspaceHasEmbeddedCatalog, type ApiWorkspaceState } from '../utils/collection-io'
+import { emptyGraphQL } from '../http/graphql/body'
+import { emptyHttpSettings } from '../http/settings/settings'
+import { wireMockRoutes } from '../mock/wire'
+import { attachChecks, evaluateChecks, resolvePreSteps, type ApiVarWrite } from '../script/eval'
+import { runPreRequestScript, runTestScript, type ScriptBag } from '../script/sandbox'
 import { applyFolderVariables, catalogEnvironmentToRuntime, catalogToTypedRecord, recordToVariableInputs } from '../utils/catalog-sync'
 import { createCatalogPersister } from '../utils/catalog-persist'
 import { createWorkspacePersister } from '../utils/workspace-persist'
 import { applyPaneDefaults } from '../layout/pane-registry'
 import { buildCurl } from '../http/utils/curl'
-import { resolveRequest } from '../http/utils/request-resolve'
+import { buildWebSocketDraft } from '../websocket/utils/draft'
+import { buildVariableContext, buildVariableMap, interpolateVariables, resolveRequest } from '../http/utils/request-resolve'
 import { canAddChildFolder, canNestFolder, collectDescendantFolderIds, scopeForRequest, type ApiVariableScope } from '../utils/folder-tree'
 import { requestFromHistory, toHistoryItem, toHistorySummary } from '../utils/history-map'
 import { tabTitle, tabTooltip } from '../utils/tab-chrome'
@@ -99,6 +107,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
   const globals = reactive<ApiVariableBag>({ vars: emptyVars(), kinds: emptyKinds() })
   const runProfiles = reactive<ApiRunProfile[]>([])
   const mockServers = reactive<ApiMockServer[]>([])
+  const mockListen = reactive<Record<string, string>>({})
   const envId = ref('')
   const treeFilter = ref('')
   const historyFilter = ref('')
@@ -566,6 +575,16 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     return env
   }
 
+  /** 导入 Postman 环境文件里的变量，并选为当前环境。 */
+  function importEnvironment(name: string, vars: Record<string, string>): ApiEnvironment {
+    const env = addEnvironment(name)
+    env.vars = { ...env.vars, ...vars }
+    if (vars.baseUrl?.trim()) env.baseUrl = vars.baseUrl.trim()
+    envId.value = env.id
+    queueCatalogScope('environment', env.id)
+    return env
+  }
+
   function renameEnvironment(environmentId: string, name: string): ApiEnvironment | undefined {
     const env = environments.find((item) => item.id === environmentId)
     if (!env) return undefined
@@ -727,6 +746,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       bodyMode: 'none',
       body: '',
       bodyForm: [],
+      settings: emptyHttpSettings(),
+      graphql: emptyGraphQL(),
     }
     applyPaneDefaults(req, { listen: opts?.listen })
     folder.requests.push(req)
@@ -940,10 +961,137 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       )
       return
     }
+    if (req.method === 'WS') {
+      if (sockets[requestId]) await sendWebSocket(requestId, opts?.data ?? req.body, opts?.encoding === 'base64' ? 'base64' : 'utf8')
+      else await connectWebSocket(requestId)
+      return
+    }
     if (sockets[requestId]) {
       await closeLiveSocket(requestId)
     }
     await sendHttp(requestId, req)
+  }
+
+  function applyScriptWrites(writes: ApiVarWrite[], env?: ApiEnvironment): void {
+    let globalsTouched = false
+    let envTouched = false
+    for (const write of writes) {
+      if (write.scope === 'global') {
+        globals.vars = { ...globals.vars, [write.key]: write.value }
+        globalsTouched = true
+      } else if (env) {
+        env.vars = { ...env.vars, [write.key]: write.value }
+        envTouched = true
+      }
+    }
+    if (globalsTouched) queueCatalogScope('global')
+    if (envTouched && env) queueCatalogScope('environment', env.id)
+  }
+
+  function withChecks(req: ApiRequest, exchange: ApiExchange): ApiExchange {
+    attachChecks(exchange, evaluateChecks(req.checks, exchange))
+    return exchange
+  }
+
+  function scriptBag(
+    env: ApiEnvironment | undefined,
+    scope: ApiVariableScope,
+  ): ScriptBag {
+    const ctx = buildVariableContext({
+      globals: scope.globals ?? globals,
+      folders: scope.folders ?? folders,
+      folderId: scope.folderId,
+      environment: env,
+    })
+    const collection: Record<string, string> = {}
+    for (const layer of ctx.folderVars) Object.assign(collection, layer)
+    return {
+      environment: { ...(env?.vars ?? {}) },
+      globals: { ...ctx.globals },
+      collection,
+    }
+  }
+
+  async function exchangeWithScript(
+    req: ApiRequest,
+    env: ApiEnvironment | undefined,
+    signal: AbortSignal,
+    scope: ApiVariableScope,
+  ): Promise<ApiExchange> {
+    const values = buildVariableMap(buildVariableContext({
+      globals: scope.globals ?? globals,
+      folders: scope.folders ?? folders,
+      folderId: scope.folderId,
+      environment: env,
+    }))
+    applyScriptWrites(resolvePreSteps(req.preSteps, values, interpolateVariables), env)
+    const bag = scriptBag(env, scope)
+    const pre = await runPreRequestScript(req.preRequestScript, bag)
+    applyScriptWrites(pre.writes, env)
+    const exchange = req.method === 'GRPC'
+      ? await executeGrpc(req, env, signal, scope)
+      : await executeRequest(req, env, signal, scope)
+    const tests = await runTestScript(req.testScript, bag, exchange)
+    applyScriptWrites(tests.writes, env)
+    attachChecks(exchange, [...evaluateChecks(req.checks, exchange), ...pre.checks, ...tests.checks])
+    return exchange
+  }
+
+  function ensureLocalMock(): ApiMockServer {
+    const existing = mockServers[0]
+    if (existing) return existing
+    const created: ApiMockServer = {
+      id: createId('mock'),
+      name: 'Local',
+      enabled: false,
+      host: '127.0.0.1',
+      port: 8787,
+      routes: [],
+    }
+    mockServers.push(created)
+    persistStructureNow()
+    return created
+  }
+
+  function touchMock(): void {
+    persistStructureNow()
+  }
+
+  async function startMock(id: string): Promise<void> {
+    const server = mockServers.find((item) => item.id === id)
+    if (!server) return
+    if (!isBridgeAvailable()) throw new SendError('need-desktop', 'desktop only')
+    const started = await apiMockApi.start({
+      serverId: server.id,
+      host: server.host.trim() || '127.0.0.1',
+      port: Number(server.port) || 0,
+      routes: wireMockRoutes(server.routes),
+    })
+    server.port = started.port
+    server.enabled = true
+    mockListen[server.id] = started.listenAddr
+    persistStructureNow()
+  }
+
+  async function stopMock(id: string): Promise<void> {
+    if (!isBridgeAvailable()) throw new SendError('need-desktop', 'desktop only')
+    await apiMockApi.stop({ serverId: id })
+    delete mockListen[id]
+    const server = mockServers.find((item) => item.id === id)
+    if (server) server.enabled = false
+    persistStructureNow()
+  }
+
+  async function pushMockRoutes(id: string): Promise<void> {
+    const server = mockServers.find((item) => item.id === id)
+    if (!server || !mockListen[id]) return
+    await apiMockApi.update({ serverId: id, routes: wireMockRoutes(server.routes) })
+    persistStructureNow()
+  }
+
+  async function mockHits(id: string): Promise<ApiMockHit[]> {
+    const result = await apiMockApi.log({ serverId: id })
+    return result.hits ?? []
   }
 
   async function sendHttp(requestId: string, req: ApiRequest): Promise<void> {
@@ -957,7 +1105,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     const started = performance.now()
     try {
       const scope = variableScope(requestId)
-      const exchange = await executeRequest(req, environment.value, ac.signal, scope)
+      const exchange = await exchangeWithScript(req, environment.value, ac.signal, scope)
       if (sendGen.get(requestId) !== gen) return
       exchanges[requestId] = exchange
       void rememberHistory(req, exchange)
@@ -965,7 +1113,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       if (sendGen.get(requestId) !== gen) return
       if (error instanceof SendError && error.code === 'cancelled') return
       const durationMs = Math.max(1, Math.round(performance.now() - started))
-      const exchange = failExchange(localizeSendError(error), durationMs, protocolOf(req.method))
+      const exchange = withChecks(req, failExchange(localizeSendError(error), durationMs, protocolOf(req.method)))
       exchanges[requestId] = exchange
       void rememberHistory(req, exchange)
     } finally {
@@ -1187,7 +1335,56 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     const live = sockets[requestId]
     detachLive(requestId, true)
     delete socketLogs[requestId]
-    if (live) await closeSocketSession(live.sessionId)
+    if (live) {
+      if (live.kind === 'websocket') await apiWsApi.close({ sessionId: live.sessionId }).catch(() => undefined)
+      else await closeSocketSession(live.sessionId)
+    }
+  }
+
+  async function connectWebSocket(requestId: string): Promise<void> {
+    const req = requestById(requestId)
+    if (!req || req.method !== 'WS' || sending[requestId]) return
+    const gen = (sendGen.get(requestId) ?? 0) + 1
+    sendGen.set(requestId, gen)
+    sending[requestId] = true
+    const started = performance.now()
+    try {
+      const values = buildVariableMap(
+        buildVariableContext({
+          globals: variableScope(requestId).globals,
+          folders: variableScope(requestId).folders,
+          folderId: variableScope(requestId).folderId,
+          environment: environment.value,
+        }),
+      )
+      const draft = buildWebSocketDraft(req, (text) => interpolateVariables(text, values))
+      if (sockets[requestId]) await closeLiveSocket(requestId)
+      const info = await apiWsApi.connect(draft)
+      if (sendGen.get(requestId) !== gen) {
+        await apiWsApi.close({ sessionId: info.sessionId }).catch(() => undefined)
+        return
+      }
+      attachLive(requestId, info.sessionId, {
+        kind: 'websocket',
+        host: draft.host,
+        port: draft.port,
+        state: info.state || 'connected',
+        localAddr: info.localAddr,
+        remoteAddr: info.remoteAddr || draft.url,
+      })
+    } catch (error) {
+      if (sendGen.get(requestId) !== gen) return
+      const durationMs = Math.max(1, Math.round(performance.now() - started))
+      exchanges[requestId] = failExchange(error instanceof Error ? error : new Error(String(error)), durationMs, 'WebSocket')
+    } finally {
+      if (sendGen.get(requestId) === gen) sending[requestId] = false
+    }
+  }
+
+  async function sendWebSocket(requestId: string, data: string, encoding: 'utf8' | 'base64' | 'hex'): Promise<void> {
+    const live = sockets[requestId]
+    if (!live || live.kind !== 'websocket' || !data) return
+    await apiWsApi.send({ sessionId: live.sessionId, data, encoding })
   }
 
   // --- 8. 历史：只写 nm_api_history，不进 workspace ---
@@ -1382,6 +1579,16 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     return buildCurl(req, environment.value, variableScope(requestId))
   }
 
+  function overlayData(env: ApiEnvironment | undefined, data?: Record<string, string>): ApiEnvironment | undefined {
+    if (!data || Object.keys(data).length === 0) return env
+    const base = env ?? { id: 'data', name: 'data', baseUrl: '', vars: {}, kinds: emptyKinds() }
+    return {
+      ...base,
+      baseUrl: data.baseUrl?.trim() || base.baseUrl,
+      vars: { ...base.vars, ...data },
+    }
+  }
+
   function resolveEnvironmentForSend(opts?: ApiSendOptions): ApiEnvironment | undefined {
     if (opts?.envId) {
       return environments.find((item) => item.id === opts.envId)
@@ -1394,12 +1601,12 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     if (!isBridgeAvailable()) {
       throw new SendError('need-desktop', 'desktop only')
     }
-    const env = resolveEnvironmentForSend(opts)
+    const env = overlayData(resolveEnvironmentForSend(opts), opts?.data)
     const scope = opts?.scope ?? variableScope(req.id)
     const ac = new AbortController()
     const signal = opts?.signal ?? ac.signal
     try {
-      const exchange = await executeRequest(req, env, signal, scope)
+      const exchange = await exchangeWithScript(req, env, signal, scope)
       if (opts?.meta) {
         exchange.meta = { ...opts.meta }
       }
@@ -1409,7 +1616,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
       return exchange
     } catch (error) {
       if (error instanceof SendError) throw error
-      const exchange = failExchange(localizeSendError(error), 1, protocolOf(req.method))
+      const exchange = withChecks(req, failExchange(localizeSendError(error), 1, protocolOf(req.method)))
       if (opts?.meta) {
         exchange.meta = { ...opts.meta }
       }
@@ -1426,6 +1633,7 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     globals,
     runProfiles,
     mockServers,
+    mockListen,
     envId,
     environment,
     ready,
@@ -1446,12 +1654,19 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     renameFolder,
     deleteFolder,
     addEnvironment,
+    importEnvironment,
     renameEnvironment,
     removeEnvironment,
     updateEnvironmentBaseUrl,
     replaceGlobalVars,
     replaceEnvironmentVars,
     markWorkspaceDirty,
+    ensureLocalMock,
+    touchMock,
+    startMock,
+    stopMock,
+    pushMockRoutes,
+    mockHits,
     variableScope,
     addRequest,
     addPreparedRequest,
@@ -1467,6 +1682,8 @@ export const useApiTesterStore = defineStore('api-tester', () => {
     send,
     sendResolved,
     connectSocket,
+    connectWebSocket,
+    sendWebSocket,
     clearSocketLog,
     kickPeer,
     cancel,

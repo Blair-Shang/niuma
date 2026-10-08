@@ -7,6 +7,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"niuma/platform/internal/ai/host"
 	"niuma/platform/internal/ai/skill"
 	"niuma/platform/internal/store"
 )
@@ -50,36 +51,44 @@ type StreamStartResult struct {
 	UserMessageID  string
 }
 
+// runControl 是一次进行中的流式 run：取消上下文，并停掉已登记的工具副作用。
+type runControl struct {
+	cancel context.CancelFunc
+	stops  *host.StopRegistry
+	// conversationID 随取消事件下发，结束状态留在原会话，不进入当前打开的另一个会话。
+	conversationID string
+}
+
 // runRegistry 跟踪进行中的流式 run，供 Cancel 使用。
 type runRegistry struct {
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	mu   sync.Mutex
+	runs map[string]*runControl
 }
 
 func newRunRegistry() *runRegistry {
-	return &runRegistry{cancels: make(map[string]context.CancelFunc)}
+	return &runRegistry{runs: make(map[string]*runControl)}
 }
 
-func (r *runRegistry) put(runID string, cancel context.CancelFunc) {
+func (r *runRegistry) put(runID string, ctl *runControl) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.cancels[runID] = cancel
+	r.runs[runID] = ctl
 }
 
-func (r *runRegistry) take(runID string) (context.CancelFunc, bool) {
+func (r *runRegistry) take(runID string) (*runControl, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cancel, ok := r.cancels[runID]
+	ctl, ok := r.runs[runID]
 	if ok {
-		delete(r.cancels, runID)
+		delete(r.runs, runID)
 	}
-	return cancel, ok
+	return ctl, ok
 }
 
 func (r *runRegistry) remove(runID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.cancels, runID)
+	delete(r.runs, runID)
 }
 
 // StartStream 落库用户消息并异步启动 LLM 流式调用；立即返回 runId。
@@ -354,8 +363,10 @@ func (s *Service) launchStream(
 	if err != nil {
 		return nil, err
 	}
+	stops := host.NewStopRegistry()
 	runCtx, cancel := context.WithCancel(context.Background())
-	s.runs.put(runID, cancel)
+	runCtx = host.ContextWithStops(runCtx, stops)
+	s.runs.put(runID, &runControl{cancel: cancel, stops: stops, conversationID: conversationID})
 
 	if publishUser {
 		s.publish(map[string]any{
@@ -400,19 +411,22 @@ func (s *Service) resolveSkillPrompt(ctx context.Context, skillCode string) stri
 }
 
 // Cancel 取消进行中的流式 run；不存在时返回 cancelled=false。
-// 同时拒绝该 run 下所有 Policy Gate 待确认项。
+// 同时拒绝该 run 下所有 Policy Gate 待确认项，并触发已登记的工具取消（如 SQL query.cancel）。
 func (s *Service) Cancel(runID string) (cancelled bool) {
 	if s == nil || runID == "" || s.runs == nil {
 		return false
 	}
-	cancel, ok := s.runs.take(runID)
-	if !ok {
+	ctl, ok := s.runs.take(runID)
+	if !ok || ctl == nil || ctl.cancel == nil {
 		return false
 	}
 	if s.policy != nil {
 		s.policy.RejectRun(runID)
 	}
-	cancel()
+	ctl.cancel()
+	if ctl.stops != nil {
+		ctl.stops.Fire()
+	}
 	if s.Conversations != nil {
 		invs, err := s.Conversations.CancelOpenInvocations(context.Background(), runID, "cancelled")
 		if err == nil {
@@ -430,9 +444,10 @@ func (s *Service) Cancel(runID string) (cancelled bool) {
 		}
 	}
 	s.publish(map[string]any{
-		"type":   "platform.ai.run.status",
-		"runId":  runID,
-		"status": "cancelled",
+		"type":           "platform.ai.run.status",
+		"runId":          runID,
+		"conversationId": ctl.conversationID,
+		"status":         "cancelled",
 	})
 	return true
 }

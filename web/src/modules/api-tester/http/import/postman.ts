@@ -2,7 +2,7 @@
  * Postman Collection v2.0 / v2.1 → 文件夹树。
  * 超过 3 层的请求并进最深允许的文件夹。集合变量写到根文件夹 vars。
  */
-import type { ApiAuth, ApiBodyMode, ApiFolder, ApiKvRow, ApiMethod, ApiRequest } from '../../types'
+import type { ApiAuth, ApiBodyMode, ApiFolder, ApiGraphQLBody, ApiKvRow, ApiMethod, ApiRequest } from '../../types'
 import { defaultAuth } from '../../utils/collection-io'
 import { MAX_FOLDER_DEPTH, normalizeFolderGraph } from '../../utils/folder-tree'
 import { asImportText, dedupeRequestNames, importedFolder, importedRequest, kv } from './request'
@@ -70,6 +70,51 @@ function readPostmanAuth(raw: unknown, inherited: ApiAuth): ApiAuth {
         key: fields.key ?? '',
         value: fields.value ?? '',
         in: fields.in === 'query' ? 'query' : 'header',
+      },
+    }
+  }
+  if (type === 'digest') {
+    const fields = authEntries(item.digest)
+    return { type: 'digest', digest: { username: fields.username ?? '', password: fields.password ?? '' } }
+  }
+  if (type === 'ntlm') {
+    const fields = authEntries(item.ntlm)
+    return { type: 'ntlm', ntlm: { username: fields.username ?? '', password: fields.password ?? '', domain: fields.domain ?? '' } }
+  }
+  if (type === 'awsv4') {
+    const fields = authEntries(item.awsv4)
+    return {
+      type: 'awsv4',
+      awsv4: {
+        accessKey: fields.accessKey ?? '',
+        secretKey: fields.secretKey ?? '',
+        region: fields.region ?? '',
+        service: fields.service ?? '',
+        sessionToken: fields.sessionToken ?? '',
+      },
+    }
+  }
+  if (type === 'oauth2') {
+    const fields = authEntries(item.oauth2)
+    const grantType = fields.grant_type ?? ''
+    const grant = grantType === 'client_credentials' || grantType === 'password' ? grantType : 'authorization_code'
+    return {
+      type: 'oauth2',
+      oauth2: {
+        grant,
+        clientAuth: fields.client_authentication === 'body' ? 'body' : 'basic',
+        accessTokenUrl: fields.accessTokenUrl ?? '',
+        authUrl: fields.authUrl ?? '',
+        callbackUrl: fields.redirect_uri || 'http://127.0.0.1:53682/callback',
+        clientId: fields.clientId ?? '',
+        clientSecret: fields.clientSecret ?? '',
+        scope: fields.scope ?? '',
+        username: fields.username ?? '',
+        password: fields.password ?? '',
+        accessToken: fields.accessToken ?? '',
+        refreshToken: fields.refreshToken ?? '',
+        expiresAt: 0,
+        codeVerifier: '',
       },
     }
   }
@@ -152,7 +197,7 @@ function readLooseQuery(query: string): ApiKvRow[] {
   return rows
 }
 
-function readPostmanBody(raw: unknown): { bodyMode: ApiBodyMode; body: string; bodyForm: ApiKvRow[] } {
+function readPostmanBody(raw: unknown): { bodyMode: ApiBodyMode; body: string; bodyForm: ApiKvRow[]; graphql?: ApiGraphQLBody } {
   if (!raw || typeof raw !== 'object') return { bodyMode: 'none', body: '', bodyForm: [] }
   const item = raw as Record<string, unknown>
   const mode = asImportText(item.mode)
@@ -165,18 +210,12 @@ function readPostmanBody(raw: unknown): { bodyMode: ApiBodyMode; body: string; b
   if (mode === 'graphql' && item.graphql && typeof item.graphql === 'object') {
     const graphql = item.graphql as Record<string, unknown>
     const query = asImportText(graphql.query)
-    let variables: unknown = asImportText(graphql.variables)
-    if (typeof variables === 'string' && variables.trim()) {
-      try {
-        variables = JSON.parse(variables) as unknown
-      } catch {
-        // 保留原文，方便用户改
-      }
-    }
+    const variables = asImportText(graphql.variables)
     return {
-      bodyMode: 'json',
-      body: JSON.stringify({ query, variables: variables || {} }, null, 2),
+      bodyMode: 'graphql',
+      body: '',
       bodyForm: [],
+      graphql: { query, variables },
     }
   }
   if (mode === 'file' && item.file && typeof item.file === 'object') {
@@ -222,13 +261,51 @@ function looksLikeJson(text: string): boolean {
   }
 }
 
-function readPostmanRequest(item: Record<string, unknown>, inherited: ApiAuth): ApiRequest | null {
+function readScript(raw: unknown, listen: string): string {
+  if (!Array.isArray(raw)) return ''
+  const chunks: string[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const item = row as Record<string, unknown>
+    if (asImportText(item.listen).toLowerCase() !== listen) continue
+    const script = item.script
+    if (!script || typeof script !== 'object') continue
+    const exec = (script as Record<string, unknown>).exec
+    if (Array.isArray(exec)) chunks.push(exec.map((line) => asImportText(line)).join('\n'))
+    else chunks.push(asImportText(exec))
+  }
+  return chunks.join('\n').trim()
+}
+
+function joinScript(parent: string, own: string): string {
+  if (!parent) return own
+  if (!own) return parent
+  return `${parent}\n${own}`
+}
+
+interface InheritedScripts {
+  pre: string
+  test: string
+}
+
+function readPostmanRequest(
+  item: Record<string, unknown>,
+  inherited: ApiAuth,
+  scripts: InheritedScripts,
+): ApiRequest | null {
   const request = item.request
   if (!request) return null
   const name = asImportText(item.name).trim() || 'Request'
   if (typeof request === 'string') {
     const located = readPostmanUrl(request)
-    return importedRequest({ name, url: located.url, params: located.params, auth: inherited })
+    return importedRequest({
+      name,
+      url: located.url,
+      params: located.params,
+      auth: inherited,
+      preRequestScript: scripts.pre,
+      testScript: scripts.test,
+    })
   }
   if (typeof request !== 'object') return null
   const req = request as Record<string, unknown>
@@ -246,10 +323,17 @@ function readPostmanRequest(item: Record<string, unknown>, inherited: ApiAuth): 
     bodyMode: body.bodyMode,
     body: body.body,
     bodyForm: body.bodyForm,
+    graphql: body.graphql,
+    preRequestScript: joinScript(scripts.pre, readScript(item.event, 'prerequest')),
+    testScript: joinScript(scripts.test, readScript(item.event, 'test')),
   })
 }
 
-function walkItems(items: unknown, inherited: ApiAuth): { requests: ApiRequest[]; folders: BuiltFolder[] } {
+function walkItems(
+  items: unknown,
+  inherited: ApiAuth,
+  scripts: InheritedScripts,
+): { requests: ApiRequest[]; folders: BuiltFolder[] } {
   const requests: ApiRequest[] = []
   const folders: BuiltFolder[] = []
   if (!Array.isArray(items)) return { requests, folders }
@@ -259,8 +343,12 @@ function walkItems(items: unknown, inherited: ApiAuth): { requests: ApiRequest[]
     const name = asImportText(item.name).trim() || 'Untitled'
     if (Array.isArray(item.item)) {
       const auth = readPostmanAuth(item.auth, inherited)
-      const nested = walkItems(item.item, auth)
-      const own = item.request ? readPostmanRequest(item, auth) : null
+      const nextScripts = {
+        pre: joinScript(scripts.pre, readScript(item.event, 'prerequest')),
+        test: joinScript(scripts.test, readScript(item.event, 'test')),
+      }
+      const nested = walkItems(item.item, auth, nextScripts)
+      const own = item.request ? readPostmanRequest(item, auth, nextScripts) : null
       folders.push({
         name,
         vars: readVariables(item.variable),
@@ -269,7 +357,7 @@ function walkItems(items: unknown, inherited: ApiAuth): { requests: ApiRequest[]
       })
       continue
     }
-    const req = readPostmanRequest(item, inherited)
+    const req = readPostmanRequest(item, inherited, scripts)
     if (req) requests.push(req)
   }
   return { requests, folders }
@@ -299,7 +387,10 @@ export function importPostman(root: Record<string, unknown>): ApiFolder[] | null
   if (!isPostmanCollection(root)) return null
   const info = root.info as Record<string, unknown>
   const auth = readPostmanAuth(root.auth, defaultAuth())
-  const nested = walkItems(root.item, auth)
+  const nested = walkItems(root.item, auth, {
+    pre: readScript(root.event, 'prerequest'),
+    test: readScript(root.event, 'test'),
+  })
   const folders: ApiFolder[] = []
   emit(
     {

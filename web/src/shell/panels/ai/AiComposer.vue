@@ -54,6 +54,83 @@ const files = ref<AiComposerFile[]>([])
 const mentionOpen = ref(false)
 const mentionQuery = ref('')
 const attachError = ref<string | null>(null)
+/** 每个会话自己的未发送草稿，切换时换回这一份。 */
+const composerCache = new Map<
+  string,
+  { draft: string; attachments: AiContextAttachment[]; files: AiComposerFile[] }
+>()
+
+const composerCacheLimit = 8
+
+function rememberComposer(id: string): void {
+  const empty = !draft.value.trim() && attachments.value.length === 0 && files.value.length === 0
+  if (empty) {
+    composerCache.delete(id)
+  } else {
+    composerCache.delete(id)
+    composerCache.set(id, {
+      draft: draft.value,
+      attachments: [...attachments.value],
+      files: [...files.value],
+    })
+  }
+  const alive = new Set(aiStore.conversations.map((c) => c.conversationId))
+  if (aiStore.activeConversationId) {
+    alive.add(aiStore.activeConversationId)
+  }
+  for (const key of composerCache.keys()) {
+    if (!alive.has(key)) {
+      composerCache.delete(key)
+    }
+  }
+  const busy = aiStore.busyConversationIds
+  while (composerCache.size > composerCacheLimit) {
+    let removed = false
+    for (const key of composerCache.keys()) {
+      if (key === aiStore.activeConversationId || busy.has(key)) {
+        continue
+      }
+      composerCache.delete(key)
+      removed = true
+      break
+    }
+    if (!removed) {
+      break
+    }
+  }
+}
+
+watch(
+  () => aiStore.conversations.map((c) => c.conversationId).join('\n'),
+  () => {
+    const alive = new Set(aiStore.conversations.map((c) => c.conversationId))
+    if (aiStore.activeConversationId) {
+      alive.add(aiStore.activeConversationId)
+    }
+    for (const key of composerCache.keys()) {
+      if (!alive.has(key)) {
+        composerCache.delete(key)
+      }
+    }
+  },
+)
+
+watch(
+  () => aiStore.activeConversationId,
+  (id, prev) => {
+    if (prev) {
+      rememberComposer(prev)
+    }
+    const saved = id ? composerCache.get(id) : undefined
+    draft.value = saved?.draft ?? ''
+    attachments.value = saved?.attachments ? [...saved.attachments] : []
+    files.value = saved?.files ? [...saved.files] : []
+    mentionOpen.value = false
+    mentionQuery.value = ''
+    attachError.value = null
+  },
+  { flush: 'sync' },
+)
 /** 用户关掉当前页签的自动引用后，换页签再恢复。 */
 const dismissedAutoTabId = ref<string | null>(null)
 

@@ -18,6 +18,7 @@ import {
   serializeCollection,
 } from '../utils/collection-io'
 import { parseImportedCollection } from '../http/import/dispatch'
+import { exportPostmanCollection } from '../http/export/postman'
 import { parseCurl } from '../http/import/curl'
 import { folderTreeKey, handleApiTreeDrop, type ApiTreeCtx } from '../utils/collection-tree'
 import { canAddChildFolder } from '../utils/folder-tree'
@@ -157,6 +158,7 @@ export function useApiCollectionPanel() {
     { key: 'import', label: t('modules.api.importCollection'), icon: 'upload' },
     { key: 'import-curl', label: t('modules.api.importCurl'), icon: 'terminal' },
     { key: 'export', label: t('modules.api.exportCollection'), icon: 'download' },
+    { key: 'export-postman', label: t('modules.api.exportPostman'), icon: 'download' },
   ])
 
   const folderCtxItems = computed<RsContextMenuItem[]>(() => {
@@ -393,6 +395,10 @@ export function useApiCollectionPanel() {
     }
     if (key === 'export') {
       exportFolders(api.folders, `niuma-api-${fileSlug('collection')}.json`)
+    }
+    if (key === 'export-postman') {
+      downloadJson(`postman-${fileSlug('collection')}.json`, exportPostmanCollection(api.folders, 'NiuMa'))
+      toast.success(t('modules.api.exportSuccess'))
     }
   }
 
