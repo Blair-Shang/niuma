@@ -90,6 +90,35 @@ const copyPayload = computed(() => {
   return props.content
 })
 
+const segments = computed(() => props.parsed?.segments ?? [])
+
+/** 末尾未闭合的思考就是当前步骤，不再在它下面画光标。 */
+const openThinkAtEnd = computed(() => {
+  const last = segments.value[segments.value.length - 1]
+  return last?.kind === 'think' && last.open === true
+})
+
+const caretIndex = computed(() => {
+  if (!props.streaming || openThinkAtEnd.value) {
+    return -1
+  }
+  for (let i = segments.value.length - 1; i >= 0; i--) {
+    if (segments.value[i]?.kind === 'text') {
+      return i
+    }
+  }
+  return -1
+})
+
+const showIdleCaret = computed(
+  () =>
+    props.streaming &&
+    caretIndex.value < 0 &&
+    !openThinkAtEnd.value &&
+    props.toolsBefore.length === 0 &&
+    props.toolsAfter.length === 0,
+)
+
 const canRegenerate = computed(
   () =>
     isAssistant.value &&
@@ -100,6 +129,14 @@ const canRegenerate = computed(
 
 const canEdit = computed(() => isUser.value && Boolean(props.messageId) && !aiStore.sending)
 const canBranch = computed(() => isUser.value && Boolean(props.messageId) && !aiStore.sending)
+
+function thinkPreview(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim()
+  if (line.length <= 48) {
+    return line
+  }
+  return `${line.slice(0, 48)}…`
+}
 
 function chipIcon(kind: AiContextAttachment['kind']): string {
   if (kind === 'tab') return 'file-text'
@@ -177,22 +214,31 @@ async function onBranch(): Promise<void> {
       </div>
 
       <template v-if="isAssistant && parsed">
-        <details
-          v-if="parsed.thinking"
-          class="nm-ai-msg__think"
-          :open="parsed.thinkingOpen || undefined"
-        >
-          <summary>
-            {{ parsed.thinkingOpen ? t('ai.thinkingLive') : t('ai.thinking') }}
-          </summary>
-          <div class="nm-ai-msg__think-body">
-            <AiMarkdown :source="parsed.thinking" lite />
-          </div>
-        </details>
         <AiToolCallList v-if="toolsBefore.length" :tools="toolsBefore" />
-        <div v-if="parsed.body || streaming" class="nm-ai-msg__body nm-ai-msg__body--md">
-          <AiMarkdown v-if="parsed.body" :source="parsed.body" :streaming="streaming" />
-          <span v-if="streaming" class="nm-ai-msg__caret" aria-hidden="true" />
+        <template v-for="(segment, index) in segments" :key="index">
+          <details
+            v-if="segment.kind === 'think'"
+            class="nm-ai-msg__think"
+            :class="{ 'nm-ai-msg__think--live': segment.open }"
+            :open="segment.open || undefined"
+          >
+            <summary>
+              <span>{{ segment.open ? t('ai.thinkingLive') : t('ai.thinking') }}</span>
+              <span v-if="!segment.open && segment.text" class="nm-ai-msg__think-preview">
+                {{ thinkPreview(segment.text) }}
+              </span>
+            </summary>
+            <div v-if="segment.text" class="nm-ai-msg__think-body">
+              <AiMarkdown :source="segment.text" lite />
+            </div>
+          </details>
+          <div v-else class="nm-ai-msg__body nm-ai-msg__body--md">
+            <AiMarkdown :source="segment.text" :streaming="streaming && index === caretIndex" />
+            <span v-if="index === caretIndex" class="nm-ai-msg__caret" aria-hidden="true" />
+          </div>
+        </template>
+        <div v-if="showIdleCaret" class="nm-ai-msg__body nm-ai-msg__body--md">
+          <span class="nm-ai-msg__caret" aria-hidden="true" />
         </div>
         <AiToolCallList v-if="toolsAfter.length" :tools="toolsAfter" />
       </template>
@@ -562,7 +608,19 @@ async function onBranch(): Promise<void> {
   overflow: hidden;
 }
 
+.nm-ai-msg__think--live {
+  border-color: color-mix(in srgb, var(--rs-primary) 28%, var(--rs-border-subtle));
+}
+
+.nm-ai-msg__think--live .nm-ai-msg__think-body {
+  max-height: 8rem;
+}
+
 .nm-ai-msg__think summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   cursor: pointer;
   list-style: none;
   padding: 6px 10px;
@@ -570,6 +628,15 @@ async function onBranch(): Promise<void> {
   font-weight: var(--rs-font-weight-medium);
   color: var(--rs-muted);
   user-select: none;
+}
+
+.nm-ai-msg__think-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--rs-font-weight-regular);
 }
 
 .nm-ai-msg__think summary::-webkit-details-marker {

@@ -168,7 +168,9 @@ func (s *Service) runChatStream(
 	}
 
 	var lastContent string
+	handoffNudges := 0
 	// 不限制工具轮次：模型持续 tool_calls 直到无调用或用户取消（ctx）。
+	// 说了要接着做却没调用时，补一次，让确认卡片而不是对话里的「回执行」来停。
 	for {
 		if err := ctx.Err(); err != nil {
 			s.publishRunStatus(runID, conversationID, "cancelled", err.Error())
@@ -206,6 +208,14 @@ func (s *Service) runChatStream(
 		lastContent = result.Content
 
 		if len(result.ToolCalls) == 0 {
+			if handoffNudges < maxHandoffNudges && len(toolDefs) > 0 && defersWork(lastContent) {
+				handoffNudges++
+				if err := s.keepHandoff(runID, conversationID, lastContent, &messages); err != nil {
+					s.publishRunError(runID, conversationID, err)
+					return
+				}
+				continue
+			}
 			s.finishAssistant(ctx, runID, conversationID, provider, modelCode, lastContent)
 			return
 		}
@@ -484,6 +494,21 @@ func truncateToolResult(s string) string {
 		return cut + "\n…[truncated]"
 	}
 	return cut
+}
+
+// keepHandoff 把「说了要做却没调用」的那段说明落库，并在本轮上下文里补一句继续。
+// 补句不写入会话，避免面板上多出一条用户消息。
+func (s *Service) keepHandoff(runID, conversationID, content string, messages *[]ChatMessage) error {
+	if strings.TrimSpace(content) != "" {
+		if err := s.commitAssistant(runID, conversationID, content); err != nil {
+			return err
+		}
+	}
+	*messages = append(*messages,
+		ChatMessage{Role: MessageRoleAssistant, Content: content},
+		ChatMessage{Role: MessageRoleUser, Content: handoffNudgePrompt},
+	)
+	return nil
 }
 
 // commitAssistant 把一段助手正文落库并推送。工具轮次中的说明与最终回答共用这一条路径。

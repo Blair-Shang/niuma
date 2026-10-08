@@ -14,7 +14,15 @@
  */
 import { openAsBlob, readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
+import { sectionNotes } from './cut-changelog.mjs'
+
+export function releaseNotesFromChangelog(text, version) {
+  return sectionNotes(text, version)
+}
+
+async function main() {
 const dir = process.argv[2]
 if (!dir) {
   process.stderr.write('usage: push-cloud-release.mjs <release-files-dir>\n')
@@ -38,6 +46,13 @@ if (!tag) {
 }
 
 const version = tag.replace(/^v/i, '')
+const changelogPath = process.env.CHANGELOG_PATH || 'CHANGELOG.md'
+const notesMd = readChangelogNotes(changelogPath, version)
+if (!notesMd) {
+  process.stderr.write(`release notes for ${version} are empty (${changelogPath})\n`)
+  process.exit(1)
+}
+process.stdout.write(`release notes ${notesMd.length} chars for ${version}\n`)
 const stableChannel = process.env.NIUMA_CHANNEL || 'stable'
 const previewChannel = process.env.NIUMA_PREVIEW_CHANNEL || 'beta'
 const hashes = loadChecksums(dir)
@@ -78,7 +93,6 @@ if (items.length === 0) {
   process.exit(1)
 }
 
-const notesMd = readChangelogNotes(process.env.CHANGELOG_PATH || 'CHANGELOG.md', version)
 const grouped = new Map()
 for (const item of items) {
   const list = grouped.get(item.channel) || []
@@ -241,9 +255,16 @@ function normalizePlatform(p) {
 
 function readChangelogNotes(path, version) {
   if (!existsSync(path)) return ''
-  const src = readFileSync(path, 'utf8')
-  const safe = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = new RegExp(`^## \\[v?${safe}\\][^\\n]*\\n([\\s\\S]*?)(?=^## |$)`, 'm')
-  const m = src.match(re)
-  return m ? m[1].trim() : ''
+  try {
+    return releaseNotesFromChangelog(readFileSync(path, 'utf8'), version)
+  } catch (err) {
+    process.stderr.write(`changelog notes: ${err.message}\n`)
+    return ''
+  }
+}
+}
+
+const entry = process.argv[1]
+if (entry && import.meta.url === pathToFileURL(entry).href) {
+  main()
 }

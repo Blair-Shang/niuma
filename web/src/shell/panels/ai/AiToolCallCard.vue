@@ -39,18 +39,19 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const open = ref(
-  props.status === 'error' || props.status === 'running' || props.status === 'pending',
-)
+
+function isActiveStatus(status: AiToolStatus): boolean {
+  return status === 'running' || status === 'pending'
+}
+
+const open = ref(isActiveStatus(props.status))
 const deciding = ref(false)
 
 watch(
   () => props.status,
-  (s) => {
-    if (s === 'pending' || s === 'error' || s === 'running') {
-      open.value = true
-    }
-    if (s !== 'pending') {
+  (status) => {
+    open.value = isActiveStatus(status)
+    if (status !== 'pending') {
       deciding.value = false
     }
   },
@@ -130,6 +131,17 @@ const showConfirm = computed(
   () => props.confirmable && displayStatus.value === 'pending',
 )
 
+/** 收起时放在标题右侧的一行摘要：失败看错误，其余看参数。 */
+const lineHint = computed(() => {
+  const raw = (displayStatus.value === 'error' ? resultText.value : argsText.value)
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!raw) {
+    return ''
+  }
+  return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw
+})
+
 async function onApprove(scope: 'once' | 'run' | 'conversation' = 'once'): Promise<void> {
   deciding.value = true
   emit('approve', scope)
@@ -160,6 +172,7 @@ async function onReject(): Promise<void> {
         />
       </span>
       <span class="nm-ai-tool__title">{{ displayName }}</span>
+      <span v-if="!open && lineHint" class="nm-ai-tool__line">{{ lineHint }}</span>
       <span v-if="riskLabel" class="nm-ai-tool__risk">{{ riskLabel }}</span>
       <span class="nm-ai-tool__status">{{ statusLabel }}</span>
       <RsIcon :name="open ? 'chevron-down' : 'chevron-right'" :size="12" class="nm-ai-tool__chev" />
@@ -255,12 +268,24 @@ async function onReject(): Promise<void> {
 
 .nm-ai-tool__title {
   flex: 1;
-  min-width: 0;
+  min-width: 4.5rem;
+  max-width: 100%;
   font-size: var(--nm-font-caption);
   font-weight: var(--rs-font-weight-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.nm-ai-tool__line {
+  flex: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--nm-font-caption);
+  font-weight: var(--rs-font-weight-regular);
+  color: var(--rs-muted);
 }
 
 .nm-ai-tool__status {

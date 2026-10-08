@@ -93,8 +93,8 @@ const showCancelled = computed(() => aiStore.runStatus === 'cancelled')
 const showCompare = computed(() => Boolean(aiStore.previousAssistantContent && aiStore.isStreaming))
 
 /**
- * 工具挂到所属轮次：有助手回复则挂回复，停在工具上则挂该轮用户消息。
- * 当前 run 仍在流式输出的工具留给流式气泡，不跟到下一条。
+ * 工具挂到所属轮次：有助手文字则留在那段前后。
+ * 还没有助手文字的当前工具才进流式气泡，画在尚未落库的正文之前。
  */
 const toolPartition = computed(() =>
   partitionAiTools(displayMessages.value, aiStore.displayTools, {

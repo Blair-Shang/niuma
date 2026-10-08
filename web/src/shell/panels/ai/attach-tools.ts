@@ -2,7 +2,8 @@
  * 按发生顺序安放工具卡片。
  *
  * 工具落在「前一段助手文字之后、后一段文字之前」。
- * 还没有文字时，放在该轮用户消息之后。当前 run 未结束的工具留给流式气泡。
+ * 还没有助手文字时，留给流式气泡，出现在尚未落库的正文之前。
+ * 已经能挂到某段助手文字上的工具留在原位，不跟进下一段思考。
  */
 
 export interface AiToolMessageRef {
@@ -41,11 +42,11 @@ export function partitionAiTools<T extends AiToolRef>(
 
   const sorted = [...tools].sort((a, b) => timeOf(a.createdAt) - timeOf(b.createdAt))
   for (const tool of sorted) {
-    if (belongsToLiveTurn(tool, opts)) {
+    const target = placeTool(messages, tool)
+    if (onStreamingBubble(tool, target, opts)) {
       streaming.push(tool)
       continue
     }
-    const target = placeTool(messages, tool)
     if (!target) {
       continue
     }
@@ -55,8 +56,9 @@ export function partitionAiTools<T extends AiToolRef>(
   return { byMessageId, streaming }
 }
 
-function belongsToLiveTurn<T extends AiToolRef>(
+function onStreamingBubble<T extends AiToolRef>(
   tool: T,
+  target: { messageRole: string } | null,
   opts: { streaming: boolean; activeRunId: string | null; liveIds: ReadonlySet<string> },
 ): boolean {
   if (!opts.streaming || !opts.liveIds.has(tool.invocationId)) {
@@ -65,13 +67,17 @@ function belongsToLiveTurn<T extends AiToolRef>(
   if (opts.activeRunId && tool.runId && tool.runId !== opts.activeRunId) {
     return false
   }
+  // 已有助手文字可挂靠时留在那段前后。跟进流式气泡会把新思考画到已完成工具的上面。
+  if (target?.messageRole === 'assistant') {
+    return false
+  }
   return true
 }
 
 function placeTool<T extends AiToolRef>(
   messages: AiToolMessageRef[],
   tool: T,
-): { messageId: string; side: keyof AiToolPlacement<T> } | null {
+): { messageId: string; messageRole: string; side: keyof AiToolPlacement<T> } | null {
   const at = timeOf(tool.createdAt)
   let userIdx = -1
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -107,13 +113,17 @@ function placeTool<T extends AiToolRef>(
     break
   }
   if (prior) {
-    return { messageId: prior.messageId, side: 'after' }
+    return { messageId: prior.messageId, messageRole: prior.messageRole, side: 'after' }
   }
   if (next) {
-    return { messageId: next.messageId, side: 'before' }
+    return { messageId: next.messageId, messageRole: next.messageRole, side: 'before' }
   }
   if (userIdx >= 0) {
-    return { messageId: messages[userIdx].messageId, side: 'after' }
+    return {
+      messageId: messages[userIdx].messageId,
+      messageRole: messages[userIdx].messageRole,
+      side: 'after',
+    }
   }
   return null
 }

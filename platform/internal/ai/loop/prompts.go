@@ -23,6 +23,7 @@ var (
 	workspaceMongoPrompt  string
 	workspaceSQLPrompt    string
 	currentTurnPrompt     string
+	handoffNudgePrompt    string
 )
 
 func init() {
@@ -36,6 +37,7 @@ func init() {
 	workspaceMongoPrompt = mustPrompt("prompts/workspace_mongodb.txt")
 	workspaceSQLPrompt = mustPrompt("prompts/workspace_sql.txt")
 	currentTurnPrompt = mustPrompt("prompts/current_turn.txt")
+	handoffNudgePrompt = mustPrompt("prompts/handoff_nudge.txt")
 }
 
 func mustPrompt(path string) string {

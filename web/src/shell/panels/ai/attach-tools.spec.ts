@@ -61,6 +61,36 @@ describe('partitionAiTools', () => {
     expect(byMessageId.get('a1')?.after).toEqual([])
   })
 
+  it('keeps a live tool under the lead-in when the next thought is still streaming', () => {
+    const messages = [
+      msg('u1', 'user', '2026-10-08T01:00:00.000Z'),
+      msg('lead', 'assistant', '2026-10-08T01:00:10.000Z'),
+    ]
+    const tools = [tool('t', '2026-10-08T01:00:20.000Z', 'run-1')]
+    const { byMessageId, streaming } = partitionAiTools(messages, tools, {
+      streaming: true,
+      activeRunId: 'run-1',
+      liveIds: new Set(['t']),
+    })
+    expect(streaming).toEqual([])
+    expect(byMessageId.get('lead')?.after.map((t) => t.invocationId)).toEqual(['t'])
+  })
+
+  it('keeps a live tool above the answer that landed after it', () => {
+    const messages = [
+      msg('u1', 'user', '2026-10-08T01:00:00.000Z'),
+      msg('a1', 'assistant', '2026-10-08T01:01:00.000Z'),
+    ]
+    const tools = [tool('t', '2026-10-08T01:00:30.000Z', 'run-1')]
+    const { byMessageId, streaming } = partitionAiTools(messages, tools, {
+      streaming: true,
+      activeRunId: 'run-1',
+      liveIds: new Set(['t']),
+    })
+    expect(streaming).toEqual([])
+    expect(byMessageId.get('a1')?.before.map((t) => t.invocationId)).toEqual(['t'])
+  })
+
   it('puts a tool between the lead-in and the following answer', () => {
     const messages = [
       msg('u1', 'user', '2026-10-08T01:00:00.000Z'),
